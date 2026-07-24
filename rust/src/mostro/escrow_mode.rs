@@ -11,9 +11,11 @@
 //! an old daemon that predates the tags is [`EscrowMode::Unknown`], which is
 //! **not** the same as knowing it speaks Lightning.
 //!
-//! Fail-safe by construction: [`EscrowMode::is_cashu`] is the only way to ask,
-//! and it answers `false` for both `Unknown` and `Lightning`. A node that never
-//! answers therefore behaves exactly like today's Lightning-only client.
+//! Fail-safe by construction: [`is_cashu_mode`] is the only way to ask whether
+//! Cashu paths may run, and it answers `false` for `Unknown`, for `Lightning`,
+//! and for a node that claims Cashu without publishing a usable mint. A node
+//! that never answers therefore behaves exactly like today's Lightning-only
+//! client.
 
 use std::sync::RwLock;
 
@@ -31,8 +33,12 @@ pub enum EscrowMode {
 }
 
 impl EscrowMode {
-    /// The single question callers may ask. `Unknown` answers `false`, so the
+    /// What the node said, nothing more. `Unknown` answers `false`, so the
     /// Cashu paths stay closed unless the node positively said otherwise.
+    ///
+    /// This is the *mode* question, for the About screen — a node can say
+    /// Cashu and still be unusable. To decide whether a Cashu path may run,
+    /// ask [`is_cashu_mode`], which also requires a usable mint.
     pub fn is_cashu(self) -> bool {
         matches!(self, EscrowMode::Cashu)
     }
@@ -247,9 +253,21 @@ pub fn clear() {
     *guard = None;
 }
 
-/// The one question the rest of the app asks.
+/// The one question the rest of the app asks: may a Cashu path run against the
+/// active node?
+///
+/// Deliberately stricter than [`EscrowMode::is_cashu`]. A node that advertises
+/// `escrow_mode=cashu` but publishes no mint URL is misconfigured, and there is
+/// nothing to connect to — enabling Cashu routing or UI for it would only fail
+/// later and further from the cause. The gate therefore also requires
+/// [`CashuNodeConfig::is_usable`], and the mint override (§4.3) is what makes a
+/// forced Cashu mode usable against a daemon that publishes no mint of its own.
+///
+/// The About screen must *not* use this: it reads [`get_resolved`], so it can
+/// say "cashu, but no mint advertised" instead of silently reading Lightning.
 pub fn is_cashu_mode() -> bool {
-    get_resolved().mode.is_cashu()
+    let resolved = get_resolved();
+    resolved.mode.is_cashu() && resolved.config.is_usable()
 }
 
 #[cfg(test)]
@@ -258,6 +276,15 @@ mod tests {
 
     fn tag(name: &str, value: &str) -> Vec<String> {
         vec![name.to_string(), value.to_string()]
+    }
+
+    /// Tests that touch `RESOLVED` run in the same process and would otherwise
+    /// race each other. A poisoned lock is recovered from so one failing test
+    /// does not cascade into the others.
+    static GLOBAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn own_the_global() -> std::sync::MutexGuard<'static, ()> {
+        GLOBAL.lock().unwrap_or_else(|e| e.into_inner())
     }
 
     #[test]
@@ -483,6 +510,7 @@ mod tests {
     #[test]
     fn the_global_defaults_to_unknown_and_clears_on_node_switch() {
         // Arrange — this test owns the global; keep it self-contained.
+        let _guard = own_the_global();
         clear();
         assert_eq!(get_resolved().mode, EscrowMode::Unknown);
         assert!(!is_cashu_mode());
@@ -502,5 +530,35 @@ mod tests {
         // Assert — a stale Cashu resolution must not leak onto the new node.
         assert_eq!(get_resolved().mode, EscrowMode::Unknown);
         assert!(!is_cashu_mode());
+    }
+
+    #[test]
+    fn a_cashu_node_without_a_usable_mint_keeps_the_gate_shut() {
+        // Arrange — a node that says cashu but published no mint URL.
+        let _guard = own_the_global();
+        clear();
+        let (mode, config) = parse_tags(&[tag("escrow_mode", "cashu"), tag("cashu_mint_url", "  ")]);
+        set_resolved(resolve(&EscrowModeInputs {
+            from_tags: mode,
+            tag_config: config,
+            ..Default::default()
+        }));
+
+        // Assert — the mode is reported honestly for the About screen, but
+        // there is no mint to connect to, so no Cashu path may run.
+        assert_eq!(get_resolved().mode, EscrowMode::Cashu);
+        assert!(!get_resolved().config.is_usable());
+        assert!(!is_cashu_mode());
+
+        // Act — the tester points it at a local mint (§4.3).
+        set_resolved(resolve(&EscrowModeInputs {
+            from_tags: EscrowMode::Cashu,
+            mint_url_override: Some("http://localhost:3338".to_string()),
+            ..Default::default()
+        }));
+
+        // Assert — now there is something to connect to.
+        assert!(is_cashu_mode());
+        clear();
     }
 }

@@ -257,6 +257,13 @@ pub(crate) async fn fetch_and_set_node_capabilities() {
         }
         Err(e) => {
             log::warn!("[nostr] failed to fetch Kind 38385 for node capabilities: {e}");
+            // Drop the escrow mode too. A reconnect whose fetch times out must
+            // not keep answering "cashu" from the last successful fetch: the
+            // module treats unreachable exactly like unfetched, and only a
+            // clear makes the gate fail closed in that window. PoW is left
+            // alone on purpose — a stale difficulty still gets messages
+            // accepted, whereas a stale escrow mode opens a path.
+            escrow_mode::clear();
         }
     }
 }
