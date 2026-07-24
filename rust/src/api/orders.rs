@@ -2466,6 +2466,13 @@ pub(crate) async fn refresh_subscriptions_for_active_node() {
     // Drop stale orders immediately so the UI doesn't show the old node's book.
     order_book().clear().await;
 
+    // Same reasoning for the escrow mode, and it matters more: the capability
+    // re-fetch below is a network round trip, and until it answers the old
+    // node's mode would still be cached. Dropping it first makes that window
+    // read as Unknown — which keeps Cashu shut — instead of carrying one
+    // node's Cashu mode onto another.
+    crate::mostro::escrow_mode::clear();
+
     let Ok(pool) = crate::api::nostr::get_pool() else {
         log::warn!(
             "[orders] node switch: relay pool not initialized; \
@@ -2498,8 +2505,9 @@ pub(crate) async fn refresh_subscriptions_for_active_node() {
     // stream won't redeliver already-seen events — see refetch_active_node_orders).
     refetch_active_node_orders().await;
 
-    // Outgoing messages must use the new node's PoW difficulty.
-    crate::api::nostr::fetch_and_set_pow().await;
+    // Outgoing messages must use the new node's PoW difficulty, and the
+    // escrow mode must reflect the node we just switched to.
+    crate::api::nostr::fetch_and_set_node_capabilities().await;
 
     crate::api::logging::blog_info(
         "orders",

@@ -49,10 +49,10 @@ pub async fn initialize(relays: Option<Vec<String>>) -> Result<()> {
         loop {
             match rx.recv().await {
                 Ok(ConnectionState::Online) => {
-                    log::info!("[nostr] relay pool ONLINE — fetching PoW, flushing queue, subscribing orders");
-                    // Fetch PoW first so queued messages are wrapped with the
+                    log::info!("[nostr] relay pool ONLINE — fetching node capabilities, flushing queue, subscribing orders");
+                    // Fetch capabilities first so queued messages are wrapped with the
                     // correct difficulty before being flushed.
-                    fetch_and_set_pow().await;
+                    fetch_and_set_node_capabilities().await;
                     let _ = flush_message_queue().await;
                     // Start (or re-start) Kind 38383 order book subscription.
                     crate::api::orders::subscribe_orders().await;
@@ -210,10 +210,17 @@ pub async fn fetch_mostro_instance_tags(
     }
 }
 
-/// Fetch the Mostro daemon's PoW requirement from its Kind 38385 event
-/// and store it globally.  Called each time the relay pool goes Online, and
-/// after a node switch, so the value stays current for the active node.
-pub(crate) async fn fetch_and_set_pow() {
+/// Fetch everything the active Mostro node advertises about itself from its
+/// Kind 38385 event and store it globally: the PoW requirement, and (phase C1)
+/// the escrow mode plus its Cashu parameters.
+///
+/// Called each time the relay pool goes Online and after a node switch, so both
+/// values stay current for the active node. One fetch serves both — they come
+/// from the same event, and a second relay query for the escrow tags would
+/// double the traffic for no new information.
+pub(crate) async fn fetch_and_set_node_capabilities() {
+    use crate::mostro::escrow_mode;
+
     let mostro_pubkey_hex = crate::config::active_mostro_pubkey();
     match fetch_mostro_instance_tags(mostro_pubkey_hex).await {
         Ok(Some(tags)) => {
@@ -231,13 +238,25 @@ pub(crate) async fn fetch_and_set_pow() {
                 None => 0,
             };
             crate::mostro::pow::set_pow(difficulty);
+
+            // Today's daemons publish no escrow tags at all, so this resolves
+            // to Unknown — which keeps every Cashu path shut. See escrow_mode.
+            let (mode, config) = escrow_mode::parse_tags(&tags);
+            escrow_mode::set_resolved(escrow_mode::resolve(&escrow_mode::EscrowModeInputs {
+                from_tags: mode,
+                tag_config: config,
+                ..Default::default()
+            }));
         }
         Ok(None) => {
             log::warn!("[nostr] no Kind 38385 event found — PoW defaults to 0");
             crate::mostro::pow::set_pow(0);
+            // Nothing was advertised: stay Unknown rather than assume
+            // Lightning, and leave Cashu closed.
+            escrow_mode::clear();
         }
         Err(e) => {
-            log::warn!("[nostr] failed to fetch Kind 38385 for PoW: {e}");
+            log::warn!("[nostr] failed to fetch Kind 38385 for node capabilities: {e}");
         }
     }
 }
