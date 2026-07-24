@@ -173,6 +173,14 @@ jobs:
           # packages are not cached and are installed either way.
           npx playwright install --with-deps chromium
 
+      # Runs smoke.mjs against three static fixtures that differ by one thing
+      # each, and asserts the exit codes. Proves the gate still fails when it
+      # should — a healthy bundle passes whether or not the error checks work,
+      # so nothing else here would notice them rotting. Seconds, no build.
+      - name: Self-test the smoke test
+        working-directory: test/web/smoke
+        run: node selftest.mjs
+
       # Serves the release bundle cross-origin isolated under the production
       # sub-path, then asserts the page is isolated, the Flutter view mounted,
       # a Rust bridge call returned, and nothing errored.

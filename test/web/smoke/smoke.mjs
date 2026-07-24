@@ -156,7 +156,13 @@ async function main() {
   let browser;
   try {
     browser = await chromium.launch();
-    const page = await browser.newPage();
+    // Pin the locale. A CI container usually has none configured, so Chromium
+    // reports something Dart's intl rejects outright — `RangeError: Incorrect
+    // locale information provided` thrown from main(), before runApp, leaving
+    // the engine bootstrapped but no view mounted. Real browsers always report
+    // a locale, so leaving it unset tests a situation no user is ever in while
+    // hiding every failure that comes after it.
+    const page = await browser.newPage({ locale: 'en-US' });
 
     const record = (origin, text) => {
       (isIgnorable(text) ? ignored : errors).push(`[${origin}] ${text}`);
@@ -220,8 +226,17 @@ async function main() {
 
     // 2. The engine mounted. Flutter paints to canvas, so there is no text to
     //    assert on — the view element is the observable signal.
+    //
+    //    state: 'attached', not Playwright's default of 'visible'. "Visible"
+    //    means a non-empty bounding box, which is a fact about layout, not
+    //    about whether the engine came up — a host element the engine has not
+    //    sized yet is still proof it mounted. Waiting on 'visible' here timed
+    //    out on a page that demonstrably had the element in its DOM.
     await page
-      .waitForSelector('flutter-view, flt-glass-pane', { timeout: TIMEOUT_MS })
+      .waitForSelector('flutter-view, flt-glass-pane', {
+        state: 'attached',
+        timeout: TIMEOUT_MS,
+      })
       .catch(() => fail('the Flutter view never mounted'));
     console.log('✓ Flutter view mounted');
 

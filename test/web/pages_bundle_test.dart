@@ -171,10 +171,37 @@ void main() {
       // Act / Assert — each of these stands for a documented blank-page cause:
       // lost isolation, an engine that never mounted, a dead FRB worker pool,
       // and errors the page swallows instead of surfacing.
+      //
+      // Presence, not behaviour: searching source cannot prove the run fails
+      // when it should — `if (errors.length)` could be mutated to `if (false)`
+      // and every line here would still pass. test/web/smoke/selftest.mjs is
+      // what actually holds that down, by running smoke.mjs against fixtures
+      // and asserting exit codes. This is only a cheap early warning that runs
+      // without a browser.
       expect(js, contains('crossOriginIsolated'));
       expect(js, contains('flutter-view'));
       expect(js, contains(bridgeReadyFlag));
-      expect(js, contains('console'));
+      expect(js, contains('errors.length'));
+    });
+
+    test('is itself tested, and that self-test runs in CI', () {
+      // Arrange
+      final selftest = File('test/web/smoke/selftest.mjs');
+      final yaml = webBuild.readAsStringSync();
+
+      // Act / Assert — a healthy bundle goes green whether or not the error
+      // checks still work, so without this the gate could rot unnoticed. The
+      // fixtures are the executable form of issue #154's "fail on any console
+      // error" requirement.
+      expect(selftest.existsSync(), isTrue);
+      for (final fixture in ['healthy', 'console-error', 'page-error']) {
+        expect(
+          File('test/web/smoke/fixtures/$fixture/index.html').existsSync(),
+          isTrue,
+          reason: 'missing smoke self-test fixture: $fixture',
+        );
+      }
+      expect(yaml, contains('selftest.mjs'));
     });
 
     test('serves the bundle cross-origin isolated, under the sub-path', () {
