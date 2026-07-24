@@ -3438,6 +3438,9 @@ pub async fn restore_session() -> Result<mostro_core::message::RestoreSessionInf
 
     match confirmation {
         Ok(Ok(DaemonReply::Restored(info))) => Ok(info),
+        Ok(Ok(DaemonReply::Rejected { reason, message })) => {
+            Err(anyhow::anyhow!("CantDo:{reason}: {message}"))
+        }
         Ok(Ok(_other)) => Err(anyhow::anyhow!("unexpected restore reply")),
         _ => Err(anyhow::anyhow!("NoDaemonResponse")),
     }
