@@ -31,7 +31,12 @@ const _fallbackDecoys = [
 /// The words live only in this screen's state and are discarded when the
 /// screen is left, restoring the masked behavior of the Account screen.
 class BackupRitualScreen extends ConsumerStatefulWidget {
-  const BackupRitualScreen({super.key});
+  const BackupRitualScreen({super.key, @visibleForTesting this.debugWords});
+
+  /// Test-only word source. When non-null, [_loadWords] uses these instead of
+  /// calling the Rust bridge, so widget tests can drive verification with a
+  /// known mnemonic. Never set in production.
+  final List<String>? debugWords;
 
   @override
   ConsumerState<BackupRitualScreen> createState() => _BackupRitualScreenState();
@@ -59,10 +64,25 @@ class _BackupRitualScreenState extends ConsumerState<BackupRitualScreen> {
   /// Option the user last tapped incorrectly (cleared on next tap).
   String? _wrongPick;
 
-  /// Wrong-pick counter for the current verification round. On the 2nd wrong
-  /// pick the user is sent back to the words screen and verification restarts,
-  /// so the confirmation can't be brute-forced by elimination (#204 review).
+  /// Wrong-pick counter for the word currently being verified. Reset to 0 on
+  /// each correct pick, so it counts misses on the word in front of the user.
+  /// A second wrong pick on the same word sends them back to the 12 words and
+  /// restarts verification, so a single slot can't be solved by tapping every
+  /// option in turn (#223).
   int _failCount = 0;
+
+  /// Test-only: the correct word for the slot currently being verified, or null
+  /// if verification isn't active. Lets widget tests tap the right/wrong option
+  /// deterministically despite the randomised challenge. Never used in prod UI.
+  @visibleForTesting
+  String? get debugCorrectWordForActiveSlot {
+    if (_words == null ||
+        _challenge.isEmpty ||
+        _activeSlot >= _challenge.length) {
+      return null;
+    }
+    return _words![_challenge[_activeSlot]];
+  }
 
   bool _confirming = false;
 
@@ -81,7 +101,8 @@ class _BackupRitualScreenState extends ConsumerState<BackupRitualScreen> {
 
   Future<void> _loadWords() async {
     try {
-      final words = await IdentityService.getMnemonicWords();
+      final words =
+          widget.debugWords ?? await IdentityService.getMnemonicWords();
       if (!mounted) return;
       if (words.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -155,6 +176,7 @@ class _BackupRitualScreenState extends ConsumerState<BackupRitualScreen> {
       setState(() {
         _filled[_activeSlot] = word;
         _wrongPick = null;
+        _failCount = 0; // correct pick — reset the per-word miss budget
         final next = _filled.indexWhere((w) => w == null);
         if (next != -1) {
           _activeSlot = next;
@@ -165,11 +187,11 @@ class _BackupRitualScreenState extends ConsumerState<BackupRitualScreen> {
         }
       });
     } else {
-      _failCount++;
+      setState(() => _failCount++);
       if (_failCount >= 2) {
-        // Second wrong pick this round: don't let the user keep guessing by
-        // elimination. Send them back to the 12 words to actually back them
-        // up, then restart verification from scratch (#204 review).
+        // Second wrong pick on this word: don't let the user grind through the
+        // options by elimination. Send them back to the 12 words to review,
+        // then restart verification from scratch (#223).
         _backToWords();
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -218,6 +240,7 @@ class _BackupRitualScreenState extends ConsumerState<BackupRitualScreen> {
       _activeSlot = 0;
       _options = const [];
       _wrongPick = null;
+      _failCount = 0; // round is over — the next one starts clean
     });
   }
 
