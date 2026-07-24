@@ -166,8 +166,46 @@ async function main() {
     });
     page.on('pageerror', (err) => record('pageerror', err.message));
 
+    // Collected but never fatal on its own: a cancelled preload is routine,
+    // while a blocked CDN fetch is not, and only the surrounding failure says
+    // which one this was. Printed whenever something else fails.
+    const aborted = [];
+    page.on('requestfailed', (req) => {
+      const text = `${req.url()} — ${req.failure()?.errorText ?? 'unknown'}`;
+      (isIgnorable(text) ? ignored : aborted).push(text);
+    });
+
+    const dump = (label, lines) => {
+      if (!lines.length) return;
+      console.error(`\n${label}:`);
+      for (const line of lines) console.error(`  ${line}`);
+    };
+
+    // A CI log is the only evidence anyone will ever have about a failure here,
+    // and none of what follows is reachable after the throw — so empty the
+    // collectors first. Without this, a red run says nothing beyond "it did
+    // not work", which is how the first one went.
     const fail = async (message) => {
       await page.screenshot({ path: 'smoke-failure.png' }).catch(() => {});
+      dump('console and page errors', errors);
+      dump("ignored (outside this bundle's control)", ignored);
+      dump('requests this server could not serve', misses);
+      dump('requests the browser gave up on', aborted);
+
+      // What the engine actually got to. Flutter paints to canvas, so the body
+      // is short — it is the <script> tags and whichever host elements the
+      // bootstrap managed to create before it stopped.
+      const snapshot = await page
+        .evaluate(() => ({
+          readyState: document.readyState,
+          body: document.body ? document.body.outerHTML.slice(0, 1500) : '(no body)',
+        }))
+        .catch(() => null);
+      if (snapshot) {
+        console.error(`\ndocument.readyState: ${snapshot.readyState}`);
+        console.error(`document.body:\n  ${snapshot.body}`);
+      }
+
       throw new Error(message);
     };
 
@@ -213,12 +251,9 @@ async function main() {
       console.log("\nignored (outside this bundle's control):");
       for (const e of ignored) console.log(`  ${e}`);
     }
-    if (misses.length) {
-      await fail(`unserved requests (check --base-href):\n  ${misses.join('\n  ')}`);
-    }
-    if (errors.length) {
-      await fail(`page reported errors:\n  ${errors.join('\n  ')}`);
-    }
+    // fail() prints the contents; these only have to name the failure.
+    if (misses.length) await fail('some requests were not served (check --base-href)');
+    if (errors.length) await fail('the page reported errors');
     console.log('✓ no console or page errors\n\nweb bundle smoke test passed.');
   } finally {
     // browser is undefined when chromium.launch() itself threw.
