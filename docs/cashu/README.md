@@ -1,6 +1,7 @@
 # Cashu Escrow — Client Implementation Spec & Phased Plan
 
-**Status:** Draft — spec only, no code yet
+**Status:** In progress — C0 merged (`mostro-core` 0.14 + wire form pinned); C1a in review
+**Goal:** ship Cashu as a user-selectable settlement backend alongside Lightning — see §1.1
 **Audience:** contributors implementing Cashu support in this client (appv2)
 **Upstream reference:** [`MostroP2P/mostro` — Cashu escrow spec series](https://github.com/MostroP2P/mostro/tree/main/docs/cashu)
 
@@ -19,16 +20,44 @@ in the daemon-side spec series:
 - Tracks B (release), C (cooperative cancel), D (disputes) — planned upstream; this plan
   anticipates them from the architecture doc and must be re-checked when they are published.
 
-The immediate purpose is to **test the daemon implementation end-to-end**: as each daemon
-track lands, the client should have the matching capability ready.
+### 1.1 What this is for — read this before planning anything
+
+**The goal is a shipped product feature: Cashu escrow available to real users, in
+`mostrod` and in this client, so that a user can choose whether to trade on a Mostro node
+that settles over Cashu or one that settles over Lightning.** Both backends are
+first-class and both are permanent. Cashu is not an experiment, and Lightning is not being
+replaced.
+
+Testing the daemon end-to-end is the **first milestone on the way there**, not the
+destination. It is genuinely useful — as each daemon track lands, the client should have
+the matching capability ready — but it is a checkpoint, and treating it as the finish line
+produces the wrong calls at exactly the points where they are expensive to undo.
+
+Concretely, the difference changes these decisions:
+
+| If the goal were "test the daemon" | Because the goal is "users choose their node" |
+|---|---|
+| The embedded wallet only has to survive a test run | It holds **user funds**. Ecash is bearer: a lost wallet DB is lost money. Backup/restore is a **release requirement**, not Wave-4 polish |
+| Errors can surface as raw markers to a developer | Every failure a user can reach needs a localized, actionable message and a way out |
+| Web can say "Cashu not available" indefinitely | Web is a first-class target of this app. A Cashu node being unusable there means the user's node choice silently depends on their platform |
+| The dev override is the way in | Users never see the override. **Detection must work off the node's own advertisement**, which makes the upstream 38385 tags (§4.1) a release blocker, not a convenience |
+| One tester who already knows the trust model | The mint is a **new trust assumption** users did not have in Lightning mode. They must see which mint a node uses *before* trading, not after |
+| Ship when the flows work | Ship when the flows work **and** funds are recoverable on every failure path — including "Mostro vanished" (locktime refund) and "user reinstalled the app" |
+
+None of this changes the phase order in §6 — the dependency graph is unaffected. It changes
+**which phases are optional**, which is why Wave 4 is no longer called "optional
+hardening".
 
 ### Non-goals
 
 - No general-purpose Cashu wallet product. The embedded wallet exists to fund/redeem
   escrows against the node's configured mint; anything beyond that is out of scope.
+  This bounds the wallet's **feature set**, not its quality bar — within that scope it
+  handles real money and is held to it.
 - No per-order mint negotiation (upstream constraint: the daemon pins a single `mint_url`).
 - No change of any kind to the Lightning flows. Cashu code is **additive and inert**
-  unless the active Mostro node is in Cashu mode.
+  unless the active Mostro node is in Cashu mode. Lightning stays fully supported: this is
+  a choice offered to users, never a migration imposed on them.
 
 ---
 
@@ -293,7 +322,7 @@ flowchart LR
 | 1 | C3, C4 | **parallel** with each other; each **stacked on C2** (C4 also on C0) | daemon not needed (mint only) |
 | 2 | C5 | **stacked** on C0+C1+C2+C4 | daemon Foundation + Track A |
 | 3 | C6, C7, C8 | **parallel** with each other; each **stacked on C5** | daemon Tracks B / C / D |
-| 4 | C9, C10 | **parallel**, optional, after C6 | — |
+| 4 | C9, C10 | **parallel** with each other, after C6. Not optional — required before general availability (§1.1) | — |
 
 Every phase, without exception, carries these standing requirements:
 
@@ -534,24 +563,50 @@ actions and screens; C5 established all shared plumbing.
 
 ---
 
-### Wave 4 — optional hardening (parallel, after C6)
+### Wave 4 — required before general availability (parallel, after C6)
+
+> Previously "optional hardening". Renamed deliberately: under §1.1's goal, most of what
+> follows is what stands between "the flows work" and "this can be handed to users". The
+> wave is still last and still parallel — it is no longer skippable.
 
 #### C9 — web (wasm) support
 
-cdk's wasm story must be validated (spike inside C2 decides the stub). This phase
-replaces the wasm stub: compile `cdk` wallet for `wasm32-unknown-unknown`, implement
+cdk's wasm story must be validated (spike before C2 — see the note there). This phase
+replaces the wasm stub: compile the `cdk` wallet for `wasm32-unknown-unknown`, implement
 the wallet store over IndexedDB (repo already has the dual-backend pattern in
 `rust/src/db/`), verify `./scripts/build-web.sh` + the `pages_bundle_test.dart` guards.
-If cdk cannot target wasm yet, this phase is deferred and web builds keep showing
-"Cashu not available on web" — an acceptable, explicit limitation.
 
-#### C10 — polish & resilience
+Web is a first-class target of this app, so "Cashu not available on web" is not a neutral
+limitation: it means a user's ability to pick a Cashu node depends on which platform they
+happen to open. Acceptable as a **temporary, explicitly messaged** state while the rest
+lands; not acceptable as the end state. If cdk cannot target wasm, that is a finding to
+act on — pin the constraint, look for a store-only workaround, raise it upstream — not a
+phase to quietly drop.
 
-Locktime countdowns everywhere relevant, wallet backup/restore integrated with the
-existing encrypted-backup flow (`export_encrypted_backup`), proof-state
-reconciliation job (NUT-07 spent-proof cleanup), richer error taxonomy, golden tests
-(`docs/golden-tests.md`) for the new screens, restore-session behavior for in-flight
-escrows.
+*(Early evidence, to confirm in the spike: cdk publishes a `check-wasm` recipe in its
+justfile and documents `cargo check -p cdk --target wasm32-unknown-unknown`. So the open
+question is not the crate but the **storage backend** — `cdk-sqlite` is native-only, so
+what the spike must actually answer is whether cdk's `WalletDatabase` can be implemented
+over IndexedDB.)*
+
+#### C10 — resilience, backup and polish
+
+Two groups, and the split matters now that real funds are involved.
+
+**Release-blocking** — ecash is a bearer asset, so these are the difference between a
+recoverable failure and lost user money:
+
+- **Wallet backup/restore**, integrated with the existing encrypted-backup flow
+  (`export_encrypted_backup`). A user who reinstalls must not lose their balance.
+- **Proof-state reconciliation** (NUT-07 spent-proof cleanup), so a crash between
+  swapping and recording cannot strand proofs.
+- **Restore-session behaviour for in-flight escrows** — an escrow mid-flight when a
+  restore happens must resolve, not hang.
+- **Locktime countdowns** wherever a deadline can cost the user money, and the
+  seller-side refund path reachable from the UI without a support conversation.
+
+**Polish** — real, but not gating: richer error taxonomy, golden tests
+(`docs/golden-tests.md`) for the new screens.
 
 ---
 
@@ -563,6 +618,7 @@ escrows.
 | Integration (Rust) | wallet + escrow primitives against a real mint | nutshell container (docker), same family as daemon CF-3; CI job optional/nightly at first |
 | Widget (Dart) | gating (no Cashu UI in Lightning mode), lock/redeem screens, error states | existing `flutter test` harness |
 | E2E manual | phase-by-phase against the matching daemon track branch + nutshell, using the C1 override until the 38385 tags land | documented per phase in this doc's checklists |
+| **Release acceptance** | the paths a user reaches that the phase tests do not: node advertises Cashu with **no override**; funds recovered after reinstall-from-backup; escrow reclaimed after locktime with the daemon offline; every reachable failure shows a localized message with a way out | manual, against a Cashu node on real relays — the gate for §1.1's actual goal |
 | Regression | entire existing suite must pass unmodified in every phase | existing CI |
 
 ## 8. Risks & open questions
@@ -571,13 +627,13 @@ escrows.
 |---|---|---|
 | 1 | ~~**Escrow-request wire form** not yet published~~ — **RESOLVED in C0.** It reuses existing types, which is why nothing was added to `mostro-core` for it. Per daemon branch `feat/cashu-ta2-take-flow` (`show_cashu_escrow_request`, `src/util.rs`): seller ← `Action::WaitingSellerToPay` + `Payload::Order(SmallOrder)` (`status = WaitingPayment`, both trade pubkeys, `buyer_invoice = None`); buyer ← same action, **no payload**. `mint_url` / `P_M` / locktime are *not* in the request — they come from the 38385 tags (C1) and the known Mostro pubkey. | C5 classifies by payload shape (§4.4) as planned: in Lightning the seller gets `PayInvoice` + `PaymentRequest`; in Cashu it gets `WaitingSellerToPay` + `Order`. `cashu_wire.rs::escrow_request_rides_on_an_unmodified_small_order` pins the assumption that makes this safe. Still to confirm when Track A merges: the daemon branch has diverged from its `main`. |
 | 2 | **cdk wasm compatibility** unknown; cdk is pre-1.0 with a moving API | wasm stub from day one (C2), web deferred to C9; pin exact cdk version in lockfile; upgrade only deliberately |
-| 3 | **38385 cashu tags don't exist upstream yet** | C1 ships the dev override; small upstream PR proposed in §4.1 |
+| 3 | **38385 cashu tags don't exist upstream yet** | C1 ships the dev override so work can proceed — but the override is a **developer** affordance and users never see it. Per §1.1 the feature is only usable once a node advertises Cashu **itself**, so the upstream PR in §4.1 is a **release blocker**, not a convenience. Land it early; it is a handful of tags read from `Settings::get_cashu()` |
 | 4 | `mostro-core` 0.13.1 → 0.14.x breakage | isolated in C0, the smallest possible PR |
 | 5 | **Buyer offline at release** — signatures sent P2P while buyer away | NIP-59 events wait on relays; startup scan for unredeemed trades (C6); nothing expires except the (15-day) locktime, and C6's margin guard protects the fiat step |
 | 6 | **Crash between receiving signatures and redeeming** | persist signatures before swap; redeem is retriable until proofs are spent; reconciliation via NUT-07 in C10 |
 | 7 | **Token loss = fund loss** (ecash is bearer) | wallet DB in app data dir; backup integration in C10; escrow tokens themselves are recoverable via the 2-of-3/refund paths |
 | 8 | Tracks B–D upstream docs still unpublished; details may shift | Waves 0–2 depend only on published material (architecture, 01, 02); re-validate C6–C8 scope when `03…05` docs land |
-| 9 | Trust shift: users must trust the mint | Surface mint URL prominently (About, lock screen, wallet); this is an explicit upstream design trade-off, the client's job is transparency |
+| 9 | **Trust shift: users must trust the mint.** In Lightning mode nobody custodies the trade; in Cashu mode the mint does, and it can censor or fail. Since §1.1 makes this a **user's choice**, the choice has to be informed — otherwise we have moved a trust assumption without telling anyone | Surface the mint URL prominently and *before* funds are committed (About, node selector, lock screen, wallet), not only after. This is an explicit upstream design trade-off; the client's job is transparency, and "which mint" belongs next to "which node" wherever a user picks one |
 
 ## 9. Glossary
 
