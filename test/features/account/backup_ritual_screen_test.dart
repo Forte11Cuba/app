@@ -46,7 +46,9 @@ Finder _aWrongOption(WidgetTester tester) {
   final correct = _correctWord(tester);
   for (final w in _words) {
     if (w == correct) continue;
-    final f = find.text(w);
+    // Scope to the option buttons (InkWell), so a filled answer chip with the
+    // same text can't be matched instead once slots start filling.
+    final f = find.widgetWithText(InkWell, w);
     if (f.evaluate().isNotEmpty) return f.first;
   }
   fail('no wrong option visible');
@@ -106,7 +108,6 @@ void main() {
     await tester.pump();
     expect(find.text(l10n.backupRitualStep1Title), findsOneWidget);
 
-    // Clear the SnackBar so it can't intercept the restart tap, then restart.
     // The failure SnackBar sits at the bottom over the verify button; clear it
     // so it can't intercept the restart tap.
     ScaffoldMessenger.of(tester.element(find.byType(BackupRitualScreen)))
@@ -130,7 +131,7 @@ void main() {
     // Answer each of the three challenge slots with its correct word.
     for (var i = 0; i < 3; i++) {
       final correct = _correctWord(tester);
-      await tester.tap(find.text(correct).first);
+      await tester.tap(find.widgetWithText(InkWell, correct).first);
       await tester.pumpAndSettle();
     }
 
