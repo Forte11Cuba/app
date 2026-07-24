@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<!--
+  Control fixture: the minimum a page must show to satisfy smoke.mjs.
+
+  It exists so the two failing fixtures beside it prove something. Without a
+  passing baseline, "console-error fails the run" could just as well mean the
+  fixture harness itself is broken.
+
+  The inline data: icon stops Chrome from requesting /favicon.ico outside the
+  served sub-path.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="icon" href="data:," />
+    <title>smoke fixture — healthy</title>
+  </head>
+  <body>
+    <flutter-view></flutter-view>
+    <script>
+      window.mostroBridgeReady = true;
+    </script>
+  </body>
+</html>

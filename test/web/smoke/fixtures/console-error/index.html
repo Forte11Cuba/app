@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<!--
+  Identical to the healthy fixture except for one console.error.
+
+  Issue #154 requires the smoke test to fail on console errors. A source grep
+  cannot prove that — mutate `if (errors.length)` to `if (false)` and the grep
+  still passes — so this page makes the requirement executable: everything
+  else smoke.mjs asserts is satisfied, and the run must still exit non-zero.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="icon" href="data:," />
+    <title>smoke fixture — console error</title>
+  </head>
+  <body>
+    <flutter-view></flutter-view>
+    <script>
+      window.mostroBridgeReady = true;
+      console.error('synthetic console error from the smoke self-test fixture');
+    </script>
+  </body>
+</html>

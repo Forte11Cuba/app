@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<!--
+  Identical to the healthy fixture except for one uncaught exception.
+
+  The throw sits in its own <script> so it cannot stop the block above it: the
+  view element and the bridge flag are already in place, which is the point —
+  every other assertion passes and the run must still exit non-zero.
+
+  Uncaught rather than caught-and-logged, because it reaches smoke.mjs through
+  a different channel than console.error: Playwright's `pageerror` event.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="icon" href="data:," />
+    <title>smoke fixture — uncaught page error</title>
+  </head>
+  <body>
+    <flutter-view></flutter-view>
+    <script>
+      window.mostroBridgeReady = true;
+    </script>
+    <script>
+      throw new Error('synthetic uncaught page error from the smoke self-test fixture');
+    </script>
+  </body>
+</html>
