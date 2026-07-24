@@ -225,21 +225,28 @@ mod tests {
         assert!(one.verify());
     }
 
-    /// **The escrow request is not in `mostro-core` 0.14.1.**
+    /// **The escrow request carries no Cashu-specific fields, by design.**
     ///
-    /// `docs/cashu/README.md` risk #1 asks whether the "Mostro → seller"
-    /// escrow request (amount, fee, mint_url, `P_B`, `P_M`, locktime) has a
-    /// pinned wire form. It does not: the Cashu fields (`cashu_mint_url`,
-    /// `cashu_escrow_token`, `cashu_escrow_locked_at`) exist only on the
-    /// daemon-internal `Order`, and **not** on `SmallOrder`, which is what
-    /// payloads actually carry.
+    /// `docs/cashu/README.md` risk #1 asked how the "Mostro → seller" escrow
+    /// request reaches the client. Resolved in C0 by reading the daemon branch
+    /// `feat/cashu-ta2-take-flow` (`show_cashu_escrow_request` in `src/util.rs`):
+    /// it reuses types that already exist, which is why nothing Cashu-shaped
+    /// was added to `mostro-core` for it.
     ///
-    /// This test states that as an executable fact. When the daemon's Track A
-    /// pins the request — by adding the fields to `SmallOrder`, or with a new
-    /// payload variant — this test fails, which is the intended signal to
-    /// revisit C5's classification instead of guessing at it.
+    /// - seller ← `Action::WaitingSellerToPay` + `Payload::Order(SmallOrder)`,
+    ///   with `status = WaitingPayment`, both trade pubkeys set and
+    ///   `buyer_invoice = None`;
+    /// - buyer  ← `Action::WaitingSellerToPay` with **no** payload.
+    ///
+    /// `mint_url`, `P_M` and the locktime are *not* in the request — the client
+    /// takes them from the node's 38385 info tags (C1) and the known Mostro
+    /// pubkey. So C5 classifies by payload shape (§4.4), exactly as planned.
+    ///
+    /// This test pins the assumption that makes that classification safe: the
+    /// wire `SmallOrder` stays free of Cashu fields. Should upstream add them,
+    /// this fails — the signal to re-read the daemon before touching C5.
     #[test]
-    fn escrow_request_shape_is_still_unpinned_upstream() {
+    fn escrow_request_rides_on_an_unmodified_small_order() {
         // Arrange — a SmallOrder as it travels inside Payload::Order.
         let small = SmallOrder::default();
 
@@ -247,12 +254,12 @@ mod tests {
         let value: serde_json::Value =
             serde_json::from_str(&serde_json::to_string(&small).unwrap()).unwrap();
 
-        // Assert — no Cashu carrier on the wire order yet. If any of these
-        // starts existing, the daemon has pinned the request: update
-        // docs/cashu/README.md §2 and C5's classification.
+        // Assert — the Cashu fields live on the daemon-internal `Order` only.
+        // If any appears here, the request shape changed: re-read the daemon
+        // and update docs/cashu/README.md §2 plus C5's classification.
         assert!(
             value.get("cashu_mint_url").is_none(),
-            "SmallOrder now carries cashu_mint_url — the escrow request may be pinned; revisit C5",
+            "SmallOrder now carries cashu_mint_url — the escrow request changed; re-read the daemon before touching C5",
         );
         assert!(
             value.get("cashu_escrow_token").is_none(),
