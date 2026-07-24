@@ -93,13 +93,18 @@ on **0.13.1** and must upgrade to **≥ 0.14.0** for `CashuLockProof.fee_token`)
 - **`CantDoReason`s:** `InvalidCashuToken`, `CashuMintUnavailable`, `InvalidMintUrl`,
   `CashuEscrowNotLocked`, `CashuSignatureMissing`
 
-Illustrative wire message (rumor content of the NIP-44/Kind-14 transport, casing to be
-confirmed against `mostro-core` 0.14 serde attributes during Phase C0):
+Wire message (rumor content of the NIP-44/Kind-14 transport). **Confirmed against
+`mostro-core` 0.14.1 in Phase C0** and pinned by tests in
+`rust/src/mostro/cashu_wire.rs`, so an upstream rename fails our suite instead of a live
+trade: `Action` is `rename_all = "kebab-case"`, `Payload` is `rename_all = "snake_case"`
+(hence the `cashu_lock_proof` discriminator), `CashuLockProof`'s field names are exactly
+as written below, and `fee_token` is `skip_serializing_if = "Option::is_none"` — a node
+charging no fee produces the pre-0.14 form byte-for-byte. The example below is accurate:
 
 ```json
 {
   "order": {
-    "version": 1,
+    "version": 2,
     "id": "ede61c96-4c13-4519-bf3a-dcf7f1e9d842",
     "request_id": 981234,
     "trade_index": 7,
@@ -564,7 +569,7 @@ escrows.
 
 | # | Risk / open question | Mitigation |
 |---|---|---|
-| 1 | **Escrow-request wire form** (mostro→seller after take) not yet published in upstream docs | Blocker only for C5; confirm against daemon Track A source; classify by payload shape as fallback (§4.4). Update §2 when pinned. |
+| 1 | ~~**Escrow-request wire form** not yet published~~ — **RESOLVED in C0.** It reuses existing types, which is why nothing was added to `mostro-core` for it. Per daemon branch `feat/cashu-ta2-take-flow` (`show_cashu_escrow_request`, `src/util.rs`): seller ← `Action::WaitingSellerToPay` + `Payload::Order(SmallOrder)` (`status = WaitingPayment`, both trade pubkeys, `buyer_invoice = None`); buyer ← same action, **no payload**. `mint_url` / `P_M` / locktime are *not* in the request — they come from the 38385 tags (C1) and the known Mostro pubkey. | C5 classifies by payload shape (§4.4) as planned: in Lightning the seller gets `PayInvoice` + `PaymentRequest`; in Cashu it gets `WaitingSellerToPay` + `Order`. `cashu_wire.rs::escrow_request_rides_on_an_unmodified_small_order` pins the assumption that makes this safe. Still to confirm when Track A merges: the daemon branch has diverged from its `main`. |
 | 2 | **cdk wasm compatibility** unknown; cdk is pre-1.0 with a moving API | wasm stub from day one (C2), web deferred to C9; pin exact cdk version in lockfile; upgrade only deliberately |
 | 3 | **38385 cashu tags don't exist upstream yet** | C1 ships the dev override; small upstream PR proposed in §4.1 |
 | 4 | `mostro-core` 0.13.1 → 0.14.x breakage | isolated in C0, the smallest possible PR |
