@@ -104,7 +104,7 @@ charging no fee produces the pre-0.14 form byte-for-byte. The example below is a
 ```json
 {
   "order": {
-    "version": 1,
+    "version": 2,
     "id": "ede61c96-4c13-4519-bf3a-dcf7f1e9d842",
     "request_id": 981234,
     "trade_index": 7,

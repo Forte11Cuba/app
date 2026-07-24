@@ -123,12 +123,16 @@ mod tests {
     }
 
     /// The full message the seller publishes, matching the example in
-    /// `docs/cashu/README.md` §2 field for field.
+    /// `docs/cashu/README.md` §2 field for field — including the `order`
+    /// envelope that `Message` adds and the `version` stamp that
+    /// `MessageKind::new` puts on every message. Both are part of what the
+    /// daemon parses, so serializing the bare `MessageKind` would pin less
+    /// than the doc shows.
     #[test]
     fn add_cashu_escrow_message_matches_the_documented_example() {
         // Arrange
         let order_id = uuid::Uuid::parse_str("ede61c96-4c13-4519-bf3a-dcf7f1e9d842").unwrap();
-        let kind = MessageKind::new(
+        let message = Message::Order(MessageKind::new(
             Some(order_id),
             Some(981234),
             Some(7),
@@ -140,18 +144,23 @@ mod tests {
                 "77b2".to_string(),
                 "dbe0".to_string(),
             ))),
-        );
+        ));
 
         // Act
-        let value: serde_json::Value = serde_json::from_str(&kind.as_json().unwrap()).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&message.as_json().unwrap()).unwrap();
 
-        // Assert
-        assert_eq!(value["action"], "add-cashu-escrow");
-        assert_eq!(value["id"], "ede61c96-4c13-4519-bf3a-dcf7f1e9d842");
-        assert_eq!(value["request_id"], 981234);
-        assert_eq!(value["trade_index"], 7);
+        // Assert — the daemon-facing envelope, then the body.
+        let order = &value["order"];
+        assert!(order.is_object(), "expected an `order` envelope: {value}");
+        // `PROTOCOL_VER` — 2 since the transport-v2 migration, not the 1 the
+        // pre-0.14 examples carried.
+        assert_eq!(order["version"], 2);
+        assert_eq!(order["action"], "add-cashu-escrow");
+        assert_eq!(order["id"], "ede61c96-4c13-4519-bf3a-dcf7f1e9d842");
+        assert_eq!(order["request_id"], 981234);
+        assert_eq!(order["trade_index"], 7);
         assert_eq!(
-            value["payload"]["cashu_lock_proof"]["mint_url"],
+            order["payload"]["cashu_lock_proof"]["mint_url"],
             "https://mint.example.com"
         );
     }

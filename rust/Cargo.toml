@@ -16,7 +16,9 @@ flutter_rust_bridge = "=2.11.1"
 
 # Nostr & Mostro protocol
 nostr-sdk = { version = "0.44", default-features = false, features = ["nip44", "nip47", "nip59"] }
-mostro-core = "0.14"
+# 0.14.1, not 0.14: the wire form pinned by `mostro/cashu_wire.rs` and documented
+# in docs/cashu/README.md §2 was confirmed against 0.14.1.
+mostro-core = "0.14.1"
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
