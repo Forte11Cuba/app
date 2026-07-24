@@ -367,12 +367,21 @@ order book populate from the daemon's Kind 38383 events without running anything
 (The organization serves its Pages sites from that domain, so this project page lives under
 `mostro.network/app/` rather than `mostrop2p.github.io/app/`, which 301s to it. The sub-path
 is the same either way.)
-The workflow runs the same steps as above (`scripts/frb-generate.sh`, then
-`scripts/build-web.sh --release`) and finishes with:
+The build itself lives in the reusable
+[`.github/workflows/web-build.yml`](.github/workflows/web-build.yml), which the deploy calls
+and **CI also runs on every pull request** — so a change that breaks the web target fails
+before it lands, and what CI validates cannot drift from what ships. It runs the same steps as
+above (`scripts/frb-generate.sh`, then `scripts/build-web.sh --release`) and finishes with:
 
 ```bash
 flutter build web --release --base-href "/app/" --pwa-strategy=none
 ```
+
+It then verifies the bundle and smoke-tests it in headless Chrome
+([`test/web/smoke/smoke.mjs`](test/web/smoke/smoke.mjs)): the release bundle is served
+cross-origin isolated under `/app/`, and the test asserts the page is isolated, the Flutter
+view mounted, a Rust bridge call returned, and nothing errored. Static checks alone cannot
+catch that — every blank-page cause below greps perfectly clean.
 
 Three things make it work on a static host that cannot set HTTP headers:
 

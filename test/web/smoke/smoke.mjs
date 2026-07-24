@@ -149,23 +149,28 @@ async function main() {
   const url = `http://127.0.0.1:${port}${BASE_PATH}`;
   console.log(`serving ${BUNDLE_DIR} at ${url}`);
 
-  const browser = await chromium.launch();
-  const page = await browser.newPage();
-
-  const record = (origin, text) => {
-    (isIgnorable(text) ? ignored : errors).push(`[${origin}] ${text}`);
-  };
-  page.on('console', (msg) => {
-    if (msg.type() === 'error') record('console', msg.text());
-  });
-  page.on('pageerror', (err) => record('pageerror', err.message));
-
-  const fail = async (message) => {
-    await page.screenshot({ path: 'smoke-failure.png' }).catch(() => {});
-    throw new Error(message);
-  };
-
+  // Everything past this point runs under the finally that closes the server:
+  // a listening socket keeps the event loop alive, so leaking one turns a
+  // browser that failed to start into a job that hangs until its timeout
+  // instead of a smoke test that fails in seconds.
+  let browser;
   try {
+    browser = await chromium.launch();
+    const page = await browser.newPage();
+
+    const record = (origin, text) => {
+      (isIgnorable(text) ? ignored : errors).push(`[${origin}] ${text}`);
+    };
+    page.on('console', (msg) => {
+      if (msg.type() === 'error') record('console', msg.text());
+    });
+    page.on('pageerror', (err) => record('pageerror', err.message));
+
+    const fail = async (message) => {
+      await page.screenshot({ path: 'smoke-failure.png' }).catch(() => {});
+      throw new Error(message);
+    };
+
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: TIMEOUT_MS });
 
     // 1. Isolation. Cheap, unambiguous, and everything after it depends on it.
@@ -216,7 +221,11 @@ async function main() {
     }
     console.log('✓ no console or page errors\n\nweb bundle smoke test passed.');
   } finally {
-    await browser.close().catch(() => {});
+    // browser is undefined when chromium.launch() itself threw.
+    await browser?.close().catch(() => {});
+    // close() only stops new connections; a keep-alive socket the browser left
+    // behind would hold the process open just as a listening one would.
+    server.closeAllConnections();
     server.close();
   }
 }
