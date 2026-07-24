@@ -93,8 +93,13 @@ on **0.13.1** and must upgrade to **≥ 0.14.0** for `CashuLockProof.fee_token`)
 - **`CantDoReason`s:** `InvalidCashuToken`, `CashuMintUnavailable`, `InvalidMintUrl`,
   `CashuEscrowNotLocked`, `CashuSignatureMissing`
 
-Illustrative wire message (rumor content of the NIP-44/Kind-14 transport, casing to be
-confirmed against `mostro-core` 0.14 serde attributes during Phase C0):
+Wire message (rumor content of the NIP-44/Kind-14 transport). **Confirmed against
+`mostro-core` 0.14.1 in Phase C0** and pinned by tests in
+`rust/src/mostro/cashu_wire.rs`, so an upstream rename fails our suite instead of a live
+trade: `Action` is `rename_all = "kebab-case"`, `Payload` is `rename_all = "snake_case"`
+(hence the `cashu_lock_proof` discriminator), `CashuLockProof`'s field names are exactly
+as written below, and `fee_token` is `skip_serializing_if = "Option::is_none"` — a node
+charging no fee produces the pre-0.14 form byte-for-byte. The example below is accurate:
 
 ```json
 {
@@ -564,7 +569,7 @@ escrows.
 
 | # | Risk / open question | Mitigation |
 |---|---|---|
-| 1 | **Escrow-request wire form** (mostro→seller after take) not yet published in upstream docs | Blocker only for C5; confirm against daemon Track A source; classify by payload shape as fallback (§4.4). Update §2 when pinned. |
+| 1 | **Escrow-request wire form** (mostro→seller after take) — **confirmed absent from `mostro-core` 0.14.1 in C0**, not merely undocumented. The Cashu fields (`cashu_mint_url`, `cashu_escrow_token`, `cashu_escrow_locked_at`) exist only on the daemon-internal `Order`, **not** on `SmallOrder`, which is what payloads carry. There is no payload variant for the request either. | Hard blocker for C5's seller side — implementing it now would mean inventing a wire format. `rust/src/mostro/cashu_wire.rs::escrow_request_shape_is_still_unpinned_upstream` asserts this, so the day upstream adds the carrier our suite goes red and points here. Resolve by reading daemon Track A source, or by proposing the `SmallOrder` fields upstream. Everything else in C5 (buyer-side gating, `CashuEscrowLocked` handling) is unblocked. |
 | 2 | **cdk wasm compatibility** unknown; cdk is pre-1.0 with a moving API | wasm stub from day one (C2), web deferred to C9; pin exact cdk version in lockfile; upgrade only deliberately |
 | 3 | **38385 cashu tags don't exist upstream yet** | C1 ships the dev override; small upstream PR proposed in §4.1 |
 | 4 | `mostro-core` 0.13.1 → 0.14.x breakage | isolated in C0, the smallest possible PR |
