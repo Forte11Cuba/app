@@ -29,6 +29,11 @@ cd rust && cargo test && cargo clippy      # mandated verify (Rust)
 ./scripts/frb-generate.sh                   # after ANY change to rust/src/api/
 ./scripts/build-web.sh                      # web only: compile the Rust core to web/pkg/
 flutter analyze && flutter test             # Dart side
+
+# web smoke test — needs a release bundle first (see "Web (wasm)" below):
+#   ./scripts/build-web.sh --release
+#   flutter build web --release --base-href "/app/" --pwa-strategy=none
+cd test/web/smoke && npm ci && npx playwright install chromium && BASE_PATH=/app/ node smoke.mjs
 flutter run -d linux|chrome|android         # Rust is a lib — there is no `cargo run`
 flutter gen-l10n                            # after editing lib/l10n/*.arb
 ```
@@ -43,7 +48,16 @@ flutter gen-l10n                            # after editing lib/l10n/*.arb
 - `main` deploys to <https://mostro.network/app/> via `.github/workflows/deploy-pages.yml`
   (`--base-href` for the sub-path, `--pwa-strategy=none` so Flutter's service worker does not
   take the isolation shim's scope). Every one of these, when wrong, yields a **blank page** —
-  `test/web/pages_bundle_test.dart` guards them.
+  `test/web/pages_bundle_test.dart` guards them statically.
+- The build itself lives in the reusable **`.github/workflows/web-build.yml`**, called by both
+  `ci.yml` (every PR) and `deploy-pages.yml` — edit it there, never in a caller, or the bundle
+  CI validates drifts from the one that ships.
+- Static greps pass on a page that dies at runtime, so that workflow also runs
+  **`test/web/smoke/smoke.mjs`**: it serves the release bundle cross-origin isolated under
+  `/app/` and asserts in headless Chrome that the page is isolated, the Flutter view mounted,
+  a **Rust bridge call returned**, and nothing errored. The bridge signal comes from
+  `lib/core/web/bridge_probe.dart`, which `main()` sets after its first successful Rust call
+  (no-op off web) — rename that flag on one side only and the check silently never fires.
 
 ## Code Style
 

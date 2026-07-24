@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:mostro/core/app.dart';
 import 'package:mostro/core/mostro_defaults.dart';
 import 'package:mostro/core/services/identity_service.dart';
+import 'package:mostro/core/web/bridge_probe.dart';
 import 'package:mostro/features/settings/providers/settings_provider.dart';
 import 'package:mostro/features/settings/widgets/mostro_node_selector.dart';
 import 'package:mostro/features/walkthrough/providers/first_run_provider.dart';
@@ -58,12 +59,18 @@ Future<void> main() async {
   // node. No-op when none was saved (the compiled-in default then applies).
   // The resolved pubkey seeds mostroPubkeyProvider so Settings shows the real
   // active node on launch.
+  //
+  // This is also the first call that proves the Rust bridge is alive end to
+  // end, so its outcome doubles as the web readiness probe CI waits on — see
+  // lib/core/web/bridge_probe.dart (no-op off web).
   String activeMostroPubkey = defaultMostroPubkey;
   try {
     await settings_api.rehydrateActiveMostroNode();
     activeMostroPubkey = await settings_api.getMostroPubkey();
+    markBridgeReady();
   } catch (e) {
     debugPrint('[main] rehydrate active Mostro node failed: $e');
+    markBridgeFailed(e);
   }
 
   // Initialize identity: creates on first launch, reloads on subsequent launches.

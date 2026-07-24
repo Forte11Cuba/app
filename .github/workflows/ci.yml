@@ -131,3 +131,15 @@ jobs:
 
       - name: Test
         run: flutter test
+
+  # Web is a first-class target (constitution, specs/004/plan.md), and its
+  # failure mode is a blank page that every static check passes. Building and
+  # smoke-testing it here means a PR that breaks the web target fails before it
+  # lands, instead of after deploy-pages.yml has already run on main (#154).
+  #
+  # Same reusable definition the deploy uses, so the two cannot drift apart.
+  web:
+    name: Web (wasm build / smoke test)
+    uses: ./.github/workflows/web-build.yml
+    permissions:
+      contents: read
