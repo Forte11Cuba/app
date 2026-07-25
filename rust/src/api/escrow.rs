@@ -79,10 +79,9 @@ pub async fn set_escrow_mode_override(force_cashu: bool) -> Result<()> {
     };
 
     persist(settings_keys::ESCROW_MODE_OVERRIDE, Some(mode.as_stored())).await?;
-    escrow_mode::set_overrides(EscrowOverrides {
-        mode,
-        ..escrow_mode::get_overrides()
-    });
+    // One field, under one lock: the mint URL is set from the same surface, and
+    // a read-modify-write of the whole struct would race with it.
+    escrow_mode::update_overrides(|o| o.mode = mode);
     Ok(())
 }
 
@@ -101,10 +100,7 @@ pub async fn set_cashu_mint_url_override(mint_url: Option<String>) -> Result<()>
     }
 
     persist(settings_keys::CASHU_MINT_URL_OVERRIDE, normalized.as_deref()).await?;
-    escrow_mode::set_overrides(EscrowOverrides {
-        mint_url: normalized,
-        ..escrow_mode::get_overrides()
-    });
+    escrow_mode::update_overrides(|o| o.mint_url = normalized);
     Ok(())
 }
 
@@ -162,7 +158,7 @@ async fn persist(key: &str, value: Option<&str>) -> Result<()> {
 /// A stream that emits the resolved escrow mode whenever it changes: a
 /// capability fetch, a node switch, or an override flip.
 pub struct EscrowModeStream {
-    rx: tokio::sync::broadcast::Receiver<escrow_mode::ResolvedEscrowMode>,
+    rx: tokio::sync::broadcast::Receiver<()>,
 }
 
 impl EscrowModeStream {
@@ -173,10 +169,10 @@ impl EscrowModeStream {
     pub async fn next(&mut self) -> Result<EscrowModeInfo> {
         loop {
             match self.rx.recv().await {
-                // The event carries the resolution, but the snapshot is rebuilt
-                // from the globals so the override fields can never disagree
-                // with the mode inside the same struct.
-                Ok(_) => return Ok(snapshot()),
+                // The event is a bare wake-up; the snapshot is rebuilt from the
+                // globals so the override fields can never disagree with the
+                // mode inside the same struct.
+                Ok(()) => return Ok(snapshot()),
                 Err(RecvError::Lagged(_)) => continue,
                 Err(RecvError::Closed) => {
                     bail!("EscrowModeStream closed: channel sender dropped")
@@ -346,6 +342,75 @@ mod tests {
         assert_eq!(
             get_escrow_mode().mint_url_override.as_deref(),
             Some("https://mint.example.com")
+        );
+    }
+
+    #[tokio::test]
+    async fn overrides_survive_a_restart_through_the_settings_store() {
+        // Arrange — a real store, so this covers the persist/rehydrate pair
+        // rather than just the halves. Without an initialised DB the setters
+        // apply in memory only, which is the web behaviour (#233) and would
+        // make this test pass for the wrong reason.
+        let _g = escrow_lock();
+        let path = std::env::temp_dir().join(format!(
+            "mostro_escrow_rehydrate_{}.db",
+            std::process::id()
+        ));
+        // `init_db` is a OnceCell — the first test to call it wins and the rest
+        // share that store, which is what we want: this test needs *a* real
+        // store, not its own.
+        let _ = crate::db::app_db::init_db(path.to_str().unwrap()).await;
+        assert!(
+            crate::db::app_db::db().is_some(),
+            "a real settings store is the point of this test"
+        );
+
+        // Act — the developer sets both overrides.
+        set_escrow_mode_override(true).await.unwrap();
+        set_cashu_mint_url_override(Some("http://localhost:3338".to_string()))
+            .await
+            .unwrap();
+
+        // Act — the app restarts: memory is empty, only the store survives.
+        escrow_mode::set_overrides(EscrowOverrides::default());
+        assert!(!get_escrow_mode().force_cashu_override, "precondition");
+        rehydrate_escrow_overrides().await.unwrap();
+
+        // Assert — both came back.
+        let info = get_escrow_mode();
+        assert!(info.force_cashu_override);
+        assert_eq!(
+            info.mint_url_override.as_deref(),
+            Some("http://localhost:3338")
+        );
+
+        // Cleanup — clear the overrides, but leave the file alone. `init_db`
+        // is a process-wide OnceCell: deleting the file here would leave every
+        // later test holding a pool onto a database that no longer has tables.
+        set_escrow_mode_override(false).await.unwrap();
+        set_cashu_mint_url_override(None).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn setting_one_override_never_clobbers_the_other() {
+        // Arrange — the read-modify-write hazard: both fields are written from
+        // the same screen, and the mode setter used to overwrite the whole
+        // struct with a separately-read copy.
+        let _g = escrow_lock();
+        set_cashu_mint_url_override(Some("http://localhost:3338".to_string()))
+            .await
+            .unwrap();
+
+        // Act
+        set_escrow_mode_override(true).await.unwrap();
+
+        // Assert — the mint override is still there.
+        let info = get_escrow_mode();
+        assert!(info.force_cashu_override);
+        assert_eq!(
+            info.mint_url_override.as_deref(),
+            Some("http://localhost:3338"),
+            "setting the mode must not drop the mint override"
         );
     }
 

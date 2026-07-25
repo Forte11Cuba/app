@@ -119,7 +119,10 @@ impl Storage for IndexedDbStorage {
     }
 
     async fn delete_setting(&self, _key: &str) -> Result<()> {
-        // Nothing was ever stored, so removal is already satisfied.
+        // Nothing was ever stored, so removal is already satisfied — but say so
+        // for the same reason the writes do: a silent no-op in a storage layer
+        // is indistinguishable from working storage when reading a log.
+        log::warn!("delete_setting: IndexedDB backend not implemented — nothing was stored to remove");
         Ok(())
     }
 

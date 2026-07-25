@@ -29,6 +29,7 @@ class _EscrowModeDevCardState extends ConsumerState<EscrowModeDevCard> {
   /// The value the field was last populated from, so a stream event that did
   /// not change the override never overwrites what the user is typing.
   String? _syncedMintOverride;
+  bool _seeded = false;
 
   @override
   void dispose() {
@@ -36,6 +37,13 @@ class _EscrowModeDevCardState extends ConsumerState<EscrowModeDevCard> {
     super.dispose();
   }
 
+  /// Populate the field from the stored override.
+  ///
+  /// Deliberately **not** called from `build`: assigning `.text` notifies the
+  /// controller's listeners, and doing that during a build marks the
+  /// `TextField` dirty in the middle of laying it out. The guard matters too —
+  /// without it every unrelated escrow event (a node switch, a capability
+  /// re-fetch) would wipe whatever the user is halfway through typing.
   void _syncMintField(String? stored) {
     if (stored == _syncedMintOverride) return;
     _syncedMintOverride = stored;
@@ -70,8 +78,17 @@ class _EscrowModeDevCardState extends ConsumerState<EscrowModeDevCard> {
     final colors = Theme.of(context).extension<AppColors>()!;
     final info = ref.watch(escrowModeProvider).valueOrNull;
 
-    if (info != null) {
-      _syncMintField(info.mintUrlOverride);
+    // Seed once when the first value arrives, then follow real changes. Both
+    // paths run outside build — see [_syncMintField].
+    ref.listen(escrowModeProvider, (_, next) {
+      final stored = next.valueOrNull;
+      if (stored != null) _syncMintField(stored.mintUrlOverride);
+    });
+    if (!_seeded && info != null) {
+      _seeded = true;
+      final seed = info.mintUrlOverride;
+      WidgetsBinding.instance
+          .addPostFrameCallback((_) => _syncMintField(seed));
     }
 
     return Container(

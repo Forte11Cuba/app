@@ -149,12 +149,18 @@ pub struct EscrowModeInputs {
 /// that speaks Cashu without advertising it, while overriding the mint is for
 /// pointing a tester at a local nutshell instead of the node's mint.
 pub fn resolve(inputs: &EscrowModeInputs) -> ResolvedEscrowMode {
-    let overridden = matches!(inputs.override_mode, EscrowModeOverride::ForceCashu);
-    let mode = if overridden {
+    let forcing = matches!(inputs.override_mode, EscrowModeOverride::ForceCashu);
+    let mode = if forcing {
         EscrowMode::Cashu
     } else {
         inputs.from_tags
     };
+
+    // `is_overridden` exists to warn a tester that the mode is not the node's
+    // own. Forcing Cashu on a node that already advertises Cashu changes
+    // nothing, so flagging it would cry wolf on the one configuration where the
+    // override is irrelevant.
+    let overridden = forcing && inputs.from_tags != EscrowMode::Cashu;
 
     let mut config = inputs.tag_config.clone();
     if let Some(url) = inputs
@@ -243,25 +249,30 @@ static OVERRIDES: RwLock<EscrowOverrides> = RwLock::new(EscrowOverrides {
     mint_url: None,
 });
 
-/// Broadcast of the resolved mode, so the UI reacts without polling.
+/// Broadcast that *something* changed, so the UI re-reads without polling.
 ///
-/// Every mutator below emits on it; nothing else may write the globals, which
-/// is what keeps "changed" and "notified" from drifting apart.
-static CHANGES: OnceLock<broadcast::Sender<ResolvedEscrowMode>> = OnceLock::new();
+/// The event carries no payload on purpose. Subscribers rebuild the snapshot
+/// from the globals anyway — that is what keeps a snapshot's mode and override
+/// fields from ever disagreeing — so sending the resolution too would just
+/// resolve it twice per change.
+///
+/// Every mutator below emits on it, and only when it actually changed
+/// something; nothing else may write the globals.
+static CHANGES: OnceLock<broadcast::Sender<()>> = OnceLock::new();
 
-fn changes() -> &'static broadcast::Sender<ResolvedEscrowMode> {
+fn changes() -> &'static broadcast::Sender<()> {
     CHANGES.get_or_init(|| broadcast::channel(32).0)
 }
 
-/// Subscribe to resolved-escrow-mode changes.
-pub fn subscribe() -> broadcast::Receiver<ResolvedEscrowMode> {
+/// Subscribe to escrow-mode changes.
+pub fn subscribe() -> broadcast::Receiver<()> {
     changes().subscribe()
 }
 
-/// Emit the current resolution to subscribers. A send error means "no
-/// listeners", which is the normal state before the UI attaches.
+/// Wake subscribers. A send error means "no listeners", which is the normal
+/// state before the UI attaches.
 fn notify() {
-    let _ = changes().send(get_resolved());
+    let _ = changes().send(());
 }
 
 /// Record what the active node advertised.
@@ -275,11 +286,18 @@ pub fn set_from_tags(mode: EscrowMode, config: CashuNodeConfig) {
         mode.as_marker(),
         config.mint_url,
     );
-    {
+    let changed = {
         let mut guard = TAGS.write().unwrap_or_else(|e| e.into_inner());
-        *guard = Some((mode, config));
+        let next = Some((mode, config));
+        let changed = *guard != next;
+        *guard = next;
+        changed
+    };
+    // A re-fetch that confirms what we already knew is the common case on a
+    // reconnect; emitting for it would wake every listener for nothing.
+    if changed {
+        notify();
     }
-    notify();
 }
 
 /// Current resolution, or the `Unknown` default before the first fetch.
@@ -308,19 +326,40 @@ pub fn get_overrides() -> EscrowOverrides {
     OVERRIDES.read().unwrap_or_else(|e| e.into_inner()).clone()
 }
 
-/// Replace the developer overrides. Persistence is the caller's job
+/// Replace the developer overrides wholesale. Persistence is the caller's job
 /// (`crate::api::escrow`); this is the in-memory half.
+///
+/// Prefer [`update_overrides`] when changing one field: this one overwrites
+/// both, so a caller that read-modify-writes races with any concurrent change
+/// to the other field.
 pub fn set_overrides(overrides: EscrowOverrides) {
-    log::info!(
-        "[escrow-mode] override set to {} (mint override={:?})",
-        overrides.mode.as_stored(),
-        overrides.mint_url,
-    );
-    {
+    update_overrides(|current| *current = overrides);
+}
+
+/// Mutate the overrides under a single write lock.
+///
+/// The lock spans the read *and* the write, which is the point: the two
+/// overrides are set from the same surface, and a read-modify-write of one
+/// field would otherwise interleave with the other and silently discard it.
+pub fn update_overrides(f: impl FnOnce(&mut EscrowOverrides)) {
+    let changed = {
         let mut guard = OVERRIDES.write().unwrap_or_else(|e| e.into_inner());
-        *guard = overrides;
+        let before = guard.clone();
+        f(&mut guard);
+        if *guard != before {
+            log::info!(
+                "[escrow-mode] override set to {} (mint override={:?})",
+                guard.mode.as_stored(),
+                guard.mint_url,
+            );
+            true
+        } else {
+            false
+        }
+    };
+    if changed {
+        notify();
     }
-    notify();
 }
 
 /// Forget what the node advertised. Called when the active node changes, so a
@@ -328,11 +367,17 @@ pub fn set_overrides(overrides: EscrowOverrides) {
 /// switch and the next successful fetch. The overrides are deliberately left
 /// alone — see [`OVERRIDES`].
 pub fn clear() {
-    {
+    let changed = {
         let mut guard = TAGS.write().unwrap_or_else(|e| e.into_inner());
+        let changed = guard.is_some();
         *guard = None;
+        changed
+    };
+    // Clearing an already-clear cache is a no-op, and a node whose capability
+    // fetch keeps failing would otherwise emit on every retry.
+    if changed {
+        notify();
     }
-    notify();
 }
 
 /// The one question the rest of the app asks: may a Cashu path run against the
@@ -696,26 +741,82 @@ mod tests {
 
     #[tokio::test]
     async fn every_mutator_notifies_subscribers() {
-        // Arrange
+        // Arrange — a Lightning node, so each step below is a real change.
         let _guard = own_the_global();
+        set_from_tags(EscrowMode::Lightning, CashuNodeConfig::default());
         let mut rx = subscribe();
 
-        // Act / Assert — tags in.
+        // Act / Assert — tags in. The event is a bare wake-up; the state is
+        // read from the globals, which is what subscribers do.
         let (mode, config) = cashu_tags();
         set_from_tags(mode, config);
-        assert_eq!(rx.recv().await.unwrap().mode, EscrowMode::Cashu);
+        rx.recv().await.unwrap();
+        assert_eq!(get_resolved().mode, EscrowMode::Cashu);
 
         // Act / Assert — override changed.
         set_overrides(EscrowOverrides {
             mode: EscrowModeOverride::ForceCashu,
-            mint_url: None,
+            mint_url: Some("http://localhost:3338".to_string()),
         });
-        assert!(rx.recv().await.unwrap().is_overridden);
+        rx.recv().await.unwrap();
+        assert_eq!(
+            get_resolved().config.mint_url.as_deref(),
+            Some("http://localhost:3338")
+        );
 
         // Act / Assert — node switch. The override still forces Cashu, but the
-        // event fires: subscribers must see every transition, not just the ones
-        // that change the mode.
+        // tags changed, so subscribers must be woken.
         clear();
-        assert!(rx.recv().await.unwrap().is_overridden);
+        rx.recv().await.unwrap();
+        assert!(get_resolved().is_overridden);
+    }
+
+    #[tokio::test]
+    async fn a_change_that_changes_nothing_does_not_wake_subscribers() {
+        // Arrange — a node that has already been fetched.
+        let _guard = own_the_global();
+        let (mode, config) = cashu_tags();
+        set_from_tags(mode, config.clone());
+        let mut rx = subscribe();
+
+        // Act — a reconnect re-fetches the same event, and a settings screen
+        // re-writes the override it already had. Neither changed anything.
+        set_from_tags(mode, config);
+        set_overrides(EscrowOverrides::default());
+        clear();
+        clear();
+
+        // Assert — exactly one wake-up, from the `clear()` that emptied the
+        // cache. On a flaky relay the alternative is a stream of identical
+        // events that every listener has to re-render.
+        rx.recv().await.unwrap();
+        assert!(
+            rx.try_recv().is_err(),
+            "only a real change may wake subscribers"
+        );
+    }
+
+    #[test]
+    fn forcing_cashu_on_a_cashu_node_is_not_flagged_as_an_override() {
+        // Arrange — the node genuinely advertises Cashu and the developer has
+        // the override on anyway.
+        let inputs = EscrowModeInputs {
+            from_tags: EscrowMode::Cashu,
+            tag_config: CashuNodeConfig {
+                mint_url: Some("https://mint.example.com".to_string()),
+                ..Default::default()
+            },
+            override_mode: EscrowModeOverride::ForceCashu,
+            ..Default::default()
+        };
+
+        // Act
+        let resolved = resolve(&inputs);
+
+        // Assert — the flag warns "this is not what the node said". Here it is
+        // exactly what the node said, so raising it would cry wolf on the one
+        // configuration where the override changes nothing.
+        assert_eq!(resolved.mode, EscrowMode::Cashu);
+        assert!(!resolved.is_overridden);
     }
 }
