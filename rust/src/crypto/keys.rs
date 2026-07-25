@@ -44,6 +44,19 @@ pub fn derive_trade_key(mnemonic_words: &[String], index: u32) -> Result<Keys> {
     derive_at_index(mnemonic_words, index)
 }
 
+/// Derive the raw BIP-39 seed from a mnemonic.
+///
+/// This is the same 64-byte seed [`derive_master_key`] feeds into BIP-32, with
+/// the same empty passphrase. The Cashu wallet (phase C2) uses it directly:
+/// `cdk` derives its blinding secrets from a 64-byte seed, so the wallet is
+/// recoverable from the very words the user already backed up — one secret to
+/// protect, not two.
+pub fn derive_bip39_seed(mnemonic_words: &[String]) -> Result<[u8; 64]> {
+    let phrase = mnemonic_words.join(" ");
+    let mnemonic = Mnemonic::parse(&phrase).map_err(|e| anyhow!("invalid mnemonic: {e}"))?;
+    Ok(mnemonic.to_seed(""))
+}
+
 // ── Internal ─────────────────────────────────────────────────────────────────
 
 fn derive_at_index(mnemonic_words: &[String], index: u32) -> Result<Keys> {

@@ -503,6 +503,26 @@ pub struct Dispute {
     pub is_read: bool,
 }
 
+/// State of the embedded Cashu wallet — phase C2 of `docs/cashu/README.md`.
+///
+/// Reported for every node, including Lightning ones, where it is simply
+/// "not connected": the UI asks before it knows what the node runs.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct CashuWalletStatus {
+    /// Whether a wallet is bound to a mint right now. False on any Lightning
+    /// node, and before the first successful connect on a Cashu one.
+    pub connected: bool,
+    /// The mint the wallet is bound to, when connected.
+    pub mint_url: Option<String>,
+    /// Spendable balance in satoshis. Zero when not connected.
+    pub balance_sats: u64,
+    /// Stable markers for anything the mint failed to advertise (`"nut07"`,
+    /// `"nut11"`, `"nut12"`, `"sat_keyset"`). Empty on a healthy connection —
+    /// a mint missing any of them is refused at connect, so a non-empty list
+    /// here means the wallet is bound to a mint that has since changed.
+    pub missing_capabilities: Vec<String>,
+}
+
 /// Aggregated user-facing application settings.
 ///
 /// `privacy_mode` is a read-only mirror of `IdentityInfo.privacy_mode` —

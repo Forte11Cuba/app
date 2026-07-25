@@ -1,4 +1,5 @@
 pub mod bond;
+pub mod cashu;
 pub mod disputes;
 pub mod identity;
 pub mod logging;
