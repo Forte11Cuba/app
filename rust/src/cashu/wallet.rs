@@ -217,6 +217,37 @@ impl CashuWallet {
         Ok(token.to_string())
     }
 
+    /// Mint `amount_sats` straight from the mint, for tests only.
+    ///
+    /// Against a `FakeWallet` backend (which is what a local nutshell runs) the
+    /// quote settles itself, so this funds a wallet with no Lightning node and
+    /// no manual step. Without it the integration tests below assert
+    /// "fund the wallet first" and can never pass, which makes them
+    /// documentation rather than verification.
+    #[cfg(test)]
+    pub(crate) async fn mint_for_test(&self, amount_sats: u64) -> Result<u64> {
+        use cdk::nuts::PaymentMethod;
+
+        let quote = self
+            .inner
+            .mint_quote(
+                PaymentMethod::BOLT11,
+                Some(Amount::from(amount_sats)),
+                None,
+                None,
+            )
+            .await
+            .map_err(|e| anyhow!("CashuMintQuoteFailed: {e}"))?;
+
+        let proofs = self
+            .inner
+            .mint(&quote.id, SplitTarget::default(), None)
+            .await
+            .map_err(|e| anyhow!("CashuMintFailed: {e} (is the mint in FakeWallet mode?)"))?;
+
+        Ok(proofs.iter().map(|p| u64::from(p.amount)).sum())
+    }
+
     /// Reconcile pending proofs with the mint (NUT-07), returning the amount
     /// reclaimed as spendable.
     ///
@@ -273,8 +304,30 @@ mod tests {
             .expect("set MOSTRO_TEST_MINT_URL to run the Cashu integration tests")
     }
 
-    fn seed(byte: u8) -> zeroize::Zeroizing<[u8; 64]> {
-        zeroize::Zeroizing::new([byte; 64])
+    /// A seed unique to this process *and* this call.
+    ///
+    /// cdk derives blinding secrets deterministically from the seed and a
+    /// counter kept in the wallet DB (NUT-13). These tests create a fresh DB
+    /// each time, so a fixed seed replays the same blinded messages and the
+    /// mint answers "already signed" on the second run. Unique seeds make the
+    /// suite re-runnable, which is the whole point of a reviewer being able to
+    /// run it.
+    fn unique_seed() -> zeroize::Zeroizing<[u8; 64]> {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let mut seed = [0u8; 64];
+        let pid = std::process::id() as u64;
+        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+        seed[..8].copy_from_slice(&pid.to_le_bytes());
+        seed[8..16].copy_from_slice(&n.to_le_bytes());
+        seed[16..24].copy_from_slice(
+            &std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos() as u64)
+                .unwrap_or(0)
+                .to_le_bytes(),
+        );
+        zeroize::Zeroizing::new(seed)
     }
 
     fn temp_db_path() -> std::path::PathBuf {
@@ -372,7 +425,7 @@ mod tests {
     async fn connects_to_a_real_mint_and_starts_empty() {
         // Arrange / Act
         let path = temp_db_path();
-        let wallet = CashuWallet::connect(&test_mint_url(), seed(7), path.to_str().unwrap())
+        let wallet = CashuWallet::connect(&test_mint_url(), unique_seed(), path.to_str().unwrap())
             .await
             .expect("nutshell must be reachable");
 
@@ -390,7 +443,7 @@ mod tests {
         let path = temp_db_path();
 
         // Act
-        let err = CashuWallet::connect("http://127.0.0.1:1", seed(7), path.to_str().unwrap())
+        let err = CashuWallet::connect("http://127.0.0.1:1", unique_seed(), path.to_str().unwrap())
             .await
             .unwrap_err();
 
@@ -403,30 +456,34 @@ mod tests {
     #[tokio::test]
     #[ignore = "requires a local nutshell mint (MOSTRO_TEST_MINT_URL)"]
     async fn a_token_round_trips_between_two_wallets() {
-        // Arrange — two wallets at the same mint. The sender must already hold
-        // at least 8 sat; funding is out of band (nutshell fakewallet), which
-        // is why this stays behind --ignored.
+        // Arrange — two wallets at the same mint, funded from the mint itself.
         let sender_path = temp_db_path();
         let receiver_path = temp_db_path();
         let mint = test_mint_url();
 
-        let sender = CashuWallet::connect(&mint, seed(1), sender_path.to_str().unwrap())
+        let sender = CashuWallet::connect(&mint, unique_seed(), sender_path.to_str().unwrap())
             .await
             .unwrap();
-        let receiver = CashuWallet::connect(&mint, seed(2), receiver_path.to_str().unwrap())
+        let receiver = CashuWallet::connect(&mint, unique_seed(), receiver_path.to_str().unwrap())
             .await
             .unwrap();
 
+        sender.mint_for_test(64).await.expect("mint must fund the wallet");
         let funded = sender.balance().await.unwrap();
-        assert!(funded >= 8, "fund the sender wallet first (has {funded} sat)");
+        assert!(funded >= 8, "minting should have funded the wallet");
 
         // Act
         let token = sender.create_token(8).await.unwrap();
         let received = receiver.receive_token(&token).await.unwrap();
 
-        // Assert
-        assert_eq!(received, 8);
-        assert_eq!(receiver.balance().await.unwrap(), 8);
+        // Assert — the sender parted with the token's face value; the receiver
+        // gets that minus whatever the mint charges to swap (nutshell's default
+        // keyset has a non-zero input fee, and a real mint may too).
+        assert!(
+            received > 0 && received <= 8,
+            "received {received} sat for an 8 sat token"
+        );
+        assert_eq!(receiver.balance().await.unwrap(), received);
         assert_eq!(sender.balance().await.unwrap(), funded - 8);
 
         let _ = std::fs::remove_file(&sender_path);
@@ -437,7 +494,7 @@ mod tests {
     #[ignore = "requires a local nutshell mint (MOSTRO_TEST_MINT_URL)"]
     async fn creating_a_zero_token_is_rejected_before_touching_the_mint() {
         let path = temp_db_path();
-        let wallet = CashuWallet::connect(&test_mint_url(), seed(3), path.to_str().unwrap())
+        let wallet = CashuWallet::connect(&test_mint_url(), unique_seed(), path.to_str().unwrap())
             .await
             .unwrap();
 
