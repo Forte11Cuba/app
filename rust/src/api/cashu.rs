@@ -38,7 +38,7 @@ fn changes() -> &'static broadcast::Sender<CashuWalletStatus> {
 /// put two migration systems on one file.
 fn proof_store_path() -> Result<String> {
     let app_db = crate::db::app_db::app_db_path()
-        .ok_or_else(|| anyhow::anyhow!("CashuStoreUnavailable: database not initialised"))?;
+        .ok_or_else(|| anyhow::anyhow!("CashuStoreUnavailable"))?;
 
     // `init_db`'s argument is a filesystem path on native and an IndexedDB
     // *database name* on web. A name has no parent, and joining onto `""` would
@@ -52,6 +52,27 @@ fn proof_store_path() -> Result<String> {
         Some(dir) => dir.join("cashu.sqlite").to_string_lossy().into_owned(),
         None => "cashu.sqlite".to_string(),
     })
+}
+
+/// Serializes wallet lifecycle changes: connect and disconnect.
+///
+/// Without it two connects both open the proof store and both hit the mint, and
+/// — worse — a disconnect issued during a connect clears an empty slot which the
+/// connect then fills, rebinding a wallet the caller just dropped.
+fn lifecycle_lock() -> &'static tokio::sync::Mutex<()> {
+    static LIFECYCLE: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
+    LIFECYCLE.get_or_init(|| tokio::sync::Mutex::new(()))
+}
+
+/// May a wallet built for `connected_to` still be installed?
+///
+/// Only if the active node still resolves to that same mint. A node switch
+/// during the connect makes the wallet stale before it is ever stored, and the
+/// funds it would manage belong to a different node's mint.
+fn should_install(connected_to: &str, resolved_now: Option<&str>) -> bool {
+    resolved_now
+        .map(|current| current.trim_end_matches('/') == connected_to.trim_end_matches('/'))
+        .unwrap_or(false)
 }
 
 /// Fail closed unless the active node was positively identified as Cashu.
@@ -115,14 +136,8 @@ async fn notify() {
 pub async fn cashu_connect() -> Result<CashuWalletStatus> {
     ensure_enabled()?;
 
-    // One connect at a time. Without this, two callers both miss the check
-    // below, both open the proof store on the same file and both make the mint
-    // round trip, and one of the wallets is then thrown away.
-    static CONNECTING: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
-    let _connecting = CONNECTING
-        .get_or_init(|| tokio::sync::Mutex::new(()))
-        .lock()
-        .await;
+    // One lifecycle change at a time — see [`lifecycle_lock`].
+    let _lifecycle = lifecycle_lock().lock().await;
 
     {
         let guard = wallet_lock().read().await;
@@ -146,11 +161,22 @@ pub async fn cashu_connect() -> Result<CashuWalletStatus> {
     let db_path = proof_store_path()?;
     let wallet = CashuWallet::connect(&mint_url, seed, &db_path).await?;
 
+    // Re-check before installing. Holding the lifecycle lock keeps a
+    // `cashu_disconnect` from interleaving, but the *escrow mode* is not under
+    // that lock: a node switch during the mint round trip changes which mint we
+    // should be bound to, and installing anyway would leave the wallet pointing
+    // at the previous node's mint.
+    let resolved_now = escrow_mode::get_resolved();
+    if !should_install(&mint_url, resolved_now.config.mint_url.as_deref()) {
+        log::warn!(
+            "[cashu] discarding a wallet for {mint_url}: the active node now resolves to {:?}",
+            resolved_now.config.mint_url
+        );
+        bail!("CashuNotEnabled");
+    }
+
     {
         let mut guard = wallet_lock().write().await;
-        // The connect mutex above makes this the only writer, but a
-        // `cashu_disconnect` could have run in between; treat a live wallet as
-        // authoritative rather than replacing it.
         if guard.is_none() {
             *guard = Some(wallet);
         }
@@ -234,6 +260,10 @@ pub async fn cashu_check_proofs_state() -> Result<u64> {
 /// wipe. Called when the active node changes, so a wallet bound to one node's
 /// mint never serves another's.
 pub async fn cashu_disconnect() -> Result<()> {
+    // Shares the lifecycle lock with `cashu_connect`, so a disconnect issued
+    // during a connect waits for it and then clears the slot, instead of
+    // clearing an empty slot and having the connect fill it back in.
+    let _lifecycle = lifecycle_lock().lock().await;
     {
         let mut guard = wallet_lock().write().await;
         *guard = None;
@@ -260,7 +290,7 @@ impl CashuWalletStream {
             match self.rx.recv().await {
                 Ok(status) => return Ok(status),
                 Err(RecvError::Lagged(_)) => continue,
-                Err(RecvError::Closed) => bail!("CashuWalletStream closed"),
+                Err(RecvError::Closed) => bail!("CashuWalletStreamClosed"),
             }
         }
     }
@@ -325,6 +355,27 @@ mod tests {
         assert!(!status.connected);
         assert_eq!(status.balance_sats, Some(0));
         assert_eq!(status.mint_url, None);
+    }
+
+    #[test]
+    fn a_wallet_is_only_installed_while_its_mint_is_still_the_active_one() {
+        // The scenario: a connect is awaiting the mint when the user switches
+        // node. The lifecycle lock keeps `cashu_disconnect` from interleaving,
+        // but the escrow mode is not under that lock — so the connect can
+        // finish holding a wallet bound to the *previous* node's mint. Storing
+        // it would silently point the app's funds at the wrong mint.
+        let mint = "https://mint.example.com";
+
+        // Still the active mint — install.
+        assert!(should_install(mint, Some(mint)));
+        // Trailing slashes are a formatting difference, not a different mint.
+        assert!(should_install(mint, Some("https://mint.example.com/")));
+        assert!(should_install("https://mint.example.com/", Some(mint)));
+
+        // The node switched to a different Cashu node — discard.
+        assert!(!should_install(mint, Some("https://other.example.com")));
+        // The node switched to Lightning, or the mode was cleared — discard.
+        assert!(!should_install(mint, None));
     }
 
     #[tokio::test]

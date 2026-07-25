@@ -209,8 +209,20 @@ impl CashuWallet {
                 // handle, so they are now reserved with no owner. Left alone,
                 // the balance silently drops by the send amount until the user
                 // happens to run a proof-state check. Reclaim here instead.
-                let reclaimed = self.check_proofs_state().await.unwrap_or(0);
-                bail!("CashuSendFailed: {e} (reclaimed {reclaimed} sat)");
+                //
+                // A failed reclaim is reported as such rather than as zero:
+                // "reclaimed 0" would tell the user their funds are accounted
+                // for when in fact nobody knows, which is the same
+                // unknown-versus-known-zero trap this module fixed for the
+                // balance.
+                match self.check_proofs_state().await {
+                    Ok(reclaimed) => {
+                        bail!("CashuSendFailed: {e} (reclaimed {reclaimed} sat)")
+                    }
+                    Err(reclaim_err) => bail!(
+                        "CashuSendFailed: {e} (reclaim also failed: {reclaim_err} —                          run the proof-state check when the mint is reachable)"
+                    ),
+                }
             }
         };
 
