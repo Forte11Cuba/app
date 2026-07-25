@@ -503,6 +503,9 @@ mod tests {
         // The rumor is authored by the trade key: that is the pubkey the daemon
         // replies to, and what the client subscribes/correlates on.
         assert_eq!(unwrapped.sender, trade_keys.public_key());
+        // The Seal carries the identity key: that is what the daemon uses to
+        // locate the user's trades. Both halves of the key split matter.
+        assert_eq!(unwrapped.identity, identity_keys.public_key());
     }
 }
 
