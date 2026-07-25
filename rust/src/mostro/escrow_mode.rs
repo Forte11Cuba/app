@@ -99,6 +99,18 @@ pub struct ResolvedEscrowMode {
     pub is_overridden: bool,
 }
 
+impl ResolvedEscrowMode {
+    /// May a Cashu path run against *this* resolution?
+    ///
+    /// The gate, expressed against a value the caller already holds — so a
+    /// snapshot that reports `mode` and this flag together cannot have read
+    /// them from two different states. [`is_cashu_mode`] is this applied to the
+    /// current globals.
+    pub fn is_cashu_usable(&self) -> bool {
+        self.mode.is_cashu() && self.config.is_usable()
+    }
+}
+
 /// Developer override, for testing against a daemon branch that implements
 /// Cashu but does not publish the info tags yet (§4.3).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -281,11 +293,7 @@ fn notify() {
 /// what the node said, and refusing to update it would leave the app pinned to
 /// a stale node's mode after any unrelated panic.
 pub fn set_from_tags(mode: EscrowMode, config: CashuNodeConfig) {
-    log::info!(
-        "[escrow-mode] active node advertises {} (mint={:?})",
-        mode.as_marker(),
-        config.mint_url,
-    );
+    let mint_url = config.mint_url.clone();
     let changed = {
         let mut guard = TAGS.write().unwrap_or_else(|e| e.into_inner());
         let next = Some((mode, config));
@@ -294,8 +302,12 @@ pub fn set_from_tags(mode: EscrowMode, config: CashuNodeConfig) {
         changed
     };
     // A re-fetch that confirms what we already knew is the common case on a
-    // reconnect; emitting for it would wake every listener for nothing.
+    // reconnect: it wakes nobody, and it does not deserve a log line either.
     if changed {
+        log::info!(
+            "[escrow-mode] active node advertises {} (mint={mint_url:?})",
+            mode.as_marker(),
+        );
         notify();
     }
 }
@@ -393,8 +405,7 @@ pub fn clear() {
 /// The About screen must *not* use this: it reads [`get_resolved`], so it can
 /// say "cashu, but no mint advertised" instead of silently reading Lightning.
 pub fn is_cashu_mode() -> bool {
-    let resolved = get_resolved();
-    resolved.mode.is_cashu() && resolved.config.is_usable()
+    get_resolved().is_cashu_usable()
 }
 
 #[cfg(test)]

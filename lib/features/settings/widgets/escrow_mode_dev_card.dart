@@ -86,9 +86,14 @@ class _EscrowModeDevCardState extends ConsumerState<EscrowModeDevCard> {
     });
     if (!_seeded && info != null) {
       _seeded = true;
-      final seed = info.mintUrlOverride;
-      WidgetsBinding.instance
-          .addPostFrameCallback((_) => _syncMintField(seed));
+      // Read at callback time, not build time. An override that arrives in the
+      // gap between the two is applied by `ref.listen` first, and a captured
+      // copy would then overwrite it with the older value.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        final current = ref.read(escrowModeProvider).valueOrNull;
+        if (current != null) _syncMintField(current.mintUrlOverride);
+      });
     }
 
     return Container(

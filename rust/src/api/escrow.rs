@@ -30,7 +30,10 @@ fn snapshot() -> EscrowModeInfo {
         escrow_locktime_days: resolved.config.escrow_locktime_days,
         settlement_margin_days: resolved.config.settlement_margin_days,
         is_overridden: resolved.is_overridden,
-        is_cashu_available: escrow_mode::is_cashu_mode(),
+        // Derived from the resolution above rather than re-reading the globals:
+        // `is_cashu_mode()` would take a second read, and a node switch between
+        // the two would produce a snapshot whose mode and gate disagree.
+        is_cashu_available: resolved.is_cashu_usable(),
         force_cashu_override: matches!(overrides.mode, EscrowModeOverride::ForceCashu),
         mint_url_override: overrides.mint_url,
     }

@@ -239,9 +239,15 @@ class MostroInstance {
     // unrecognised backend reads as Lightning: we cannot trade Cashu with it
     // either, and that is the reading that keeps Cashu shut.
     EscrowMode parseEscrowMode() {
-      final raw = getOptional('escrow_mode')?.toLowerCase();
+      // `get`, not `getOptional`: only an *absent* tag is unknown. A tag that
+      // is present but blank is a node that answered, and Rust's `parse_tags`
+      // reads it as Lightning — the two parsers must agree, or the About screen
+      // and the gate disagree about the same event.
+      final raw = get('escrow_mode');
       if (raw == null) return EscrowMode.unknown;
-      return raw == 'cashu' ? EscrowMode.cashu : EscrowMode.lightning;
+      return raw.trim().toLowerCase() == 'cashu'
+          ? EscrowMode.cashu
+          : EscrowMode.lightning;
     }
 
     // Parameters are gated on an enabled policy so a disabled or malformed

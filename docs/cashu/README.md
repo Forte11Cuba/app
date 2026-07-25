@@ -378,8 +378,9 @@ Every phase, without exception, carries these standing requirements:
   (tracked in #233).
 - Companion (out of this repo): upstream PR to `mostrod` adding the tags of §4.1.
 - **Done when:** against any current daemon the app shows Lightning and behaves
-  identically; flipping the override flips the provider and the About section; unit
-  tests for tag parsing + resolution order.
+  identically; flipping the override flips the resolved mode and the dev card's
+  effective state — **not** the About section, which reports only what the node
+  advertised; unit tests for tag parsing + resolution order.
 - Est. size: S (~400–600 lines).
 
 #### C2 — Cashu wallet core (Rust, cdk)

@@ -423,6 +423,35 @@ void main() {
       expect(instance.cashuEscrowLocktimeDays, isNull);
     });
 
+    test('a present but blank escrow_mode is lightning, not unknown', () {
+      // A node that answered is not a node that stayed silent. Rust's
+      // `parse_tags` reads a blank value as Lightning, and the two parsers read
+      // the same event — a divergence here would have the About screen and the
+      // Cashu gate disagreeing about the same daemon.
+      for (final blank in ['', '   ']) {
+        expect(
+          MostroInstance.fromTags(_tagsWith({'escrow_mode': blank})).escrowMode,
+          EscrowMode.lightning,
+          reason: 'blank value ${blank.isEmpty ? "(empty)" : "(spaces)"}',
+        );
+      }
+
+      // Only an absent tag is unknown.
+      expect(
+        MostroInstance.fromTags(_tagsWith({})).escrowMode,
+        EscrowMode.unknown,
+      );
+      // A value-less tag has nothing to read, so it counts as absent — which
+      // is also what Rust's `value_of` does.
+      expect(
+        MostroInstance.fromTags(const [
+          ['d', 'npub_test'],
+          ['escrow_mode'],
+        ]).escrowMode,
+        EscrowMode.unknown,
+      );
+    });
+
     test('a cashu node with a blank mint reports none', () {
       final instance = MostroInstance.fromTags(_tagsWith({
         'escrow_mode': 'cashu',
