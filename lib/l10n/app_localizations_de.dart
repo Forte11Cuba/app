@@ -2311,4 +2311,85 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get bondSlashedDetailPaymentMethod => 'Zahlungsmethode';
+
+  @override
+  String aboutDaysValue(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count Tage',
+      one: '$count Tag',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get aboutCashuEscrowSection => 'Cashu-Treuhand';
+
+  @override
+  String get aboutCashuMintUrlLabel => 'Mint';
+
+  @override
+  String get aboutCashuMintUrlExplanation =>
+      'Die Cashu-Mint, die dieser Node für jede Treuhand verwendet. Das für einen Handel gesperrte E-Cash stammt von dieser Mint; pro Order gibt es keine Wahl.';
+
+  @override
+  String get aboutCashuMintNotAdvertised => 'Nicht angegeben';
+
+  @override
+  String get aboutCashuLocktimeLabel => 'Treuhand-Sperrfrist';
+
+  @override
+  String get aboutCashuLocktimeExplanation =>
+      'Wie lange das E-Cash des Verkäufers in der Treuhand gesperrt bleibt. Nach Ablauf kann der Verkäufer die Mittel ohne Zutun des Nodes zurückholen.';
+
+  @override
+  String get aboutCashuSettlementMarginLabel => 'Abwicklungspuffer';
+
+  @override
+  String get aboutCashuSettlementMarginExplanation =>
+      'Wie lange vor Ablauf der Treuhand dieser Node „Fiat gesendet“ nicht mehr annimmt, damit kein Handel mit zu wenig verbleibender Zeit abgewickelt wird.';
+
+  @override
+  String get escrowModeLightning => 'Lightning';
+
+  @override
+  String get escrowModeCashu => 'Cashu';
+
+  @override
+  String get escrowModeUnknown => 'Nicht angegeben';
+
+  @override
+  String get settingsEscrowOverrideTitle => 'Treuhand-Backend (Entwicklung)';
+
+  @override
+  String get settingsEscrowOverrideSubtitle =>
+      'Cashu gegen einen Node testen, der es noch nicht angibt. Nur in Debug-Builds.';
+
+  @override
+  String get settingsForceCashuLabel => 'Cashu-Treuhand erzwingen';
+
+  @override
+  String get settingsCashuMintOverrideLabel => 'Abweichende Mint-URL';
+
+  @override
+  String get settingsCashuMintOverrideApply => 'Übernehmen';
+
+  @override
+  String get settingsCashuMintOverrideInvalid =>
+      'Das ist keine gültige Mint-URL. Verwende http oder https mit einem Host.';
+
+  @override
+  String settingsEscrowEffectiveMode(String mode) {
+    return 'Effektives Backend: $mode';
+  }
+
+  @override
+  String settingsEscrowEffectiveMint(String mint) {
+    return 'Effektive Mint: $mint';
+  }
+
+  @override
+  String get settingsEscrowCashuUnavailable =>
+      'Cashu funktioniert ohne Mint nicht – unten eine festlegen.';
 }

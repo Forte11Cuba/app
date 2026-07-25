@@ -17,7 +17,8 @@
 //! that never answers therefore behaves exactly like today's Lightning-only
 //! client.
 
-use std::sync::RwLock;
+use std::sync::{OnceLock, RwLock};
+use tokio::sync::broadcast;
 
 /// Settlement backend advertised by the active Mostro node.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -216,41 +217,122 @@ pub fn parse_tags(tags: &[Vec<String>]) -> (EscrowMode, CashuNodeConfig) {
     (mode, config)
 }
 
+/// The two developer overrides, as persisted and as applied.
+///
+/// Kept together because they are read together on every resolution and are
+/// written by the same dev-only settings surface.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct EscrowOverrides {
+    pub mode: EscrowModeOverride,
+    /// Mint URL to use instead of the node's. `None` (or blank) leaves the
+    /// node's own value in place — see [`resolve`].
+    pub mint_url: Option<String>,
+}
+
 // ── Process-global state ────────────────────────────────────────────────────
 
-static RESOLVED: RwLock<Option<ResolvedEscrowMode>> = RwLock::new(None);
+/// What the active node's 38385 tags said, or `None` before the first
+/// successful fetch. Node-scoped: cleared on every node switch.
+static TAGS: RwLock<Option<(EscrowMode, CashuNodeConfig)>> = RwLock::new(None);
 
-/// Replace the resolved mode for the active node.
+/// The developer overrides. **Not** node-scoped: forcing Cashu is a statement
+/// about this build, not about a particular node, so it survives a node switch
+/// exactly as the user left it. The surface that writes it is `kDebugMode`-only.
+static OVERRIDES: RwLock<EscrowOverrides> = RwLock::new(EscrowOverrides {
+    mode: EscrowModeOverride::Auto,
+    mint_url: None,
+});
+
+/// Broadcast of the resolved mode, so the UI reacts without polling.
 ///
-/// A poisoned lock is recovered from rather than propagated: escrow mode is a
-/// cache of what the node advertised, and refusing to update it would leave the
-/// app pinned to a stale node's mode after any unrelated panic.
-pub fn set_resolved(resolved: ResolvedEscrowMode) {
+/// Every mutator below emits on it; nothing else may write the globals, which
+/// is what keeps "changed" and "notified" from drifting apart.
+static CHANGES: OnceLock<broadcast::Sender<ResolvedEscrowMode>> = OnceLock::new();
+
+fn changes() -> &'static broadcast::Sender<ResolvedEscrowMode> {
+    CHANGES.get_or_init(|| broadcast::channel(32).0)
+}
+
+/// Subscribe to resolved-escrow-mode changes.
+pub fn subscribe() -> broadcast::Receiver<ResolvedEscrowMode> {
+    changes().subscribe()
+}
+
+/// Emit the current resolution to subscribers. A send error means "no
+/// listeners", which is the normal state before the UI attaches.
+fn notify() {
+    let _ = changes().send(get_resolved());
+}
+
+/// Record what the active node advertised.
+///
+/// A poisoned lock is recovered from rather than propagated: this is a cache of
+/// what the node said, and refusing to update it would leave the app pinned to
+/// a stale node's mode after any unrelated panic.
+pub fn set_from_tags(mode: EscrowMode, config: CashuNodeConfig) {
     log::info!(
-        "[escrow-mode] active node resolved to {} (overridden={}, mint={:?})",
-        resolved.mode.as_marker(),
-        resolved.is_overridden,
-        resolved.config.mint_url,
+        "[escrow-mode] active node advertises {} (mint={:?})",
+        mode.as_marker(),
+        config.mint_url,
     );
-    let mut guard = RESOLVED.write().unwrap_or_else(|e| e.into_inner());
-    *guard = Some(resolved);
+    {
+        let mut guard = TAGS.write().unwrap_or_else(|e| e.into_inner());
+        *guard = Some((mode, config));
+    }
+    notify();
 }
 
 /// Current resolution, or the `Unknown` default before the first fetch.
+///
+/// Resolution happens on read rather than on write, so flipping an override
+/// takes effect immediately instead of waiting for the next relay fetch — and
+/// there is no second copy of the answer that could go stale.
 pub fn get_resolved() -> ResolvedEscrowMode {
-    RESOLVED
+    let (from_tags, tag_config) = TAGS
         .read()
         .unwrap_or_else(|e| e.into_inner())
         .clone()
-        .unwrap_or_default()
+        .unwrap_or_default();
+    let overrides = get_overrides();
+
+    resolve(&EscrowModeInputs {
+        from_tags,
+        tag_config,
+        override_mode: overrides.mode,
+        mint_url_override: overrides.mint_url,
+    })
 }
 
-/// Forget the cached mode. Called when the active node changes, so a stale
-/// Cashu resolution can never leak onto a different node between the switch
-/// and the next successful fetch.
+/// The developer overrides currently in force.
+pub fn get_overrides() -> EscrowOverrides {
+    OVERRIDES.read().unwrap_or_else(|e| e.into_inner()).clone()
+}
+
+/// Replace the developer overrides. Persistence is the caller's job
+/// (`crate::api::escrow`); this is the in-memory half.
+pub fn set_overrides(overrides: EscrowOverrides) {
+    log::info!(
+        "[escrow-mode] override set to {} (mint override={:?})",
+        overrides.mode.as_stored(),
+        overrides.mint_url,
+    );
+    {
+        let mut guard = OVERRIDES.write().unwrap_or_else(|e| e.into_inner());
+        *guard = overrides;
+    }
+    notify();
+}
+
+/// Forget what the node advertised. Called when the active node changes, so a
+/// stale Cashu resolution can never leak onto a different node between the
+/// switch and the next successful fetch. The overrides are deliberately left
+/// alone — see [`OVERRIDES`].
 pub fn clear() {
-    let mut guard = RESOLVED.write().unwrap_or_else(|e| e.into_inner());
-    *guard = None;
+    {
+        let mut guard = TAGS.write().unwrap_or_else(|e| e.into_inner());
+        *guard = None;
+    }
+    notify();
 }
 
 /// The one question the rest of the app asks: may a Cashu path run against the
@@ -278,13 +360,18 @@ mod tests {
         vec![name.to_string(), value.to_string()]
     }
 
-    /// Tests that touch `RESOLVED` run in the same process and would otherwise
+    /// Tests that touch the globals run in the same process and would otherwise
     /// race each other. A poisoned lock is recovered from so one failing test
     /// does not cascade into the others.
     static GLOBAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+    /// Take the globals and reset them, so each test starts from the state a
+    /// freshly-launched app has: nothing fetched, no override.
     fn own_the_global() -> std::sync::MutexGuard<'static, ()> {
-        GLOBAL.lock().unwrap_or_else(|e| e.into_inner())
+        let guard = GLOBAL.lock().unwrap_or_else(|e| e.into_inner());
+        clear();
+        set_overrides(EscrowOverrides::default());
+        guard
     }
 
     #[test]
@@ -507,23 +594,23 @@ mod tests {
         );
     }
 
+    fn cashu_tags() -> (EscrowMode, CashuNodeConfig) {
+        parse_tags(&[
+            tag("escrow_mode", "cashu"),
+            tag("cashu_mint_url", "https://mint.example.com"),
+        ])
+    }
+
     #[test]
     fn the_global_defaults_to_unknown_and_clears_on_node_switch() {
         // Arrange — this test owns the global; keep it self-contained.
         let _guard = own_the_global();
-        clear();
         assert_eq!(get_resolved().mode, EscrowMode::Unknown);
         assert!(!is_cashu_mode());
 
         // Act — a Cashu node is detected, then the user switches nodes.
-        set_resolved(ResolvedEscrowMode {
-            mode: EscrowMode::Cashu,
-            config: CashuNodeConfig {
-                mint_url: Some("https://mint.example.com".to_string()),
-                ..Default::default()
-            },
-            is_overridden: false,
-        });
+        let (mode, config) = cashu_tags();
+        set_from_tags(mode, config);
         assert!(is_cashu_mode());
         clear();
 
@@ -536,13 +623,8 @@ mod tests {
     fn a_cashu_node_without_a_usable_mint_keeps_the_gate_shut() {
         // Arrange — a node that says cashu but published no mint URL.
         let _guard = own_the_global();
-        clear();
         let (mode, config) = parse_tags(&[tag("escrow_mode", "cashu"), tag("cashu_mint_url", "  ")]);
-        set_resolved(resolve(&EscrowModeInputs {
-            from_tags: mode,
-            tag_config: config,
-            ..Default::default()
-        }));
+        set_from_tags(mode, config);
 
         // Assert — the mode is reported honestly for the About screen, but
         // there is no mint to connect to, so no Cashu path may run.
@@ -551,14 +633,89 @@ mod tests {
         assert!(!is_cashu_mode());
 
         // Act — the tester points it at a local mint (§4.3).
-        set_resolved(resolve(&EscrowModeInputs {
-            from_tags: EscrowMode::Cashu,
-            mint_url_override: Some("http://localhost:3338".to_string()),
+        set_overrides(EscrowOverrides {
+            mint_url: Some("http://localhost:3338".to_string()),
             ..Default::default()
-        }));
+        });
 
         // Assert — now there is something to connect to.
         assert!(is_cashu_mode());
+    }
+
+    #[test]
+    fn flipping_the_override_re_resolves_without_another_fetch() {
+        // Arrange — a plain Lightning node, already fetched.
+        let _guard = own_the_global();
+        set_from_tags(EscrowMode::Lightning, CashuNodeConfig::default());
+        assert!(!is_cashu_mode());
+
+        // Act — the developer forces Cashu at a local mint. No fetch happens.
+        set_overrides(EscrowOverrides {
+            mode: EscrowModeOverride::ForceCashu,
+            mint_url: Some("http://localhost:3338".to_string()),
+        });
+
+        // Assert — resolution is computed on read, so the change is immediate.
+        let resolved = get_resolved();
+        assert_eq!(resolved.mode, EscrowMode::Cashu);
+        assert!(resolved.is_overridden);
+        assert!(is_cashu_mode());
+
+        // Act — and turning it off restores what the node actually said.
+        set_overrides(EscrowOverrides::default());
+
+        // Assert
+        assert_eq!(get_resolved().mode, EscrowMode::Lightning);
+        assert!(!is_cashu_mode());
+    }
+
+    #[test]
+    fn a_node_switch_clears_the_tags_but_keeps_the_override() {
+        // Arrange — override on, against some node.
+        let _guard = own_the_global();
+        let (mode, config) = cashu_tags();
+        set_from_tags(mode, config);
+        set_overrides(EscrowOverrides {
+            mode: EscrowModeOverride::ForceCashu,
+            mint_url: Some("http://localhost:3338".to_string()),
+        });
+
+        // Act — the user switches nodes.
         clear();
+
+        // Assert — the override is a statement about this build, not about the
+        // node, so it survives; the node's own tags do not.
+        assert_eq!(
+            get_overrides().mode,
+            EscrowModeOverride::ForceCashu,
+            "the override must not be reset by a node switch"
+        );
+        assert_eq!(get_resolved().mode, EscrowMode::Cashu);
+        assert!(get_resolved().is_overridden);
+    }
+
+    #[tokio::test]
+    async fn every_mutator_notifies_subscribers() {
+        // Arrange
+        let _guard = own_the_global();
+        let mut rx = subscribe();
+
+        // Act / Assert — tags in.
+        let (mode, config) = cashu_tags();
+        set_from_tags(mode, config);
+        assert_eq!(rx.recv().await.unwrap().mode, EscrowMode::Cashu);
+
+        // Act / Assert — override changed.
+        set_overrides(EscrowOverrides {
+            mode: EscrowModeOverride::ForceCashu,
+            mint_url: None,
+        });
+        assert!(rx.recv().await.unwrap().is_overridden);
+
+        // Act / Assert — node switch. The override still forces Cashu, but the
+        // event fires: subscribers must see every transition, not just the ones
+        // that change the mode.
+        clear();
+        assert!(rx.recv().await.unwrap().is_overridden);
     }
 }
