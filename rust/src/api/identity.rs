@@ -206,7 +206,7 @@ pub async fn get_identity() -> Result<Option<IdentityInfo>> {
 /// skips it because it is not `pub`. The Cashu wallet (phase C2) needs a
 /// 64-byte seed to derive its blinding secrets, and reusing this one is what
 /// makes the ecash recoverable from the words the user already backed up.
-pub(crate) async fn current_bip39_seed() -> Option<[u8; 64]> {
+pub(crate) async fn current_bip39_seed() -> Option<zeroize::Zeroizing<[u8; 64]>> {
     let guard = identity_lock().read().await;
     let state = guard.as_ref()?;
     match key_ops::derive_bip39_seed(&state.mnemonic_words) {

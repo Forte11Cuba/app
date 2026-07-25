@@ -4836,7 +4836,7 @@ impl SseDecode for crate::api::types::CashuWalletStatus {
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         let mut var_connected = <bool>::sse_decode(deserializer);
         let mut var_mintUrl = <Option<String>>::sse_decode(deserializer);
-        let mut var_balanceSats = <u64>::sse_decode(deserializer);
+        let mut var_balanceSats = <Option<u64>>::sse_decode(deserializer);
         let mut var_missingCapabilities = <Vec<String>>::sse_decode(deserializer);
         return crate::api::types::CashuWalletStatus {
             connected: var_connected,
@@ -7701,7 +7701,7 @@ impl SseEncode for crate::api::types::CashuWalletStatus {
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <bool>::sse_encode(self.connected, serializer);
         <Option<String>>::sse_encode(self.mint_url, serializer);
-        <u64>::sse_encode(self.balance_sats, serializer);
+        <Option<u64>>::sse_encode(self.balance_sats, serializer);
         <Vec<String>>::sse_encode(self.missing_capabilities, serializer);
     }
 }

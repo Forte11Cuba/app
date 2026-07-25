@@ -54,7 +54,11 @@ pub struct CashuWallet;
 
 #[cfg(target_arch = "wasm32")]
 impl CashuWallet {
-    pub async fn connect(_mint_url: &str, _seed: [u8; 64], _db_path: &str) -> anyhow::Result<Self> {
+    pub async fn connect(
+        _mint_url: &str,
+        _seed: zeroize::Zeroizing<[u8; 64]>,
+        _db_path: &str,
+    ) -> anyhow::Result<Self> {
         anyhow::bail!("CashuUnsupportedOnWeb")
     }
 
@@ -62,8 +66,17 @@ impl CashuWallet {
         ""
     }
 
+    /// Never called — `connect` cannot succeed here — but it answers instead of
+    /// panicking, so "this cannot happen" has one meaning in this file rather
+    /// than two.
     pub fn capabilities(&self) -> &MintCapabilities {
-        unreachable!("no wasm wallet can be constructed")
+        const NONE: &MintCapabilities = &MintCapabilities {
+            nut07_state_check: false,
+            nut11_p2pk: false,
+            nut12_dleq: false,
+            has_sat_keyset: false,
+        };
+        NONE
     }
 
     pub async fn balance(&self) -> anyhow::Result<u64> {

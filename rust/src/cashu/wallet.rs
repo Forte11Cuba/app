@@ -88,7 +88,11 @@ impl CashuWallet {
     /// **Errors** (stable markers): `CashuMintUnreachable` when the mint does
     /// not answer, `CashuMintUnusable` when it answers but lacks a required NUT
     /// or the `sat` keyset.
-    pub async fn connect(mint_url: &str, seed: [u8; 64], db_path: &str) -> Result<Self> {
+    pub async fn connect(
+        mint_url: &str,
+        seed: zeroize::Zeroizing<[u8; 64]>,
+        db_path: &str,
+    ) -> Result<Self> {
         let localstore = WalletSqliteDatabase::new(db_path)
             .await
             .map_err(|e| anyhow!("CashuStoreUnavailable: {e}"))?;
@@ -97,7 +101,8 @@ impl CashuWallet {
             mint_url,
             CurrencyUnit::Sat,
             Arc::new(localstore),
-            seed,
+            // cdk takes the seed by value; our copy is wiped on drop.
+            *seed,
             // cdk's own default: keep roughly this many proofs per denomination
             // so an ordinary send rarely needs an extra swap round trip.
             None,
@@ -168,7 +173,7 @@ impl CashuWallet {
     pub async fn receive_token(&self, encoded: &str) -> Result<u64> {
         let amount = self
             .inner
-            .receive(encoded.trim(), ReceiveOptions::default())
+            .receive(&normalize_token(encoded), ReceiveOptions::default())
             .await
             .map_err(|e| anyhow!("CashuReceiveFailed: {e}"))?;
         log::info!("[cashu] received {amount} sat");
@@ -197,10 +202,17 @@ impl CashuWallet {
             .await
             .map_err(|e| anyhow!("CashuSendFailed: {e}"))?;
 
-        let token = prepared
-            .confirm(None::<SendMemo>)
-            .await
-            .map_err(|e| anyhow!("CashuSendFailed: {e}"))?;
+        let token = match prepared.confirm(None::<SendMemo>).await {
+            Ok(token) => token,
+            Err(e) => {
+                // `prepare_send` reserved the proofs and `confirm` consumed the
+                // handle, so they are now reserved with no owner. Left alone,
+                // the balance silently drops by the send amount until the user
+                // happens to run a proof-state check. Reclaim here instead.
+                let reclaimed = self.check_proofs_state().await.unwrap_or(0);
+                bail!("CashuSendFailed: {e} (reclaimed {reclaimed} sat)");
+            }
+        };
 
         Ok(token.to_string())
     }
@@ -224,6 +236,21 @@ impl CashuWallet {
     }
 }
 
+/// Strip whitespace and the `cashu:` URI scheme.
+///
+/// QR payloads routinely carry `cashu:cashuB…`, and a wallet that rejects them
+/// tells the user their token is from another mint or already spent — three
+/// wrong explanations for one missing prefix strip.
+pub(crate) fn normalize_token(encoded: &str) -> String {
+    let trimmed = encoded.trim();
+    trimmed
+        .strip_prefix("cashu://")
+        .or_else(|| trimmed.strip_prefix("cashu:"))
+        .unwrap_or(trimmed)
+        .trim()
+        .to_string()
+}
+
 // ── Tests ────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -244,6 +271,10 @@ mod tests {
     fn test_mint_url() -> String {
         std::env::var("MOSTRO_TEST_MINT_URL")
             .expect("set MOSTRO_TEST_MINT_URL to run the Cashu integration tests")
+    }
+
+    fn seed(byte: u8) -> zeroize::Zeroizing<[u8; 64]> {
+        zeroize::Zeroizing::new([byte; 64])
     }
 
     fn temp_db_path() -> std::path::PathBuf {
@@ -305,6 +336,29 @@ mod tests {
     }
 
     #[test]
+    fn a_scanned_token_uri_is_accepted() {
+        // Arrange — the shapes a QR scanner actually hands over. Rejecting any
+        // of these tells the user their token is from another mint or already
+        // spent, which is three wrong explanations for a missing prefix strip.
+        for input in [
+            "cashuBtoken",
+            "  cashuBtoken\n",
+            "cashu:cashuBtoken",
+            "cashu://cashuBtoken",
+            "  cashu: cashuBtoken ",
+        ] {
+            assert_eq!(normalize_token(input), "cashuBtoken", "input: {input:?}");
+        }
+    }
+
+    #[test]
+    fn normalisation_leaves_a_token_body_alone() {
+        // Assert — only the scheme is stripped, never a prefix that happens to
+        // look like one inside the payload.
+        assert_eq!(normalize_token("cashuBcashu:inner"), "cashuBcashu:inner");
+    }
+
+    #[test]
     fn a_fresh_capability_set_is_unusable() {
         // Assert — the default must fail closed, so a probe that never ran
         // cannot be mistaken for a usable mint.
@@ -318,7 +372,7 @@ mod tests {
     async fn connects_to_a_real_mint_and_starts_empty() {
         // Arrange / Act
         let path = temp_db_path();
-        let wallet = CashuWallet::connect(&test_mint_url(), [7u8; 64], path.to_str().unwrap())
+        let wallet = CashuWallet::connect(&test_mint_url(), seed(7), path.to_str().unwrap())
             .await
             .expect("nutshell must be reachable");
 
@@ -336,7 +390,7 @@ mod tests {
         let path = temp_db_path();
 
         // Act
-        let err = CashuWallet::connect("http://127.0.0.1:1", [7u8; 64], path.to_str().unwrap())
+        let err = CashuWallet::connect("http://127.0.0.1:1", seed(7), path.to_str().unwrap())
             .await
             .unwrap_err();
 
@@ -356,10 +410,10 @@ mod tests {
         let receiver_path = temp_db_path();
         let mint = test_mint_url();
 
-        let sender = CashuWallet::connect(&mint, [1u8; 64], sender_path.to_str().unwrap())
+        let sender = CashuWallet::connect(&mint, seed(1), sender_path.to_str().unwrap())
             .await
             .unwrap();
-        let receiver = CashuWallet::connect(&mint, [2u8; 64], receiver_path.to_str().unwrap())
+        let receiver = CashuWallet::connect(&mint, seed(2), receiver_path.to_str().unwrap())
             .await
             .unwrap();
 
@@ -383,7 +437,7 @@ mod tests {
     #[ignore = "requires a local nutshell mint (MOSTRO_TEST_MINT_URL)"]
     async fn creating_a_zero_token_is_rejected_before_touching_the_mint() {
         let path = temp_db_path();
-        let wallet = CashuWallet::connect(&test_mint_url(), [3u8; 64], path.to_str().unwrap())
+        let wallet = CashuWallet::connect(&test_mint_url(), seed(3), path.to_str().unwrap())
             .await
             .unwrap();
 

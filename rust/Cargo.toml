@@ -45,6 +45,10 @@ rand = { version = "0.8", features = ["getrandom"] }
 # Hashing (nym derivation)
 sha2 = "0.10"
 
+# Wipes key material on drop. The BIP-39 seed is copied out of the identity
+# state to seed the Cashu wallet; without this it lingers in freed memory.
+zeroize = { version = "1", features = ["zeroize_derive"] }
+
 # secp256k1 scalar math (ECDH shared-key derivation for P2P chat)
 k256 = { version = "0.13", features = ["ecdh", "arithmetic"] }
 

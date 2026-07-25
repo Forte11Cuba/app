@@ -40,9 +40,18 @@ fn proof_store_path() -> Result<String> {
     let app_db = crate::db::app_db::app_db_path()
         .ok_or_else(|| anyhow::anyhow!("CashuStoreUnavailable: database not initialised"))?;
 
-    let path = std::path::Path::new(app_db);
-    let dir = path.parent().unwrap_or_else(|| std::path::Path::new("."));
-    Ok(dir.join("cashu.sqlite").to_string_lossy().into_owned())
+    // `init_db`'s argument is a filesystem path on native and an IndexedDB
+    // *database name* on web. A name has no parent, and joining onto `""` would
+    // silently produce a relative file next to the process's cwd — so the two
+    // cases are separated rather than left to `Path` semantics.
+    let parent = std::path::Path::new(app_db)
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty());
+
+    Ok(match parent {
+        Some(dir) => dir.join("cashu.sqlite").to_string_lossy().into_owned(),
+        None => "cashu.sqlite".to_string(),
+    })
 }
 
 /// Fail closed unless the active node was positively identified as Cashu.
@@ -59,13 +68,17 @@ async fn snapshot() -> CashuWalletStatus {
         Some(wallet) => CashuWalletStatus {
             connected: true,
             mint_url: Some(wallet.mint_url().to_string()),
-            // A failed balance read reports zero rather than tearing down the
-            // status: the wallet is still connected, and the next event will
-            // carry the real figure.
-            balance_sats: wallet.balance().await.unwrap_or_else(|e| {
-                log::warn!("[cashu] balance read failed: {e}");
-                0
-            }),
+            // A failed read reports `None`, never zero. The wallet is still
+            // connected and the next event will carry the real figure, but in
+            // the meantime the UI must say "unknown" rather than name a number
+            // that would read as "your money is gone".
+            balance_sats: match wallet.balance().await {
+                Ok(balance) => Some(balance),
+                Err(e) => {
+                    log::warn!("[cashu] balance read failed: {e}");
+                    None
+                }
+            },
             missing_capabilities: wallet
                 .capabilities()
                 .missing()
@@ -76,7 +89,9 @@ async fn snapshot() -> CashuWalletStatus {
         None => CashuWalletStatus {
             connected: false,
             mint_url: None,
-            balance_sats: 0,
+            // Not connected is a known state, and a wallet with no binding
+            // genuinely holds nothing spendable here.
+            balance_sats: Some(0),
             missing_capabilities: Vec::new(),
         },
     }
@@ -99,6 +114,15 @@ async fn notify() {
 /// [`CashuWallet::connect`].
 pub async fn cashu_connect() -> Result<CashuWalletStatus> {
     ensure_enabled()?;
+
+    // One connect at a time. Without this, two callers both miss the check
+    // below, both open the proof store on the same file and both make the mint
+    // round trip, and one of the wallets is then thrown away.
+    static CONNECTING: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
+    let _connecting = CONNECTING
+        .get_or_init(|| tokio::sync::Mutex::new(()))
+        .lock()
+        .await;
 
     {
         let guard = wallet_lock().read().await;
@@ -124,8 +148,9 @@ pub async fn cashu_connect() -> Result<CashuWalletStatus> {
 
     {
         let mut guard = wallet_lock().write().await;
-        // Another task may have connected while this one awaited the mint;
-        // keep the live wallet rather than replacing it.
+        // The connect mutex above makes this the only writer, but a
+        // `cashu_disconnect` could have run in between; treat a live wallet as
+        // authoritative rather than replacing it.
         if guard.is_none() {
             *guard = Some(wallet);
         }
@@ -295,9 +320,10 @@ mod tests {
         // anything, and "not connected" is truthful everywhere.
         let status = cashu_status().await.unwrap();
 
-        // Assert
+        // Assert — a disconnected wallet holds nothing, and that is a *known*
+        // zero rather than an unreadable balance.
         assert!(!status.connected);
-        assert_eq!(status.balance_sats, 0);
+        assert_eq!(status.balance_sats, Some(0));
         assert_eq!(status.mint_url, None);
     }
 

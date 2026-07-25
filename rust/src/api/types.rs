@@ -514,8 +514,13 @@ pub struct CashuWalletStatus {
     pub connected: bool,
     /// The mint the wallet is bound to, when connected.
     pub mint_url: Option<String>,
-    /// Spendable balance in satoshis. Zero when not connected.
-    pub balance_sats: u64,
+    /// Spendable balance in satoshis, or `None` when it could not be read.
+    ///
+    /// `None` and `Some(0)` are different facts and only one of them is
+    /// alarming: ecash is bearer money, and showing a user "0 sat" because a
+    /// store read failed invites exactly the wrong reaction. The UI must render
+    /// the unknown case as unknown.
+    pub balance_sats: Option<u64>,
     /// Stable markers for anything the mint failed to advertise (`"nut07"`,
     /// `"nut11"`, `"nut12"`, `"sat_keyset"`). Empty on a healthy connection —
     /// a mint missing any of them is refused at connect, so a non-empty list

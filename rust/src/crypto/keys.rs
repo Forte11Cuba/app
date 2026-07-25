@@ -13,6 +13,7 @@ use anyhow::{anyhow, Result};
 use bip32::{DerivationPath, XPrv};
 use bip39::Mnemonic;
 use nostr_sdk::prelude::{Keys, SecretKey};
+use zeroize::Zeroizing;
 
 const DERIVATION_PREFIX: &str = "m/44'/1237'/38383'/0";
 
@@ -51,10 +52,13 @@ pub fn derive_trade_key(mnemonic_words: &[String], index: u32) -> Result<Keys> {
 /// `cdk` derives its blinding secrets from a 64-byte seed, so the wallet is
 /// recoverable from the very words the user already backed up — one secret to
 /// protect, not two.
-pub fn derive_bip39_seed(mnemonic_words: &[String]) -> Result<[u8; 64]> {
+/// Returned in a [`Zeroizing`] wrapper so the copy is wiped when the caller
+/// drops it — the seed is the whole account, and it is about to cross into a
+/// third-party crate.
+pub fn derive_bip39_seed(mnemonic_words: &[String]) -> Result<Zeroizing<[u8; 64]>> {
     let phrase = mnemonic_words.join(" ");
     let mnemonic = Mnemonic::parse(&phrase).map_err(|e| anyhow!("invalid mnemonic: {e}"))?;
-    Ok(mnemonic.to_seed(""))
+    Ok(Zeroizing::new(mnemonic.to_seed("")))
 }
 
 // ── Internal ─────────────────────────────────────────────────────────────────
