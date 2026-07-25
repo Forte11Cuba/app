@@ -177,6 +177,12 @@ pub async fn import_from_mnemonic(words: Vec<String>, recover: bool) -> Result<I
     }
     let info = load_identity_from_mnemonic(words, 0, privacy_mode, None).await?;
     if recover {
+        // NOTE: recovery is best-effort relative to the import, but this `?`
+        // propagates a restore failure AFTER the identity has already been
+        // swapped — so a slow/unreachable daemon makes the caller see "import
+        // failed" when the import itself succeeded and only recovery didn't.
+        // Not reachable today (identity_service.dart passes recover: false).
+        // #219 restructures the waiting; revisit this propagation when it lands.
         crate::api::orders::restore_session().await?;
     }
     Ok(info)
