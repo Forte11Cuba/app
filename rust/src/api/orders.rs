@@ -2031,12 +2031,17 @@ async fn dispatch_mostro_message(
                 other => format!("Order rejected by Mostro: {other}"),
             };
 
-            // Consume the pending request ONLY when this rejection echoes its
-            // request_id — a genuine rejection ends the attempt, so the whole
-            // record goes with it (whatever its kind). Stale replayed CantDo
-            // events (no or foreign request_id) touch nothing and leave the
-            // record for the genuine reply.
-            if let Some(pending) = take_matching_request(trade_pubkey_hex, kind.request_id) {
+            // Consume the pending request on a genuine rejection. A restore is
+            // nonce-less (RestoreSession carries no request_id), so its record
+            // is correlated by trade pubkey via take_matching_restore — try that
+            // first. It only matches a Restore record, so order requests keep
+            // their nonce gate: a stale replayed CantDo (no or foreign
+            // request_id) still touches nothing and leaves the order record for
+            // the genuine reply. For non-restore requests the nonce-gated
+            // take_matching_request path is unchanged.
+            let matched = take_matching_restore(trade_pubkey_hex)
+                .or_else(|| take_matching_request(trade_pubkey_hex, kind.request_id));
+            if let Some(pending) = matched {
                 if let Some(tx) = pending.tx {
                     crate::api::logging::blog_warn("gift-wrap", format!(
                         "CantDo: reason={reason} — notifying waiting caller"
@@ -3051,6 +3056,42 @@ mod tests {
             },
         );
         rx
+    }
+
+    /// #215: a restore is nonce-less, so `take_matching_restore` must match its
+    /// pending record by trade pubkey alone — that is what lets a `CantDo`
+    /// rejecting a restore reach the waiter instead of timing out. It must NOT
+    /// match a non-restore record, so order requests keep their nonce gate.
+    #[tokio::test]
+    async fn take_matching_restore_matches_restore_records_only() {
+        let restore_key = "test-restore-pubkey";
+        let order_key = "test-order-pubkey";
+
+        // A pending Restore record (request_id 0, nonce-less).
+        let (rtx, _rrx) = tokio::sync::oneshot::channel::<DaemonReply>();
+        pending_requests().lock().unwrap().insert(
+            restore_key.to_string(),
+            PendingRequest {
+                request_id: 0,
+                trade_index: 4,
+                kind: PendingRequestKind::Restore,
+                tx: Some(rtx),
+            },
+        );
+        // A pending non-restore (Create) record on a different pubkey.
+        let _orx = insert_pending_create(order_key, 7);
+
+        // take_matching_restore ignores the order record (wrong kind)...
+        assert!(take_matching_restore(order_key).is_none());
+        assert!(pending_requests().lock().unwrap().contains_key(order_key));
+        // ...and matches the restore record with no request_id involved.
+        let taken = take_matching_restore(restore_key).expect("restore must match");
+        assert!(matches!(taken.kind, PendingRequestKind::Restore));
+        // Consumed on take (the CantDo path removes it exactly once).
+        assert!(take_matching_restore(restore_key).is_none());
+
+        // Cleanup the order record so global state does not leak to other tests.
+        let _ = take_matching_request(order_key, Some(7));
     }
 
     /// A reply with a foreign or missing request_id must leave the record in
