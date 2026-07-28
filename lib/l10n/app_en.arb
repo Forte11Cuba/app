@@ -1417,11 +1417,12 @@
   "@reasonJustPublished": {"description": "Order-book reason badge: just published"},
   "marketPriceCaption": "Market price",
   "@marketPriceCaption": {"description": "Caption under an order-book card amount"},
-  "orderReputationStats": " · {trades} trades · {days} days",
-  "@orderReputationStats": {
-    "description": "Trades and active days in the order-book reputation row",
-    "placeholders": {"trades": {"type": "int"}, "days": {"type": "int"}}
-  },
+  "reputationTradesLabel": "trades",
+  "@reputationTradesLabel": {"description": "Unit word after the trade count in the order-book reputation row"},
+  "reputationDaysLabel": "days",
+  "@reputationDaysLabel": {"description": "Unit word after the active-days count in the order-book reputation row"},
+  "sortBestPremium": "Sort: best premium ▾",
+  "@sortBestPremium": {"description": "Sort caption on the order-book filter row"},
   "hideEarlierEvents": "Hide earlier events",
   "@hideEarlierEvents": {"description": "Notification group action to collapse earlier events"},
   "viewEarlierEvents": "{count, plural, =1{View 1 earlier event} other{View {count} earlier events}}",

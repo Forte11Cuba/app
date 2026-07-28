@@ -143,6 +143,93 @@ class AppColors extends ThemeExtension<AppColors> {
   }
 }
 
+// ── Order Book redesign palette ───────────────────────────────────────────────
+
+/// Exact palette of the "Mostro UX Redesign" mock (Claude Design, screen
+/// #3 · Order book). Applied only to the redesigned Order Book screen while
+/// the rest of the app migrates screen by screen; dark values are pixel-exact
+/// to the mock. The mock is dark-only, so [light] is a legibility mapping onto
+/// the existing light surfaces.
+@immutable
+class OrderBookPalette {
+  const OrderBookPalette({
+    required this.bg,
+    required this.bgCard,
+    required this.bgElevated,
+    required this.border,
+    required this.textPrimary,
+    required this.textSecondary,
+    required this.textTertiary,
+    required this.textDisabled,
+    required this.green,
+    required this.greenDim,
+    required this.gold,
+    required this.goldDim,
+    required this.blue,
+    required this.blueFill,
+    required this.amber,
+    required this.red,
+  });
+
+  final Color bg;
+  final Color bgCard;
+  final Color bgElevated;
+  final Color border;
+  final Color textPrimary;
+  final Color textSecondary;
+  final Color textTertiary;
+  final Color textDisabled;
+  final Color green;
+  final Color greenDim;
+  final Color gold;
+  final Color goldDim;
+  final Color blue;
+  final Color blueFill;
+  final Color amber;
+  final Color red;
+
+  static const dark = OrderBookPalette(
+    bg: Color(0xFF0F151C),
+    bgCard: Color(0xFF1A2029),
+    bgElevated: Color(0xFF222A35),
+    border: Color(0x0FFFFFFF), // rgba(255,255,255,0.06)
+    textPrimary: Color(0xFFF2F4F7),
+    textSecondary: Color(0xFFA8B0BC),
+    textTertiary: Color(0xFF6B7280),
+    textDisabled: Color(0xFF4A5060),
+    green: Color(0xFF8FE04A),
+    greenDim: Color(0xFF2A4015),
+    gold: Color(0xFFFFC940),
+    goldDim: Color(0xFF3A2D0A),
+    blue: Color(0xFF7BB4F0),
+    blueFill: Color(0xFF1E2B42),
+    amber: Color(0xFFE89C3C),
+    red: Color(0xFFE5484D),
+  );
+
+  static const light = OrderBookPalette(
+    bg: Color(0xFFFFFFFF),
+    bgCard: Color(0xFFF5F5F5),
+    bgElevated: Color(0xFFEEEEEE),
+    border: Color(0x14000000),
+    textPrimary: Color(0xFF1A1A1A),
+    textSecondary: Color(0xFF666666),
+    textTertiary: Color(0xFF888888),
+    textDisabled: Color(0xFFAAAAAA),
+    green: Color(0xFF6A9E00),
+    greenDim: Color(0x266A9E00),
+    gold: Color(0xFFB8860B),
+    goldDim: Color(0x26B8860B),
+    blue: Color(0xFF3B6EA5),
+    blueFill: Color(0x263B6EA5),
+    amber: Color(0xFFC97B1F),
+    red: Color(0xFFD84D4D),
+  );
+
+  static OrderBookPalette of(BuildContext context) =>
+      Theme.of(context).brightness == Brightness.dark ? dark : light;
+}
+
 // ── Spacing tokens ─────────────────────────────────────────────────────────────
 
 abstract final class AppSpacing {
