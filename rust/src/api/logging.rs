@@ -48,12 +48,17 @@ fn buffer() -> &'static Mutex<VecDeque<LogEntry>> {
 /// runs, `log::` records go nowhere.
 pub fn install_log_bridge() {
     static INSTALLED: std::sync::Once = std::sync::Once::new();
-    INSTALLED.call_once(|| match log::set_logger(&BRIDGE_LOGGER) {
-        Ok(()) => log::set_max_level(default_max_level()),
+    INSTALLED.call_once(|| {
+        // Unconditional: the filter defaults to `Off`, and `bridge_log` checks
+        // it even when the branch below loses the logger.
+        log::set_max_level(default_max_level());
+
         // flutter_rust_bridge installs its own logger in
         // `setup_default_user_utils()`, which this crate never calls. If this
         // fires, `log::` macros bypass us and only `blog_*` reaches the UI.
-        Err(e) => eprintln!("[logging] set_logger failed ({e}) — another logger is already active"),
+        if let Err(e) = log::set_logger(&BRIDGE_LOGGER) {
+            eprintln!("[logging] set_logger failed ({e}) — another logger is already active");
+        }
     });
 }
 

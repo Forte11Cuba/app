@@ -39,6 +39,20 @@ Future<void> main() async {
 
   await RustLib.init();
 
+  // Pre-read SharedPreferences so providers start with synchronous initial
+  // values — eliminates the AsyncValue.loading() race that caused the router
+  // to show the home screen before redirecting to /walkthrough on first launch.
+  final prefs = await SharedPreferences.getInstance();
+  final firstRunComplete = prefs.getBool(kFirstRunCompleteKey) ?? false;
+  final backupDismissed = prefs.getBool(kBackupReminderDismissedKey) ?? false;
+  final backupActive = prefs.getBool(kBackupReminderActiveKey) ?? false;
+  final backupPending = backupActive && !backupDismissed;
+  final savedSettings = AppSettingsState.fromPrefs(prefs);
+
+  // Before any startup work below, so a failure in it is captured at the
+  // verbosity the user asked for rather than the default.
+  await settings_api.setLoggingEnabled(enabled: savedSettings.loggingEnabled);
+
   // Initialize persistent SQLite store. Must come before any trade / order
   // operations that read or write trade keys and trade records.
   if (!kIsWeb) {
@@ -79,19 +93,6 @@ Future<void> main() async {
   } catch (e, st) {
     debugPrint('[main] Identity init failed — secure storage unavailable: $e\n$st');
   }
-
-  // Pre-read SharedPreferences so providers start with synchronous initial
-  // values — eliminates the AsyncValue.loading() race that caused the router
-  // to show the home screen before redirecting to /walkthrough on first launch.
-  final prefs = await SharedPreferences.getInstance();
-  final firstRunComplete = prefs.getBool(kFirstRunCompleteKey) ?? false;
-  final backupDismissed = prefs.getBool(kBackupReminderDismissedKey) ?? false;
-  final backupActive = prefs.getBool(kBackupReminderActiveKey) ?? false;
-  final backupPending = backupActive && !backupDismissed;
-  final savedSettings = AppSettingsState.fromPrefs(prefs);
-
-  // Without this the setting only takes effect the next time it is toggled.
-  settings_api.setLoggingEnabled(enabled: savedSettings.loggingEnabled);
 
   // Subscribe to bond-slashed notices BEFORE relay delivery starts, so the
   // Tokio broadcast channel buffers any notice arriving during startup rather

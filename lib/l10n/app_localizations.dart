@@ -2534,28 +2534,28 @@ abstract class AppLocalizations {
   /// **'No logs to share'**
   String get noLogsToShareTooltip;
 
-  /// Tooltip to disable logging
+  /// Tooltip to turn verbose (debug-level) logging off
   ///
   /// In en, this message translates to:
-  /// **'Disable logging'**
+  /// **'Disable verbose logging'**
   String get disableLoggingTooltip;
 
-  /// Tooltip to enable logging
+  /// Tooltip to turn verbose (debug-level) logging on
   ///
   /// In en, this message translates to:
-  /// **'Enable logging'**
+  /// **'Enable verbose logging'**
   String get enableLoggingTooltip;
 
-  /// Status banner text when logging is enabled
+  /// Status banner text when verbose logging is enabled
   ///
   /// In en, this message translates to:
-  /// **'Logging enabled'**
+  /// **'Verbose logging enabled'**
   String get loggingEnabledStatus;
 
-  /// Status banner text when logging is disabled
+  /// Status banner text when verbose logging is disabled
   ///
   /// In en, this message translates to:
-  /// **'Logging disabled'**
+  /// **'Verbose logging disabled'**
   String get loggingDisabledStatus;
 
   /// Message shown when there are no log entries

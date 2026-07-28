@@ -1363,16 +1363,16 @@ class AppLocalizationsEs extends AppLocalizations {
   String get noLogsToShareTooltip => 'No hay registros para compartir';
 
   @override
-  String get disableLoggingTooltip => 'Desactivar registro';
+  String get disableLoggingTooltip => 'Desactivar registro detallado';
 
   @override
-  String get enableLoggingTooltip => 'Activar registro';
+  String get enableLoggingTooltip => 'Activar registro detallado';
 
   @override
-  String get loggingEnabledStatus => 'Registro activado';
+  String get loggingEnabledStatus => 'Registro detallado activado';
 
   @override
-  String get loggingDisabledStatus => 'Registro desactivado';
+  String get loggingDisabledStatus => 'Registro detallado desactivado';
 
   @override
   String get noLogEntriesMessage => 'No hay entradas de registro';

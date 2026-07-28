@@ -1370,16 +1370,16 @@ class AppLocalizationsFr extends AppLocalizations {
   String get noLogsToShareTooltip => 'Aucun journal à partager';
 
   @override
-  String get disableLoggingTooltip => 'Désactiver la journalisation';
+  String get disableLoggingTooltip => 'Désactiver la journalisation détaillée';
 
   @override
-  String get enableLoggingTooltip => 'Activer la journalisation';
+  String get enableLoggingTooltip => 'Activer la journalisation détaillée';
 
   @override
-  String get loggingEnabledStatus => 'Journalisation activée';
+  String get loggingEnabledStatus => 'Journalisation détaillée activée';
 
   @override
-  String get loggingDisabledStatus => 'Journalisation désactivée';
+  String get loggingDisabledStatus => 'Journalisation détaillée désactivée';
 
   @override
   String get noLogEntriesMessage => 'Aucune entrée de journal';

@@ -577,5 +577,5 @@ With 3+ developers after Phase 2 completes:
 - `CooperativelyCanceled` is a **client-side UI state only** — protocol sends action notifications
 - Nym avatar icons MUST always render in **white** regardless of `color_hue` (v1 bug fix, see `contracts/types.md`)
 - `privacy_mode` single write path is `reputation.set_privacy_mode()` — never write `Settings.privacy_mode` directly
-- `logging_enabled` is runtime-only — always `false` at startup regardless of stored value
+- `logging_enabled` is runtime-only in Rust — Flutter persists it and re-applies it on launch
 - Commit after each task or logical group; stop at any checkpoint to validate independently

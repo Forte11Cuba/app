@@ -210,6 +210,10 @@ pub async fn delete_identity() -> Result<()> {
     *guard = None;
     drop(guard);
 
+    // Buffered log lines name orders and counterparties of the identity being
+    // deleted, and the Logs screen can still share them afterwards.
+    crate::api::logging::clear_logs();
+
     // Clear the persisted trade key counter and per-order key mappings: both
     // belong to the deleted identity's derivation tree, and a new mnemonic
     // must start counting from zero instead of inheriting them. (If this
@@ -470,8 +474,16 @@ mod tests {
         let current = get_identity().await.unwrap().unwrap();
         assert_eq!(current.trade_key_index, 22);
 
+        crate::api::logging::forward_log(log::Level::Info, "identity_probe", "before delete");
+
         delete_identity().await.unwrap();
         assert!(get_identity().await.unwrap().is_none());
+        assert!(
+            !crate::api::logging::recent_logs()
+                .iter()
+                .any(|e| e.tag == "identity_probe"),
+            "delete_identity must drop the buffered log history",
+        );
 
         // Deleting again fails: there is no identity left.
         assert!(delete_identity().await.is_err());

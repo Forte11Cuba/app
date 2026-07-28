@@ -1348,16 +1348,16 @@ class AppLocalizationsEn extends AppLocalizations {
   String get noLogsToShareTooltip => 'No logs to share';
 
   @override
-  String get disableLoggingTooltip => 'Disable logging';
+  String get disableLoggingTooltip => 'Disable verbose logging';
 
   @override
-  String get enableLoggingTooltip => 'Enable logging';
+  String get enableLoggingTooltip => 'Enable verbose logging';
 
   @override
-  String get loggingEnabledStatus => 'Logging enabled';
+  String get loggingEnabledStatus => 'Verbose logging enabled';
 
   @override
-  String get loggingDisabledStatus => 'Logging disabled';
+  String get loggingDisabledStatus => 'Verbose logging disabled';
 
   @override
   String get noLogEntriesMessage => 'No log entries';
