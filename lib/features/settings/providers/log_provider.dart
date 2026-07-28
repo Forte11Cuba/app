@@ -3,21 +3,33 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mostro/src/rust/api/logging.dart' as logging_api;
 import 'package:mostro/src/rust/api/types.dart';
 
-/// Live log entries from the Rust backend, newest first.
+/// Entries held in the provider, matching the Rust ring buffer's own bound.
+const _maxEntries = 500;
+
+/// Log entries from the Rust backend, newest first.
 ///
-/// Caps at 500 entries to bound memory usage.  The stream is cancelled
-/// when the provider is disposed (e.g. when LogReportScreen is popped).
-final logEntriesProvider = StreamProvider.autoDispose<List<LogEntry>>((ref) async* {
+/// Seeded from the Rust ring buffer so the screen opens on the history that led
+/// to whatever the user is reporting, then followed live. Cancelled when the
+/// provider is disposed (e.g. when LogReportScreen is popped).
+final logEntriesProvider =
+    StreamProvider.autoDispose<List<LogEntry>>((ref) async* {
   var cancelled = false;
   ref.onDispose(() => cancelled = true);
 
+  // Subscribe before snapshotting: an entry emitted between the two calls
+  // arrives on the stream and is dropped below, whereas the reverse order
+  // would lose it entirely.
   final stream = await logging_api.onLogEntry();
-  final entries = <LogEntry>[];
+  final entries = (await logging_api.recentLogs()).take(_maxEntries).toList();
+  final seededUpTo = entries.isEmpty ? -1 : entries.first.id;
+  yield List.unmodifiable(entries);
+
   while (!cancelled) {
     final entry = await stream.next();
     if (entry == null || cancelled) break;
-    entries.insert(0, entry); // newest first
-    if (entries.length > 500) entries.removeLast();
+    if (entry.id <= seededUpTo) continue; // already in the seed
+    entries.insert(0, entry);
+    if (entries.length > _maxEntries) entries.removeLast();
     yield List.unmodifiable(entries);
   }
 });

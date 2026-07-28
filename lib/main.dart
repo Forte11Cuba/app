@@ -17,7 +17,6 @@ import 'package:mostro/src/rust/frb_generated.dart';
 import 'package:mostro/src/rust/api.dart' as rust_api;
 import 'package:mostro/features/settings/providers/nwc_provider.dart';
 import 'package:mostro/src/rust/api/nwc.dart' as nwc_api;
-import 'package:mostro/src/rust/api/logging.dart' as logging_api;
 import 'package:mostro/src/rust/api/nostr.dart' as nostr_api;
 import 'package:mostro/src/rust/api/orders.dart' as orders_api;
 import 'package:mostro/src/rust/api/settings.dart' as settings_api;
@@ -91,6 +90,9 @@ Future<void> main() async {
   final backupPending = backupActive && !backupDismissed;
   final savedSettings = AppSettingsState.fromPrefs(prefs);
 
+  // Without this the setting only takes effect the next time it is toggled.
+  settings_api.setLoggingEnabled(enabled: savedSettings.loggingEnabled);
+
   // Subscribe to bond-slashed notices BEFORE relay delivery starts, so the
   // Tokio broadcast channel buffers any notice arriving during startup rather
   // than dropping it (a receiver must exist at send time).
@@ -107,9 +109,6 @@ Future<void> main() async {
 
   // Watch for connection state changes in background (logs appear in flutter output).
   _watchConnectionState();
-
-  // Forward Rust log entries to debugPrint so they appear in `flutter run`.
-  _forwardRustLogs();
 
   final container = ProviderContainer(
     overrides: [
@@ -159,31 +158,6 @@ void _restoreNwcConnection(String nwcUri, ProviderContainer container) {
       debugPrint('[nwc] wallet restored: ${info.walletName ?? info.walletPubkey}');
     } catch (e) {
       debugPrint('[nwc] wallet restore failed: $e');
-    }
-  });
-}
-
-/// Forward Rust log entries to debugPrint so they are visible in `flutter run`.
-///
-/// Only active in debug builds.
-void _forwardRustLogs() {
-  if (!kDebugMode) return;
-  debugPrint('[rust-log] starting Rust log forwarder...');
-  Future.microtask(() async {
-    try {
-      debugPrint('[rust-log] subscribing to Rust log stream...');
-      final stream = await logging_api.onLogEntry();
-      debugPrint('[rust-log] subscribed — waiting for entries');
-      while (true) {
-        final entry = await stream.next();
-        if (entry == null) {
-          debugPrint('[rust-log] stream closed');
-          break;
-        }
-        debugPrint('[rust/${entry.tag}] ${entry.message}');
-      }
-    } catch (e, st) {
-      debugPrint('[rust-log] bridge error: $e\n$st');
     }
   });
 }
