@@ -2280,9 +2280,11 @@ dependencies = [
  "sqlx",
  "thiserror 1.0.69",
  "tokio",
+ "tracing",
  "uuid",
  "wasm-bindgen-futures",
  "wasmtimer",
+ "web-sys",
 ]
 
 [[package]]
