@@ -4,7 +4,19 @@ import 'package:mostro/src/rust/api/logging.dart' as logging_api;
 import 'package:mostro/src/rust/api/types.dart';
 
 /// Entries held in the provider, matching the Rust ring buffer's own bound.
-const _maxEntries = 500;
+const logEntriesLimit = 500;
+
+/// Pulls the next live entry, or null once the stream closes.
+typedef LogEntryReader = Future<LogEntry?> Function();
+
+/// The two bridge calls behind function seams, so the merge below can be
+/// driven in tests without a live bridge.
+final logHistoryProvider =
+    Provider<Future<List<LogEntry>> Function()>((ref) => logging_api.recentLogs);
+
+final logStreamProvider = Provider<Future<LogEntryReader> Function()>(
+  (ref) => () async => (await logging_api.onLogEntry()).next,
+);
 
 /// Log entries from the Rust backend, newest first.
 ///
@@ -19,17 +31,18 @@ final logEntriesProvider =
   // Subscribe before snapshotting: an entry emitted between the two calls
   // arrives on the stream and is dropped below, whereas the reverse order
   // would lose it entirely.
-  final stream = await logging_api.onLogEntry();
-  final entries = (await logging_api.recentLogs()).take(_maxEntries).toList();
+  final nextEntry = await ref.read(logStreamProvider)();
+  final entries =
+      (await ref.read(logHistoryProvider)()).take(logEntriesLimit).toList();
   final seededUpTo = entries.isEmpty ? -1 : entries.first.id;
   yield List.unmodifiable(entries);
 
   while (!cancelled) {
-    final entry = await stream.next();
+    final entry = await nextEntry();
     if (entry == null || cancelled) break;
     if (entry.id <= seededUpTo) continue; // already in the seed
     entries.insert(0, entry);
-    if (entries.length > _maxEntries) entries.removeLast();
+    if (entries.length > logEntriesLimit) entries.removeLast();
     yield List.unmodifiable(entries);
   }
 });
