@@ -210,10 +210,6 @@ pub async fn delete_identity() -> Result<()> {
     *guard = None;
     drop(guard);
 
-    // Buffered log lines name orders and counterparties of the identity being
-    // deleted, and the Logs screen can still share them afterwards.
-    crate::api::logging::clear_logs();
-
     // Clear the persisted trade key counter and per-order key mappings: both
     // belong to the deleted identity's derivation tree, and a new mnemonic
     // must start counting from zero instead of inheriting them. (If this
@@ -227,6 +223,12 @@ pub async fn delete_identity() -> Result<()> {
             log::warn!("[identity] failed to clear trade key mappings: {e}");
         }
     }
+
+    // Last, so the cleanup warnings above are dropped too: buffered lines name
+    // orders and counterparties of the identity being deleted, and the Logs
+    // screen can still share them afterwards. The platform console keeps them.
+    crate::api::logging::clear_logs();
+
     Ok(())
 }
 
