@@ -1,6 +1,27 @@
 /// Database schema version. Currently unused at runtime — kept as a reference
 /// for future migration logic (e.g. ALTER TABLE guards or schema-diff checks).
-pub const SCHEMA_VERSION: u32 = 2;
+pub const SCHEMA_VERSION: u32 = 3;
+
+/// One-off rebuild for databases created while `messages` still carried a
+/// foreign key to `trades(id)` (schema v2). SQLite cannot drop a FK in place,
+/// so the table is recreated and the rows copied. Runs after the main DDL;
+/// `SqliteStorage::open` executes it only when the old FK is detected.
+#[cfg(not(target_arch = "wasm32"))]
+pub const SQLITE_DROP_MESSAGES_FK_SQL: &str = r#"
+PRAGMA foreign_keys = OFF;
+CREATE TABLE messages_v3 (
+    id              TEXT PRIMARY KEY,
+    trade_id        TEXT NOT NULL,
+    data            TEXT NOT NULL,
+    is_read         INTEGER NOT NULL DEFAULT 0,
+    created_at      INTEGER NOT NULL
+);
+INSERT INTO messages_v3 SELECT id, trade_id, data, is_read, created_at FROM messages;
+DROP TABLE messages;
+ALTER TABLE messages_v3 RENAME TO messages;
+CREATE INDEX IF NOT EXISTS idx_messages_trade ON messages(trade_id);
+PRAGMA foreign_keys = ON;
+"#;
 
 /// SQLite DDL executed unconditionally on every `SqliteStorage::open()` call.
 /// Safe to run repeatedly because every statement uses `CREATE TABLE IF NOT
@@ -27,13 +48,17 @@ CREATE TABLE IF NOT EXISTS trades (
     completed_at    INTEGER
 );
 
+-- Chat history + durable replay dedup (issue #246). `trade_id` here is the
+-- **order id** — the identity chat keys are derived from — which for taken
+-- orders differs from the `trades.id` UUID, so deliberately NO foreign key
+-- to trades(id): with one, every taker's save_message failed its FK check
+-- and history/dedup silently vanished on restart.
 CREATE TABLE IF NOT EXISTS messages (
     id              TEXT PRIMARY KEY,
     trade_id        TEXT NOT NULL,
     data            TEXT NOT NULL,   -- JSON-serialised ChatMessage
     is_read         INTEGER NOT NULL DEFAULT 0,
-    created_at      INTEGER NOT NULL,
-    FOREIGN KEY (trade_id) REFERENCES trades(id)
+    created_at      INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_messages_trade ON messages(trade_id);
 

@@ -7,9 +7,12 @@ of the protocol spec (<https://mostro.network/protocol/chat.html>, issue
 #246): a kind 14 outer event signed with `K_sign` and `p`-tagged to
 `pub(K_conv)` — both HKDF-SHA256 derivations of the trade-key ECDH secret —
 carrying a NIP-44 encrypted kind 1 inner event signed by the sender's trade
-key. NIP-59 gift wrap (kind 1059) is no longer used for peer chat (its
-random ephemeral authors made third-party flooding unattributable);
-admin/dispute chat still uses it. Messages persist locally after
+key. NIP-59 gift wrap (kind 1059) is no longer *written* for peer chat (its
+random ephemeral authors made third-party flooding unattributable); it is
+still *read* from pre-migration peers until the dual-read deadline
+(`LEGACY_CHAT_DEPRECATION_TS`, 2026-12-31T00:00:00Z), bounded by the same
+LRU / rate budget / size cap / durable dedup / quota as the new envelope.
+Admin/dispute chat still uses gift wrap. Messages persist locally after
 validation. Supports encrypted file attachments via Blossom servers.
 
 **Security requirements implemented** (see the protocol spec for the
@@ -23,7 +26,22 @@ normative list):
   and halts chat processing while the trade stays operational).
 - Inner signature verified and its author checked against the two trade
   keys of the order — the only sender authentication.
-- Durable replay dedup on the inner event id (`messages` table).
+- Durable replay dedup on the inner event id (`messages` table on native,
+  IndexedDB on web), **fail-closed**: a dedup lookup error drops the event.
+- The rate budget meters only the live stream (post-EOSE); stored catch-up
+  is bounded by the filter `limit` instead, so history above the burst size
+  is never dropped.
+- The cursor advances only past durably stored messages.
+- Per-trade retention quotas (message count and total bytes) bound durable
+  growth even at a legitimate send rate.
+- Send-side size validation: a message whose encrypted envelope no receiver
+  would accept fails with a stable `MessageTooLarge` error; each inner event
+  carries a signed uniqueness nonce so identical same-second sends keep
+  distinct ids.
+- Subscription lifecycle: one task per order (spawn guard), explicit
+  subscription ids unsubscribed on every exit, no idle timeout, and
+  automatic resubscription of persisted active trades when the relay pool
+  comes online.
 - Isolation: chat runs on its own task and bounded channels; it can never
   block the order state machine, the daemon transport, or a dispute.
 

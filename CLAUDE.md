@@ -101,8 +101,9 @@ bridged by flutter_rust_bridge.
   **NIP-44 / signed Kind 14** (transport v2), via `wrap_mostro_message`/`unwrap_mostro_message`.
 - **Peer chat**: **chat envelope** (kind 14 signed with `K_sign`, NIP-44 inner kind 1
   signed by the trade key — <https://mostro.network/protocol/chat.html>), via
-  `mostro_wrap`/`mostro_unwrap` + `crypto/chat_keys.rs`. NIP-59 is gone from this
-  channel (gift-wrap flood attack, issue #246).
+  `mostro_wrap`/`mostro_unwrap` + `crypto/chat_keys.rs`. Outbound NIP-59 is gone from
+  this channel (gift-wrap flood attack, issue #246); inbound 1059 is still accepted
+  from pre-migration peers until the dual-read deadline (`LEGACY_CHAT_DEPRECATION_TS`).
 - **Dispute admin chat**: still **NIP-59 gift wrap / Kind 1059**, via `wrap`/`unwrap`.
 - All live in `rust/src/nostr/gift_wrap.rs` (rename to `transport.rs` pending).
 - Wire status strings are **kebab-case** (`waiting-buyer-invoice`, `fiat-sent`).

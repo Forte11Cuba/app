@@ -5,8 +5,10 @@
 /// event signed with `K_sign` and `p`-tagged to `pub(K_conv)` — both derived
 /// from the trade-key ECDH secret via `crate::crypto::chat_keys` — carrying a
 /// NIP-44 encrypted kind 1 inner event signed by the sender's trade key. The
-/// old NIP-59 gift wrap (kind 1059) is gone from this channel: its random
-/// ephemeral authors made third-party flooding unattributable and unfilterable.
+/// old NIP-59 gift wrap (kind 1059) — whose random ephemeral authors made
+/// third-party flooding unattributable and unfilterable — is no longer
+/// written; it is still *read* from pre-migration peers until
+/// [`LEGACY_CHAT_DEPRECATION_TS`] so mixed-version trades keep chatting.
 /// Admin/dispute chat (api/disputes.rs) still uses gift wrap.
 ///
 /// Messages persist to the `messages` table (native; web is memory-only until
@@ -103,7 +105,12 @@ impl MessageStore {
         self.hydrated.write().await.insert(trade_id.to_string());
     }
 
-    async fn add_message(&self, msg: ChatMessage) {
+    /// Store a message; returns `true` when it is **durably** stored (DB
+    /// write succeeded, or no DB backend exists so memory is the best this
+    /// platform offers). The chat `since` cursor must only advance past
+    /// events whose messages returned `true` — otherwise a failed write plus
+    /// an advanced cursor loses the message permanently.
+    async fn add_message(&self, msg: ChatMessage) -> bool {
         // Hydrate first so the persisted history is not masked by a fresher
         // in-memory entry created before the first read.
         self.ensure_hydrated(&msg.trade_id).await;
@@ -117,34 +124,62 @@ impl MessageStore {
         // Write-through: chat history and the durable replay dedup both live
         // in the `messages` table. Failure is logged, never propagated — a
         // full disk must not take the chat (let alone the trade) down.
-        if let Some(db) = crate::db::app_db::db() {
-            if let Err(e) = db.save_message(&msg).await {
-                log::warn!("[messages] persist failed id={}: {e}", msg.id);
-            }
-        }
+        let stored = match crate::db::app_db::db() {
+            Some(db) => match db.save_message(&msg).await {
+                Ok(()) => true,
+                Err(e) => {
+                    log::warn!("[messages] persist failed id={}: {e}", msg.id);
+                    false
+                }
+            },
+            None => true,
+        };
         let _ = self.new_message_tx.send(msg.clone());
         let unread = self.unread_count_inner().await;
         let _ = self.unread_tx.send(unread);
+        stored
     }
 
     /// `true` if this message id was already accepted, in memory or on disk.
     ///
     /// This is the spec's durable inner-id replay dedup: a re-wrapped inner
     /// event keeps the id it had the first time, so a hit here rejects it.
-    async fn is_known(&self, trade_id: &str, id: &str) -> bool {
+    /// A storage lookup failure is an `Err` — the caller MUST fail closed
+    /// (drop the event) rather than treat it as "not seen".
+    async fn is_known(&self, trade_id: &str, id: &str) -> Result<bool> {
         {
             let store = self.messages.read().await;
             if let Some(msgs) = store.get(trade_id) {
                 if msgs.iter().any(|m| m.id == id) {
-                    return true;
+                    return Ok(true);
                 }
             }
         }
         match crate::db::app_db::db() {
-            Some(db) => db.message_exists(id)
+            Some(db) => db
+                .message_exists(id)
                 .await
-                .unwrap_or(false),
+                .map_err(|e| anyhow!("dedup lookup failed: {e}")),
+            None => Ok(false),
+        }
+    }
+
+    /// `true` when storing one more incoming message of `incoming_bytes`
+    /// would exceed the per-trade retention caps. Bounds durable growth from
+    /// a counterparty writing forever at a legitimate rate — the token
+    /// bucket limits CPU, this limits memory and disk (isolation invariant).
+    async fn quota_exceeded(&self, trade_id: &str, incoming_bytes: usize) -> bool {
+        self.ensure_hydrated(trade_id).await;
+        let store = self.messages.read().await;
+        match store.get(trade_id) {
             None => false,
+            Some(msgs) => {
+                if msgs.len() >= MAX_STORED_MESSAGES_PER_TRADE {
+                    return true;
+                }
+                let bytes: usize = msgs.iter().map(|m| m.content.len()).sum();
+                bytes.saturating_add(incoming_bytes) > MAX_STORED_BYTES_PER_TRADE
+            }
         }
     }
 
@@ -252,6 +287,17 @@ pub async fn send_message(trade_id: String, content: String) -> Result<ChatMessa
         bail!("TradeNotFound: trade_id must not be empty");
     }
 
+    // Cheap upper bound before any crypto: the NIP-44 ciphertext of a
+    // payload this size can never fit under MAX_CONTENT_BYTES, so no
+    // receiver would accept it. The exact boundary (padding + JSON
+    // escaping) is enforced post-encryption in `mostro_wrap`.
+    if content.len() > crate::nostr::gift_wrap::MAX_CONTENT_BYTES {
+        bail!(
+            "MessageTooLarge: {} bytes exceeds the maximum message size",
+            content.len()
+        );
+    }
+
     // Look up session to get peer pubkey and trade key index.
     // If no session exists (e.g. order not yet active), fall back to local-only.
     let session = crate::mostro::session::session_manager()
@@ -273,6 +319,12 @@ pub async fn send_message(trade_id: String, content: String) -> Result<ChatMessa
                 Ok(ctx) => {
                     sender_pubkey = ctx.trade_keys.public_key().to_hex();
                     match publish_chat_payload(&ctx, &content).await {
+                        // A message every receiver must reject is a caller
+                        // error, not a transport hiccup — surface it instead
+                        // of storing a "sent" message the peer never sees.
+                        Err(e) if e.to_string().contains("MessageTooLarge") => {
+                            return Err(e);
+                        }
                         Err(e) => log::warn!("[messages] send_message trade={trade_id}: {e}"),
                         Ok(inner) => {
                             id = inner.id.to_hex();
@@ -297,7 +349,7 @@ pub async fn send_message(trade_id: String, content: String) -> Result<ChatMessa
         created_at,
     };
 
-    message_store().add_message(msg.clone()).await;
+    let _ = message_store().add_message(msg.clone()).await;
     Ok(msg)
 }
 
@@ -445,7 +497,7 @@ pub async fn send_file(
         created_at: msg_created_at,
     };
 
-    message_store().add_message(msg.clone()).await;
+    let _ = message_store().add_message(msg.clone()).await;
     Ok(msg)
 }
 
@@ -716,6 +768,42 @@ const FLOOD_TRIP_REJECTIONS: u32 = 180;
 /// durable inner-id check in `MessageStore::is_known`.
 const OUTER_LRU_CAP: usize = 512;
 
+/// Per-trade retention caps (protocol spec: "Clients SHOULD also cap the
+/// number of messages and total bytes stored per trade"). Excess incoming
+/// messages are dropped and logged; the trade itself is unaffected.
+const MAX_STORED_MESSAGES_PER_TRADE: usize = 1000;
+const MAX_STORED_BYTES_PER_TRADE: usize = 5 * 1024 * 1024;
+
+/// End of the dual-read migration window: until this instant (unix seconds,
+/// 2026-12-31T00:00:00Z) the client also *accepts* the superseded NIP-59
+/// gift-wrap chat (kind 1059) from pre-migration peers. It always *sends*
+/// the new envelope. After the deadline the legacy subscription is simply
+/// not created. Trades in flight at the cutover keep working: the legacy
+/// path only reads, never writes.
+const LEGACY_CHAT_DEPRECATION_TS: i64 = 1_798_675_200;
+
+/// Subscription id for the chat envelope of one order — explicit so every
+/// exit path can unsubscribe and a lingering relay subscription never
+/// outlives its task.
+fn chat_subscription_id(order_id: &str) -> nostr_sdk::SubscriptionId {
+    nostr_sdk::SubscriptionId::new(format!("mostro-chat-{order_id}"))
+}
+
+/// Subscription id for the legacy gift-wrap dual-read of one order.
+fn legacy_chat_subscription_id(order_id: &str) -> nostr_sdk::SubscriptionId {
+    nostr_sdk::SubscriptionId::new(format!("mostro-chat-legacy-{order_id}"))
+}
+
+/// Orders with a live chat task. Single-owner guard: `on_peer_pubkey_received`
+/// fires again on daemon replays and reconnect backfills, and a second task
+/// for the same order would double-process events and race on the cursor.
+static ACTIVE_CHATS: OnceLock<tokio::sync::Mutex<std::collections::HashSet<String>>> =
+    OnceLock::new();
+
+fn active_chats() -> &'static tokio::sync::Mutex<std::collections::HashSet<String>> {
+    ACTIVE_CHATS.get_or_init(|| tokio::sync::Mutex::new(std::collections::HashSet::new()))
+}
+
 /// Bounded insert-only id set with FIFO eviction (outer-id LRU, step 5).
 struct BoundedIdSet {
     set: std::collections::HashSet<String>,
@@ -832,36 +920,140 @@ fn parse_chat_payload(payload: &str) -> (String, Option<AttachmentInfo>) {
 /// third-party flooding: relays drop everything not signed by the
 /// conversation key, so junk never reaches us — bounded by the persisted
 /// `since` cursor plus a `limit`, so a restart never re-downloads an
-/// unbounded backlog.
+/// unbounded backlog. Until [`LEGACY_CHAT_DEPRECATION_TS`] it additionally
+/// dual-reads the superseded NIP-59 gift wrap (kind 1059) so pre-migration
+/// peers keep working; it never *writes* the legacy form.
 ///
 /// Incoming events run the spec's cheapest-check-first pipeline: author →
 /// outer-id LRU → rate-limit budget → `mostro_unwrap` (p tag, timestamp
-/// bounds, size, both signatures, allowed signers) → durable inner-id dedup.
-/// The one deliberate deviation: the LRU and budget run *before* the p-tag /
-/// timestamp / size checks rather than after — all five are O(1) compares,
-/// and what matters is that no signature or decryption work happens before
-/// the budget gate.
+/// bounds, size, both signatures, allowed signers) → durable inner-id dedup
+/// (fail-closed) → retention quota. The budget is only metered on the
+/// **live** stream (after the relay's EOSE): stored catch-up above the burst
+/// size is legitimate history, and dropping it would permanently lose
+/// messages the advancing cursor never re-fetches. Two deliberate ordering
+/// deviations from the spec text: the LRU and budget run before the p-tag /
+/// timestamp / size checks (all are O(1) compares; what matters is that no
+/// signature or decryption work happens before the budget gate).
+///
+/// Lifecycle: exactly one task per order (`ACTIVE_CHATS` guard — daemon
+/// replays re-invoke `on_peer_pubkey_received` and must be no-ops), explicit
+/// subscription ids unsubscribed on every exit path, and **no idle timeout**:
+/// the listener lives until relay-pool shutdown or a flood trip, because a
+/// quiet half hour is normal in a fiat trade and the next peer message must
+/// still arrive. After a restart, `resubscribe_active_chats` rebuilds the
+/// listeners for persisted active trades.
 ///
 /// Isolation: this is its own task over a bounded notification channel. It
 /// only ever drops chat events; it cannot touch the order state machine, the
 /// daemon transport, or dispute flows.
-///
-/// Called by `orders::on_peer_pubkey_received` as soon as the peer (and thus
-/// the conversation keys) are known. Runs until the relay pool shuts down, an
-/// idle-timeout fires (30 min of silence), or the conversation trips the
-/// flood breaker.
 pub(crate) async fn subscribe_incoming_chat(
     order_id: String,
-    my_trade_pubkey: nostr_sdk::PublicKey,
+    trade_keys: nostr_sdk::Keys,
     peer_pubkey: nostr_sdk::PublicKey,
     conv: nostr_sdk::Keys,
     sign: nostr_sdk::Keys,
 ) {
-    use crate::rt::time::{timeout, Duration};
+    // Single-owner guard: a second spawn for the same order is a no-op.
+    {
+        let mut active = active_chats().lock().await;
+        if !active.insert(order_id.clone()) {
+            log::debug!("[messages] chat task already active order={order_id}");
+            return;
+        }
+    }
+
+    run_chat_subscription(&order_id, &trade_keys, &peer_pubkey, &conv, &sign).await;
+
+    // Cleanup on every exit path: release ownership and drop the relay
+    // subscriptions so they never outlive the task.
+    active_chats().lock().await.remove(&order_id);
+    if let Ok(pool) = crate::api::nostr::get_pool() {
+        let client = pool.client();
+        client.unsubscribe(&chat_subscription_id(&order_id)).await;
+        client
+            .unsubscribe(&legacy_chat_subscription_id(&order_id))
+            .await;
+    }
+    log::debug!("[messages] incoming-chat subscription exiting order={order_id}");
+}
+
+/// Mutable per-conversation receive state (see `subscribe_incoming_chat`).
+struct ChatRxState {
+    outer_seen: BoundedIdSet,
+    bucket: TokenBucket,
+    consecutive_rejected: u32,
+    /// `true` once a relay reported EOSE for one of our subscriptions —
+    /// from then on the token bucket meters arrivals; before that, events
+    /// are stored catch-up already bounded by the filter `limit`.
+    live: bool,
+    cursor: i64,
+    flooded: bool,
+}
+
+impl ChatRxState {
+    fn new(cursor: i64) -> Self {
+        Self {
+            outer_seen: BoundedIdSet::new(OUTER_LRU_CAP),
+            bucket: TokenBucket::new(crate::rt::time::Instant::now()),
+            consecutive_rejected: 0,
+            live: false,
+            cursor,
+            flooded: false,
+        }
+    }
+
+    /// Count one rejected event; trips the flood breaker on sustained abuse.
+    fn reject(&mut self, order_id: &str) {
+        self.consecutive_rejected += 1;
+        if self.consecutive_rejected >= FLOOD_TRIP_REJECTIONS {
+            self.flooded = true;
+            log::error!(
+                "[messages] conversation flooded — halting chat for order={order_id}; \
+                 the trade itself stays fully operational"
+            );
+            crate::api::logging::blog_info(
+                "messages",
+                format!("chat flooded, processing stopped order={order_id}"),
+            );
+        }
+    }
+
+    /// Live-stream budget check (no-op during stored catch-up).
+    fn budget_ok(&mut self, order_id: &str) -> bool {
+        if !self.live {
+            return true;
+        }
+        if self.bucket.try_take(crate::rt::time::Instant::now()) {
+            true
+        } else {
+            self.reject(order_id);
+            false
+        }
+    }
+
+    /// Advance the persisted cursor to `event_ts` clamped to our own clock,
+    /// so a counterparty dating events at the skew-tolerance edge can never
+    /// push it into the future and silence the conversation. Callers only
+    /// invoke this once the corresponding message is durably stored (or was
+    /// already known/durable).
+    async fn advance_cursor(&mut self, order_id: &str, event_ts: i64) {
+        let accepted = event_ts.min(unix_now());
+        if accepted > self.cursor {
+            self.cursor = accepted;
+            store_chat_cursor(order_id, accepted).await;
+        }
+    }
+}
+
+async fn run_chat_subscription(
+    order_id: &str,
+    trade_keys: &nostr_sdk::Keys,
+    peer_pubkey: &nostr_sdk::PublicKey,
+    conv: &nostr_sdk::Keys,
+    sign: &nostr_sdk::Keys,
+) {
     use nostr_sdk::RelayPoolNotification;
     use tokio::sync::broadcast;
-
-    const IDLE_TIMEOUT_SECS: u64 = 30 * 60;
 
     let Ok(pool) = crate::api::nostr::get_pool() else {
         log::warn!("[messages] subscribe_incoming_chat: relay pool not initialized");
@@ -870,11 +1062,15 @@ pub(crate) async fn subscribe_incoming_chat(
     let client = pool.client();
 
     let sign_pubkey = sign.public_key();
-    let allowed_signers = [my_trade_pubkey, peer_pubkey];
+    let my_trade_pubkey = trade_keys.public_key();
+    let allowed_signers = [my_trade_pubkey, *peer_pubkey];
 
     // `since` from the persisted cursor: everything older is already stored
-    // locally (the cursor only advances on accepted messages).
-    let mut cursor = load_chat_cursor(&order_id).await.unwrap_or(0);
+    // locally (the cursor only advances on durably stored messages).
+    let cursor = load_chat_cursor(order_id).await.unwrap_or(0);
+    let sub_id = chat_subscription_id(order_id);
+    let legacy_sub_id = legacy_chat_subscription_id(order_id);
+
     let mut filter = nostr_sdk::Filter::new()
         .kind(nostr_sdk::Kind::PrivateDirectMessage)
         .author(sign_pubkey)
@@ -888,148 +1084,387 @@ pub(crate) async fn subscribe_incoming_chat(
     // and would otherwise be missed.
     let mut rx = client.notifications();
 
-    if let Err(e) = client.subscribe(filter, None).await {
+    if let Err(e) = client.subscribe_with_id(sub_id.clone(), filter, None).await {
         log::warn!("[messages] subscribe_incoming_chat subscribe failed: {e}");
         return;
     }
 
+    // Dual-read window: also accept the superseded gift-wrap envelope from
+    // pre-migration peers, read-only, until the deprecation date. The legacy
+    // address is the old NIP-04-style shared pubkey.
+    let legacy_shared: Option<nostr_sdk::Keys> = if unix_now() < LEGACY_CHAT_DEPRECATION_TS {
+        // The legacy address doubles as the decryption key: v1 gift-wraps to
+        // the NIP-04-style shared pubkey, so the receiver must unwrap with
+        // the shared SECRET as its keypair.
+        let keys = crate::crypto::ecdh::derive_nip04_shared_key(trade_keys, peer_pubkey)
+            .ok()
+            .and_then(|raw| nostr_sdk::SecretKey::from_slice(&raw).ok())
+            .map(nostr_sdk::Keys::new);
+        match keys {
+            None => {
+                log::warn!("[messages] legacy shared key derivation failed order={order_id}");
+                None
+            }
+            Some(keys) => {
+                let legacy_filter = nostr_sdk::Filter::new()
+                    .kind(nostr_sdk::Kind::GiftWrap)
+                    .pubkey(keys.public_key())
+                    .limit(CHAT_BACKLOG_LIMIT);
+                match client
+                    .subscribe_with_id(legacy_sub_id.clone(), legacy_filter, None)
+                    .await
+                {
+                    Ok(_) => Some(keys),
+                    Err(e) => {
+                        log::warn!("[messages] legacy chat subscribe failed: {e}");
+                        None
+                    }
+                }
+            }
+        }
+    } else {
+        None
+    };
+
     log::info!(
-        "[messages] incoming-chat subscription active order={order_id} author={} since={cursor}",
-        sign_pubkey.to_hex()
+        "[messages] incoming-chat subscription active order={order_id} author={} since={cursor} legacy={}",
+        sign_pubkey.to_hex(),
+        legacy_shared.is_some(),
     );
 
-    let mut last_activity = crate::rt::time::Instant::now();
-    let mut outer_seen = BoundedIdSet::new(OUTER_LRU_CAP);
-    let mut bucket = TokenBucket::new(crate::rt::time::Instant::now());
-    let mut consecutive_rejected: u32 = 0;
+    let mut state = ChatRxState::new(cursor);
 
     loop {
-        let remaining =
-            Duration::from_secs(IDLE_TIMEOUT_SECS).saturating_sub(last_activity.elapsed());
-        if remaining.is_zero() {
-            log::debug!("[messages] incoming-chat idle timeout order={order_id}");
-            break;
-        }
-
-        match timeout(remaining, rx.recv()).await {
-            Ok(Ok(RelayPoolNotification::Event { event, .. })) => {
-                if event.kind != nostr_sdk::Kind::PrivateDirectMessage {
-                    continue;
-                }
-                // Step 1 — author. Kind 14 is shared with the daemon
-                // transport; a different author is somebody else's traffic
-                // (routed by its own subscription), not a violation.
-                if event.pubkey != sign_pubkey {
-                    continue;
-                }
-                last_activity = crate::rt::time::Instant::now();
-
-                // Step 5 — outer-id LRU: duplicate relay deliveries cost one
-                // hash lookup, nothing more.
-                if !outer_seen.insert(&event.id.to_hex()) {
-                    continue;
-                }
-
-                // Step 6 — rate-limit budget, before any cryptographic work.
-                if !bucket.try_take(crate::rt::time::Instant::now()) {
-                    consecutive_rejected += 1;
-                    if consecutive_rejected >= FLOOD_TRIP_REJECTIONS {
-                        log::error!(
-                            "[messages] conversation flooded — halting chat for order={order_id} \
-                             (author={}); the trade itself stays fully operational",
-                            sign_pubkey.to_hex()
-                        );
-                        crate::api::logging::blog_info(
-                            "messages",
-                            format!("chat flooded, processing stopped order={order_id}"),
-                        );
-                        return;
+        match rx.recv().await {
+            Ok(RelayPoolNotification::Event {
+                subscription_id,
+                event,
+                ..
+            }) => {
+                if subscription_id == sub_id {
+                    handle_chat_event(order_id, &allowed_signers, conv, &sign_pubkey, &my_trade_pubkey, &event, &mut state)
+                        .await;
+                } else if subscription_id == legacy_sub_id {
+                    if let Some(shared) = &legacy_shared {
+                        handle_legacy_chat_event(
+                            order_id,
+                            shared,
+                            &my_trade_pubkey,
+                            &allowed_signers,
+                            &event,
+                            &mut state,
+                        )
+                        .await;
                     }
-                    continue;
                 }
-
-                // Steps 2,3,4,7–11,13 — the crypto-side validation.
-                let inner = match crate::nostr::gift_wrap::mostro_unwrap(
-                    &conv,
-                    &sign_pubkey,
-                    &allowed_signers,
-                    &event,
-                    nostr_sdk::Timestamp::now(),
-                ) {
-                    Ok(inner) => inner,
-                    Err(e) => {
-                        // Only the counterparty can author a validly-signed
-                        // outer event, so failures here are attributable.
-                        log::warn!("[messages] incoming-chat rejected order={order_id}: {e}");
-                        consecutive_rejected += 1;
-                        if consecutive_rejected >= FLOOD_TRIP_REJECTIONS {
-                            log::error!(
-                                "[messages] conversation flooded — halting chat for \
-                                 order={order_id}; the trade itself stays fully operational"
-                            );
-                            return;
-                        }
-                        continue;
-                    }
-                };
-                consecutive_rejected = 0;
-
-                // Advance the persisted cursor for every event that passed
-                // validation (echoes included), clamped to our own clock so a
-                // counterparty dating events at the skew-tolerance edge can
-                // never push it into the future and silence the conversation.
-                let accepted_ts = (event.created_at.as_secs() as i64).min(unix_now());
-                if accepted_ts > cursor {
-                    cursor = accepted_ts;
-                    store_chat_cursor(&order_id, cursor).await;
+                if state.flooded {
+                    return;
                 }
-
-                // Step 12 — durable replay dedup on the inner id. Also what
-                // skips echoes of our own already-stored sends.
-                let inner_id = inner.id.to_hex();
-                if message_store().is_known(&order_id, &inner_id).await {
-                    log::debug!("[messages] incoming-chat duplicate inner id={inner_id}");
-                    continue;
-                }
-
-                // An unknown echo of our own message (this device lost its
-                // local copy, or another device of ours sent it): store it as
-                // ours so history reconstructs, but never as unread.
-                let is_echo = inner.pubkey == my_trade_pubkey;
-                let (content, attachment) = parse_chat_payload(&inner.content);
-
-                let msg = ChatMessage {
-                    id: inner_id,
-                    trade_id: order_id.clone(),
-                    sender_pubkey: inner.pubkey.to_hex(),
-                    content,
-                    message_type: MessageType::Peer,
-                    is_mine: is_echo,
-                    is_read: is_echo,
-                    has_attachment: attachment.is_some(),
-                    attachment,
-                    // Presentation orders by the inner timestamp, which the
-                    // relative bound has already tied to the outer one.
-                    created_at: inner.created_at.as_secs() as i64,
-                };
-
-                log::debug!("[messages] incoming-chat rx order={order_id} id={}", msg.id);
-                message_store().add_message(msg).await;
             }
-            Ok(Ok(RelayPoolNotification::Shutdown)) => break,
-            Ok(Err(broadcast::error::RecvError::Lagged(n))) => {
+            Ok(RelayPoolNotification::Message { message, .. }) => {
+                // EOSE for one of our subscriptions: stored catch-up is over,
+                // the token bucket meters everything from here on.
+                if let nostr_sdk::RelayMessage::EndOfStoredEvents(sid) = message {
+                    if *sid == sub_id || *sid == legacy_sub_id {
+                        state.live = true;
+                    }
+                }
+            }
+            Ok(RelayPoolNotification::Shutdown) => break,
+            Err(broadcast::error::RecvError::Lagged(n)) => {
                 // The bounded notification channel dropped n events under
                 // pressure — chat data loss, never trade-traffic loss.
                 log::warn!("[messages] incoming-chat lagged by {n} messages");
                 continue;
             }
-            Ok(Err(broadcast::error::RecvError::Closed)) => break,
-            Err(_) => break, // idle timeout
-            Ok(Ok(_)) => continue,
+            Err(broadcast::error::RecvError::Closed) => break,
         }
     }
+}
 
-    log::debug!("[messages] incoming-chat subscription exiting order={order_id}");
+/// Validate and store one incoming chat-envelope event (see
+/// `subscribe_incoming_chat` for the pipeline description).
+async fn handle_chat_event(
+    order_id: &str,
+    allowed_signers: &[nostr_sdk::PublicKey],
+    conv: &nostr_sdk::Keys,
+    sign_pubkey: &nostr_sdk::PublicKey,
+    my_trade_pubkey: &nostr_sdk::PublicKey,
+    event: &nostr_sdk::Event,
+    state: &mut ChatRxState,
+) {
+    if event.kind != nostr_sdk::Kind::PrivateDirectMessage {
+        return;
+    }
+    // Step 1 — author. Kind 14 is shared with the daemon transport; a
+    // different author is somebody else's traffic, not a violation.
+    if event.pubkey != *sign_pubkey {
+        return;
+    }
+    // Step 5 — outer-id LRU: duplicate relay deliveries cost one hash lookup.
+    if !state.outer_seen.insert(&event.id.to_hex()) {
+        return;
+    }
+    // Step 6 — rate-limit budget, before any cryptographic work.
+    if !state.budget_ok(order_id) {
+        return;
+    }
+
+    // Steps 2,3,4,7–11,13 — the crypto-side validation.
+    let inner = match crate::nostr::gift_wrap::mostro_unwrap(
+        conv,
+        sign_pubkey,
+        allowed_signers,
+        event,
+        nostr_sdk::Timestamp::now(),
+    ) {
+        Ok(inner) => inner,
+        Err(e) => {
+            // Only the counterparty can author a validly-signed outer event,
+            // so failures here are attributable.
+            log::warn!("[messages] incoming-chat rejected order={order_id}: {e}");
+            state.reject(order_id);
+            return;
+        }
+    };
+    state.consecutive_rejected = 0;
+
+    // Step 12 — durable replay dedup on the inner id, fail-closed: a lookup
+    // error drops the event (and leaves the cursor put, so it is re-fetched
+    // once storage recovers) instead of accepting a possible replay.
+    let inner_id = inner.id.to_hex();
+    match message_store().is_known(order_id, &inner_id).await {
+        Err(e) => {
+            log::warn!("[messages] {e} — dropping event order={order_id}");
+            return;
+        }
+        Ok(true) => {
+            // Already durably stored (an echo of our own send, or a replay).
+            log::debug!("[messages] incoming-chat duplicate inner id={inner_id}");
+            state
+                .advance_cursor(order_id, event.created_at.as_secs() as i64)
+                .await;
+            return;
+        }
+        Ok(false) => {}
+    }
+
+    // Retention quota — bounds durable growth at a legitimate send rate.
+    if message_store()
+        .quota_exceeded(order_id, inner.content.len())
+        .await
+    {
+        log::warn!("[messages] retention quota reached order={order_id} — dropping message");
+        return;
+    }
+
+    // An unknown echo of our own message (this device lost its local copy,
+    // or another device of ours sent it): store it as ours so history
+    // reconstructs, but never as unread.
+    let is_echo = inner.pubkey == *my_trade_pubkey;
+    let (content, attachment) = parse_chat_payload(&inner.content);
+
+    let msg = ChatMessage {
+        id: inner_id,
+        trade_id: order_id.to_string(),
+        sender_pubkey: inner.pubkey.to_hex(),
+        content,
+        message_type: MessageType::Peer,
+        is_mine: is_echo,
+        is_read: is_echo,
+        has_attachment: attachment.is_some(),
+        attachment,
+        // Presentation orders by the inner timestamp, which the relative
+        // bound has already tied to the outer one.
+        created_at: inner.created_at.as_secs() as i64,
+    };
+
+    log::debug!("[messages] incoming-chat rx order={order_id} id={}", msg.id);
+    // Cursor moves only past durably stored messages: a failed write with an
+    // advanced cursor would lose the message permanently.
+    if message_store().add_message(msg).await {
+        state
+            .advance_cursor(order_id, event.created_at.as_secs() as i64)
+            .await;
+    }
+}
+
+/// Validate and store one legacy gift-wrap chat event (dual-read window).
+///
+/// The legacy envelope has no author to pin, so this path keeps the old
+/// exposure — but bounded: same LRU, same live-stream budget, same size cap
+/// before decryption, same durable dedup and quota. It exists only so a
+/// pre-migration counterparty is not cut off mid-trade, and disappears at
+/// [`LEGACY_CHAT_DEPRECATION_TS`].
+async fn handle_legacy_chat_event(
+    order_id: &str,
+    legacy_shared: &nostr_sdk::Keys,
+    my_trade_pubkey: &nostr_sdk::PublicKey,
+    allowed_signers: &[nostr_sdk::PublicKey],
+    event: &nostr_sdk::Event,
+    state: &mut ChatRxState,
+) {
+    let legacy_shared_hex = legacy_shared.public_key().to_hex();
+    if event.kind != nostr_sdk::Kind::GiftWrap {
+        return;
+    }
+    let is_for_us = event.tags.iter().any(|t| {
+        let s = t.as_slice();
+        s.first().map(|v| v.as_str()) == Some("p")
+            && s.get(1).map(|v| v.as_str()) == Some(legacy_shared_hex.as_str())
+    });
+    if !is_for_us {
+        return;
+    }
+    if !state.outer_seen.insert(&event.id.to_hex()) {
+        return;
+    }
+    if !state.budget_ok(order_id) {
+        return;
+    }
+    if event.content.len() > crate::nostr::gift_wrap::MAX_CONTENT_BYTES {
+        state.reject(order_id);
+        return;
+    }
+
+    let event_json = match serde_json::to_string(event) {
+        Ok(j) => j,
+        Err(_) => return,
+    };
+    let rumor_json = match crate::nostr::gift_wrap::unwrap(legacy_shared, &event_json).await {
+        Ok(j) => j,
+        Err(e) => {
+            log::debug!("[messages] legacy chat decrypt failed order={order_id}: {e}");
+            state.reject(order_id);
+            return;
+        }
+    };
+    let rumor: serde_json::Value = match serde_json::from_str(&rumor_json) {
+        Ok(v) => v,
+        Err(_) => {
+            state.reject(order_id);
+            return;
+        }
+    };
+    state.consecutive_rejected = 0;
+
+    // The rumor is unsigned (NIP-59), so the claimed sender is only checked
+    // for membership: this is exactly the weakness the new envelope fixes.
+    let sender_hex = rumor.get("pubkey").and_then(|v| v.as_str()).unwrap_or("");
+    let Ok(sender) = nostr_sdk::PublicKey::from_hex(sender_hex) else {
+        return;
+    };
+    if !allowed_signers.contains(&sender) {
+        return;
+    }
+
+    let rumor_id = rumor
+        .get("id")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    match message_store().is_known(order_id, &rumor_id).await {
+        Err(e) => {
+            log::warn!("[messages] {e} — dropping legacy event order={order_id}");
+            return;
+        }
+        Ok(true) => return,
+        Ok(false) => {}
+    }
+
+    let raw_content = rumor.get("content").and_then(|v| v.as_str()).unwrap_or("");
+    if message_store()
+        .quota_exceeded(order_id, raw_content.len())
+        .await
+    {
+        log::warn!("[messages] retention quota reached order={order_id} — dropping message");
+        return;
+    }
+
+    // Legacy senders wrapped text as {"text": ...}; also accept the file
+    // pointer shape and plain text.
+    let (content, attachment) = match serde_json::from_str::<serde_json::Value>(raw_content)
+        .ok()
+        .and_then(|v| v.get("text").and_then(|t| t.as_str()).map(String::from))
+    {
+        Some(text) => (text, None),
+        None => parse_chat_payload(raw_content),
+    };
+
+    let is_echo = sender == *my_trade_pubkey;
+    let msg = ChatMessage {
+        id: rumor_id,
+        trade_id: order_id.to_string(),
+        sender_pubkey: sender_hex.to_string(),
+        content,
+        message_type: MessageType::Peer,
+        is_mine: is_echo,
+        is_read: is_echo,
+        has_attachment: attachment.is_some(),
+        attachment,
+        created_at: rumor
+            .get("created_at")
+            .and_then(|v| v.as_i64())
+            .unwrap_or_else(unix_now),
+    };
+    let _ = message_store().add_message(msg).await;
+}
+
+/// Rebuild the chat listeners for every persisted trade that can still chat.
+///
+/// Called once the relay pool is up (`api::nostr::initialize`): sessions are
+/// in-memory, so after a process restart nothing else would resubscribe and
+/// the next peer message would be lost until the daemon happened to resend a
+/// peer-pubkey notification.
+pub(crate) async fn resubscribe_active_chats() {
+    let Some(db) = crate::db::app_db::db() else {
+        return;
+    };
+    let trades = match db.list_trades().await {
+        Ok(t) => t,
+        Err(e) => {
+            log::warn!("[messages] resubscribe: list_trades failed: {e}");
+            return;
+        }
+    };
+    for trade in trades.into_iter().filter(chat_still_relevant) {
+        let order_id = trade.order.id.clone();
+        let Ok(trade_keys) =
+            crate::api::identity::get_active_trade_keys(trade.trade_key_index).await
+        else {
+            continue;
+        };
+        let Ok(peer) = nostr_sdk::PublicKey::from_hex(&trade.counterparty_pubkey) else {
+            continue;
+        };
+        let Ok((conv, sign)) = crate::crypto::chat_keys::derive_chat_keys(&trade_keys, &peer)
+        else {
+            continue;
+        };
+        log::info!("[messages] resubscribing chat order={order_id}");
+        crate::rt::spawn(subscribe_incoming_chat(
+            order_id, trade_keys, peer, conv, sign,
+        ));
+    }
+}
+
+/// A persisted trade still needs a live chat listener: it has a known peer
+/// and has not reached a terminal outcome.
+fn chat_still_relevant(trade: &crate::api::types::TradeInfo) -> bool {
+    use crate::api::types::OrderStatus::*;
+    trade.outcome.is_none()
+        && !trade.counterparty_pubkey.is_empty()
+        && matches!(
+            trade.order.status,
+            Pending
+                | WaitingBuyerInvoice
+                | WaitingPayment
+                | Active
+                | FiatSent
+                | SettledHoldInvoice
+                | Dispute
+                | InProgress
+        )
 }
 
 #[cfg(test)]
@@ -1104,10 +1539,27 @@ mod tests {
         };
         store.add_message(incoming).await;
 
-        let count_before = get_unread_count().await.unwrap();
+        // Assert on THIS trade's messages, not the global unread counter:
+        // the store is a process-wide singleton and other tests add unread
+        // messages concurrently, so global comparisons are racy (this
+        // exact flake took CI down on PR #247).
+        let unread_before = get_messages(trade_id.clone())
+            .await
+            .unwrap()
+            .iter()
+            .filter(|m| !m.is_read)
+            .count();
+        assert_eq!(unread_before, 1);
+
         mark_as_read(trade_id.clone()).await.unwrap();
-        let count_after = get_unread_count().await.unwrap();
-        assert!(count_after < count_before || count_after == 0);
+
+        let unread_after = get_messages(trade_id)
+            .await
+            .unwrap()
+            .iter()
+            .filter(|m| !m.is_read)
+            .count();
+        assert_eq!(unread_after, 0);
     }
 
     #[test]
@@ -1286,6 +1738,204 @@ mod tests {
         assert!(att.is_none(), "incomplete pointer must not become an attachment");
     }
 
+    #[test]
+    fn bucket_is_bypassed_during_stored_catchup() {
+        use crate::rt::time::Instant;
+
+        // Pre-EOSE (catch-up): a backlog far above the burst size is all
+        // accepted — dropping stored history would lose it permanently
+        // because the cursor advances past it.
+        let mut state = ChatRxState::new(0);
+        assert!(!state.live);
+        for _ in 0..(RATE_CAPACITY as u32 * 5) {
+            assert!(state.budget_ok("order-x"));
+        }
+        assert_eq!(state.consecutive_rejected, 0);
+
+        // Post-EOSE (live): the bucket meters normally.
+        state.live = true;
+        let now = Instant::now();
+        state.bucket = TokenBucket::new(now);
+        let mut accepted = 0;
+        for _ in 0..(RATE_CAPACITY as u32 + 10) {
+            if state.budget_ok("order-x") {
+                accepted += 1;
+            }
+        }
+        assert_eq!(accepted, RATE_CAPACITY as u32);
+        assert!(state.consecutive_rejected > 0);
+    }
+
+    #[tokio::test]
+    async fn quota_bounds_messages_and_bytes_per_trade() {
+        let trade_id = uuid::Uuid::new_v4().to_string();
+        let store = message_store();
+
+        // Byte cap: one huge stored message + an incoming one that would
+        // cross the byte quota.
+        let _ = store
+            .add_message(ChatMessage {
+                id: uuid::Uuid::new_v4().to_string(),
+                trade_id: trade_id.clone(),
+                sender_pubkey: "peer".into(),
+                content: "x".repeat(MAX_STORED_BYTES_PER_TRADE - 10),
+                message_type: MessageType::Peer,
+                is_mine: false,
+                is_read: true,
+                has_attachment: false,
+                attachment: None,
+                created_at: unix_now(),
+            })
+            .await;
+        assert!(!store.quota_exceeded(&trade_id, 5).await);
+        assert!(store.quota_exceeded(&trade_id, 50).await);
+
+        // An untouched trade has room.
+        let other = uuid::Uuid::new_v4().to_string();
+        assert!(!store.quota_exceeded(&other, 1024).await);
+    }
+
+    #[tokio::test]
+    async fn legacy_gift_wrap_is_accepted_during_the_window() {
+        use nostr_sdk::prelude::*;
+
+        // Mixed-version pair: the peer still runs the pre-migration client
+        // and gift-wraps {"text": ...} to the NIP-04-style shared pubkey.
+        let my_keys = Keys::generate();
+        let peer_keys = Keys::generate();
+        let shared_keys = {
+            let raw =
+                crate::crypto::ecdh::derive_nip04_shared_key(&peer_keys, &my_keys.public_key())
+                    .unwrap();
+            Keys::new(SecretKey::from_slice(&raw).unwrap())
+        };
+        let shared_pk = shared_keys.public_key();
+        let payload = serde_json::json!({ "text": "hola desde v1" }).to_string();
+        let event_json = crate::nostr::gift_wrap::wrap(
+            &peer_keys,
+            &shared_pk,
+            &payload,
+            Kind::PrivateDirectMessage,
+        )
+        .await
+        .unwrap();
+        let event: Event = serde_json::from_str(&event_json).unwrap();
+
+        let order_id = uuid::Uuid::new_v4().to_string();
+        let mut state = ChatRxState::new(0);
+        handle_legacy_chat_event(
+            &order_id,
+            &shared_keys,
+            &my_keys.public_key(),
+            &[my_keys.public_key(), peer_keys.public_key()],
+            &event,
+            &mut state,
+        )
+        .await;
+
+        let msgs = get_messages(order_id.clone()).await.unwrap();
+        assert_eq!(msgs.len(), 1, "legacy message must be accepted");
+        assert_eq!(msgs[0].content, "hola desde v1");
+        assert!(!msgs[0].is_mine);
+
+        // Replay of the same rumor in a fresh wrap is deduped durably.
+        let event_json2 = crate::nostr::gift_wrap::wrap(
+            &peer_keys,
+            &shared_pk,
+            &payload,
+            Kind::PrivateDirectMessage,
+        )
+        .await
+        .unwrap();
+        let event2: Event = serde_json::from_str(&event_json2).unwrap();
+        handle_legacy_chat_event(
+            &order_id,
+            &shared_keys,
+            &my_keys.public_key(),
+            &[my_keys.public_key(), peer_keys.public_key()],
+            &event2,
+            &mut state,
+        )
+        .await;
+        // Different rumor id (new timestamp/id) → may store; a stranger's
+        // wrap must never store.
+        let stranger = Keys::generate();
+        let stranger_json = crate::nostr::gift_wrap::wrap(
+            &stranger,
+            &shared_pk,
+            &serde_json::json!({ "text": "spoof" }).to_string(),
+            Kind::PrivateDirectMessage,
+        )
+        .await
+        .unwrap();
+        let stranger_event: Event = serde_json::from_str(&stranger_json).unwrap();
+        handle_legacy_chat_event(
+            &order_id,
+            &shared_keys,
+            &my_keys.public_key(),
+            &[my_keys.public_key(), peer_keys.public_key()],
+            &stranger_event,
+            &mut state,
+        )
+        .await;
+        let msgs = get_messages(order_id).await.unwrap();
+        assert!(
+            msgs.iter().all(|m| m.content != "spoof"),
+            "stranger-authored rumor must be rejected"
+        );
+    }
+
+    #[test]
+    fn chat_still_relevant_selects_only_live_trades() {
+        use crate::api::types::*;
+        let base = TradeInfo {
+            id: "t".into(),
+            order: OrderInfo {
+                id: "o".into(),
+                kind: OrderKind::Sell,
+                status: OrderStatus::Active,
+                amount_sats: None,
+                fiat_amount: None,
+                fiat_amount_min: None,
+                fiat_amount_max: None,
+                fiat_code: "VES".into(),
+                payment_method: "bank".into(),
+                premium: 0.0,
+                creator_pubkey: "maker".into(),
+                created_at: 1,
+                expires_at: None,
+                is_mine: false,
+                rating: 0.0,
+                total_reviews: 0,
+                days_active: 0,
+            },
+            role: TradeRole::Buyer,
+            counterparty_pubkey: "peer".into(),
+            current_step: TradeStep::Buyer(BuyerStep::FiatSent),
+            hold_invoice: None,
+            buyer_invoice: None,
+            trade_key_index: 1,
+            cooperative_cancel_state: None,
+            timeout_at: None,
+            started_at: 1,
+            completed_at: None,
+            outcome: None,
+        };
+        assert!(chat_still_relevant(&base));
+
+        let mut done = base.clone();
+        done.outcome = Some(TradeOutcome::Success);
+        assert!(!chat_still_relevant(&done));
+
+        let mut no_peer = base.clone();
+        no_peer.counterparty_pubkey = String::new();
+        assert!(!chat_still_relevant(&no_peer));
+
+        let mut canceled = base;
+        canceled.order.status = OrderStatus::Canceled;
+        assert!(!chat_still_relevant(&canceled));
+    }
+
     #[tokio::test]
     async fn is_known_finds_messages_already_in_memory() {
         let trade_id = uuid::Uuid::new_v4().to_string();
@@ -1306,8 +1956,8 @@ mod tests {
             })
             .await;
 
-        assert!(store.is_known(&trade_id, &id).await);
-        assert!(!store.is_known(&trade_id, "unknown-id").await);
+        assert!(store.is_known(&trade_id, &id).await.unwrap());
+        assert!(!store.is_known(&trade_id, "unknown-id").await.unwrap());
     }
 
     #[tokio::test]

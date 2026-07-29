@@ -106,8 +106,16 @@ pub async fn unwrap_mostro_message(
 /// `created_at` and against the recipient's own clock.
 pub const MAX_CLOCK_SKEW_SECS: u64 = 60;
 
-/// Upper bound on the encrypted payload, enforced before decrypting.
+/// Upper bound on the encrypted payload, enforced on receive before
+/// decrypting and on send before publishing (`MessageTooLarge`).
 pub const MAX_CONTENT_BYTES: usize = 64 * 1024;
+
+/// Upper bound on the outer event's tag count, enforced before signature
+/// verification. The envelope defines exactly one `p` tag (plus optional
+/// NIP-13 nonce); anything past this is a peer padding the event with junk
+/// tags to inflate pre-decryption work — the ciphertext cap alone does not
+/// bound the raw event a relay may deliver.
+pub const MAX_OUTER_TAGS: usize = 8;
 
 /// Build the outer kind 14 event carrying an encrypted, trade-key-signed
 /// kind 1 event, per the P2P chat spec.
@@ -137,7 +145,18 @@ pub async fn mostro_wrap(
     // timestamp tweaking — it would break `since`-based sync.
     let now = Timestamp::now();
 
+    // Signed uniqueness nonce: the inner id is a hash over pubkey, kind,
+    // created_at, tags and content — with second-resolution timestamps two
+    // intentional identical sends ("yes", "yes") in the same second would
+    // otherwise collapse to one id and the receiver's replay dedup would
+    // silently drop the second one.
+    let nonce: [u8; 8] = rand::random();
+
     let inner = EventBuilder::text_note(message)
+        .tag(Tag::custom(
+            TagKind::custom("u"),
+            [hex::encode(nonce)],
+        ))
         .custom_created_at(now)
         .build(sender_trade.public_key())
         .sign(sender_trade)
@@ -152,6 +171,18 @@ pub async fn mostro_wrap(
         nip44::Version::V2,
     )
     .map_err(|e| anyhow!("NIP-44 encrypt failed: {e}"))?;
+
+    // Reject before publishing what every receiver running this protocol
+    // must discard before decrypting — otherwise the sender stores the
+    // message as "sent" while the counterparty never sees it. Stable marker:
+    // Dart maps `MessageTooLarge` to a localized error.
+    if content.len() > MAX_CONTENT_BYTES {
+        return Err(anyhow!(
+            "MessageTooLarge: encrypted payload is {} bytes, limit {}",
+            content.len(),
+            MAX_CONTENT_BYTES
+        ));
+    }
 
     // Exactly one `p` tag, ours. Anything else could hide the message from
     // the `#p` query a dispute solver uses to rebuild the transcript.
@@ -202,6 +233,18 @@ pub fn mostro_unwrap(
     }
     if outer.kind != Kind::PrivateDirectMessage {
         return Err(anyhow!("outer event is not kind 14"));
+    }
+
+    // Bound the raw event before any signature work: the ciphertext cap
+    // below does not stop a peer from shipping a small ciphertext inside a
+    // multi-megabyte event padded with thousands of junk tags, forcing
+    // hashing and verification cost per event.
+    if outer.tags.len() > MAX_OUTER_TAGS {
+        return Err(anyhow!(
+            "outer event carries {} tags, limit {}",
+            outer.tags.len(),
+            MAX_OUTER_TAGS
+        ));
     }
 
     // Exactly one `p` tag, addressing this conversation. Anything else could
@@ -577,6 +620,77 @@ mod chat_envelope_tests {
         .unwrap_err()
         .to_string();
         assert!(err.contains("stale"), "got: {err}");
+    }
+
+    #[tokio::test]
+    async fn identical_same_second_sends_keep_distinct_identities() {
+        let c = convo();
+        // Two rapid "yes" messages: without the signed nonce they would share
+        // one inner id and the receiver's dedup would drop the second.
+        let (o1, i1) = mostro_wrap(&c.alice_trade, &c.conv, &c.sign, "yes")
+            .await
+            .unwrap();
+        let (o2, i2) = mostro_wrap(&c.alice_trade, &c.conv, &c.sign, "yes")
+            .await
+            .unwrap();
+
+        assert_ne!(i1.id, i2.id, "identical sends collapsed to one inner id");
+        assert!(unwrap_now(&c, &o1).is_ok());
+        assert!(unwrap_now(&c, &o2).is_ok());
+    }
+
+    #[tokio::test]
+    async fn oversized_message_is_refused_at_send_time() {
+        let c = convo();
+        // Large enough that the NIP-44 ciphertext exceeds what any receiver
+        // accepts — must fail with the stable marker instead of publishing.
+        let big = "x".repeat(60 * 1024);
+        let err = mostro_wrap(&c.alice_trade, &c.conv, &c.sign, &big)
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("MessageTooLarge"), "got: {err}");
+
+        // A comfortably large message still round-trips (largest-accepted
+        // boundary is fuzzy by design: NIP-44 padding + JSON escaping).
+        let ok = "y".repeat(30 * 1024);
+        let (outer, _) = mostro_wrap(&c.alice_trade, &c.conv, &c.sign, &ok)
+            .await
+            .unwrap();
+        let inner = unwrap_now(&c, &outer).unwrap();
+        assert_eq!(inner.content, ok);
+    }
+
+    #[tokio::test]
+    async fn junk_tag_padding_is_rejected_before_verification() {
+        let c = convo();
+        let (_, inner) = mostro_wrap(&c.alice_trade, &c.conv, &c.sign, "hola")
+            .await
+            .unwrap();
+        let content = nip44::encrypt(
+            c.conv.secret_key(),
+            &c.conv.public_key(),
+            inner.as_json(),
+            nip44::Version::V2,
+        )
+        .unwrap();
+
+        // Small ciphertext, huge tag list — the raw-event bound must trip.
+        let mut builder = EventBuilder::new(Kind::PrivateDirectMessage, content)
+            .tag(Tag::public_key(c.conv.public_key()));
+        for i in 0..2000 {
+            builder = builder.tag(Tag::custom(
+                TagKind::custom("x"),
+                [format!("junk-{i}")],
+            ));
+        }
+        let padded = builder
+            .custom_created_at(inner.created_at)
+            .sign_with_keys(&c.sign)
+            .unwrap();
+
+        let err = unwrap_now(&c, &padded).unwrap_err().to_string();
+        assert!(err.contains("tags"), "got: {err}");
     }
 
     #[tokio::test]

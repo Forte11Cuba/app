@@ -86,6 +86,24 @@ impl SqliteStorage {
             }
         }
 
+        // Migration 2 → 3: drop the messages → trades foreign key. Chat keys
+        // (and therefore `messages.trade_id`) are per **order id**, while a
+        // taker's trades row uses a fresh UUID — with the FK in place every
+        // taker `save_message` failed and chat history/replay-dedup was lost
+        // on restart (PR #247 review). Rows are preserved.
+        let messages_has_fk: bool = sqlx::query_scalar(
+            "SELECT COUNT(*) > 0 FROM pragma_foreign_key_list('messages')",
+        )
+        .fetch_one(pool)
+        .await
+        .unwrap_or(false);
+        if messages_has_fk {
+            log::warn!("[db] migrating messages table from schema v2 to v3 (dropping FK)");
+            sqlx::query(crate::db::schema::SQLITE_DROP_MESSAGES_FK_SQL)
+                .execute(pool)
+                .await?;
+        }
+
         Ok(())
     }
 }
@@ -218,8 +236,16 @@ impl Storage for SqliteStorage {
     }
 
     async fn mark_messages_read(&self, trade_id: &str) -> Result<()> {
+        // `list_messages` reconstructs ChatMessage from the JSON `data` blob,
+        // so the flag must be rewritten there too — updating only the
+        // denormalized column resurrects unread badges after a restart.
+        // `json('true')` keeps the field a JSON boolean (json_set with a bare
+        // 1 would turn it into a number and break deserialization).
         sqlx::query(
-            "UPDATE messages SET is_read = 1 WHERE trade_id = ? AND is_read = 0",
+            "UPDATE messages
+             SET is_read = 1,
+                 data = json_set(data, '$.is_read', json('true'))
+             WHERE trade_id = ? AND is_read = 0",
         )
         .bind(trade_id)
         .execute(&self.pool)
@@ -545,43 +571,10 @@ mod tests {
         let path = temp_db_path();
         let storage = SqliteStorage::open(path.to_str().unwrap()).await.unwrap();
 
-        // messages.trade_id has a FK to trades(id) — store the trade first,
-        // exactly as the take-order flow does before chat ever runs.
-        let trade_id = "trade-dedup-1".to_string();
-        let trade = TradeInfo {
-            id: trade_id.clone(),
-            order: OrderInfo {
-                id: "order-dedup-1".into(),
-                kind: OrderKind::Sell,
-                status: OrderStatus::Active,
-                amount_sats: Some(1000),
-                fiat_amount: Some(10.0),
-                fiat_amount_min: None,
-                fiat_amount_max: None,
-                fiat_code: "VES".into(),
-                payment_method: "bank".into(),
-                premium: 0.0,
-                creator_pubkey: "maker".into(),
-                created_at: 1,
-                expires_at: None,
-                is_mine: false,
-                rating: 0.0,
-                total_reviews: 0,
-                days_active: 0,
-            },
-            role: TradeRole::Buyer,
-            counterparty_pubkey: "peer".into(),
-            current_step: TradeStep::Buyer(BuyerStep::FiatSent),
-            hold_invoice: None,
-            buyer_invoice: None,
-            trade_key_index: 1,
-            cooperative_cancel_state: None,
-            timeout_at: None,
-            started_at: 1,
-            completed_at: None,
-            outcome: None,
-        };
-        storage.save_trade(&trade).await.unwrap();
+        // Chat persists under the ORDER id — for takers there is no trades
+        // row with that id (trades.id is a fresh UUID), so this must succeed
+        // without any trades row at all (the old FK broke exactly this).
+        let trade_id = "order-dedup-1".to_string();
 
         let inner_id = "3f".repeat(32);
         assert!(!storage.message_exists(&inner_id).await.unwrap());
@@ -603,6 +596,84 @@ mod tests {
         // A re-wrapped replay carries the same inner id — now known, durably.
         assert!(storage.message_exists(&inner_id).await.unwrap());
         assert!(!storage.message_exists("un".repeat(32).as_str()).await.unwrap());
+
+        drop(storage);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[tokio::test]
+    async fn mark_messages_read_survives_rehydration() {
+        use crate::api::types::*;
+
+        let path = temp_db_path();
+        let storage = SqliteStorage::open(path.to_str().unwrap()).await.unwrap();
+
+        let trade_id = "order-read-1".to_string();
+        storage
+            .save_message(&ChatMessage {
+                id: "read-msg-1".into(),
+                trade_id: trade_id.clone(),
+                sender_pubkey: "peer".into(),
+                content: "hola".into(),
+                message_type: MessageType::Peer,
+                is_mine: false,
+                is_read: false,
+                has_attachment: false,
+                attachment: None,
+                created_at: 1,
+            })
+            .await
+            .unwrap();
+
+        storage.mark_messages_read(&trade_id).await.unwrap();
+
+        // Reopen: list_messages deserializes the JSON blob — the read flag
+        // must have been rewritten there, not only in the column.
+        drop(storage);
+        let storage = SqliteStorage::open(path.to_str().unwrap()).await.unwrap();
+        let msgs = storage.list_messages(&trade_id).await.unwrap();
+        assert_eq!(msgs.len(), 1);
+        assert!(msgs[0].is_read, "is_read lost on rehydration");
+
+        drop(storage);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[tokio::test]
+    async fn v2_messages_fk_is_dropped_and_rows_survive() {
+        let path = temp_db_path();
+        let url = format!("sqlite://{}?mode=rwc", path.to_str().unwrap());
+
+        // Build a v2-era database by hand: messages with the old FK and one
+        // row referencing a trades row (the maker case, which used to work).
+        {
+            let pool = SqlitePoolOptions::new().connect(&url).await.unwrap();
+            sqlx::query(
+                "CREATE TABLE trades (
+                     id TEXT PRIMARY KEY, data TEXT NOT NULL, status TEXT NOT NULL,
+                     started_at INTEGER NOT NULL, completed_at INTEGER);
+                 CREATE TABLE messages (
+                     id TEXT PRIMARY KEY, trade_id TEXT NOT NULL, data TEXT NOT NULL,
+                     is_read INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL,
+                     FOREIGN KEY (trade_id) REFERENCES trades(id));
+                 INSERT INTO trades VALUES ('t1', '{}', 'Active', 1, NULL);
+                 INSERT INTO messages VALUES ('m1', 't1',
+                     '{\"id\":\"m1\",\"trade_id\":\"t1\",\"sender_pubkey\":\"p\",\"content\":\"x\",\"message_type\":\"Peer\",\"is_mine\":false,\"is_read\":false,\"has_attachment\":false,\"attachment\":null,\"created_at\":1}',
+                     0, 1);",
+            )
+            .execute(&pool)
+            .await
+            .unwrap();
+            pool.close().await;
+        }
+
+        // open() must detect the FK, rebuild the table, and keep the row.
+        let storage = SqliteStorage::open(path.to_str().unwrap()).await.unwrap();
+        assert!(storage.message_exists("m1").await.unwrap());
+
+        // And an order-id message with no trades row now persists fine.
+        let msgs = storage.list_messages("t1").await.unwrap();
+        assert_eq!(msgs.len(), 1);
 
         drop(storage);
         let _ = std::fs::remove_file(&path);

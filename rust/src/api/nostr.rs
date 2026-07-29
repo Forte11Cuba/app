@@ -56,6 +56,11 @@ pub async fn initialize(relays: Option<Vec<String>>) -> Result<()> {
                     let _ = flush_message_queue().await;
                     // Start (or re-start) Kind 38383 order book subscription.
                     crate::api::orders::subscribe_orders().await;
+                    // Rebuild chat listeners for persisted active trades —
+                    // sessions are in-memory, so after a restart nothing else
+                    // would resubscribe. Idempotent: orders with a live chat
+                    // task are skipped by the single-owner guard.
+                    crate::api::messages::resubscribe_active_chats().await;
                 }
                 Ok(state) => {
                     log::info!("[nostr] connection state changed: {state:?}");
