@@ -1370,16 +1370,18 @@ class AppLocalizationsDe extends AppLocalizations {
   String get noLogsToShareTooltip => 'Keine Protokolle zum Teilen';
 
   @override
-  String get disableLoggingTooltip => 'Protokollierung deaktivieren';
+  String get disableLoggingTooltip =>
+      'Ausführliche Protokollierung deaktivieren';
 
   @override
-  String get enableLoggingTooltip => 'Protokollierung aktivieren';
+  String get enableLoggingTooltip => 'Ausführliche Protokollierung aktivieren';
 
   @override
-  String get loggingEnabledStatus => 'Protokollierung aktiviert';
+  String get loggingEnabledStatus => 'Ausführliche Protokollierung aktiviert';
 
   @override
-  String get loggingDisabledStatus => 'Protokollierung deaktiviert';
+  String get loggingDisabledStatus =>
+      'Ausführliche Protokollierung deaktiviert';
 
   @override
   String get noLogEntriesMessage => 'Keine Protokolleinträge';

@@ -205,7 +205,9 @@ User preferences stored locally.
 `pin_enabled` (bool), `biometric_enabled` (bool),
 `default_fiat_currency` (ISO code), `notification_enabled` (bool),
 `privacy_mode` (bool — global toggle, applies to future trades),
-`logging_enabled` (bool — diagnostic logging, runtime-only: not persisted to storage; startup code unconditionally sets this to `false` on process start regardless of any prior value).
+`logging_enabled` (bool — verbose diagnostic logging, runtime-only in the Rust
+store: the Flutter layer persists it and re-applies it on launch, so the user's
+choice survives a restart).
 
 ---
 

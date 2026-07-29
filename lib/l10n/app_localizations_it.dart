@@ -1364,16 +1364,16 @@ class AppLocalizationsIt extends AppLocalizations {
   String get noLogsToShareTooltip => 'Nessun log da condividere';
 
   @override
-  String get disableLoggingTooltip => 'Disattiva la registrazione';
+  String get disableLoggingTooltip => 'Disattiva la registrazione dettagliata';
 
   @override
-  String get enableLoggingTooltip => 'Attiva la registrazione';
+  String get enableLoggingTooltip => 'Attiva la registrazione dettagliata';
 
   @override
-  String get loggingEnabledStatus => 'Registrazione attivata';
+  String get loggingEnabledStatus => 'Registrazione dettagliata attivata';
 
   @override
-  String get loggingDisabledStatus => 'Registrazione disattivata';
+  String get loggingDisabledStatus => 'Registrazione dettagliata disattivata';
 
   @override
   String get noLogEntriesMessage => 'Nessuna voce di registro';
