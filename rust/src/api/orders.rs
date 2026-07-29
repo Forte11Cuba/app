@@ -1880,7 +1880,7 @@ async fn dispatch_mostro_message(
             );
             // Derive the ECDH shared key and store in session so the chat API
             // can encrypt/decrypt P2P messages and subscribe to the right p-tag.
-            on_peer_pubkey_received(&order_id, trade_pubkey_hex, &peer_pubkey_hex).await;
+            on_peer_pubkey_received(&order_id, &peer_pubkey_hex).await;
 
             // Sync the order status from the payload so the trade doesn't stay
             // stuck at Pending in the DB and in-memory order book.
@@ -2195,7 +2195,7 @@ fn map_core_status(s: mostro_core::order::Status) -> Option<OrderStatus> {
 /// stores it in the session, and spawns an incoming-chat subscription on the
 /// shared-key pubkey so we receive peer messages from the moment the trade
 /// goes active.
-async fn on_peer_pubkey_received(order_id: &str, trade_pubkey_hex: &str, peer_pubkey_hex: &str) {
+async fn on_peer_pubkey_received(order_id: &str, peer_pubkey_hex: &str) {
     // Resolve trade key index from order_id.
     let trade_index = match get_trade_key_index(order_id).await {
         Some(idx) => idx,
@@ -2256,15 +2256,26 @@ async fn on_peer_pubkey_received(order_id: &str, trade_pubkey_hex: &str, peer_pu
             "[orders] on_peer_pubkey_received: session not found for order={order_id}, skipping session update — incoming subscription still spawned"
         );
     }
-    // Spawn incoming-chat subscription on shared-key pubkey.
+    // Derive the chat conversation keys (K_conv / K_sign — HKDF split of the
+    // trade-key ECDH secret, protocol chat spec) and spawn the incoming-chat
+    // subscription pinned to their author key.
+    let (conv, sign) = match crate::crypto::chat_keys::derive_chat_keys(&trade_keys, &peer_pubkey)
+    {
+        Ok(pair) => pair,
+        Err(e) => {
+            log::error!("[orders] on_peer_pubkey_received: chat key derivation failed: {e}");
+            return;
+        }
+    };
     let order_id_owned = order_id.to_string();
-    let trade_pubkey_hex_owned = trade_pubkey_hex.to_string();
+    let my_trade_pubkey = trade_keys.public_key();
     crate::rt::spawn(async move {
         crate::api::messages::subscribe_incoming_chat(
             order_id_owned,
-            trade_pubkey_hex_owned,
-            shared_pubkey,
-            trade_keys,
+            my_trade_pubkey,
+            peer_pubkey,
+            conv,
+            sign,
         )
         .await;
     });
@@ -3505,8 +3516,7 @@ mod tests {
         // Use a random order_id that has no session — should log a warning only.
         on_peer_pubkey_received(
             &uuid::Uuid::new_v4().to_string(),
-            "aabbccdd", // trade_pubkey_hex (irrelevant, no trade key stored)
-            "aabbccdd", // peer_pubkey_hex (also irrelevant)
+            "aabbccdd", // peer_pubkey_hex (irrelevant, no trade key stored)
         )
         .await;
         // If we reach here without panicking the test passes.

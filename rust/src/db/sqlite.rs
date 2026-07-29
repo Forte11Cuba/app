@@ -209,6 +209,14 @@ impl Storage for SqliteStorage {
             .collect()
     }
 
+    async fn message_exists(&self, id: &str) -> Result<bool> {
+        let row: Option<(i64,)> = sqlx::query_as("SELECT 1 FROM messages WHERE id = ?")
+            .bind(id)
+            .fetch_optional(&self.pool)
+            .await?;
+        Ok(row.is_some())
+    }
+
     async fn mark_messages_read(&self, trade_id: &str) -> Result<()> {
         sqlx::query(
             "UPDATE messages SET is_read = 1 WHERE trade_id = ? AND is_read = 0",
@@ -528,6 +536,76 @@ mod tests {
         static COUNTER: AtomicU32 = AtomicU32::new(0);
         let n = COUNTER.fetch_add(1, Ordering::Relaxed);
         std::env::temp_dir().join(format!("mostro_test_{}_{n}.db", std::process::id()))
+    }
+
+    #[tokio::test]
+    async fn message_exists_is_durable_replay_dedup() {
+        use crate::api::types::*;
+
+        let path = temp_db_path();
+        let storage = SqliteStorage::open(path.to_str().unwrap()).await.unwrap();
+
+        // messages.trade_id has a FK to trades(id) — store the trade first,
+        // exactly as the take-order flow does before chat ever runs.
+        let trade_id = "trade-dedup-1".to_string();
+        let trade = TradeInfo {
+            id: trade_id.clone(),
+            order: OrderInfo {
+                id: "order-dedup-1".into(),
+                kind: OrderKind::Sell,
+                status: OrderStatus::Active,
+                amount_sats: Some(1000),
+                fiat_amount: Some(10.0),
+                fiat_amount_min: None,
+                fiat_amount_max: None,
+                fiat_code: "VES".into(),
+                payment_method: "bank".into(),
+                premium: 0.0,
+                creator_pubkey: "maker".into(),
+                created_at: 1,
+                expires_at: None,
+                is_mine: false,
+                rating: 0.0,
+                total_reviews: 0,
+                days_active: 0,
+            },
+            role: TradeRole::Buyer,
+            counterparty_pubkey: "peer".into(),
+            current_step: TradeStep::Buyer(BuyerStep::FiatSent),
+            hold_invoice: None,
+            buyer_invoice: None,
+            trade_key_index: 1,
+            cooperative_cancel_state: None,
+            timeout_at: None,
+            started_at: 1,
+            completed_at: None,
+            outcome: None,
+        };
+        storage.save_trade(&trade).await.unwrap();
+
+        let inner_id = "3f".repeat(32);
+        assert!(!storage.message_exists(&inner_id).await.unwrap());
+
+        let msg = ChatMessage {
+            id: inner_id.clone(),
+            trade_id,
+            sender_pubkey: "peer".into(),
+            content: "I sent the fiat".into(),
+            message_type: MessageType::Peer,
+            is_mine: false,
+            is_read: false,
+            has_attachment: false,
+            attachment: None,
+            created_at: 2,
+        };
+        storage.save_message(&msg).await.unwrap();
+
+        // A re-wrapped replay carries the same inner id — now known, durably.
+        assert!(storage.message_exists(&inner_id).await.unwrap());
+        assert!(!storage.message_exists("un".repeat(32).as_str()).await.unwrap());
+
+        drop(storage);
+        let _ = std::fs::remove_file(&path);
     }
 
     #[tokio::test]

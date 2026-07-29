@@ -9,11 +9,17 @@
 ///   proof, NIP-44 encryption and event signing/verification all live in
 ///   mostro-core. See `specs/005-transport-v2-migration/`.
 ///
+/// * `mostro_wrap` / `mostro_unwrap` — the P2P chat envelope
+///   (<https://mostro.network/protocol/chat.html>): a kind 14 event signed
+///   with `K_sign` (derived from the trade-key ECDH secret, see
+///   `crate::crypto::chat_keys`), carrying a NIP-44 encrypted kind 1 event
+///   signed by the sender's trade key. Replaced the simplified NIP-59 gift
+///   wrap, which allowed unattributable third-party flooding — issue #246.
+///
 /// * `wrap` / `unwrap` — raw JSON content gift-wrapped (NIP-59, Kind 1059),
-///   used for NIP-17-style text DMs (P2P chat, dispute admin messages). These
-///   are **not** part of the v2 migration: they keep using gift wrap. Their
-///   payloads are not `mostro_core::Message` values, so they stay on the
-///   local helper — see issue #101, "Scope".
+///   still used for dispute admin messages only. Their payloads are not
+///   `mostro_core::Message` values, so they stay on the local helper — see
+///   issue #101, "Scope".
 use anyhow::{anyhow, Result};
 use mostro_core::message::Message;
 use mostro_core::nip59::{UnwrappedMessage, WrapOptions};
@@ -86,10 +92,188 @@ pub async fn unwrap_mostro_message(
         .map_err(|e| anyhow!("unwrap_message failed: {e}"))
 }
 
-// ── NIP-17 text DMs (P2P chat, dispute admin) ────────────────────────────────
+// ── P2P chat envelope (kind 14 signed with K_sign) ───────────────────────────
+//
+// Implements the event structure and the crypto-side validation steps of the
+// chat spec. The caller (api/messages.rs) owns the stateful steps: outer-id
+// LRU, rate-limit budget, durable inner-id dedup, and the `since` cursor.
+//
+// mostro-core 0.14.1 still ships the superseded gift-wrap chat
+// (`wrap_chat_message` / `unwrap_chat_message`); this stays a local
+// implementation until the canonical one lands upstream — flagged in #246.
+
+/// Tolerance for clock skew, applied both between the inner and outer
+/// `created_at` and against the recipient's own clock.
+pub const MAX_CLOCK_SKEW_SECS: u64 = 60;
+
+/// Upper bound on the encrypted payload, enforced before decrypting.
+pub const MAX_CONTENT_BYTES: usize = 64 * 1024;
+
+/// Build the outer kind 14 event carrying an encrypted, trade-key-signed
+/// kind 1 event, per the P2P chat spec.
+///
+/// The inner event authenticates the sender; the outer event authenticates
+/// the conversation and is what clients (and relays) filter on. When the
+/// connected Mostro requires NIP-13 Proof of Work, the difficulty is applied
+/// to the outer event.
+///
+/// Returns `(outer, inner)` — the caller publishes `outer` and keeps
+/// `inner.id` as the message's durable identity (it is what the recipient's
+/// replay dedup keys on, so both sides agree on it).
+///
+/// # Arguments
+/// - `sender_trade`: the sender's trade keys, used to sign the inner event.
+/// - `conv`: `K_conv`, used to encrypt and as the `p` tag.
+/// - `sign`: `K_sign`, used to sign the outer event.
+/// - `message`: the plaintext payload (text, or attachment-metadata JSON).
+pub async fn mostro_wrap(
+    sender_trade: &Keys,
+    conv: &Keys,
+    sign: &Keys,
+    message: &str,
+) -> Result<(Event, Event)> {
+    // One timestamp for both events: the real moment the message is sent.
+    // Recipients reject a mismatch, which is what bounds replays. No NIP-59
+    // timestamp tweaking — it would break `since`-based sync.
+    let now = Timestamp::now();
+
+    let inner = EventBuilder::text_note(message)
+        .custom_created_at(now)
+        .build(sender_trade.public_key())
+        .sign(sender_trade)
+        .await
+        .map_err(|e| anyhow!("inner event sign failed: {e}"))?;
+
+    // NIP-44 self-encryption: K_conv is both sides of the key exchange.
+    let content = nip44::encrypt(
+        conv.secret_key(),
+        &conv.public_key(),
+        inner.as_json(),
+        nip44::Version::V2,
+    )
+    .map_err(|e| anyhow!("NIP-44 encrypt failed: {e}"))?;
+
+    // Exactly one `p` tag, ours. Anything else could hide the message from
+    // the `#p` query a dispute solver uses to rebuild the transcript.
+    let builder = EventBuilder::new(Kind::PrivateDirectMessage, content)
+        .tag(Tag::public_key(conv.public_key()))
+        .custom_created_at(now);
+
+    let pow = crate::mostro::pow::get_pow();
+    let builder = if pow > 0 { builder.pow(pow) } else { builder };
+
+    let outer = builder
+        .sign_with_keys(sign)
+        .map_err(|e| anyhow!("outer event sign failed: {e}"))?;
+
+    Ok((outer, inner))
+}
+
+/// Validate an incoming outer event and return the inner event.
+///
+/// Implements the crypto-side steps of the spec's cheapest-check-first
+/// validation order (author, `p` tag, absolute timestamp bound, size, outer
+/// signature, decrypt, inner signature, allowed signer, inner kind, relative
+/// timestamp bound). Three steps are the **caller's**, because they need
+/// state this function does not own: the bounded LRU on the outer id, the
+/// rate-limit budget, and the durable dedup on the inner id. A caller that
+/// skips the durable inner-id check accepts replays.
+///
+/// # Arguments
+/// - `conv`: `K_conv`, used to decrypt.
+/// - `sign_pubkey`: `pub(K_sign)` of this conversation.
+/// - `allowed_signers`: the buyer's and the seller's trade pubkeys.
+/// - `outer`: the received kind 14 event.
+/// - `now`: the recipient's current time, for the absolute timestamp bound.
+pub fn mostro_unwrap(
+    conv: &Keys,
+    sign_pubkey: &PublicKey,
+    allowed_signers: &[PublicKey],
+    outer: &Event,
+    now: Timestamp,
+) -> Result<Event> {
+    // A third party cannot produce a valid signature for this author, so this
+    // check is what makes flooding impossible. Relays enforce it too, via the
+    // `authors` filter; we re-check locally.
+    if outer.pubkey != *sign_pubkey {
+        return Err(anyhow!(
+            "outer event is not authored by the conversation signing key"
+        ));
+    }
+    if outer.kind != Kind::PrivateDirectMessage {
+        return Err(anyhow!("outer event is not kind 14"));
+    }
+
+    // Exactly one `p` tag, addressing this conversation. Anything else could
+    // be a message engineered to stay out of a dispute solver's `#p` query.
+    let mut p_tags = outer
+        .tags
+        .iter()
+        .filter(|t| t.kind() == TagKind::p());
+    match (p_tags.next().and_then(|t| t.content()), p_tags.next()) {
+        (Some(pk), None) if pk == conv.public_key().to_hex() => {}
+        _ => {
+            return Err(anyhow!(
+                "outer event must carry exactly one p tag for this conversation"
+            ))
+        }
+    }
+
+    // Absolute bound against our own clock. Without it a counterparty can
+    // date both events far in the future — they agree with each other, so the
+    // relative check below passes — and poison the `since` cursor, silencing
+    // the conversation until that date. The past is unbounded: catching up
+    // after being offline is legitimate.
+    if outer.created_at.as_secs() > now.as_secs().saturating_add(MAX_CLOCK_SKEW_SECS) {
+        return Err(anyhow!("outer event is dated too far in the future"));
+    }
+
+    if outer.content.len() > MAX_CONTENT_BYTES {
+        return Err(anyhow!("encrypted payload exceeds the accepted size"));
+    }
+
+    outer
+        .verify()
+        .map_err(|e| anyhow!("outer signature invalid: {e}"))?;
+
+    let decrypted = nip44::decrypt(conv.secret_key(), &conv.public_key(), &outer.content)
+        .map_err(|e| anyhow!("NIP-44 decrypt failed: {e}"))?;
+    let inner = Event::from_json(&decrypted)
+        .map_err(|e| anyhow!("inner event parse failed: {e}"))?;
+
+    // The only authentication of who wrote the message: both parties can sign
+    // the outer event, so it cannot tell the two sides apart. Reading the
+    // inner pubkey without verifying this signature accepts forged senders.
+    inner
+        .verify()
+        .map_err(|e| anyhow!("inner signature invalid: {e}"))?;
+    if !allowed_signers.contains(&inner.pubkey) {
+        return Err(anyhow!(
+            "inner event is signed by a key that is not a party to this order"
+        ));
+    }
+    if inner.kind != Kind::TextNote {
+        return Err(anyhow!("inner event is not kind 1"));
+    }
+
+    // Bounds how far back the caller's durable inner-id dedup has to reach: a
+    // re-wrap older than the tolerance is stale and rejected here, while one
+    // inside the window is caught by that dedup, never by this check.
+    let skew = inner
+        .created_at
+        .as_secs()
+        .abs_diff(outer.created_at.as_secs());
+    if skew > MAX_CLOCK_SKEW_SECS {
+        return Err(anyhow!("inner and outer timestamps disagree — stale re-wrap"));
+    }
+
+    Ok(inner)
+}
+
+// ── NIP-59 gift wrap (dispute admin messages only) ───────────────────────────
 //
 // These wrap arbitrary JSON content in a Kind 14 rumor. Kept as local glue
-// until `mostro-core` grows a DM helper or we migrate these off NIP-59.
+// for the admin/dispute channel; the P2P chat moved to `mostro_wrap` above.
 
 /// Wrap a plaintext JSON payload as a NIP-59 Gift Wrap event addressed to
 /// `recipient_pubkey`, signed by `sender_keys`.
@@ -151,6 +335,273 @@ pub async fn unwrap(recipient_keys: &Keys, gift_wrap_json: &str) -> Result<Strin
         .map_err(|e| anyhow!("NIP-59 unwrap failed: {e}"))?;
 
     Ok(unwrapped.rumor.as_json())
+}
+
+#[cfg(test)]
+mod chat_envelope_tests {
+    use super::*;
+    use crate::crypto::chat_keys::derive_chat_keys;
+
+    struct Convo {
+        alice_trade: Keys,
+        bob_trade: Keys,
+        conv: Keys,
+        sign: Keys,
+    }
+
+    fn convo() -> Convo {
+        let alice_trade = Keys::generate();
+        let bob_trade = Keys::generate();
+        let (conv, sign) = derive_chat_keys(&alice_trade, &bob_trade.public_key()).unwrap();
+        Convo {
+            alice_trade,
+            bob_trade,
+            conv,
+            sign,
+        }
+    }
+
+    fn unwrap_now(c: &Convo, outer: &Event) -> Result<Event> {
+        mostro_unwrap(
+            &c.conv,
+            &c.sign.public_key(),
+            &[c.alice_trade.public_key(), c.bob_trade.public_key()],
+            outer,
+            Timestamp::now(),
+        )
+    }
+
+    #[tokio::test]
+    async fn round_trip_authenticates_the_sender() {
+        let c = convo();
+        let (outer, inner) = mostro_wrap(&c.alice_trade, &c.conv, &c.sign, "hola")
+            .await
+            .unwrap();
+
+        // Wire shape: kind 14 authored by pub(K_sign), one p tag = pub(K_conv),
+        // and no field anywhere carrying a trade pubkey.
+        assert_eq!(outer.kind, Kind::PrivateDirectMessage);
+        assert_eq!(outer.pubkey, c.sign.public_key());
+        let outer_json = outer.as_json();
+        assert!(!outer_json.contains(&c.alice_trade.public_key().to_hex()));
+        assert!(!outer_json.contains(&c.bob_trade.public_key().to_hex()));
+
+        let got = unwrap_now(&c, &outer).unwrap();
+        assert_eq!(got.id, inner.id);
+        assert_eq!(got.pubkey, c.alice_trade.public_key());
+        assert_eq!(got.content, "hola");
+    }
+
+    #[tokio::test]
+    async fn wrong_outer_author_is_rejected() {
+        let c = convo();
+        let (_, inner) = mostro_wrap(&c.alice_trade, &c.conv, &c.sign, "hola")
+            .await
+            .unwrap();
+
+        // A third party re-encrypts a genuine inner event under K_conv (which
+        // it could hold after a dispute disclosure) but must sign the outer
+        // event with its own key — rejected on the author check.
+        let mallory = Keys::generate();
+        let content = nip44::encrypt(
+            c.conv.secret_key(),
+            &c.conv.public_key(),
+            inner.as_json(),
+            nip44::Version::V2,
+        )
+        .unwrap();
+        let forged = EventBuilder::new(Kind::PrivateDirectMessage, content)
+            .tag(Tag::public_key(c.conv.public_key()))
+            .custom_created_at(inner.created_at)
+            .sign_with_keys(&mallory)
+            .unwrap();
+
+        let err = unwrap_now(&c, &forged).unwrap_err().to_string();
+        assert!(err.contains("not authored"), "got: {err}");
+    }
+
+    #[tokio::test]
+    async fn missing_or_foreign_p_tag_is_rejected() {
+        let c = convo();
+        let (_, inner) = mostro_wrap(&c.alice_trade, &c.conv, &c.sign, "hola")
+            .await
+            .unwrap();
+        let content = nip44::encrypt(
+            c.conv.secret_key(),
+            &c.conv.public_key(),
+            inner.as_json(),
+            nip44::Version::V2,
+        )
+        .unwrap();
+
+        // No p tag: reaches us via the authors filter, but would be invisible
+        // in the #p transcript a dispute solver retrieves.
+        let no_p = EventBuilder::new(Kind::PrivateDirectMessage, content.clone())
+            .custom_created_at(inner.created_at)
+            .sign_with_keys(&c.sign)
+            .unwrap();
+        assert!(unwrap_now(&c, &no_p).is_err());
+
+        // Foreign p tag: same evasion, pointing elsewhere.
+        let foreign = EventBuilder::new(Kind::PrivateDirectMessage, content.clone())
+            .tag(Tag::public_key(Keys::generate().public_key()))
+            .custom_created_at(inner.created_at)
+            .sign_with_keys(&c.sign)
+            .unwrap();
+        assert!(unwrap_now(&c, &foreign).is_err());
+
+        // Two p tags: ours plus a decoy — "exactly one" is the contract.
+        let two = EventBuilder::new(Kind::PrivateDirectMessage, content)
+            .tag(Tag::public_key(c.conv.public_key()))
+            .tag(Tag::public_key(Keys::generate().public_key()))
+            .custom_created_at(inner.created_at)
+            .sign_with_keys(&c.sign)
+            .unwrap();
+        assert!(unwrap_now(&c, &two).is_err());
+    }
+
+    #[tokio::test]
+    async fn far_future_timestamp_is_rejected() {
+        let c = convo();
+        // Counterparty dates BOTH events in the future: the relative check
+        // passes, only the absolute bound against our clock catches it —
+        // this is the cursor-poisoning defence.
+        let future = Timestamp::from_secs(Timestamp::now().as_secs() + 7 * 24 * 3600);
+        let inner = EventBuilder::text_note("poison")
+            .custom_created_at(future)
+            .build(c.alice_trade.public_key())
+            .sign(&c.alice_trade)
+            .await
+            .unwrap();
+        let content = nip44::encrypt(
+            c.conv.secret_key(),
+            &c.conv.public_key(),
+            inner.as_json(),
+            nip44::Version::V2,
+        )
+        .unwrap();
+        let outer = EventBuilder::new(Kind::PrivateDirectMessage, content)
+            .tag(Tag::public_key(c.conv.public_key()))
+            .custom_created_at(future)
+            .sign_with_keys(&c.sign)
+            .unwrap();
+
+        let err = unwrap_now(&c, &outer).unwrap_err().to_string();
+        assert!(err.contains("future"), "got: {err}");
+    }
+
+    #[tokio::test]
+    async fn oversized_payload_is_rejected_before_decrypting() {
+        let c = convo();
+        let big = "x".repeat(MAX_CONTENT_BYTES + 1);
+        let outer = EventBuilder::new(Kind::PrivateDirectMessage, big)
+            .tag(Tag::public_key(c.conv.public_key()))
+            .sign_with_keys(&c.sign)
+            .unwrap();
+
+        let err = unwrap_now(&c, &outer).unwrap_err().to_string();
+        assert!(err.contains("size"), "got: {err}");
+    }
+
+    #[tokio::test]
+    async fn inner_signed_by_a_stranger_is_rejected() {
+        let c = convo();
+        // Outer is genuine (signed with K_sign) but the inner author is not a
+        // party to the order — e.g. a solver who obtained K_sign could still
+        // not impersonate either side.
+        let stranger = Keys::generate();
+        let (outer, _) = mostro_wrap(&stranger, &c.conv, &c.sign, "imposter")
+            .await
+            .unwrap();
+
+        let err = unwrap_now(&c, &outer).unwrap_err().to_string();
+        assert!(err.contains("not a party"), "got: {err}");
+    }
+
+    #[tokio::test]
+    async fn tampered_inner_signature_is_rejected() {
+        let c = convo();
+        let (_, inner) = mostro_wrap(&c.alice_trade, &c.conv, &c.sign, "hola")
+            .await
+            .unwrap();
+
+        // Forge the inner: claim Alice's pubkey without her signature.
+        let mut forged: serde_json::Value = serde_json::from_str(&inner.as_json()).unwrap();
+        forged["content"] = serde_json::json!("I sent the fiat");
+        let content = nip44::encrypt(
+            c.conv.secret_key(),
+            &c.conv.public_key(),
+            forged.to_string(),
+            nip44::Version::V2,
+        )
+        .unwrap();
+        let outer = EventBuilder::new(Kind::PrivateDirectMessage, content)
+            .tag(Tag::public_key(c.conv.public_key()))
+            .custom_created_at(inner.created_at)
+            .sign_with_keys(&c.sign)
+            .unwrap();
+
+        assert!(unwrap_now(&c, &outer).is_err());
+    }
+
+    #[tokio::test]
+    async fn stale_rewrap_outside_the_window_is_rejected() {
+        let c = convo();
+        let (_, inner) = mostro_wrap(&c.alice_trade, &c.conv, &c.sign, "fiat sent")
+            .await
+            .unwrap();
+
+        // Bob re-wraps Alice's genuine old message in a fresh outer event
+        // dated outside the tolerance window: the relative bound rejects it.
+        let later = Timestamp::from_secs(inner.created_at.as_secs() + MAX_CLOCK_SKEW_SECS + 10);
+        let content = nip44::encrypt(
+            c.conv.secret_key(),
+            &c.conv.public_key(),
+            inner.as_json(),
+            nip44::Version::V2,
+        )
+        .unwrap();
+        let rewrap = EventBuilder::new(Kind::PrivateDirectMessage, content)
+            .tag(Tag::public_key(c.conv.public_key()))
+            .custom_created_at(later)
+            .sign_with_keys(&c.sign)
+            .unwrap();
+
+        let err = mostro_unwrap(
+            &c.conv,
+            &c.sign.public_key(),
+            &[c.alice_trade.public_key(), c.bob_trade.public_key()],
+            &rewrap,
+            later,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("stale"), "got: {err}");
+    }
+
+    #[tokio::test]
+    async fn conv_key_alone_cannot_author_into_the_conversation() {
+        // Dispute disclosure grant: K_conv decrypts, but an outer event signed
+        // with K_conv (instead of K_sign) is rejected — read-only access.
+        let c = convo();
+        let (_, inner) = mostro_wrap(&c.alice_trade, &c.conv, &c.sign, "hola")
+            .await
+            .unwrap();
+        let content = nip44::encrypt(
+            c.conv.secret_key(),
+            &c.conv.public_key(),
+            inner.as_json(),
+            nip44::Version::V2,
+        )
+        .unwrap();
+        let signed_with_conv = EventBuilder::new(Kind::PrivateDirectMessage, content)
+            .tag(Tag::public_key(c.conv.public_key()))
+            .custom_created_at(inner.created_at)
+            .sign_with_keys(&c.conv)
+            .unwrap();
+
+        assert!(unwrap_now(&c, &signed_with_conv).is_err());
+    }
 }
 
 #[cfg(test)]

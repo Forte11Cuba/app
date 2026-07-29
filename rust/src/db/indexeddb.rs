@@ -49,6 +49,12 @@ impl Storage for IndexedDbStorage {
     async fn mark_messages_read(&self, _trade_id: &str) -> Result<()> {
         Err(anyhow!("IndexedDB not yet implemented"))
     }
+    async fn message_exists(&self, _id: &str) -> Result<bool> {
+        // Stub contract (#233): answer "not stored" so the caller falls back
+        // to its in-memory dedup. On web, replay dedup is process-lifetime
+        // only until IndexedDB lands.
+        Ok(false)
+    }
     async fn save_relay(&self, _relay: &RelayInfo) -> Result<()> {
         Err(anyhow!("IndexedDB not yet implemented"))
     }
