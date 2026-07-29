@@ -81,6 +81,24 @@ pub(crate) fn set_verbose_logging(enabled: bool) {
     });
 }
 
+/// Dependency targets that dump raw protocol traffic at `Debug`:
+/// `nostr-relay-pool` logs every outgoing and incoming relay message verbatim
+/// (`relay/inner.rs:818` and `:1092`), which would put pubkeys, subscription
+/// filters and event payloads on the console and in the retained buffer.
+const TRAFFIC_TARGETS: &[&str] = &["nostr_relay_pool"];
+
+/// Per-target ceiling, never above the global filter. Capping these at `Info`
+/// keeps their connection and error records, which is why the `tracing` bridge
+/// exists, without retaining the traffic itself.
+fn max_level_for(target: &str) -> log::LevelFilter {
+    let global = log::max_level();
+    if TRAFFIC_TARGETS.iter().any(|t| target.starts_with(t)) {
+        global.min(log::LevelFilter::Info)
+    } else {
+        global
+    }
+}
+
 // ── Logger ───────────────────────────────────────────────────────────────────
 
 static BRIDGE_LOGGER: BridgeLogger = BridgeLogger;
@@ -113,7 +131,7 @@ impl Drop for ReentryGuard {
 
 impl log::Log for BridgeLogger {
     fn enabled(&self, metadata: &log::Metadata) -> bool {
-        metadata.level() <= log::max_level()
+        metadata.level() <= max_level_for(metadata.target())
     }
 
     fn log(&self, record: &log::Record) {
@@ -346,6 +364,29 @@ mod tests {
         let entry = recv_tagged(&mut stream, "tracing_probe").await;
         assert_eq!(entry.level, LogLevel::Warning);
         assert!(entry.message.contains("event from a dependency"));
+    }
+
+    /// Raw relay traffic must not reach the console or the retained buffer,
+    /// where sharing, screenshots and logcat would expose it unredacted.
+    #[test]
+    fn traffic_targets_are_capped_below_debug() {
+        use log::Log as _;
+
+        install_log_bridge();
+        const PAYLOAD: &str = "traffic-probe-payload";
+
+        log::debug!(target: "nostr_relay_pool::relay::inner", "Received '{PAYLOAD}'");
+
+        assert!(!recent_logs().iter().any(|e| e.message.contains(PAYLOAD)));
+        assert!(
+            BRIDGE_LOGGER.enabled(
+                &log::Metadata::builder()
+                    .level(log::Level::Info)
+                    .target("nostr_relay_pool::relay::inner")
+                    .build()
+            ),
+            "connection and error records from the same crate must still pass",
+        );
     }
 
     /// `blog_*` must go through the same fan-out as the `log::` macros.

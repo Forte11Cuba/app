@@ -3,8 +3,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mostro/src/rust/api/logging.dart' as logging_api;
 import 'package:mostro/src/rust/api/types.dart';
 
-/// Entries held in the provider, matching the Rust ring buffer's own bound.
-const logEntriesLimit = 500;
+/// Entries held in the provider. Matches `BUFFER_CAPACITY` in
+/// `rust/src/api/logging.rs`, so the screen shows and shares every entry Rust
+/// still holds.
+const logEntriesLimit = 1000;
 
 /// Pulls the next live entry, or null once the stream closes.
 typedef LogEntryReader = Future<LogEntry?> Function();

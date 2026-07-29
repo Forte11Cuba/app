@@ -91,18 +91,19 @@ void main() {
   });
 
   test('caps the list and evicts the oldest entry', () async {
+    const newest = logEntriesLimit + 100;
     final history = [
-      for (var id = 600; id >= 1; id--) entry(id),
+      for (var id = newest; id >= 1; id--) entry(id),
     ];
-    final s = seams(history: history, live: [entry(601)]);
+    final s = seams(history: history, live: [entry(newest + 1)]);
     final container = createContainer(overrides: s.overrides);
 
-    final seeded = await valueWhere(container, (v) => v.first.id == 600);
+    final seeded = await valueWhere(container, (v) => v.first.id == newest);
     expect(seeded, hasLength(logEntriesLimit));
-    expect(seeded.last.id, 101);
+    expect(seeded.last.id, newest - logEntriesLimit + 1);
 
-    final entries = await valueWhere(container, (v) => v.first.id == 601);
+    final entries = await valueWhere(container, (v) => v.first.id == newest + 1);
     expect(entries, hasLength(logEntriesLimit));
-    expect(entries.last.id, 102);
+    expect(entries.last.id, newest - logEntriesLimit + 2);
   });
 }
