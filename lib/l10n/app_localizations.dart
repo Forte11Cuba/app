@@ -4111,6 +4111,132 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Payment method'**
   String get bondSlashedDetailPaymentMethod;
+
+  /// About screen — a pluralized day count
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{{count} day} other{{count} days}}'**
+  String aboutDaysValue(int count);
+
+  /// About screen — section header shown when the node settles trades with Cashu ecash instead of Lightning
+  ///
+  /// In en, this message translates to:
+  /// **'Cashu escrow'**
+  String get aboutCashuEscrowSection;
+
+  /// About screen — Cashu mint URL row label
+  ///
+  /// In en, this message translates to:
+  /// **'Mint'**
+  String get aboutCashuMintUrlLabel;
+
+  /// Info dialog explanation for the Cashu Mint field
+  ///
+  /// In en, this message translates to:
+  /// **'The Cashu mint this node uses for every escrow. Ecash locked for a trade is issued by this mint; there is no per-order choice.'**
+  String get aboutCashuMintUrlExplanation;
+
+  /// About screen — shown when a node says it runs Cashu but publishes no mint, which means trades cannot run
+  ///
+  /// In en, this message translates to:
+  /// **'Not advertised'**
+  String get aboutCashuMintNotAdvertised;
+
+  /// About screen — Cashu escrow locktime row label
+  ///
+  /// In en, this message translates to:
+  /// **'Escrow locktime'**
+  String get aboutCashuLocktimeLabel;
+
+  /// Info dialog explanation for the Cashu Escrow locktime field
+  ///
+  /// In en, this message translates to:
+  /// **'How long the seller\'s ecash stays locked in escrow. Once it expires the seller can reclaim the funds without the node\'s help.'**
+  String get aboutCashuLocktimeExplanation;
+
+  /// About screen — Cashu settlement margin row label
+  ///
+  /// In en, this message translates to:
+  /// **'Settlement margin'**
+  String get aboutCashuSettlementMarginLabel;
+
+  /// Info dialog explanation for the Cashu Settlement margin field
+  ///
+  /// In en, this message translates to:
+  /// **'How close to the escrow expiry this node stops accepting \'fiat sent\', so a trade is never settled with too little time left to complete it.'**
+  String get aboutCashuSettlementMarginExplanation;
+
+  /// Name of the Lightning settlement backend
+  ///
+  /// In en, this message translates to:
+  /// **'Lightning'**
+  String get escrowModeLightning;
+
+  /// Name of the Cashu ecash settlement backend
+  ///
+  /// In en, this message translates to:
+  /// **'Cashu'**
+  String get escrowModeCashu;
+
+  /// Shown when the node publishes no settlement backend, which is not the same as knowing it uses Lightning
+  ///
+  /// In en, this message translates to:
+  /// **'Not advertised'**
+  String get escrowModeUnknown;
+
+  /// Settings — title of the debug-only card that forces the escrow backend
+  ///
+  /// In en, this message translates to:
+  /// **'Escrow backend (developer)'**
+  String get settingsEscrowOverrideTitle;
+
+  /// Settings — subtitle of the debug-only escrow backend override card
+  ///
+  /// In en, this message translates to:
+  /// **'Test Cashu against a node that does not advertise it yet. Debug builds only.'**
+  String get settingsEscrowOverrideSubtitle;
+
+  /// Settings — switch that makes the app treat the node as running Cashu regardless of what it advertises
+  ///
+  /// In en, this message translates to:
+  /// **'Force Cashu escrow'**
+  String get settingsForceCashuLabel;
+
+  /// Settings — text field for a mint URL to use instead of the node's
+  ///
+  /// In en, this message translates to:
+  /// **'Mint URL override'**
+  String get settingsCashuMintOverrideLabel;
+
+  /// Settings — button that saves the mint URL override
+  ///
+  /// In en, this message translates to:
+  /// **'Apply'**
+  String get settingsCashuMintOverrideApply;
+
+  /// Settings — error shown when the entered mint URL is rejected
+  ///
+  /// In en, this message translates to:
+  /// **'That is not a valid mint URL. Use http or https with a host.'**
+  String get settingsCashuMintOverrideInvalid;
+
+  /// Settings — the backend the app is actually acting on, overrides included
+  ///
+  /// In en, this message translates to:
+  /// **'Effective backend: {mode}'**
+  String settingsEscrowEffectiveMode(String mode);
+
+  /// Settings — the mint the app is actually acting on, overrides included
+  ///
+  /// In en, this message translates to:
+  /// **'Effective mint: {mint}'**
+  String settingsEscrowEffectiveMint(String mint);
+
+  /// Settings — warning shown when Cashu mode is on but no mint is available, so no Cashu path can run
+  ///
+  /// In en, this message translates to:
+  /// **'Cashu cannot run without a mint — set one below.'**
+  String get settingsEscrowCashuUnavailable;
 }
 
 class _AppLocalizationsDelegate

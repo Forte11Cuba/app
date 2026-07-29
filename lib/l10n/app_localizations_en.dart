@@ -2297,4 +2297,85 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get bondSlashedDetailPaymentMethod => 'Payment method';
+
+  @override
+  String aboutDaysValue(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count days',
+      one: '$count day',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get aboutCashuEscrowSection => 'Cashu escrow';
+
+  @override
+  String get aboutCashuMintUrlLabel => 'Mint';
+
+  @override
+  String get aboutCashuMintUrlExplanation =>
+      'The Cashu mint this node uses for every escrow. Ecash locked for a trade is issued by this mint; there is no per-order choice.';
+
+  @override
+  String get aboutCashuMintNotAdvertised => 'Not advertised';
+
+  @override
+  String get aboutCashuLocktimeLabel => 'Escrow locktime';
+
+  @override
+  String get aboutCashuLocktimeExplanation =>
+      'How long the seller\'s ecash stays locked in escrow. Once it expires the seller can reclaim the funds without the node\'s help.';
+
+  @override
+  String get aboutCashuSettlementMarginLabel => 'Settlement margin';
+
+  @override
+  String get aboutCashuSettlementMarginExplanation =>
+      'How close to the escrow expiry this node stops accepting \'fiat sent\', so a trade is never settled with too little time left to complete it.';
+
+  @override
+  String get escrowModeLightning => 'Lightning';
+
+  @override
+  String get escrowModeCashu => 'Cashu';
+
+  @override
+  String get escrowModeUnknown => 'Not advertised';
+
+  @override
+  String get settingsEscrowOverrideTitle => 'Escrow backend (developer)';
+
+  @override
+  String get settingsEscrowOverrideSubtitle =>
+      'Test Cashu against a node that does not advertise it yet. Debug builds only.';
+
+  @override
+  String get settingsForceCashuLabel => 'Force Cashu escrow';
+
+  @override
+  String get settingsCashuMintOverrideLabel => 'Mint URL override';
+
+  @override
+  String get settingsCashuMintOverrideApply => 'Apply';
+
+  @override
+  String get settingsCashuMintOverrideInvalid =>
+      'That is not a valid mint URL. Use http or https with a host.';
+
+  @override
+  String settingsEscrowEffectiveMode(String mode) {
+    return 'Effective backend: $mode';
+  }
+
+  @override
+  String settingsEscrowEffectiveMint(String mint) {
+    return 'Effective mint: $mint';
+  }
+
+  @override
+  String get settingsEscrowCashuUnavailable =>
+      'Cashu cannot run without a mint — set one below.';
 }

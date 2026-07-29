@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -8,6 +9,7 @@ import 'package:mostro/l10n/app_localizations.dart';
 import 'package:mostro/features/settings/providers/nwc_provider.dart';
 import 'package:mostro/features/settings/providers/settings_provider.dart';
 import 'package:mostro/features/settings/widgets/currency_selector_dialog.dart';
+import 'package:mostro/features/settings/widgets/escrow_mode_dev_card.dart';
 import 'package:mostro/features/settings/widgets/language_selector.dart';
 import 'package:mostro/features/settings/widgets/mostro_node_selector.dart';
 import 'package:mostro/features/settings/widgets/relay_management_card.dart';
@@ -192,6 +194,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             subtitle: truncatePubkey(mostroPubkey),
             onTap: () => showMostroNodeSelector(context),
           ),
+
+          // 9 — Escrow backend override. Debug builds only: forcing a backend
+          // the node does not run is a testing affordance, never a user
+          // setting. See docs/cashu/README.md §4.3.
+          if (kDebugMode) const EscrowModeDevCard(),
         ],
       ),
     );
