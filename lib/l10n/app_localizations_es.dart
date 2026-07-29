@@ -2146,9 +2146,29 @@ class AppLocalizationsEs extends AppLocalizations {
   String get marketPriceCaption => 'Precio de mercado';
 
   @override
-  String orderReputationStats(int trades, int days) {
-    return ' · $trades operaciones · $days días';
+  String reputationTradesLabel(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'operaciones',
+      one: 'operación',
+    );
+    return '$_temp0';
   }
+
+  @override
+  String reputationDaysLabel(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'días',
+      one: 'día',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get sortNewest => 'Orden: más recientes ▾';
 
   @override
   String get hideEarlierEvents => 'Ocultar eventos anteriores';

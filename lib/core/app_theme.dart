@@ -143,6 +143,102 @@ class AppColors extends ThemeExtension<AppColors> {
   }
 }
 
+// ── Order Book redesign palette ───────────────────────────────────────────────
+
+/// Palette of the "Mostro UX Redesign" mock (Claude Design, screen
+/// #3 · Order book). Applied only to the redesigned Order Book screen while
+/// the rest of the app migrates screen by screen; dark values follow the mock
+/// except where the mock fails WCAG AA (4.5:1) on its real rendered surface —
+/// [textTertiary] and [red] are lightened just enough to pass. The mock is
+/// dark-only, so [light] is a legibility mapping onto the existing light
+/// surfaces, darkened where needed to pass AA. Every text-role/surface pair is
+/// locked by `test/core/order_book_palette_contrast_test.dart`.
+@immutable
+class OrderBookPalette {
+  const OrderBookPalette({
+    required this.bg,
+    required this.bgCard,
+    required this.bgElevated,
+    required this.border,
+    required this.textPrimary,
+    required this.textSecondary,
+    required this.textTertiary,
+    required this.tabInactive,
+    required this.green,
+    required this.greenDim,
+    required this.gold,
+    required this.goldDim,
+    required this.blue,
+    required this.blueFill,
+    required this.amber,
+    required this.red,
+  });
+
+  final Color bg;
+  final Color bgCard;
+  final Color bgElevated;
+  final Color border;
+  final Color textPrimary;
+  final Color textSecondary;
+  final Color textTertiary;
+
+  /// Unselected BUY/SELL tab label. In dark this keeps the mock's dimmed
+  /// value (a deliberately de-emphasized state); in light it must clear
+  /// WCAG AA since the tab is an interactive control.
+  final Color tabInactive;
+  final Color green;
+  final Color greenDim;
+  final Color gold;
+  final Color goldDim;
+  final Color blue;
+  final Color blueFill;
+  final Color amber;
+  final Color red;
+
+  static const dark = OrderBookPalette(
+    bg: Color(0xFF0F151C),
+    bgCard: Color(0xFF1A2029),
+    bgElevated: Color(0xFF222A35),
+    border: Color(0x0FFFFFFF), // rgba(255,255,255,0.06)
+    textPrimary: Color(0xFFF2F4F7),
+    textSecondary: Color(0xFFA8B0BC),
+    // Mock #6B7280 is 3.4:1 on the card — lightened to pass AA (4.8:1).
+    textTertiary: Color(0xFF848C9A),
+    tabInactive: Color(0xFF4A5060),
+    green: Color(0xFF8FE04A),
+    greenDim: Color(0xFF2A4015),
+    gold: Color(0xFFFFC940),
+    goldDim: Color(0xFF3A2D0A),
+    blue: Color(0xFF7BB4F0),
+    blueFill: Color(0xFF1E2B42),
+    amber: Color(0xFFE89C3C),
+    // Mock #E5484D is 3.7:1 on its 13% pill fill — lightened to pass AA.
+    red: Color(0xFFF27D81),
+  );
+
+  static const light = OrderBookPalette(
+    bg: Color(0xFFFFFFFF),
+    bgCard: Color(0xFFF5F5F5),
+    bgElevated: Color(0xFFEEEEEE),
+    border: Color(0x14000000),
+    textPrimary: Color(0xFF1A1A1A),
+    textSecondary: Color(0xFF666666),
+    textTertiary: Color(0xFF696969),
+    tabInactive: Color(0xFF666666),
+    green: Color(0xFF426800),
+    greenDim: Color(0x26426800),
+    gold: Color(0xFF7E5C09),
+    goldDim: Color(0x267E5C09),
+    blue: Color(0xFF35638F),
+    blueFill: Color(0x2635638F),
+    amber: Color(0xFF845010),
+    red: Color(0xFFAE3333),
+  );
+
+  static OrderBookPalette of(BuildContext context) =>
+      Theme.of(context).brightness == Brightness.dark ? dark : light;
+}
+
 // ── Spacing tokens ─────────────────────────────────────────────────────────────
 
 abstract final class AppSpacing {

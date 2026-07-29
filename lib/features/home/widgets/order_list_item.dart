@@ -1,16 +1,20 @@
 import 'package:clock/clock.dart';
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 
 import 'package:mostro/core/app_theme.dart';
 import 'package:mostro/features/home/providers/home_order_providers.dart';
 import 'package:mostro/features/home/providers/order_reason_provider.dart';
 import 'package:mostro/l10n/app_localizations.dart';
 
-/// Order list item card — "reason to pick" redesign.
+/// Order list item card — pixel-exact port of the "Mostro UX Redesign" mock
+/// (screen #3 · Order book with reasons to pick).
 ///
+/// Layout, colors, and proportions mirror the mock's offer card:
+/// reason pill + timestamp, 26px amount row with premium pill, "Market price"
+/// caption, elevated numeric-reputation strip, and payment-method line.
 /// Each card may carry one [OrderReason] pill (computed once per visible list
-/// and passed in — never computed here), a color-coded premium pill, and a
-/// numeric reputation row.
+/// and passed in — never computed here).
 class OrderListItem extends StatelessWidget {
   const OrderListItem({
     super.key,
@@ -30,115 +34,122 @@ class OrderListItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final colors = theme.extension<AppColors>();
-    final cardBg = colors?.backgroundCard ?? const Color(0xFF1E2230);
-    final inputBg = colors?.backgroundInput ?? const Color(0xFF252A3A);
-    final textPrimary = colors?.textPrimary ?? Colors.white;
-    final textSec = colors?.textSecondary ?? const Color(0xFFB0B3C6);
-    final green = colors?.mostroGreen ?? const Color(0xFF8CC63F);
-    final sellColor = colors?.sellColor ?? const Color(0xFFFF8A8A);
-    final amber = colors?.warningAmber ?? const Color(0xFFE89C3C);
-    final blueFill = colors?.blueAccent ?? const Color(0xFF35485E);
-
+    final pal = OrderBookPalette.of(context);
     final l10n = AppLocalizations.of(context);
-    final isSelling = order.kind == 'sell';
-    final typeLabel = switch ((order.isMine, isSelling)) {
-      (true, true) => l10n.orderPillYouAreSelling,
-      (true, false) => l10n.orderPillYouAreBuying,
-      (false, true) => l10n.orderPillSelling,
-      (false, false) => l10n.orderPillBuying,
-    };
-    final typeColor = isSelling ? sellColor : green;
+    final locale = Localizations.localeOf(context).toString();
     final flag = currencyFlags[order.fiatCode] ?? '';
 
-    // Premium pill: green < 2 (incl. negative), amber 2–5, sell-red > 5.
+    // Premium pill: green < 2 (incl. negative), amber 2–5, red > 5.
     final premiumColor = order.premium < 2
-        ? green
+        ? pal.green
         : order.premium > 5
-            ? sellColor
-            : amber;
+            ? pal.red
+            : pal.amber;
     final premiumText =
-        '${order.premium >= 0 ? '+' : ''}${order.premium.toStringAsFixed(1)}%';
+        '${NumberFormat('+0.0;-0.0', locale).format(order.premium)}%';
 
-    // Reason pill styling (gold per design ≈ #FFC940; blue per info-blue).
     final (reasonLabel, reasonColor, reasonBg) = switch (reason) {
       OrderReason.bestPremium => (
           l10n.reasonBestPremium,
-          green,
-          green.withValues(alpha: 0.15),
+          pal.green,
+          pal.greenDim,
         ),
       OrderReason.mostReputable => (
           l10n.reasonMostReputable,
-          Colors.amber,
-          Colors.amber.withValues(alpha: 0.15),
+          pal.gold,
+          pal.goldDim,
         ),
       OrderReason.justPublished => (
           l10n.reasonJustPublished,
-          const Color(0xFF7BB4F0),
-          blueFill.withValues(alpha: 0.55),
+          pal.blue,
+          pal.blueFill,
         ),
       null => (null, null, null),
     };
 
-    return GestureDetector(
-      onTap: onTap,
-      behavior: HitTestBehavior.opaque,
-      child: Container(
-        padding: const EdgeInsets.all(AppSpacing.md),
-        decoration: BoxDecoration(
-          color: cardBg,
-          borderRadius: BorderRadius.circular(AppRadius.card),
-        ),
+    // The mock's cards carry no buy/sell pill (the tabs already scope the
+    // side); the only functional signal kept is "yours" on own orders.
+    final mineLabel = order.isMine
+        ? (order.kind == 'sell'
+            ? l10n.orderPillYouAreSelling
+            : l10n.orderPillYouAreBuying)
+        : null;
+
+    // Material + InkWell (not GestureDetector) so each offer card is
+    // focusable, keyboard-activatable, and announced as a button.
+    return Material(
+      color: pal.bgCard,
+      borderRadius: BorderRadius.circular(16),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(16),
+        child: Padding(
+        padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Row 1: reason pill + type pill + relative timestamp
+            // Row 1: reason pill (+ "yours" pill) · relative timestamp
             Row(
               children: [
                 if (reasonLabel != null) ...[
-                  _Pill(
-                    label: reasonLabel,
-                    color: reasonColor!,
-                    background: reasonBg!,
+                  Flexible(
+                    child: _Pill(
+                      label: reasonLabel,
+                      color: reasonColor!,
+                      background: reasonBg!,
+                    ),
                   ),
-                  const SizedBox(width: AppSpacing.xs),
+                  const SizedBox(width: 6),
                 ],
-                Flexible(
-                  child: _Pill(
-                    label: typeLabel,
-                    color: typeColor,
-                    background: typeColor.withValues(alpha: 0.12),
-                    fontSize: 10,
+                if (mineLabel != null) ...[
+                  Flexible(
+                    child: _Pill(
+                      label: mineLabel,
+                      color: pal.textSecondary,
+                      background: pal.bgElevated,
+                    ),
                   ),
-                ),
+                  const SizedBox(width: 6),
+                ],
                 const Spacer(),
                 Text(
                   _relativeTime(order.createdAt, l10n),
-                  style: theme.textTheme.bodySmall!.copyWith(color: textSec),
+                  style: TextStyle(fontSize: 11, color: pal.textTertiary),
                 ),
               ],
             ),
-            const SizedBox(height: AppSpacing.sm),
+            const SizedBox(height: 10),
 
-            // Row 2: fiat amount + currency + flag, premium pill right-aligned
+            // Row 2: amount + currency + flag · premium pill
             Row(
-              crossAxisAlignment: CrossAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.baseline,
+              textBaseline: TextBaseline.alphabetic,
               children: [
                 Flexible(
                   child: Text(
                     order.displayAmount,
-                    style: theme.textTheme.headlineMedium,
+                    style: TextStyle(
+                      fontSize: 26,
+                      fontWeight: FontWeight.w700,
+                      color: pal.textPrimary,
+                      height: 1.2,
+                    ),
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
-                const SizedBox(width: AppSpacing.sm),
+                const SizedBox(width: 8),
                 Text(
-                  '${order.fiatCode} $flag',
-                  style: theme.textTheme.bodyMedium!.copyWith(
+                  order.fiatCode,
+                  style: TextStyle(
+                    fontSize: 14,
                     fontWeight: FontWeight.w600,
+                    color: pal.textSecondary,
                   ),
                 ),
+                if (flag.isNotEmpty) ...[
+                  const SizedBox(width: 8),
+                  Text(flag, style: const TextStyle(fontSize: 18)),
+                ],
                 const Spacer(),
                 _Pill(
                   label: premiumText,
@@ -147,80 +158,79 @@ class OrderListItem extends StatelessWidget {
                 ),
               ],
             ),
-            const SizedBox(height: 2),
+            const SizedBox(height: 4),
 
-            // Row 3: small secondary "Market price" caption
+            // Row 3: "Market price" caption
             Text(
               l10n.marketPriceCaption,
-              style: TextStyle(color: textSec, fontSize: 11),
+              style: TextStyle(fontSize: 11, color: pal.textTertiary),
             ),
-            const SizedBox(height: AppSpacing.sm),
+            const SizedBox(height: 10),
 
             // Row 4: numeric reputation — ★ 4.9 · 47 trades · 312 days
             Container(
               width: double.infinity,
-              padding: const EdgeInsets.symmetric(
-                horizontal: AppSpacing.sm,
-                vertical: AppSpacing.xs,
-              ),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
               decoration: BoxDecoration(
-                color: inputBg,
-                borderRadius: BorderRadius.circular(AppRadius.chip),
+                color: pal.bgElevated,
+                borderRadius: BorderRadius.circular(10),
               ),
               child: Row(
                 children: [
-                  const Icon(Icons.star, size: 14, color: Colors.amber),
-                  const SizedBox(width: AppSpacing.xs),
+                  Icon(Icons.star, size: 16, color: pal.gold),
+                  const SizedBox(width: 4),
                   Text(
-                    order.rating.toStringAsFixed(1),
+                    _formatRating(order.rating, locale),
                     style: TextStyle(
-                      color: textPrimary,
+                      color: pal.textPrimary,
                       fontSize: 13,
                       fontWeight: FontWeight.w700,
                     ),
                   ),
+                  const SizedBox(width: 14),
+                  Text('·',
+                      style: TextStyle(fontSize: 12, color: pal.textTertiary)),
+                  const SizedBox(width: 14),
+                  _StatText(
+                    value:
+                        NumberFormat.decimalPattern(locale).format(order.tradeCount),
+                    label: l10n.reputationTradesLabel(order.tradeCount),
+                    palette: pal,
+                  ),
+                  const SizedBox(width: 14),
+                  Text('·',
+                      style: TextStyle(fontSize: 12, color: pal.textTertiary)),
+                  const SizedBox(width: 14),
                   Flexible(
-                    child: Text(
-                      l10n.orderReputationStats(
-                          order.tradeCount, order.daysActive),
-                      style: TextStyle(color: textSec, fontSize: 12),
-                      overflow: TextOverflow.ellipsis,
+                    child: _StatText(
+                      value: NumberFormat.decimalPattern(locale)
+                          .format(order.daysActive),
+                      label: l10n.reputationDaysLabel(order.daysActive),
+                      palette: pal,
                     ),
                   ),
                 ],
               ),
             ),
-            const SizedBox(height: AppSpacing.xs),
+            const SizedBox(height: 8),
 
             // Row 5: payment methods
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(
-                horizontal: AppSpacing.sm,
-                vertical: AppSpacing.xs,
-              ),
-              decoration: BoxDecoration(
-                color: inputBg,
-                borderRadius: BorderRadius.circular(AppRadius.chip),
-              ),
-              child: Row(
-                children: [
-                  Icon(Icons.payment_outlined, size: 14, color: textSec),
-                  const SizedBox(width: AppSpacing.xs),
-                  Expanded(
-                    child: Text(
-                      order.paymentMethod,
-                      style: TextStyle(color: textSec, fontSize: 12),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                ],
-              ),
+            Text(
+              order.paymentMethod,
+              style: TextStyle(fontSize: 12, color: pal.textSecondary),
+              overflow: TextOverflow.ellipsis,
             ),
           ],
         ),
+        ),
       ),
     );
+  }
+
+  /// Mock renders raw ratings (4.9, 4.95): up to 2 decimals, no trailing
+  /// zeros, localized decimal separator.
+  String _formatRating(double rating, String locale) {
+    return NumberFormat('0.##', locale).format(rating);
   }
 
   String _relativeTime(DateTime dt, AppLocalizations l10n) {
@@ -232,37 +242,66 @@ class OrderListItem extends StatelessWidget {
   }
 }
 
-/// Small rounded pill used for reason, type, and premium badges.
+/// Bold-number + secondary-label stat ("47 trades") from the reputation strip.
+class _StatText extends StatelessWidget {
+  const _StatText({
+    required this.value,
+    required this.label,
+    required this.palette,
+  });
+
+  final String value;
+  final String label;
+  final OrderBookPalette palette;
+
+  @override
+  Widget build(BuildContext context) {
+    return Text.rich(
+      TextSpan(
+        children: [
+          TextSpan(
+            text: value,
+            style: TextStyle(
+              color: palette.textPrimary,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          TextSpan(text: ' $label'),
+        ],
+      ),
+      style: TextStyle(fontSize: 12, color: palette.textSecondary),
+      overflow: TextOverflow.ellipsis,
+    );
+  }
+}
+
+/// Small rounded pill — mock's `sm` variant (3×8 padding, radius 8, 11px/600).
 class _Pill extends StatelessWidget {
   const _Pill({
     required this.label,
     required this.color,
     required this.background,
-    this.fontSize = 11,
   });
 
   final String label;
   final Color color;
   final Color background;
-  final double fontSize;
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(
-        horizontal: AppSpacing.sm,
-        vertical: 2,
-      ),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
         color: background,
-        borderRadius: BorderRadius.circular(AppRadius.chip),
+        borderRadius: BorderRadius.circular(8),
       ),
       child: Text(
         label,
         style: TextStyle(
           color: color,
-          fontSize: fontSize,
+          fontSize: 11,
           fontWeight: FontWeight.w600,
+          letterSpacing: 0.2,
         ),
         overflow: TextOverflow.ellipsis,
       ),
@@ -276,15 +315,13 @@ class OrderListItemSkeleton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colors = Theme.of(context).extension<AppColors>();
-    final cardBg = colors?.backgroundCard ?? const Color(0xFF1E2230);
-    final shimmer = colors?.backgroundInput ?? const Color(0xFF252A3A);
+    final pal = OrderBookPalette.of(context);
 
     return Container(
-      padding: const EdgeInsets.all(AppSpacing.md),
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
       decoration: BoxDecoration(
-        color: cardBg,
-        borderRadius: BorderRadius.circular(AppRadius.card),
+        color: pal.bgCard,
+        borderRadius: BorderRadius.circular(16),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -292,24 +329,24 @@ class OrderListItemSkeleton extends StatelessWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              _shimmerBox(100, 18, shimmer),
-              _shimmerBox(40, 14, shimmer),
+              _shimmerBox(100, 18, pal.bgElevated),
+              _shimmerBox(40, 14, pal.bgElevated),
             ],
           ),
-          const SizedBox(height: AppSpacing.sm),
+          const SizedBox(height: 10),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              _shimmerBox(140, 24, shimmer),
-              _shimmerBox(48, 18, shimmer),
+              _shimmerBox(140, 26, pal.bgElevated),
+              _shimmerBox(48, 18, pal.bgElevated),
             ],
           ),
-          const SizedBox(height: AppSpacing.xs),
-          _shimmerBox(80, 12, shimmer),
-          const SizedBox(height: AppSpacing.sm),
-          _shimmerBox(double.infinity, 24, shimmer),
-          const SizedBox(height: AppSpacing.xs),
-          _shimmerBox(double.infinity, 24, shimmer),
+          const SizedBox(height: 4),
+          _shimmerBox(80, 12, pal.bgElevated),
+          const SizedBox(height: 10),
+          _shimmerBox(double.infinity, 36, pal.bgElevated),
+          const SizedBox(height: 8),
+          _shimmerBox(double.infinity, 14, pal.bgElevated),
         ],
       ),
     );
@@ -333,18 +370,16 @@ class OrderListEmpty extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final pal = OrderBookPalette.of(context);
     return Center(
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Icon(Icons.inbox_outlined, size: 48, color: Colors.white38),
+          Icon(Icons.inbox_outlined, size: 48, color: pal.textSecondary),
           const SizedBox(height: AppSpacing.md),
           Text(
             AppLocalizations.of(context).noOrdersAvailable,
-            style: Theme.of(context)
-                .textTheme
-                .bodyMedium!
-                .copyWith(color: Colors.white38),
+            style: TextStyle(fontSize: 14, color: pal.textSecondary),
           ),
         ],
       ),
