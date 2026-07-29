@@ -51,7 +51,7 @@ A buy or sell offer on the Mostro network.
 | nostr_event_id | String? | Kind 38383 event ID on relay |
 | is_mine | bool | Whether current user created this order |
 | cached_at | Timestamp | When this order was last fetched/updated locally |
-| rating | f64 | Maker reputation from the Kind 38383 `rating` tag (`total_rating`, 0–5; 0.0 = none/full privacy) |
+| rating | f64 | Maker reputation from the Kind 38383 `rating` tag (`total_rating`, 0–5; 0.0 = no reputation: full privacy (`none`), missing tag, or malformed/invalid data) |
 | total_reviews | u32 | Number of reviews behind `rating` (`total_reviews`) |
 | days_active | u32 | Days the maker has been active on the node (`days`) |
 
@@ -60,7 +60,7 @@ A buy or sell offer on the Mostro network.
 - Either `fiat_amount` OR both `fiat_amount_min` and `fiat_amount_max` MUST be provided, but NOT both. If `fiat_amount` is present, `fiat_amount_min` and `fiat_amount_max` MUST be absent; if `fiat_amount_min`/`fiat_amount_max` are present, `fiat_amount` MUST be absent.
 - If range: `fiat_amount_min` MUST be > 0 and < `fiat_amount_max`.
 - `premium` is a signed float (negative = discount).
-- `rating` MUST be within 0–5; out-of-range or malformed `rating`-tag values degrade to 0 without rejecting the order.
+- `rating` MUST be within 0–5. Each reputation field (`rating`, `total_reviews`, `days_active`) is validated independently: an out-of-range, non-integer, or malformed value degrades that field alone to 0, and the order is never rejected because of its `rating` tag.
 
 **State machine** (15 mostro-core states):
 ```text
