@@ -210,6 +210,21 @@ pub struct OrderInfo {
     pub created_at: i64,
     pub expires_at: Option<i64>,
     pub is_mine: bool,
+    /// Maker reputation from the Kind 38383 `rating` tag (`total_rating`
+    /// aggregate, 0–5). `0.0` when the maker has no reputation yet or
+    /// publishes in full-privacy mode (`rating` = `"none"`).
+    ///
+    /// `serde(default)` on these three fields keeps rows persisted before
+    /// they existed (orders table, `OrderInfo` nested in trades JSON)
+    /// deserializable after an app upgrade.
+    #[serde(default)]
+    pub rating: f64,
+    /// Number of reviews behind [`Self::rating`] (`total_reviews`).
+    #[serde(default)]
+    pub total_reviews: u32,
+    /// Days the maker has been active on this Mostro node (`days`).
+    #[serde(default)]
+    pub days_active: u32,
 }
 
 /// Parameters for creating a new order via the Mostro protocol.
@@ -526,6 +541,36 @@ pub struct CashuWalletStatus {
     /// a mint missing any of them is refused at connect, so a non-empty list
     /// here means the wallet is bound to a mint that has since changed.
     pub missing_capabilities: Vec<String>,
+}
+
+/// The settlement backend the active Mostro node runs, as resolved by
+/// [`crate::mostro::escrow_mode`] with the developer overrides applied.
+///
+/// Phase C1b of `docs/cashu/README.md`.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct EscrowModeInfo {
+    /// Stable marker — `"unknown"`, `"lightning"` or `"cashu"`. Rust does not
+    /// translate; Dart maps this to a localized string.
+    pub mode: String,
+    /// Mint the node pins for every escrow, override applied. `None` on a
+    /// Lightning node, or on a Cashu node that published none.
+    pub mint_url: Option<String>,
+    /// NUT-11 locktime the seller must set, in days.
+    pub escrow_locktime_days: Option<u32>,
+    /// How close to expiry the daemon stops accepting `fiat-sent`, in days.
+    pub settlement_margin_days: Option<u32>,
+    /// True when [`Self::mode`] came from the developer override rather than
+    /// the node's own tags.
+    pub is_overridden: bool,
+    /// **The gate.** True only when the mode is Cashu *and* there is a usable
+    /// mint to connect to. `mode == "cashu"` alone is not enough — a node can
+    /// advertise Cashu and publish no mint.
+    pub is_cashu_available: bool,
+    /// Developer override state, mirrored so the dev-only settings surface can
+    /// render its own controls without a second call.
+    pub force_cashu_override: bool,
+    /// Mint URL override as stored, independent of what the node advertises.
+    pub mint_url_override: Option<String>,
 }
 
 /// Aggregated user-facing application settings.

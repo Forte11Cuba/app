@@ -34,6 +34,11 @@ hex = "0.4"
 
 # Logging
 log = "0.4"
+# Not called directly: declaring it with the `log` feature makes cargo apply
+# that feature to the copy nostr-sdk and sqlx use, so their `tracing` events
+# become `log` records that api::logging captures. Drop it and every
+# dependency's log line disappears silently.
+tracing = { version = "0.1", features = ["log"] }
 
 # Base64 encoding (Blossom auth events)
 base64 = "0.22"
@@ -71,7 +76,9 @@ cdk = { version = "=0.17.3", default-features = false, features = ["wallet"] }
 # gets a typed stub instead — see rust/src/cashu/mod.rs.
 cdk-sqlite = { version = "=0.17.3", default-features = false, features = ["wallet"] }
 
-# Android logging backend
+# Android logging backend. api::logging delegates to an `AndroidLogger`
+# instance rather than calling `init_once()`, which would install a competing
+# global logger and lock the Flutter log stream out.
 [target.'cfg(target_os = "android")'.dependencies]
 android_logger = "0.14"
 
@@ -84,3 +91,5 @@ reqwest = { version = "0.12", default-features = false, features = ["json"] }
 tokio = { version = "1", default-features = false, features = ["sync"] }
 # tokio::time replacement for wasm (sleep/timeout/Instant backed by the browser).
 wasmtimer = "0.4"
+# Browser console — the wasm target has no stderr (see api::logging).
+web-sys = { version = "0.3", features = ["console"] }

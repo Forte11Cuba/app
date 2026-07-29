@@ -16,8 +16,8 @@ import 'package:mostro/firebase_options.dart';
 import 'package:mostro/src/rust/frb_generated.dart';
 import 'package:mostro/src/rust/api.dart' as rust_api;
 import 'package:mostro/features/settings/providers/nwc_provider.dart';
+import 'package:mostro/src/rust/api/escrow.dart' as escrow_api;
 import 'package:mostro/src/rust/api/nwc.dart' as nwc_api;
-import 'package:mostro/src/rust/api/logging.dart' as logging_api;
 import 'package:mostro/src/rust/api/nostr.dart' as nostr_api;
 import 'package:mostro/src/rust/api/orders.dart' as orders_api;
 import 'package:mostro/src/rust/api/settings.dart' as settings_api;
@@ -39,6 +39,20 @@ Future<void> main() async {
   }
 
   await RustLib.init();
+
+  // Pre-read SharedPreferences so providers start with synchronous initial
+  // values — eliminates the AsyncValue.loading() race that caused the router
+  // to show the home screen before redirecting to /walkthrough on first launch.
+  final prefs = await SharedPreferences.getInstance();
+  final firstRunComplete = prefs.getBool(kFirstRunCompleteKey) ?? false;
+  final backupDismissed = prefs.getBool(kBackupReminderDismissedKey) ?? false;
+  final backupActive = prefs.getBool(kBackupReminderActiveKey) ?? false;
+  final backupPending = backupActive && !backupDismissed;
+  final savedSettings = AppSettingsState.fromPrefs(prefs);
+
+  // Before any startup work below, so a failure in it is captured at the
+  // verbosity the user asked for rather than the default.
+  await settings_api.setLoggingEnabled(enabled: savedSettings.loggingEnabled);
 
   // Initialize persistent SQLite store. Must come before any trade / order
   // operations that read or write trade keys and trade records.
@@ -67,6 +81,10 @@ Future<void> main() async {
   try {
     await settings_api.rehydrateActiveMostroNode();
     activeMostroPubkey = await settings_api.getMostroPubkey();
+    // Load the escrow-mode overrides before the relay pool starts, so the first
+    // capability fetch already resolves against them. Nothing can have written
+    // them in a release build (docs/cashu/README.md §4.3).
+    await escrow_api.rehydrateEscrowOverrides();
     markBridgeReady();
   } catch (e) {
     debugPrint('[main] rehydrate active Mostro node failed: $e');
@@ -80,16 +98,6 @@ Future<void> main() async {
   } catch (e, st) {
     debugPrint('[main] Identity init failed — secure storage unavailable: $e\n$st');
   }
-
-  // Pre-read SharedPreferences so providers start with synchronous initial
-  // values — eliminates the AsyncValue.loading() race that caused the router
-  // to show the home screen before redirecting to /walkthrough on first launch.
-  final prefs = await SharedPreferences.getInstance();
-  final firstRunComplete = prefs.getBool(kFirstRunCompleteKey) ?? false;
-  final backupDismissed = prefs.getBool(kBackupReminderDismissedKey) ?? false;
-  final backupActive = prefs.getBool(kBackupReminderActiveKey) ?? false;
-  final backupPending = backupActive && !backupDismissed;
-  final savedSettings = AppSettingsState.fromPrefs(prefs);
 
   // Subscribe to bond-slashed notices BEFORE relay delivery starts, so the
   // Tokio broadcast channel buffers any notice arriving during startup rather
@@ -107,9 +115,6 @@ Future<void> main() async {
 
   // Watch for connection state changes in background (logs appear in flutter output).
   _watchConnectionState();
-
-  // Forward Rust log entries to debugPrint so they appear in `flutter run`.
-  _forwardRustLogs();
 
   final container = ProviderContainer(
     overrides: [
@@ -159,31 +164,6 @@ void _restoreNwcConnection(String nwcUri, ProviderContainer container) {
       debugPrint('[nwc] wallet restored: ${info.walletName ?? info.walletPubkey}');
     } catch (e) {
       debugPrint('[nwc] wallet restore failed: $e');
-    }
-  });
-}
-
-/// Forward Rust log entries to debugPrint so they are visible in `flutter run`.
-///
-/// Only active in debug builds.
-void _forwardRustLogs() {
-  if (!kDebugMode) return;
-  debugPrint('[rust-log] starting Rust log forwarder...');
-  Future.microtask(() async {
-    try {
-      debugPrint('[rust-log] subscribing to Rust log stream...');
-      final stream = await logging_api.onLogEntry();
-      debugPrint('[rust-log] subscribed — waiting for entries');
-      while (true) {
-        final entry = await stream.next();
-        if (entry == null) {
-          debugPrint('[rust-log] stream closed');
-          break;
-        }
-        debugPrint('[rust/${entry.tag}] ${entry.message}');
-      }
-    } catch (e, st) {
-      debugPrint('[rust-log] bridge error: $e\n$st');
     }
   });
 }
