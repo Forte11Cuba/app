@@ -81,21 +81,19 @@ pub(crate) fn set_verbose_logging(enabled: bool) {
     });
 }
 
-/// Dependency targets that dump raw protocol traffic at `Debug`:
-/// `nostr-relay-pool` logs every outgoing and incoming relay message verbatim
-/// (`relay/inner.rs:818` and `:1092`), which would put pubkeys, subscription
-/// filters and event payloads on the console and in the retained buffer.
-const TRAFFIC_TARGETS: &[&str] = &["nostr_relay_pool"];
+/// Dependency targets dropped at every level: `nostr-relay-pool` logs raw relay
+/// messages verbatim at `Debug` (`relay/inner.rs:818`, `:1092`) *and* at `Error`
+/// (`:1073`, `:1915`), so no level ceiling separates its diagnostics from its
+/// payloads. Per-relay lifecycle is instrumented from our own pool wrapper
+/// instead, where the message text is ours (#241).
+const EXCLUDED_TARGETS: &[&str] = &["nostr_relay_pool"];
 
-/// Per-target ceiling, never above the global filter. Capping these at `Info`
-/// keeps their connection and error records, which is why the `tracing` bridge
-/// exists, without retaining the traffic itself.
+/// Per-target ceiling, never above the global filter.
 fn max_level_for(target: &str) -> log::LevelFilter {
-    let global = log::max_level();
-    if TRAFFIC_TARGETS.iter().any(|t| target.starts_with(t)) {
-        global.min(log::LevelFilter::Info)
+    if EXCLUDED_TARGETS.iter().any(|t| target.starts_with(t)) {
+        log::LevelFilter::Off
     } else {
-        global
+        log::max_level()
     }
 }
 
@@ -367,26 +365,40 @@ mod tests {
     }
 
     /// Raw relay traffic must not reach the console or the retained buffer,
-    /// where sharing, screenshots and logcat would expose it unredacted.
+    /// where sharing, screenshots and logcat would expose it unredacted. The
+    /// payload rides on `Error` records too, so every level has to be covered.
     #[test]
-    fn traffic_targets_are_capped_below_debug() {
+    fn excluded_targets_never_reach_any_sink() {
         use log::Log as _;
 
         install_log_bridge();
+        const TARGET: &str = "nostr_relay_pool::relay::inner";
         const PAYLOAD: &str = "traffic-probe-payload";
 
-        log::debug!(target: "nostr_relay_pool::relay::inner", "Received '{PAYLOAD}'");
+        log::debug!(target: TARGET, "Received '{PAYLOAD}'");
+        log::info!(target: TARGET, "Connected, {PAYLOAD}");
+        log::warn!(target: TARGET, "Rejected, {PAYLOAD}");
+        log::error!(target: TARGET, "Impossible to handle relay message, msg={PAYLOAD}");
 
         assert!(!recent_logs().iter().any(|e| e.message.contains(PAYLOAD)));
-        assert!(
-            BRIDGE_LOGGER.enabled(
-                &log::Metadata::builder()
-                    .level(log::Level::Info)
-                    .target("nostr_relay_pool::relay::inner")
-                    .build()
-            ),
-            "connection and error records from the same crate must still pass",
-        );
+        for level in [
+            log::Level::Error,
+            log::Level::Warn,
+            log::Level::Info,
+            log::Level::Debug,
+        ] {
+            assert!(
+                !BRIDGE_LOGGER
+                    .enabled(&log::Metadata::builder().level(level).target(TARGET).build()),
+                "{level} records from an excluded target must be dropped",
+            );
+        }
+        assert!(BRIDGE_LOGGER.enabled(
+            &log::Metadata::builder()
+                .level(log::Level::Info)
+                .target("nostr_sdk::client")
+                .build()
+        ));
     }
 
     /// `blog_*` must go through the same fan-out as the `log::` macros.
