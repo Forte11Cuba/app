@@ -210,6 +210,14 @@ pub struct OrderInfo {
     pub created_at: i64,
     pub expires_at: Option<i64>,
     pub is_mine: bool,
+    /// Maker reputation from the Kind 38383 `rating` tag (`total_rating`
+    /// aggregate, 0–5). `0.0` when the maker has no reputation yet or
+    /// publishes in full-privacy mode (`rating` = `"none"`).
+    pub rating: f64,
+    /// Number of reviews behind [`Self::rating`] (`total_reviews`).
+    pub total_reviews: u32,
+    /// Days the maker has been active on this Mostro node (`days`).
+    pub days_active: u32,
 }
 
 /// Parameters for creating a new order via the Mostro protocol.

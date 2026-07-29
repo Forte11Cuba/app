@@ -684,6 +684,11 @@ pub async fn create_order(params: NewOrderParams) -> Result<OrderInfo> {
         created_at: now,
         expires_at: Some(now + 24 * 3600),
         is_mine: true,
+        // Own new order: the daemon's Kind 38383 confirmation carries the
+        // real reputation snapshot; until then there is none to show.
+        rating: 0.0,
+        total_reviews: 0,
+        days_active: 0,
     };
 
     // Derive a fresh trade key — each order must use a unique derived key index
@@ -3264,6 +3269,9 @@ mod tests {
             expires_at: None,
             amount_sats: None,
             creator_pubkey: String::new(),
+            rating: 0.0,
+            total_reviews: 0,
+            days_active: 0,
         }
     }
 
