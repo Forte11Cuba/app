@@ -145,11 +145,14 @@ class AppColors extends ThemeExtension<AppColors> {
 
 // ── Order Book redesign palette ───────────────────────────────────────────────
 
-/// Exact palette of the "Mostro UX Redesign" mock (Claude Design, screen
+/// Palette of the "Mostro UX Redesign" mock (Claude Design, screen
 /// #3 · Order book). Applied only to the redesigned Order Book screen while
-/// the rest of the app migrates screen by screen; dark values are pixel-exact
-/// to the mock. The mock is dark-only, so [light] is a legibility mapping onto
-/// the existing light surfaces.
+/// the rest of the app migrates screen by screen; dark values follow the mock
+/// except where the mock fails WCAG AA (4.5:1) on its real rendered surface —
+/// [textTertiary] and [red] are lightened just enough to pass. The mock is
+/// dark-only, so [light] is a legibility mapping onto the existing light
+/// surfaces, darkened where needed to pass AA. Every text-role/surface pair is
+/// locked by `test/core/order_book_palette_contrast_test.dart`.
 @immutable
 class OrderBookPalette {
   const OrderBookPalette({
@@ -160,7 +163,7 @@ class OrderBookPalette {
     required this.textPrimary,
     required this.textSecondary,
     required this.textTertiary,
-    required this.textDisabled,
+    required this.tabInactive,
     required this.green,
     required this.greenDim,
     required this.gold,
@@ -178,7 +181,11 @@ class OrderBookPalette {
   final Color textPrimary;
   final Color textSecondary;
   final Color textTertiary;
-  final Color textDisabled;
+
+  /// Unselected BUY/SELL tab label. In dark this keeps the mock's dimmed
+  /// value (a deliberately de-emphasized state); in light it must clear
+  /// WCAG AA since the tab is an interactive control.
+  final Color tabInactive;
   final Color green;
   final Color greenDim;
   final Color gold;
@@ -195,8 +202,9 @@ class OrderBookPalette {
     border: Color(0x0FFFFFFF), // rgba(255,255,255,0.06)
     textPrimary: Color(0xFFF2F4F7),
     textSecondary: Color(0xFFA8B0BC),
-    textTertiary: Color(0xFF6B7280),
-    textDisabled: Color(0xFF4A5060),
+    // Mock #6B7280 is 3.4:1 on the card — lightened to pass AA (4.8:1).
+    textTertiary: Color(0xFF848C9A),
+    tabInactive: Color(0xFF4A5060),
     green: Color(0xFF8FE04A),
     greenDim: Color(0xFF2A4015),
     gold: Color(0xFFFFC940),
@@ -204,7 +212,8 @@ class OrderBookPalette {
     blue: Color(0xFF7BB4F0),
     blueFill: Color(0xFF1E2B42),
     amber: Color(0xFFE89C3C),
-    red: Color(0xFFE5484D),
+    // Mock #E5484D is 3.7:1 on its 13% pill fill — lightened to pass AA.
+    red: Color(0xFFF27D81),
   );
 
   static const light = OrderBookPalette(
@@ -214,16 +223,16 @@ class OrderBookPalette {
     border: Color(0x14000000),
     textPrimary: Color(0xFF1A1A1A),
     textSecondary: Color(0xFF666666),
-    textTertiary: Color(0xFF888888),
-    textDisabled: Color(0xFFAAAAAA),
-    green: Color(0xFF6A9E00),
-    greenDim: Color(0x266A9E00),
-    gold: Color(0xFFB8860B),
-    goldDim: Color(0x26B8860B),
-    blue: Color(0xFF3B6EA5),
-    blueFill: Color(0x263B6EA5),
-    amber: Color(0xFFC97B1F),
-    red: Color(0xFFD84D4D),
+    textTertiary: Color(0xFF696969),
+    tabInactive: Color(0xFF666666),
+    green: Color(0xFF426800),
+    greenDim: Color(0x26426800),
+    gold: Color(0xFF7E5C09),
+    goldDim: Color(0x267E5C09),
+    blue: Color(0xFF35638F),
+    blueFill: Color(0x2635638F),
+    amber: Color(0xFF845010),
+    red: Color(0xFFAE3333),
   );
 
   static OrderBookPalette of(BuildContext context) =>

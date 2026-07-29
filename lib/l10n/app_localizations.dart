@@ -3869,20 +3869,20 @@ abstract class AppLocalizations {
   /// Unit word after the trade count in the order-book reputation row
   ///
   /// In en, this message translates to:
-  /// **'trades'**
-  String get reputationTradesLabel;
+  /// **'{count, plural, =1{trade} other{trades}}'**
+  String reputationTradesLabel(int count);
 
   /// Unit word after the active-days count in the order-book reputation row
   ///
   /// In en, this message translates to:
-  /// **'days'**
-  String get reputationDaysLabel;
+  /// **'{count, plural, =1{day} other{days}}'**
+  String reputationDaysLabel(int count);
 
-  /// Sort caption on the order-book filter row
+  /// Sort caption on the order-book filter row; must describe the ordering actually applied (newest first)
   ///
   /// In en, this message translates to:
-  /// **'Sort: best premium ▾'**
-  String get sortBestPremium;
+  /// **'Sort: newest first ▾'**
+  String get sortNewest;
 
   /// Notification group action to collapse earlier events
   ///

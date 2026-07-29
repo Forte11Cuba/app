@@ -149,7 +149,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
             indicatorSize: TabBarIndicatorSize.tab,
             dividerColor: Colors.transparent,
             labelColor: pal.green,
-            unselectedLabelColor: pal.textDisabled,
+            unselectedLabelColor: pal.tabInactive,
             labelStyle: const TextStyle(
               fontSize: 13,
               fontWeight: FontWeight.w700,
@@ -167,51 +167,62 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           padding: const EdgeInsets.fromLTRB(16, 14, 16, 6),
           child: Row(
             children: [
-              GestureDetector(
-                onTap: () => showOrderFilterDialog(context),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 14,
-                    vertical: 8,
-                  ),
-                  decoration: BoxDecoration(
-                    color: pal.bgCard,
-                    borderRadius: BorderRadius.circular(999),
-                    border: Border.all(color: pal.border),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        Icons.filter_alt_outlined,
-                        size: 16,
-                        color: pal.textSecondary,
+              // Flexible + ellipsis so long localized labels (de/fr) fit
+              // 320px-wide screens without a RenderFlex overflow.
+              Flexible(
+                child: Material(
+                  color: pal.bgCard,
+                  shape: StadiumBorder(side: BorderSide(color: pal.border)),
+                  child: InkWell(
+                    customBorder: const StadiumBorder(),
+                    onTap: () => showOrderFilterDialog(context),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 8,
                       ),
-                      const SizedBox(width: 8),
-                      Text(
-                        l10n.filterButtonLabel,
-                        style: TextStyle(
-                          color: pal.textPrimary,
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                        ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.filter_alt_outlined,
+                            size: 16,
+                            color: pal.textSecondary,
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            l10n.filterButtonLabel,
+                            style: TextStyle(
+                              color: pal.textPrimary,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Flexible(
+                            child: Text(
+                              '· ${l10n.offersCount(filteredOrders.length)}',
+                              style: TextStyle(
+                                color: pal.textTertiary,
+                                fontSize: 13,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
                       ),
-                      const SizedBox(width: 8),
-                      Text(
-                        '· ${l10n.offersCount(filteredOrders.length)}',
-                        style: TextStyle(
-                          color: pal.textTertiary,
-                          fontSize: 13,
-                        ),
-                      ),
-                    ],
+                    ),
                   ),
                 ),
               ),
-              const Spacer(),
-              Text(
-                l10n.sortBestPremium,
-                style: TextStyle(fontSize: 11, color: pal.textTertiary),
+              const SizedBox(width: 8),
+              Flexible(
+                child: Text(
+                  l10n.sortNewest,
+                  style: TextStyle(fontSize: 11, color: pal.textTertiary),
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.right,
+                ),
               ),
             ],
           ),

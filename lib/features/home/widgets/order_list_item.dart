@@ -1,5 +1,6 @@
 import 'package:clock/clock.dart';
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 
 import 'package:mostro/core/app_theme.dart';
 import 'package:mostro/features/home/providers/home_order_providers.dart';
@@ -35,6 +36,7 @@ class OrderListItem extends StatelessWidget {
   Widget build(BuildContext context) {
     final pal = OrderBookPalette.of(context);
     final l10n = AppLocalizations.of(context);
+    final locale = Localizations.localeOf(context).toString();
     final flag = currencyFlags[order.fiatCode] ?? '';
 
     // Premium pill: green < 2 (incl. negative), amber 2–5, red > 5.
@@ -44,7 +46,7 @@ class OrderListItem extends StatelessWidget {
             ? pal.red
             : pal.amber;
     final premiumText =
-        '${order.premium >= 0 ? '+' : ''}${order.premium.toStringAsFixed(1)}%';
+        '${NumberFormat('+0.0;-0.0', locale).format(order.premium)}%';
 
     final (reasonLabel, reasonColor, reasonBg) = switch (reason) {
       OrderReason.bestPremium => (
@@ -73,15 +75,16 @@ class OrderListItem extends StatelessWidget {
             : l10n.orderPillYouAreBuying)
         : null;
 
-    return GestureDetector(
-      onTap: onTap,
-      behavior: HitTestBehavior.opaque,
-      child: Container(
+    // Material + InkWell (not GestureDetector) so each offer card is
+    // focusable, keyboard-activatable, and announced as a button.
+    return Material(
+      color: pal.bgCard,
+      borderRadius: BorderRadius.circular(16),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(16),
+        child: Padding(
         padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
-        decoration: BoxDecoration(
-          color: pal.bgCard,
-          borderRadius: BorderRadius.circular(16),
-        ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -89,10 +92,12 @@ class OrderListItem extends StatelessWidget {
             Row(
               children: [
                 if (reasonLabel != null) ...[
-                  _Pill(
-                    label: reasonLabel,
-                    color: reasonColor!,
-                    background: reasonBg!,
+                  Flexible(
+                    child: _Pill(
+                      label: reasonLabel,
+                      color: reasonColor!,
+                      background: reasonBg!,
+                    ),
                   ),
                   const SizedBox(width: 6),
                 ],
@@ -175,7 +180,7 @@ class OrderListItem extends StatelessWidget {
                   Icon(Icons.star, size: 16, color: pal.gold),
                   const SizedBox(width: 4),
                   Text(
-                    _formatRating(order.rating),
+                    _formatRating(order.rating, locale),
                     style: TextStyle(
                       color: pal.textPrimary,
                       fontSize: 13,
@@ -187,8 +192,9 @@ class OrderListItem extends StatelessWidget {
                       style: TextStyle(fontSize: 12, color: pal.textTertiary)),
                   const SizedBox(width: 14),
                   _StatText(
-                    value: '${order.tradeCount}',
-                    label: l10n.reputationTradesLabel,
+                    value:
+                        NumberFormat.decimalPattern(locale).format(order.tradeCount),
+                    label: l10n.reputationTradesLabel(order.tradeCount),
                     palette: pal,
                   ),
                   const SizedBox(width: 14),
@@ -197,8 +203,9 @@ class OrderListItem extends StatelessWidget {
                   const SizedBox(width: 14),
                   Flexible(
                     child: _StatText(
-                      value: '${order.daysActive}',
-                      label: l10n.reputationDaysLabel,
+                      value: NumberFormat.decimalPattern(locale)
+                          .format(order.daysActive),
+                      label: l10n.reputationDaysLabel(order.daysActive),
                       palette: pal,
                     ),
                   ),
@@ -215,18 +222,15 @@ class OrderListItem extends StatelessWidget {
             ),
           ],
         ),
+        ),
       ),
     );
   }
 
-  /// Mock renders raw ratings (4.9, 4.95): up to 2 decimals, no trailing zeros.
-  String _formatRating(double rating) {
-    var s = rating.toStringAsFixed(2);
-    while (s.endsWith('0')) {
-      s = s.substring(0, s.length - 1);
-    }
-    if (s.endsWith('.')) s = s.substring(0, s.length - 1);
-    return s;
+  /// Mock renders raw ratings (4.9, 4.95): up to 2 decimals, no trailing
+  /// zeros, localized decimal separator.
+  String _formatRating(double rating, String locale) {
+    return NumberFormat('0.##', locale).format(rating);
   }
 
   String _relativeTime(DateTime dt, AppLocalizations l10n) {
@@ -371,11 +375,11 @@ class OrderListEmpty extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.inbox_outlined, size: 48, color: pal.textTertiary),
+          Icon(Icons.inbox_outlined, size: 48, color: pal.textSecondary),
           const SizedBox(height: AppSpacing.md),
           Text(
             AppLocalizations.of(context).noOrdersAvailable,
-            style: TextStyle(fontSize: 14, color: pal.textTertiary),
+            style: TextStyle(fontSize: 14, color: pal.textSecondary),
           ),
         ],
       ),
