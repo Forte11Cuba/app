@@ -164,8 +164,28 @@ pub async fn load_identity_from_mnemonic(
 /// When `recover = true`, the daemon recovery flow is triggered (Phase 7).
 /// Currently this validates and loads the mnemonic; recovery contacts are
 /// initiated separately via the daemon API.
-pub async fn import_from_mnemonic(words: Vec<String>, _recover: bool) -> Result<IdentityInfo> {
-    load_identity_from_mnemonic(words, 0, false, None).await
+pub async fn import_from_mnemonic(words: Vec<String>, recover: bool) -> Result<IdentityInfo> {
+    // Source the authoritative privacy mode up front. Recovery is only possible
+    // in Reputation mode; Full-Privacy trades are anonymous by design and can't
+    // be replayed by the daemon.
+    let privacy_mode = crate::api::reputation::get_privacy_mode();
+    // Reject privacy-mode recovery BEFORE loading — otherwise the identity is
+    // already swapped when we bail, leaving the user in a mutated state, and it
+    // violates the "reject before any network traffic" contract for restore.
+    if recover && privacy_mode {
+        bail!("PrivacyModeRecoveryUnavailable");
+    }
+    let info = load_identity_from_mnemonic(words, 0, privacy_mode, None).await?;
+    if recover {
+        // NOTE: recovery is best-effort relative to the import, but this `?`
+        // propagates a restore failure AFTER the identity has already been
+        // swapped — so a slow/unreachable daemon makes the caller see "import
+        // failed" when the import itself succeeded and only recovery didn't.
+        // Not reachable today (identity_service.dart passes recover: false).
+        // #219 restructures the waiting; revisit this propagation when it lands.
+        crate::api::orders::restore_session().await?;
+    }
+    Ok(info)
 }
 
 /// Import identity from an nsec (bech32-encoded Nostr secret key).
