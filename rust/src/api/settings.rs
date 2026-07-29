@@ -225,12 +225,18 @@ pub async fn rehydrate_active_mostro_node() -> Result<()> {
 
 /// Toggle the in-memory logging flag (not persisted to disk).
 ///
-/// When a Tokio runtime is available the update is dispatched asynchronously
-/// and the broadcast notification is sent.  When there is no runtime (e.g.
-/// during synchronous tests) we fall back to a blocking write; the broadcast
-/// notification is skipped in that path but the flag is always set.
+/// Applies the global log filter synchronously, so the change takes effect on
+/// the next record rather than when the async store update lands.
+///
+/// When a Tokio runtime is available the store update is dispatched
+/// asynchronously and the broadcast notification is sent.  When there is no
+/// runtime (e.g. during synchronous tests) we fall back to a blocking write;
+/// the broadcast notification is skipped in that path but the flag is always
+/// set.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn set_logging_enabled(enabled: bool) {
+    crate::api::logging::set_verbose_logging(enabled);
+
     // Note: the async path is fire-and-forget (spawn); callers that call
     // get_settings() immediately after may not yet see the updated flag
     // (eventually consistent).  The sync fallback applies the change inline.
@@ -253,6 +259,7 @@ pub fn set_logging_enabled(enabled: bool) {
 // present, so dispatch onto it directly.
 #[cfg(target_arch = "wasm32")]
 pub fn set_logging_enabled(enabled: bool) {
+    crate::api::logging::set_verbose_logging(enabled);
     crate::rt::spawn(async move {
         let snapshot = store().write_with(|s| s.logging_enabled = enabled).await;
         store().notify(snapshot);

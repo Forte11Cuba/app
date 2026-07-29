@@ -1,8 +1,9 @@
 /// Mostro action dispatch — builds and wraps `mostro_core::Message` values.
 ///
 /// Each function constructs a `Message` using the `mostro-core` types,
-/// wraps it via NIP-59 Gift Wrap using `mostro_core::nip59::wrap_message`,
-/// and returns the event JSON ready for publication.
+/// wraps it as a transport-v2 (NIP-44, signed Kind 14) event via
+/// `gift_wrap::wrap_mostro_message`, and returns the event JSON ready for
+/// publication.
 ///
 /// **Key split.** Mostro-core 0.10 requires two `Keys` values per wrap:
 /// `identity_keys` sign the Seal (Kind 13) so the node can tie the rumor to
@@ -28,7 +29,7 @@ use crate::nostr::gift_wrap;
 /// `create_order` tells the genuine reply apart from stale relay-replayed
 /// events addressed to the same trade key.
 ///
-/// Returns the NIP-59 Gift Wrap event JSON ready for publication.
+/// Returns the transport-v2 (NIP-44, signed Kind 14) event JSON ready for publication.
 pub async fn new_order(
     identity_keys: &Keys,
     trade_keys: &Keys,
@@ -216,7 +217,7 @@ pub async fn dispute(
 /// Build and wrap a RateUser MostroMessage.
 ///
 /// Sends a 1–5 star rating for the counterparty to the Mostro daemon via
-/// NIP-59 Gift Wrap after a trade completes.
+/// the transport-v2 (NIP-44, signed Kind 14) wrap after a trade completes.
 pub async fn rate_user(
     identity_keys: &Keys,
     trade_keys: &Keys,
@@ -337,8 +338,9 @@ async fn simple_action(
     wrap_message(identity_keys, trade_keys, mostro_pubkey, &msg).await
 }
 
-/// Wrap `msg` as a NIP-59 Gift Wrap via `mostro_core::nip59::wrap_message`,
-/// applying the daemon-advertised PoW difficulty, and return the event JSON.
+/// Wrap `msg` as a transport-v2 (NIP-44, signed Kind 14) event via
+/// `gift_wrap::wrap_mostro_message`, applying the daemon-advertised PoW
+/// difficulty, and return the event JSON.
 async fn wrap_message(
     identity_keys: &Keys,
     trade_keys: &Keys,
@@ -349,6 +351,25 @@ async fn wrap_message(
     let event =
         gift_wrap::wrap_mostro_message(identity_keys, trade_keys, mostro_pubkey, msg, pow).await?;
     Ok(event.as_json())
+}
+
+/// Build a `RestoreSession` request (mostro-core `Message::new_restore`).
+///
+/// Payload MUST be `None` — the daemon rejects any other payload
+/// (`MessageKind::verify`). The Seal is signed by the identity key (used by
+/// the daemon to look up the user's trades); the rumor is signed by a fresh
+/// trade key, and the daemon's restore reply is addressed to that trade key.
+/// Returns the transport-v2 (NIP-44, signed Kind 14) event JSON.
+pub async fn restore_session(
+    identity_keys: &Keys,
+    trade_keys: &Keys,
+    mostro_pubkey: &PublicKey,
+) -> Result<String> {
+    // identity_keys sign the Seal (-> event.identity = master key, used by the
+    // daemon to look up the user's trades); trade_keys sign the rumor
+    // (-> event.sender, the key the daemon replies to). Mirrors new_order.
+    let msg = Message::new_restore(None);
+    wrap_message(identity_keys, trade_keys, mostro_pubkey, &msg).await
 }
 
 #[cfg(test)]
@@ -458,4 +479,33 @@ mod tests {
         assert!(matches!(kind.action, Action::TakeBuy));
         assert!(matches!(kind.payload, Some(Payload::Amount(100))));
     }
+
+    /// #215 handshake contract: a RestoreSession carries no payload (the daemon
+    /// rejects anything else in `MessageKind::verify`), its action is
+    /// `RestoreSession`, and the rumor is authored by the trade key — the
+    /// `event.sender` the daemon addresses its RestoreData reply to.
+    #[tokio::test]
+    async fn restore_session_payload_none_action_restore_rumor_by_trade_key() {
+        let identity_keys = Keys::generate();
+        let trade_keys = Keys::generate();
+        let mostro_keys = Keys::generate();
+        let json = restore_session(&identity_keys, &trade_keys, &mostro_keys.public_key())
+            .await
+            .unwrap();
+        let event = Event::from_json(&json).unwrap();
+        let unwrapped = gift_wrap::unwrap_mostro_message(&mostro_keys, &event)
+            .await
+            .unwrap()
+            .expect("message must decrypt for the recipient");
+        let kind = unwrapped.message.get_inner_message_kind();
+        assert!(kind.payload.is_none(), "RestoreSession payload must be None");
+        assert!(matches!(kind.action, Action::RestoreSession));
+        // The rumor is authored by the trade key: that is the pubkey the daemon
+        // replies to, and what the client subscribes/correlates on.
+        assert_eq!(unwrapped.sender, trade_keys.public_key());
+        // The Seal carries the identity key: that is what the daemon uses to
+        // locate the user's trades. Both halves of the key split matter.
+        assert_eq!(unwrapped.identity, identity_keys.public_key());
+    }
 }
+

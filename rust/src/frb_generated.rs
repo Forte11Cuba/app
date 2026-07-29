@@ -47,7 +47,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.11.1";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 477970385;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -612460854;
 
 // Section: executor
 
@@ -1363,6 +1363,40 @@ fn wire__crate__api__orders__cancel_order_impl(
         },
     )
 }
+fn wire__crate__api__logging__clear_logs_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "clear_logs",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, ()>((move || {
+                    let output_ok = Result::<_, ()>::Ok({
+                        crate::api::logging::clear_logs();
+                    })?;
+                    Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
 fn wire__crate__api__nwc__connect_wallet_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -2603,13 +2637,13 @@ fn wire__crate__api__identity__import_from_mnemonic_impl(
             let mut deserializer =
                 flutter_rust_bridge::for_generated::SseDeserializer::new(message);
             let api_words = <Vec<String>>::sse_decode(&mut deserializer);
-            let api__recover = <bool>::sse_decode(&mut deserializer);
+            let api_recover = <bool>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| async move {
                 transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
                     (move || async move {
                         let output_ok =
-                            crate::api::identity::import_from_mnemonic(api_words, api__recover)
+                            crate::api::identity::import_from_mnemonic(api_words, api_recover)
                                 .await?;
                         Ok(output_ok)
                     })()
@@ -3464,6 +3498,38 @@ fn wire__crate__api__nwc__pay_invoice_impl(
                     })()
                     .await,
                 )
+            }
+        },
+    )
+}
+fn wire__crate__api__logging__recent_logs_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "recent_logs",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, ()>((move || {
+                    let output_ok = Result::<_, ()>::Ok(crate::api::logging::recent_logs())?;
+                    Ok(output_ok)
+                })())
             }
         },
     )
@@ -4988,6 +5054,18 @@ impl SseDecode for Vec<Vec<String>> {
     }
 }
 
+impl SseDecode for Vec<crate::api::types::LogEntry> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = vec![];
+        for idx_ in 0..len_ {
+            ans_.push(<crate::api::types::LogEntry>::sse_decode(deserializer));
+        }
+        return ans_;
+    }
+}
+
 impl SseDecode for Vec<crate::api::types::OrderInfo> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -5457,6 +5535,9 @@ impl SseDecode for crate::api::types::OrderInfo {
         let mut var_createdAt = <i64>::sse_decode(deserializer);
         let mut var_expiresAt = <Option<i64>>::sse_decode(deserializer);
         let mut var_isMine = <bool>::sse_decode(deserializer);
+        let mut var_rating = <f64>::sse_decode(deserializer);
+        let mut var_totalReviews = <u32>::sse_decode(deserializer);
+        let mut var_daysActive = <u32>::sse_decode(deserializer);
         return crate::api::types::OrderInfo {
             id: var_id,
             kind: var_kind,
@@ -5472,6 +5553,9 @@ impl SseDecode for crate::api::types::OrderInfo {
             created_at: var_createdAt,
             expires_at: var_expiresAt,
             is_mine: var_isMine,
+            rating: var_rating,
+            total_reviews: var_totalReviews,
+            days_active: var_daysActive,
         };
     }
 }
@@ -5871,208 +5955,210 @@ fn pde_ffi_dispatcher_primary_impl(
         }
         23 => wire__crate__api__nostr__add_relay_impl(port, ptr, rust_vec_len, data_len),
         24 => wire__crate__api__orders__cancel_order_impl(port, ptr, rust_vec_len, data_len),
-        25 => wire__crate__api__nwc__connect_wallet_impl(port, ptr, rust_vec_len, data_len),
-        26 => wire__crate__api__identity__create_identity_impl(port, ptr, rust_vec_len, data_len),
-        27 => wire__crate__api__orders__create_order_impl(port, ptr, rust_vec_len, data_len),
-        28 => wire__crate__api__identity__delete_identity_impl(port, ptr, rust_vec_len, data_len),
-        29 => wire__crate__api__identity__derive_trade_key_impl(port, ptr, rust_vec_len, data_len),
-        30 => wire__crate__api__nwc__disconnect_wallet_impl(port, ptr, rust_vec_len, data_len),
-        31 => {
+        25 => wire__crate__api__logging__clear_logs_impl(port, ptr, rust_vec_len, data_len),
+        26 => wire__crate__api__nwc__connect_wallet_impl(port, ptr, rust_vec_len, data_len),
+        27 => wire__crate__api__identity__create_identity_impl(port, ptr, rust_vec_len, data_len),
+        28 => wire__crate__api__orders__create_order_impl(port, ptr, rust_vec_len, data_len),
+        29 => wire__crate__api__identity__delete_identity_impl(port, ptr, rust_vec_len, data_len),
+        30 => wire__crate__api__identity__derive_trade_key_impl(port, ptr, rust_vec_len, data_len),
+        31 => wire__crate__api__nwc__disconnect_wallet_impl(port, ptr, rust_vec_len, data_len),
+        32 => {
             wire__crate__api__messages__download_attachment_impl(port, ptr, rust_vec_len, data_len)
         }
-        32 => wire__crate__api__identity__export_encrypted_backup_impl(
+        33 => wire__crate__api__identity__export_encrypted_backup_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        33 => wire__crate__api__nostr__fetch_mostro_instance_tags_impl(
+        34 => wire__crate__api__nostr__fetch_mostro_instance_tags_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        34 => wire__crate__api__nostr__flush_message_queue_impl(port, ptr, rust_vec_len, data_len),
-        35 => wire__crate__api__get_app_version_impl(port, ptr, rust_vec_len, data_len),
-        36 => wire__crate__api__messages__get_attachment_status_impl(
+        35 => wire__crate__api__nostr__flush_message_queue_impl(port, ptr, rust_vec_len, data_len),
+        36 => wire__crate__api__get_app_version_impl(port, ptr, rust_vec_len, data_len),
+        37 => wire__crate__api__messages__get_attachment_status_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        37 => wire__crate__api__nwc__get_balance_impl(port, ptr, rust_vec_len, data_len),
-        38 => wire__crate__api__nostr__get_connection_state_impl(port, ptr, rust_vec_len, data_len),
-        39 => wire__crate__api__disputes__get_dispute_impl(port, ptr, rust_vec_len, data_len),
-        40 => wire__crate__api__escrow__get_escrow_mode_impl(port, ptr, rust_vec_len, data_len),
-        41 => wire__crate__api__identity__get_identity_impl(port, ptr, rust_vec_len, data_len),
-        42 => wire__crate__api__messages__get_messages_impl(port, ptr, rust_vec_len, data_len),
-        43 => wire__crate__api__settings__get_mostro_pubkey_impl(port, ptr, rust_vec_len, data_len),
-        44 => wire__crate__api__identity__get_nym_identity_impl(port, ptr, rust_vec_len, data_len),
-        45 => wire__crate__api__orders__get_order_impl(port, ptr, rust_vec_len, data_len),
-        46 => wire__crate__api__orders__get_orders_impl(port, ptr, rust_vec_len, data_len),
-        47 => {
+        38 => wire__crate__api__nwc__get_balance_impl(port, ptr, rust_vec_len, data_len),
+        39 => wire__crate__api__nostr__get_connection_state_impl(port, ptr, rust_vec_len, data_len),
+        40 => wire__crate__api__disputes__get_dispute_impl(port, ptr, rust_vec_len, data_len),
+        41 => wire__crate__api__escrow__get_escrow_mode_impl(port, ptr, rust_vec_len, data_len),
+        42 => wire__crate__api__identity__get_identity_impl(port, ptr, rust_vec_len, data_len),
+        43 => wire__crate__api__messages__get_messages_impl(port, ptr, rust_vec_len, data_len),
+        44 => wire__crate__api__settings__get_mostro_pubkey_impl(port, ptr, rust_vec_len, data_len),
+        45 => wire__crate__api__identity__get_nym_identity_impl(port, ptr, rust_vec_len, data_len),
+        46 => wire__crate__api__orders__get_order_impl(port, ptr, rust_vec_len, data_len),
+        47 => wire__crate__api__orders__get_orders_impl(port, ptr, rust_vec_len, data_len),
+        48 => {
             wire__crate__api__reputation__get_privacy_mode_impl(port, ptr, rust_vec_len, data_len)
         }
-        48 => wire__crate__api__reputation__get_rating_for_trade_impl(
+        49 => wire__crate__api__reputation__get_rating_for_trade_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        49 => wire__crate__api__nostr__get_relays_impl(port, ptr, rust_vec_len, data_len),
-        50 => wire__crate__api__settings__get_settings_impl(port, ptr, rust_vec_len, data_len),
-        51 => wire__crate__api__identity__get_trade_key_impl(port, ptr, rust_vec_len, data_len),
-        52 => wire__crate__api__orders__get_trade_role_impl(port, ptr, rust_vec_len, data_len),
-        53 => wire__crate__api__messages__get_unread_count_impl(port, ptr, rust_vec_len, data_len),
-        54 => wire__crate__api__nwc__get_wallet_impl(port, ptr, rust_vec_len, data_len),
-        55 => wire__crate__api__disputes__handle_admin_canceled_impl(
+        50 => wire__crate__api__nostr__get_relays_impl(port, ptr, rust_vec_len, data_len),
+        51 => wire__crate__api__settings__get_settings_impl(port, ptr, rust_vec_len, data_len),
+        52 => wire__crate__api__identity__get_trade_key_impl(port, ptr, rust_vec_len, data_len),
+        53 => wire__crate__api__orders__get_trade_role_impl(port, ptr, rust_vec_len, data_len),
+        54 => wire__crate__api__messages__get_unread_count_impl(port, ptr, rust_vec_len, data_len),
+        55 => wire__crate__api__nwc__get_wallet_impl(port, ptr, rust_vec_len, data_len),
+        56 => wire__crate__api__disputes__handle_admin_canceled_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        56 => {
+        57 => {
             wire__crate__api__disputes__handle_admin_settled_impl(port, ptr, rust_vec_len, data_len)
         }
-        57 => wire__crate__api__disputes__handle_admin_took_dispute_impl(
+        58 => wire__crate__api__disputes__handle_admin_took_dispute_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        58 => wire__crate__api__reputation__handle_rating_received_impl(
+        59 => wire__crate__api__reputation__handle_rating_received_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        59 => {
+        60 => {
             wire__crate__api__identity__import_from_mnemonic_impl(port, ptr, rust_vec_len, data_len)
         }
-        60 => wire__crate__api__identity__import_from_nsec_impl(port, ptr, rust_vec_len, data_len),
-        61 => wire__crate__api__init_db_impl(port, ptr, rust_vec_len, data_len),
-        62 => wire__crate__api__nostr__initialize_impl(port, ptr, rust_vec_len, data_len),
-        63 => wire__crate__api__logging__install_log_bridge_impl(port, ptr, rust_vec_len, data_len),
-        64 => wire__crate__api__orders__list_trades_impl(port, ptr, rust_vec_len, data_len),
-        65 => wire__crate__api__identity__load_identity_from_mnemonic_impl(
+        61 => wire__crate__api__identity__import_from_nsec_impl(port, ptr, rust_vec_len, data_len),
+        62 => wire__crate__api__init_db_impl(port, ptr, rust_vec_len, data_len),
+        63 => wire__crate__api__nostr__initialize_impl(port, ptr, rust_vec_len, data_len),
+        64 => wire__crate__api__logging__install_log_bridge_impl(port, ptr, rust_vec_len, data_len),
+        65 => wire__crate__api__orders__list_trades_impl(port, ptr, rust_vec_len, data_len),
+        66 => wire__crate__api__identity__load_identity_from_mnemonic_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        66 => wire__crate__api__nwc__make_invoice_impl(port, ptr, rust_vec_len, data_len),
-        67 => wire__crate__api__messages__mark_as_read_impl(port, ptr, rust_vec_len, data_len),
-        68 => wire__crate__api__messages__on_attachment_progress_impl(
+        67 => wire__crate__api__nwc__make_invoice_impl(port, ptr, rust_vec_len, data_len),
+        68 => wire__crate__api__messages__mark_as_read_impl(port, ptr, rust_vec_len, data_len),
+        69 => wire__crate__api__messages__on_attachment_progress_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        69 => wire__crate__api__bond__on_bond_slashed_impl(port, ptr, rust_vec_len, data_len),
-        70 => wire__crate__api__nostr__on_connection_state_changed_impl(
+        70 => wire__crate__api__bond__on_bond_slashed_impl(port, ptr, rust_vec_len, data_len),
+        71 => wire__crate__api__nostr__on_connection_state_changed_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        71 => {
+        72 => {
             wire__crate__api__disputes__on_dispute_updated_impl(port, ptr, rust_vec_len, data_len)
         }
-        72 => {
+        73 => {
             wire__crate__api__escrow__on_escrow_mode_changed_impl(port, ptr, rust_vec_len, data_len)
         }
-        73 => wire__crate__api__logging__on_log_entry_impl(port, ptr, rust_vec_len, data_len),
-        74 => wire__crate__api__messages__on_new_message_impl(port, ptr, rust_vec_len, data_len),
-        75 => wire__crate__api__orders__on_orders_updated_impl(port, ptr, rust_vec_len, data_len),
-        76 => {
+        74 => wire__crate__api__logging__on_log_entry_impl(port, ptr, rust_vec_len, data_len),
+        75 => wire__crate__api__messages__on_new_message_impl(port, ptr, rust_vec_len, data_len),
+        76 => wire__crate__api__orders__on_orders_updated_impl(port, ptr, rust_vec_len, data_len),
+        77 => {
             wire__crate__api__reputation__on_rating_received_impl(port, ptr, rust_vec_len, data_len)
         }
-        77 => {
+        78 => {
             wire__crate__api__nostr__on_relay_status_changed_impl(port, ptr, rust_vec_len, data_len)
         }
-        78 => {
+        79 => {
             wire__crate__api__settings__on_settings_changed_impl(port, ptr, rust_vec_len, data_len)
         }
-        79 => wire__crate__api__messages__on_unread_count_changed_impl(
+        80 => wire__crate__api__messages__on_unread_count_changed_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        80 => {
+        81 => {
             wire__crate__api__nwc__on_wallet_status_changed_impl(port, ptr, rust_vec_len, data_len)
         }
-        81 => wire__crate__api__disputes__open_dispute_impl(port, ptr, rust_vec_len, data_len),
-        82 => {
+        82 => wire__crate__api__disputes__open_dispute_impl(port, ptr, rust_vec_len, data_len),
+        83 => {
             wire__crate__api__orders__order_filters_default_impl(port, ptr, rust_vec_len, data_len)
         }
-        83 => wire__crate__api__nwc__pay_invoice_impl(port, ptr, rust_vec_len, data_len),
-        84 => wire__crate__api__settings__rehydrate_active_mostro_node_impl(
+        84 => wire__crate__api__nwc__pay_invoice_impl(port, ptr, rust_vec_len, data_len),
+        85 => wire__crate__api__logging__recent_logs_impl(port, ptr, rust_vec_len, data_len),
+        86 => wire__crate__api__settings__rehydrate_active_mostro_node_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        85 => wire__crate__api__escrow__rehydrate_escrow_overrides_impl(
+        87 => wire__crate__api__escrow__rehydrate_escrow_overrides_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        86 => wire__crate__api__orders__release_order_impl(port, ptr, rust_vec_len, data_len),
-        87 => wire__crate__api__nostr__remove_relay_impl(port, ptr, rust_vec_len, data_len),
-        88 => wire__crate__api__orders__restart_orders_subscription_impl(
+        88 => wire__crate__api__orders__release_order_impl(port, ptr, rust_vec_len, data_len),
+        89 => wire__crate__api__nostr__remove_relay_impl(port, ptr, rust_vec_len, data_len),
+        90 => wire__crate__api__orders__restart_orders_subscription_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        89 => wire__crate__api__orders__send_fiat_sent_impl(port, ptr, rust_vec_len, data_len),
-        90 => wire__crate__api__messages__send_file_impl(port, ptr, rust_vec_len, data_len),
-        91 => wire__crate__api__orders__send_invoice_impl(port, ptr, rust_vec_len, data_len),
-        92 => wire__crate__api__messages__send_message_impl(port, ptr, rust_vec_len, data_len),
-        93 => wire__crate__api__settings__set_active_mostro_node_impl(
+        91 => wire__crate__api__orders__send_fiat_sent_impl(port, ptr, rust_vec_len, data_len),
+        92 => wire__crate__api__messages__send_file_impl(port, ptr, rust_vec_len, data_len),
+        93 => wire__crate__api__orders__send_invoice_impl(port, ptr, rust_vec_len, data_len),
+        94 => wire__crate__api__messages__send_message_impl(port, ptr, rust_vec_len, data_len),
+        95 => wire__crate__api__settings__set_active_mostro_node_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        94 => wire__crate__api__escrow__set_cashu_mint_url_override_impl(
+        96 => wire__crate__api__escrow__set_cashu_mint_url_override_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        95 => wire__crate__api__settings__set_default_fiat_code_impl(
+        97 => wire__crate__api__settings__set_default_fiat_code_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        96 => wire__crate__api__settings__set_default_lightning_address_impl(
+        98 => wire__crate__api__settings__set_default_lightning_address_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        97 => wire__crate__api__escrow__set_escrow_mode_override_impl(
+        99 => wire__crate__api__escrow__set_escrow_mode_override_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        98 => wire__crate__api__settings__set_language_impl(port, ptr, rust_vec_len, data_len),
-        99 => {
+        100 => wire__crate__api__settings__set_language_impl(port, ptr, rust_vec_len, data_len),
+        101 => {
             wire__crate__api__settings__set_logging_enabled_impl(port, ptr, rust_vec_len, data_len)
         }
-        100 => {
+        102 => {
             wire__crate__api__reputation__set_privacy_mode_impl(port, ptr, rust_vec_len, data_len)
         }
-        101 => wire__crate__api__settings__set_theme_impl(port, ptr, rust_vec_len, data_len),
-        102 => wire__crate__api__disputes__submit_evidence_impl(port, ptr, rust_vec_len, data_len),
-        103 => wire__crate__api__reputation__submit_rating_impl(port, ptr, rust_vec_len, data_len),
-        104 => wire__crate__api__orders__subscribe_orders_impl(port, ptr, rust_vec_len, data_len),
-        105 => wire__crate__api__orders__take_order_impl(port, ptr, rust_vec_len, data_len),
+        103 => wire__crate__api__settings__set_theme_impl(port, ptr, rust_vec_len, data_len),
+        104 => wire__crate__api__disputes__submit_evidence_impl(port, ptr, rust_vec_len, data_len),
+        105 => wire__crate__api__reputation__submit_rating_impl(port, ptr, rust_vec_len, data_len),
+        106 => wire__crate__api__orders__subscribe_orders_impl(port, ptr, rust_vec_len, data_len),
+        107 => wire__crate__api__orders__take_order_impl(port, ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }
@@ -6867,6 +6953,9 @@ impl flutter_rust_bridge::IntoDart for crate::api::types::OrderInfo {
             self.created_at.into_into_dart().into_dart(),
             self.expires_at.into_into_dart().into_dart(),
             self.is_mine.into_into_dart().into_dart(),
+            self.rating.into_into_dart().into_dart(),
+            self.total_reviews.into_into_dart().into_dart(),
+            self.days_active.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -7837,6 +7926,16 @@ impl SseEncode for Vec<Vec<String>> {
     }
 }
 
+impl SseEncode for Vec<crate::api::types::LogEntry> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <crate::api::types::LogEntry>::sse_encode(item, serializer);
+        }
+    }
+}
+
 impl SseEncode for Vec<crate::api::types::OrderInfo> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -8234,6 +8333,9 @@ impl SseEncode for crate::api::types::OrderInfo {
         <i64>::sse_encode(self.created_at, serializer);
         <Option<i64>>::sse_encode(self.expires_at, serializer);
         <bool>::sse_encode(self.is_mine, serializer);
+        <f64>::sse_encode(self.rating, serializer);
+        <u32>::sse_encode(self.total_reviews, serializer);
+        <u32>::sse_encode(self.days_active, serializer);
     }
 }
 

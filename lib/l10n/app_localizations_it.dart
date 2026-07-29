@@ -1364,16 +1364,16 @@ class AppLocalizationsIt extends AppLocalizations {
   String get noLogsToShareTooltip => 'Nessun log da condividere';
 
   @override
-  String get disableLoggingTooltip => 'Disattiva la registrazione';
+  String get disableLoggingTooltip => 'Disattiva la registrazione dettagliata';
 
   @override
-  String get enableLoggingTooltip => 'Attiva la registrazione';
+  String get enableLoggingTooltip => 'Attiva la registrazione dettagliata';
 
   @override
-  String get loggingEnabledStatus => 'Registrazione attivata';
+  String get loggingEnabledStatus => 'Registrazione dettagliata attivata';
 
   @override
-  String get loggingDisabledStatus => 'Registrazione disattivata';
+  String get loggingDisabledStatus => 'Registrazione dettagliata disattivata';
 
   @override
   String get noLogEntriesMessage => 'Nessuna voce di registro';
@@ -2146,9 +2146,29 @@ class AppLocalizationsIt extends AppLocalizations {
   String get marketPriceCaption => 'Prezzo di mercato';
 
   @override
-  String orderReputationStats(int trades, int days) {
-    return ' · $trades operazioni · $days giorni';
+  String reputationTradesLabel(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'operazioni',
+      one: 'operazione',
+    );
+    return '$_temp0';
   }
+
+  @override
+  String reputationDaysLabel(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'giorni',
+      one: 'giorno',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get sortNewest => 'Ordina: più recenti ▾';
 
   @override
   String get hideEarlierEvents => 'Nascondi eventi precedenti';

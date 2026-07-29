@@ -1348,16 +1348,16 @@ class AppLocalizationsEn extends AppLocalizations {
   String get noLogsToShareTooltip => 'No logs to share';
 
   @override
-  String get disableLoggingTooltip => 'Disable logging';
+  String get disableLoggingTooltip => 'Disable verbose logging';
 
   @override
-  String get enableLoggingTooltip => 'Enable logging';
+  String get enableLoggingTooltip => 'Enable verbose logging';
 
   @override
-  String get loggingEnabledStatus => 'Logging enabled';
+  String get loggingEnabledStatus => 'Verbose logging enabled';
 
   @override
-  String get loggingDisabledStatus => 'Logging disabled';
+  String get loggingDisabledStatus => 'Verbose logging disabled';
 
   @override
   String get noLogEntriesMessage => 'No log entries';
@@ -2121,9 +2121,29 @@ class AppLocalizationsEn extends AppLocalizations {
   String get marketPriceCaption => 'Market price';
 
   @override
-  String orderReputationStats(int trades, int days) {
-    return ' · $trades trades · $days days';
+  String reputationTradesLabel(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'trades',
+      one: 'trade',
+    );
+    return '$_temp0';
   }
+
+  @override
+  String reputationDaysLabel(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'days',
+      one: 'day',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get sortNewest => 'Sort: newest first ▾';
 
   @override
   String get hideEarlierEvents => 'Hide earlier events';

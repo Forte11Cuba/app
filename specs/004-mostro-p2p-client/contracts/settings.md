@@ -3,7 +3,8 @@
 **Module**: `rust/src/api/settings.rs`
 
 User-configurable app preferences. All settings are persisted locally.
-`logging_enabled` is runtime-only (not persisted — always false at startup).
+`logging_enabled` is runtime-only in the Rust store; the Flutter layer persists
+it and re-applies it on launch, so the user's choice survives a restart.
 `privacy_mode` in `AppSettings` is a read-only mirror of `Identity.privacy_mode`.
 To change privacy mode, call `set_privacy_mode()` in the Reputation API
 (`rust/src/api/reputation.rs`), which is the single write path.
@@ -20,7 +21,7 @@ AppSettings {
   language: String                 # BCP-47 locale code (default: device locale)
   default_fiat_code: String?       # ISO 4217 code, e.g. "USD" (default: null — show all)
   default_lightning_address: String?  # Lightning address for auto-fill when selling
-  logging_enabled: bool            # Runtime-only; always false at startup
+  logging_enabled: bool            # Runtime-only in Rust; re-applied by Flutter on launch
   privacy_mode: bool               # Mirrors Identity.privacy_mode; false when no Identity exists
 }
 ```
@@ -73,8 +74,12 @@ submits invoice). Pass null to clear.
 ---
 
 ### set_logging_enabled(enabled: bool) → ()
-Enable or disable diagnostic logging at runtime. Not persisted —
-resets to false on next app launch.
+Enable or disable verbose diagnostic logging at runtime. Applies the global log
+filter synchronously: `Debug` while enabled, otherwise the build default
+(`Debug` in debug builds, `Info` in release).
+
+Not persisted in the Rust store — the Flutter layer owns persistence and calls
+this once at startup with the saved value.
 
 ---
 
