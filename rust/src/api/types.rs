@@ -213,10 +213,17 @@ pub struct OrderInfo {
     /// Maker reputation from the Kind 38383 `rating` tag (`total_rating`
     /// aggregate, 0–5). `0.0` when the maker has no reputation yet or
     /// publishes in full-privacy mode (`rating` = `"none"`).
+    ///
+    /// `serde(default)` on these three fields keeps rows persisted before
+    /// they existed (orders table, `OrderInfo` nested in trades JSON)
+    /// deserializable after an app upgrade.
+    #[serde(default)]
     pub rating: f64,
     /// Number of reviews behind [`Self::rating`] (`total_reviews`).
+    #[serde(default)]
     pub total_reviews: u32,
     /// Days the maker has been active on this Mostro node (`days`).
+    #[serde(default)]
     pub days_active: u32,
 }
 

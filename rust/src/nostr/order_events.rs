@@ -125,11 +125,22 @@ fn parse_rating_tag(value: Option<&str>) -> (f64, u32, u32) {
         }
         _ => return EMPTY,
     };
-    let num = |key: &str| obj.get(key).and_then(|v| v.as_f64()).unwrap_or(0.0);
+    // Validate ranges instead of blindly casting: total_rating is defined as
+    // 0–5, and counts must be non-negative whole numbers that fit u32. Any
+    // out-of-range value falls back to that field's zero default.
     (
-        num("total_rating"),
-        num("total_reviews") as u32,
-        num("days") as u32,
+        obj.get("total_rating")
+            .and_then(|v| v.as_f64())
+            .filter(|rating| (0.0..=5.0).contains(rating))
+            .unwrap_or(0.0),
+        obj.get("total_reviews")
+            .and_then(|v| v.as_u64())
+            .and_then(|value| u32::try_from(value).ok())
+            .unwrap_or(0),
+        obj.get("days")
+            .and_then(|v| v.as_u64())
+            .and_then(|value| u32::try_from(value).ok())
+            .unwrap_or(0),
     )
 }
 
@@ -331,6 +342,72 @@ mod tests {
         assert_eq!(order.days_active, 0);
         // The order itself must survive a bad rating tag.
         assert_eq!(order.fiat_amount, Some(20.0));
+    }
+
+    #[test]
+    fn out_of_range_rating_values_fall_back_to_zeros() {
+        // total_rating above 5, negative reviews, fractional days: each
+        // invalid field independently degrades to its zero default.
+        let order = parse_order_event(
+            &order_event_with_rating(
+                r#"{"total_reviews":-3,"total_rating":9.7,"days":2.5}"#,
+            ),
+            None,
+        )
+        .unwrap();
+        assert_eq!(order.rating, 0.0);
+        assert_eq!(order.total_reviews, 0);
+        assert_eq!(order.days_active, 0);
+    }
+
+    #[test]
+    fn boundary_rating_values_are_accepted() {
+        let order = parse_order_event(
+            &order_event_with_rating(r#"{"total_reviews":0,"total_rating":5.0,"days":0}"#),
+            None,
+        )
+        .unwrap();
+        assert_eq!(order.rating, 5.0);
+
+        let order = parse_order_event(
+            &order_event_with_rating(r#"{"total_reviews":1,"total_rating":0.0,"days":1}"#),
+            None,
+        )
+        .unwrap();
+        assert_eq!(order.rating, 0.0);
+        assert_eq!(order.total_reviews, 1);
+        assert_eq!(order.days_active, 1);
+    }
+
+    #[test]
+    fn review_count_larger_than_u32_falls_back_to_zero() {
+        let order = parse_order_event(
+            &order_event_with_rating(
+                r#"{"total_reviews":4294967296,"total_rating":4.0,"days":10}"#,
+            ),
+            None,
+        )
+        .unwrap();
+        assert_eq!(order.rating, 4.0);
+        assert_eq!(order.total_reviews, 0);
+        assert_eq!(order.days_active, 10);
+    }
+
+    #[test]
+    fn order_info_json_without_reputation_fields_deserializes_with_zeros() {
+        // Rows persisted before the reputation fields existed (orders table,
+        // trades JSON) must keep loading after an app upgrade.
+        let legacy = r#"{
+            "id":"308e1272-d5f4-47e6-bd97-3504baea9c23",
+            "kind":"Buy","status":"Pending","amount_sats":null,
+            "fiat_amount":100.0,"fiat_amount_min":null,"fiat_amount_max":null,
+            "fiat_code":"USD","payment_method":"Bank","premium":0.0,
+            "creator_pubkey":"","created_at":0,"expires_at":null,"is_mine":false
+        }"#;
+        let order: OrderInfo = serde_json::from_str(legacy).unwrap();
+        assert_eq!(order.rating, 0.0);
+        assert_eq!(order.total_reviews, 0);
+        assert_eq!(order.days_active, 0);
     }
 
     #[test]
