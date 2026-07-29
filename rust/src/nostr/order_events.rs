@@ -75,6 +75,8 @@ pub fn parse_order_event(event: &Event, my_pubkey: Option<&PublicKey>) -> Option
     let is_mine = false;
     let _ = my_pubkey; // unused — kept in signature for future use
 
+    let (rating, total_reviews, days_active) = parse_rating_tag(get("rating").as_deref());
+
     Some(OrderInfo {
         id,
         kind,
@@ -90,7 +92,56 @@ pub fn parse_order_event(event: &Event, my_pubkey: Option<&PublicKey>) -> Option
         created_at,
         expires_at,
         is_mine,
+        rating,
+        total_reviews,
+        days_active,
     })
+}
+
+/// Parse the `rating` tag value into `(total_rating, total_reviews, days)`.
+///
+/// The daemon publishes the maker's reputation snapshot on each order event:
+/// `"none"` for full-privacy makers, otherwise a JSON object
+/// `{"total_reviews":47,"total_rating":4.9,"last_rating":5,"max_rate":5,
+/// "min_rate":1,"days":312}` (mostro-core `Rating`). Some deployments wrap it
+/// as `["rating", {…}]` — v1 accepts both shapes, so we do too. Missing tag or
+/// malformed JSON degrades to zeros rather than dropping the order.
+fn parse_rating_tag(value: Option<&str>) -> (f64, u32, u32) {
+    const EMPTY: (f64, u32, u32) = (0.0, 0, 0);
+    let Some(raw) = value else { return EMPTY };
+    if raw == "none" {
+        return EMPTY;
+    }
+    let Ok(parsed) = serde_json::from_str::<serde_json::Value>(raw) else {
+        log::debug!("[parse] unparseable rating tag: {raw:?}");
+        return EMPTY;
+    };
+    let obj = match &parsed {
+        serde_json::Value::Object(map) => map,
+        serde_json::Value::Array(arr)
+            if arr.len() > 1 && arr[0].as_str() == Some("rating") && arr[1].is_object() =>
+        {
+            arr[1].as_object().expect("checked is_object above")
+        }
+        _ => return EMPTY,
+    };
+    // Validate ranges instead of blindly casting: total_rating is defined as
+    // 0–5, and counts must be non-negative whole numbers that fit u32. Any
+    // out-of-range value falls back to that field's zero default.
+    (
+        obj.get("total_rating")
+            .and_then(|v| v.as_f64())
+            .filter(|rating| (0.0..=5.0).contains(rating))
+            .unwrap_or(0.0),
+        obj.get("total_reviews")
+            .and_then(|v| v.as_u64())
+            .and_then(|value| u32::try_from(value).ok())
+            .unwrap_or(0),
+        obj.get("days")
+            .and_then(|v| v.as_u64())
+            .and_then(|value| u32::try_from(value).ok())
+            .unwrap_or(0),
+    )
 }
 
 /// Parse the `s` tag value into an [`OrderStatus`].
@@ -228,6 +279,143 @@ mod tests {
         assert_eq!(order.fiat_amount, None);
         assert_eq!(order.fiat_amount_min, None);
         assert_eq!(order.fiat_amount_max, None);
+    }
+
+    /// Build a signed Kind 38383 event carrying the given `rating` tag value.
+    fn order_event_with_rating(rating_value: &str) -> Event {
+        let keys = Keys::generate();
+        EventBuilder::new(Kind::from(KIND_ORDER), "")
+            .tags([
+                Tag::parse(["d", "308e1272-d5f4-47e6-bd97-3504baea9c23"]).unwrap(),
+                Tag::parse(["k", "sell"]).unwrap(),
+                Tag::parse(["s", "pending"]).unwrap(),
+                Tag::parse(["f", "USD"]).unwrap(),
+                Tag::parse(["fa", "20"]).unwrap(),
+                Tag::parse(["rating", rating_value]).unwrap(),
+                Tag::parse(["z", "order"]).unwrap(),
+            ])
+            .sign_with_keys(&keys)
+            .unwrap()
+    }
+
+    #[test]
+    fn parses_rating_tag_object_form() {
+        let order = parse_order_event(
+            &order_event_with_rating(
+                r#"{"total_reviews":47,"total_rating":4.9,"last_rating":5,"max_rate":5,"min_rate":1,"days":312}"#,
+            ),
+            None,
+        )
+        .unwrap();
+        assert_eq!(order.rating, 4.9);
+        assert_eq!(order.total_reviews, 47);
+        assert_eq!(order.days_active, 312);
+    }
+
+    #[test]
+    fn parses_rating_tag_array_wrapped_form() {
+        let order = parse_order_event(
+            &order_event_with_rating(
+                r#"["rating",{"total_reviews":11,"total_rating":4.8,"days":203}]"#,
+            ),
+            None,
+        )
+        .unwrap();
+        assert_eq!(order.rating, 4.8);
+        assert_eq!(order.total_reviews, 11);
+        assert_eq!(order.days_active, 203);
+    }
+
+    #[test]
+    fn full_privacy_rating_none_yields_zeros() {
+        let order = parse_order_event(&order_event_with_rating("none"), None).unwrap();
+        assert_eq!(order.rating, 0.0);
+        assert_eq!(order.total_reviews, 0);
+        assert_eq!(order.days_active, 0);
+    }
+
+    #[test]
+    fn malformed_rating_json_degrades_to_zeros_without_dropping_order() {
+        let order = parse_order_event(&order_event_with_rating("{not json"), None).unwrap();
+        assert_eq!(order.rating, 0.0);
+        assert_eq!(order.total_reviews, 0);
+        assert_eq!(order.days_active, 0);
+        // The order itself must survive a bad rating tag.
+        assert_eq!(order.fiat_amount, Some(20.0));
+    }
+
+    #[test]
+    fn out_of_range_rating_values_fall_back_to_zeros() {
+        // total_rating above 5, negative reviews, fractional days: each
+        // invalid field independently degrades to its zero default.
+        let order = parse_order_event(
+            &order_event_with_rating(
+                r#"{"total_reviews":-3,"total_rating":9.7,"days":2.5}"#,
+            ),
+            None,
+        )
+        .unwrap();
+        assert_eq!(order.rating, 0.0);
+        assert_eq!(order.total_reviews, 0);
+        assert_eq!(order.days_active, 0);
+    }
+
+    #[test]
+    fn boundary_rating_values_are_accepted() {
+        let order = parse_order_event(
+            &order_event_with_rating(r#"{"total_reviews":0,"total_rating":5.0,"days":0}"#),
+            None,
+        )
+        .unwrap();
+        assert_eq!(order.rating, 5.0);
+
+        let order = parse_order_event(
+            &order_event_with_rating(r#"{"total_reviews":1,"total_rating":0.0,"days":1}"#),
+            None,
+        )
+        .unwrap();
+        assert_eq!(order.rating, 0.0);
+        assert_eq!(order.total_reviews, 1);
+        assert_eq!(order.days_active, 1);
+    }
+
+    #[test]
+    fn review_count_larger_than_u32_falls_back_to_zero() {
+        let order = parse_order_event(
+            &order_event_with_rating(
+                r#"{"total_reviews":4294967296,"total_rating":4.0,"days":10}"#,
+            ),
+            None,
+        )
+        .unwrap();
+        assert_eq!(order.rating, 4.0);
+        assert_eq!(order.total_reviews, 0);
+        assert_eq!(order.days_active, 10);
+    }
+
+    #[test]
+    fn order_info_json_without_reputation_fields_deserializes_with_zeros() {
+        // Rows persisted before the reputation fields existed (orders table,
+        // trades JSON) must keep loading after an app upgrade.
+        let legacy = r#"{
+            "id":"308e1272-d5f4-47e6-bd97-3504baea9c23",
+            "kind":"Buy","status":"Pending","amount_sats":null,
+            "fiat_amount":100.0,"fiat_amount_min":null,"fiat_amount_max":null,
+            "fiat_code":"USD","payment_method":"Bank","premium":0.0,
+            "creator_pubkey":"","created_at":0,"expires_at":null,"is_mine":false
+        }"#;
+        let order: OrderInfo = serde_json::from_str(legacy).unwrap();
+        assert_eq!(order.rating, 0.0);
+        assert_eq!(order.total_reviews, 0);
+        assert_eq!(order.days_active, 0);
+    }
+
+    #[test]
+    fn missing_rating_tag_yields_zeros() {
+        let order = parse_order_event(&order_event(&["20"]), None).unwrap();
+        assert_eq!(order.rating, 0.0);
+        assert_eq!(order.total_reviews, 0);
+        assert_eq!(order.days_active, 0);
     }
 
     #[test]

@@ -23,6 +23,9 @@ TradeInfo fakeTrade({
     creatorPubkey: 'pubkey-$id',
     createdAt: startedAt,
     isMine: isMine,
+    rating: 0,
+    totalReviews: 0,
+    daysActive: 0,
   );
 
   return TradeInfo(

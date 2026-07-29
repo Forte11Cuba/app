@@ -5256,6 +5256,9 @@ impl SseDecode for crate::api::types::OrderInfo {
         let mut var_createdAt = <i64>::sse_decode(deserializer);
         let mut var_expiresAt = <Option<i64>>::sse_decode(deserializer);
         let mut var_isMine = <bool>::sse_decode(deserializer);
+        let mut var_rating = <f64>::sse_decode(deserializer);
+        let mut var_totalReviews = <u32>::sse_decode(deserializer);
+        let mut var_daysActive = <u32>::sse_decode(deserializer);
         return crate::api::types::OrderInfo {
             id: var_id,
             kind: var_kind,
@@ -5271,6 +5274,9 @@ impl SseDecode for crate::api::types::OrderInfo {
             created_at: var_createdAt,
             expires_at: var_expiresAt,
             is_mine: var_isMine,
+            rating: var_rating,
+            total_reviews: var_totalReviews,
+            days_active: var_daysActive,
         };
     }
 }
@@ -6601,6 +6607,9 @@ impl flutter_rust_bridge::IntoDart for crate::api::types::OrderInfo {
             self.created_at.into_into_dart().into_dart(),
             self.expires_at.into_into_dart().into_dart(),
             self.is_mine.into_into_dart().into_dart(),
+            self.rating.into_into_dart().into_dart(),
+            self.total_reviews.into_into_dart().into_dart(),
+            self.days_active.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -7946,6 +7955,9 @@ impl SseEncode for crate::api::types::OrderInfo {
         <i64>::sse_encode(self.created_at, serializer);
         <Option<i64>>::sse_encode(self.expires_at, serializer);
         <bool>::sse_encode(self.is_mine, serializer);
+        <f64>::sse_encode(self.rating, serializer);
+        <u32>::sse_encode(self.total_reviews, serializer);
+        <u32>::sse_encode(self.days_active, serializer);
     }
 }
 

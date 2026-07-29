@@ -130,6 +130,9 @@ class OrderItem {
         status: info.status,
         amountSats: info.amountSats,
         isMine: info.isMine,
+        rating: info.rating,
+        tradeCount: info.totalReviews,
+        daysActive: info.daysActive,
       );
 }
 
