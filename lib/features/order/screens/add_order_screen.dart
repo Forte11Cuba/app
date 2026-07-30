@@ -204,6 +204,10 @@ class _AddOrderScreenState extends ConsumerState<AddOrderScreen> {
       // instead of the raw marker. The order was not created.
       final display = msg.contains('NoDaemonResponse')
           ? AppLocalizations.of(context).sessionTimeoutMessage
+          // The node speaks a wire protocol this v2-native client does not, so
+          // it would never read the request — say so instead of timing out.
+          : msg.contains('UnsupportedNodeProtocol')
+              ? AppLocalizations.of(context).nodeProtocolUnsupported
           // No durable storage means the trade-key counter cannot be recorded,
           // so no key is derived and no order is created (issue #249).
           : msg.contains('StorageUnavailable')

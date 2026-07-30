@@ -233,6 +233,10 @@ class AppLocalizationsEn extends AppLocalizations {
       'This node requires an anti-abuse bond, which is not supported yet';
 
   @override
+  String get nodeProtocolUnsupported =>
+      'This Mostro node runs an older version of the protocol that this app no longer speaks. Pick another node in Settings';
+
+  @override
   String get storageUnavailable =>
       'The app cannot create or take orders while its local database is unavailable. Restart the app and try again';
 

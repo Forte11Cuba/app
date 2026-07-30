@@ -244,6 +244,13 @@ pub(crate) async fn fetch_and_set_node_capabilities() {
             };
             crate::mostro::pow::set_pow(difficulty);
 
+            // Which wire format this node reads. Getting it wrong is silent —
+            // the daemon never decrypts the event — so it is read per node
+            // rather than assumed. See mostro::protocol_version.
+            crate::mostro::protocol_version::set_protocol_version(
+                crate::mostro::protocol_version::parse_protocol_version(&tags),
+            );
+
             // Today's daemons publish no escrow tags at all, so this resolves
             // to Unknown — which keeps every Cashu path shut. See escrow_mode.
             let (mode, config) = escrow_mode::parse_tags(&tags);

@@ -71,6 +71,7 @@
   "submitButtonLabel": "Enviar",
   "orderAlreadyTaken": "La orden ya fue tomada",
   "bondRequired": "Este nodo requiere un bono anti-abuso, que aún no está soportado",
+  "nodeProtocolUnsupported": "Este nodo Mostro usa una versión antigua del protocolo que esta app ya no habla. Elige otro nodo en Ajustes",
   "storageUnavailable": "La app no puede crear ni tomar órdenes mientras su base de datos local no esté disponible. Reinicia la app e inténtalo de nuevo",
   "addInvoiceAmount": "Cantidad a recibir: {sats} sats",
   "payInvoiceAmount": "Cantidad a pagar: {sats} sats",

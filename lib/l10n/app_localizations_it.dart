@@ -236,6 +236,10 @@ class AppLocalizationsIt extends AppLocalizations {
       'Questo nodo richiede una cauzione anti-abuso, non ancora supportata';
 
   @override
+  String get nodeProtocolUnsupported =>
+      'Questo nodo Mostro usa una versione del protocollo che questa app non parla più. Scegli un altro nodo nelle Impostazioni';
+
+  @override
   String get storageUnavailable =>
       'L\'app non può creare né prendere ordini finché il suo database locale non è disponibile. Riavvia l\'app e riprova';
 

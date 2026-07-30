@@ -169,7 +169,11 @@ class _TakeOrderScreenState extends ConsumerState<TakeOrderScreen> {
                 // recorded, so no key is derived and the take never happens.
                 : msg.contains('StorageUnavailable')
                     ? l10n.storageUnavailable
-                    : msg;
+                    // The node speaks a wire protocol this v2-native client
+                    // does not: it would never read the take request.
+                    : msg.contains('UnsupportedNodeProtocol')
+                        ? l10n.nodeProtocolUnsupported
+                        : msg;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(display)),
         );

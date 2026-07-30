@@ -347,6 +347,23 @@ async fn wrap_message(
     mostro_pubkey: &PublicKey,
     msg: &Message,
 ) -> Result<String> {
+    // A node speaking a different wire protocol never decrypts what we send and
+    // never answers, so every caller would time out with no way to tell that
+    // apart from an unreachable daemon. Refuse up front with a marker Dart
+    // localizes. Protocol v1 (gift wrap) is being removed, not implemented —
+    // this client is v2-native, and the fix for such a node is to run a v2
+    // daemon (mostrod 0.19.0 runs v2 only).
+    if !crate::mostro::protocol_version::node_is_supported() {
+        let advertised = crate::mostro::protocol_version::get_protocol_version()
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| "unknown".to_string());
+        anyhow::bail!(
+            "UnsupportedNodeProtocol: node speaks protocol version {advertised}, \
+             this client speaks {}",
+            crate::mostro::protocol_version::SUPPORTED_VERSION
+        );
+    }
+
     let pow = crate::mostro::pow::get_pow();
     let event =
         gift_wrap::wrap_mostro_message(identity_keys, trade_keys, mostro_pubkey, msg, pow).await?;

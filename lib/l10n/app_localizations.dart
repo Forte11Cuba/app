@@ -488,6 +488,12 @@ abstract class AppLocalizations {
   /// **'This node requires an anti-abuse bond, which is not supported yet'**
   String get bondRequired;
 
+  /// Error shown when the selected Mostro node advertises a protocol version this v2-native client does not speak, so it would never read the request
+  ///
+  /// In en, this message translates to:
+  /// **'This Mostro node runs an older version of the protocol that this app no longer speaks. Pick another node in Settings'**
+  String get nodeProtocolUnsupported;
+
   /// Error shown when a trade key cannot be derived because the local database is unavailable, so orders cannot be created or taken
   ///
   /// In en, this message translates to:
