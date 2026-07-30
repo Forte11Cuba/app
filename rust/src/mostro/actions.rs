@@ -415,6 +415,125 @@ pub async fn restore_session(
 mod tests {
     use super::*;
 
+    /// The NIP-13 target difficulty the event was mined at, read from its
+    /// nonce tag (`["nonce", "<nonce>", "<target>"]`), or `None` when the
+    /// event was not mined at all.
+    fn mined_target(json: &str) -> Option<String> {
+        let event = Event::from_json(json).unwrap();
+        event.tags.iter().find_map(|t| {
+            let tag = t.as_slice();
+            (tag.first().map(String::as_str) == Some("nonce"))
+                .then(|| tag.get(2).cloned())
+                .flatten()
+        })
+    }
+
+    fn sample_params() -> NewOrderParams {
+        NewOrderParams {
+            kind: OrderKind::Sell,
+            fiat_amount: Some(100.0),
+            fiat_amount_min: None,
+            fiat_amount_max: None,
+            fiat_code: "USD".to_string(),
+            payment_method: "cashapp".to_string(),
+            premium: 0.0,
+            amount_sats: None,
+        }
+    }
+
+    /// Directed PoW-selection coverage (issue #177): create, take, and restore
+    /// are first-contact events — their visible sender is a trade key the
+    /// daemon does not know yet — so they must mine at `first_contact_pow()`,
+    /// not the base difficulty. Distinct values (1 vs 4) make the nonce tag
+    /// betray which one was selected; both are low enough to mine instantly.
+    #[tokio::test]
+    async fn create_take_and_restore_mine_at_the_first_contact_difficulty() {
+        use std::time::Duration;
+
+        let _pow = crate::mostro::pow::test_support::lock_pow();
+        crate::mostro::pow::set_pows(1, Some(4));
+
+        let identity_keys = Keys::generate();
+        let trade_keys = Keys::generate();
+        let mostro_pubkey = Keys::generate().public_key();
+        let order_id = "94486ae3-4083-4dfe-b543-53fe761025e9";
+
+        // Mining is probabilistic — cap wall time so a regression that stalls
+        // does not hang CI indefinitely.
+        let wraps = crate::rt::time::timeout(Duration::from_secs(60), async {
+            let create = new_order(
+                &identity_keys,
+                &trade_keys,
+                &mostro_pubkey,
+                &sample_params(),
+                3,
+                42,
+            )
+            .await
+            .unwrap();
+            let take = take_sell(
+                &identity_keys,
+                &trade_keys,
+                &mostro_pubkey,
+                order_id,
+                5,
+                None,
+                None,
+                77,
+            )
+            .await
+            .unwrap();
+            let restore = restore_session(&identity_keys, &trade_keys, &mostro_pubkey)
+                .await
+                .unwrap();
+            [("create", create), ("take", take), ("restore", restore)]
+        })
+        .await
+        .expect("first-contact wraps timed out");
+
+        for (name, json) in wraps {
+            assert_eq!(
+                mined_target(&json).as_deref(),
+                Some("4"),
+                "{name} must mine at first_contact_pow(), not the base pow"
+            );
+        }
+    }
+
+    /// The counterpart: an action on an order the daemon already knows the
+    /// trade key for pays only the base `pow`, never `pow_first_contact`.
+    #[tokio::test]
+    async fn generic_actions_mine_at_the_base_difficulty() {
+        use std::time::Duration;
+
+        let _pow = crate::mostro::pow::test_support::lock_pow();
+        crate::mostro::pow::set_pows(1, Some(4));
+
+        let identity_keys = Keys::generate();
+        let trade_keys = Keys::generate();
+        let mostro_pubkey = Keys::generate().public_key();
+
+        let json = crate::rt::time::timeout(
+            Duration::from_secs(60),
+            fiat_sent(
+                &identity_keys,
+                &trade_keys,
+                &mostro_pubkey,
+                "94486ae3-4083-4dfe-b543-53fe761025e9",
+                5,
+            ),
+        )
+        .await
+        .expect("generic wrap timed out")
+        .unwrap();
+
+        assert_eq!(
+            mined_target(&json).as_deref(),
+            Some("1"),
+            "a generic action must mine at get_pow()"
+        );
+    }
+
     /// The outgoing new-order message must carry the caller's request_id —
     /// it is the correlation nonce the daemon echoes in its reply, and
     /// `create_order` relies on it to tell the genuine reply apart from

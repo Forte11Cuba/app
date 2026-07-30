@@ -69,6 +69,22 @@ delivery and decryption are unchanged.
 - **FR-005**: Outgoing v2 events MUST carry no NIP-40 expiration tag (`expiration:
   None`), mirroring the reference client; the daemon fills its own.
 - **FR-006**: Full-privacy mode MUST behave as today (identity key = trade key).
+- **FR-007**: Outgoing v2 events MUST be mined (NIP-13) to the difficulty the
+  connected node advertises in its Kind 38385 event: `pow` for every event, and
+  `pow_first_contact` for **first-contact** events — ones whose visible sender is
+  a trade key the node does not yet associate with an active order or dispute:
+  creating an order, taking one, or a restore under a fresh trade key. Selection
+  rules (issue #177):
+  - An absent `pow_first_contact` tag means *unknown* — not zero and not `pow`;
+    first-contact events then fall back to mining at `pow`.
+  - A published `pow_first_contact` lower than `pow` MUST be clamped up to `pow`
+    (the protocol states it is never lower; a node advertising otherwise is
+    clamped rather than trusted).
+  - Both difficulties MUST be refreshed together from the same Kind 38385 fetch
+    and published to senders as a single atomic snapshot, so a wrap in flight
+    during a refresh can never mix values from two generations.
+  - An under-powered event is dropped before the node decrypts anything, with no
+    `cant-do` and no reply of any kind — the caller sees only a timeout.
 
 ## Out of Scope
 

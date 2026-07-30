@@ -231,10 +231,11 @@ pub(crate) async fn fetch_and_set_node_capabilities() {
         Ok(Some(tags)) => {
             // Both difficulties: `pow` for every event, `pow_first_contact`
             // for the first event of a trade. An absent first-contact tag is
-            // recorded as unknown rather than as `pow` — see mostro::pow.
+            // recorded as unknown rather than as `pow`, and both land in one
+            // atomic snapshot so an in-flight wrap can never mix generations
+            // — see mostro::pow.
             let (difficulty, first_contact) = crate::mostro::pow::parse_pow_tags(&tags);
-            crate::mostro::pow::set_pow(difficulty);
-            crate::mostro::pow::set_first_contact_pow(first_contact);
+            crate::mostro::pow::set_pows(difficulty, first_contact);
 
             // Today's daemons publish no escrow tags at all, so this resolves
             // to Unknown — which keeps every Cashu path shut. See escrow_mode.
@@ -243,8 +244,7 @@ pub(crate) async fn fetch_and_set_node_capabilities() {
         }
         Ok(None) => {
             log::warn!("[nostr] no Kind 38385 event found — PoW defaults to 0");
-            crate::mostro::pow::set_pow(0);
-            crate::mostro::pow::set_first_contact_pow(None);
+            crate::mostro::pow::set_pows(0, None);
             // Nothing was advertised: stay Unknown rather than assume
             // Lightning, and leave Cashu closed.
             escrow_mode::clear();
