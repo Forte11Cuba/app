@@ -89,7 +89,11 @@ impl DisputeStore {
                     if existing.status == DisputeStatus::InReview
                         && !existing.initiated_by_me
                         && existing.reason.is_none()
-                        && existing.admin_pubkey.is_some() =>
+                        && existing.admin_pubkey.is_some()
+                        && pending_opens()
+                            .lock()
+                            .map(|set| set.contains(&dispute.trade_id))
+                            .unwrap_or(false) =>
                 {
                     existing.initiated_by_me = true;
                     existing.reason = dispute.reason;
@@ -146,6 +150,29 @@ impl DisputeStore {
 
 static DISPUTE_STORE: OnceLock<DisputeStore> = OnceLock::new();
 
+/// Trades with an `open_dispute` call currently in flight (between its
+/// entry check and its post-publish insert). The admin-took placeholder may
+/// only be claimed as ours while this marker is held — a placeholder that
+/// exists with no owned in-flight attempt is a genuinely peer-opened dispute
+/// and must stay peer-owned (PR #253 review).
+static PENDING_OPENS: OnceLock<std::sync::Mutex<std::collections::HashSet<String>>> =
+    OnceLock::new();
+
+fn pending_opens() -> &'static std::sync::Mutex<std::collections::HashSet<String>> {
+    PENDING_OPENS.get_or_init(|| std::sync::Mutex::new(std::collections::HashSet::new()))
+}
+
+/// Removes the pending-open marker on every exit path of `open_dispute`.
+struct PendingOpenGuard(String);
+
+impl Drop for PendingOpenGuard {
+    fn drop(&mut self) {
+        if let Ok(mut set) = pending_opens().lock() {
+            set.remove(&self.0);
+        }
+    }
+}
+
 fn dispute_store() -> &'static DisputeStore {
     DISPUTE_STORE.get_or_init(DisputeStore::new)
 }
@@ -169,6 +196,24 @@ pub async fn open_dispute(trade_id: String, reason: Option<String>) -> Result<Di
     if trade_id.trim().is_empty() {
         bail!("TradeNotDisputable: trade_id must not be empty");
     }
+
+    // A record that already exists at entry — whatever its origin, including
+    // a peer-opened dispute whose status update we may have missed — means
+    // this is not a fresh open: fail before publishing a duplicate request
+    // the daemon will reject by status (PR #253 review).
+    if let Some(existing) = dispute_store().get(&trade_id).await {
+        if existing.status != DisputeStatus::Resolved {
+            bail!("DisputeAlreadyOpen: dispute already exists for trade {trade_id}");
+        }
+    }
+    // Mark this process's concrete in-flight open attempt: only while the
+    // marker is held may the post-publish insert claim an admin-took
+    // placeholder as ours. Dropped on every exit path.
+    pending_opens()
+        .lock()
+        .expect("pending_opens poisoned")
+        .insert(trade_id.clone());
+    let _pending = PendingOpenGuard(trade_id.clone());
 
     // Dispatch Action::Dispute to Mostro BEFORE creating the local record so
     // that a failed publish does not leave an un-retryable "open" slot in the
@@ -356,16 +401,23 @@ pub async fn handle_admin_took_dispute(trade_id: String, admin_pubkey: String) -
                 }
             },
             move |dispute| {
-                // Idempotent same-solver replay (PR #254 review): the record
-                // is committed InReview before key derivation and listener
-                // startup, both of which can fail transiently (keys not
-                // hydrated yet, relay pool offline). A replayed assignment
-                // for the SAME solver is the retry path for exactly that
-                // window, so it must fall through to re-derive and re-arm
-                // instead of being rejected.
-                if dispute.status == DisputeStatus::InReview
-                    && dispute.admin_pubkey.as_deref() == Some(admin_pubkey.as_str())
-                {
+                if dispute.status == DisputeStatus::InReview {
+                    // Same-solver replay: the daemon resends the assignment
+                    // (reconnect backfill, or deliberately); it is the retry
+                    // path for the best-effort key derivation and must
+                    // succeed. Exact-event replays never reach here — the
+                    // receive path dedups by event id — so an InReview
+                    // record with a different pubkey is a genuinely newer
+                    // assignment: the daemon lets a write-capable solver
+                    // take over an in-progress dispute from a read-only one
+                    // (mostro admin_take_dispute.rs, pubkey_event_can_solve)
+                    // and notifies both parties with the new pubkey. Keeping
+                    // the old key would leave the actual solver unreachable
+                    // (PR #253 review).
+                    if dispute.admin_pubkey.as_deref() != Some(admin_pubkey.as_str()) {
+                        dispute.admin_pubkey = Some(admin_pubkey);
+                        dispute.is_read = false;
+                    }
                     return Ok(());
                 }
                 if dispute.status != DisputeStatus::Open {
@@ -587,29 +639,6 @@ mod tests {
         assert!(err.to_string().contains("DisputeAlreadyOpen"));
     }
 
-    /// PR #254 review (ermeme): the record commits InReview before key
-    /// derivation and listener startup, which can fail transiently. A
-    /// replayed assignment for the same solver is the retry path and must
-    /// succeed instead of being rejected as InvalidState.
-    #[tokio::test]
-    async fn a_same_solver_assignment_replay_is_idempotent() {
-        let trade_id = format!("t-{}", uuid::Uuid::new_v4());
-        let admin_pk = "0000000000000000000000000000000000000000000000000000000000000005";
-        seed_dispute(&trade_id, None).await;
-
-        handle_admin_took_dispute(trade_id.clone(), admin_pk.to_string())
-            .await
-            .unwrap();
-        // The replay (daemon resend / reconnect backfill) must be accepted.
-        handle_admin_took_dispute(trade_id.clone(), admin_pk.to_string())
-            .await
-            .expect("same-solver replay must be an idempotent retry");
-
-        let d = get_dispute(trade_id).await.unwrap().unwrap();
-        assert_eq!(d.status, DisputeStatus::InReview);
-        assert_eq!(d.admin_pubkey.as_deref(), Some(admin_pk));
-    }
-
     #[tokio::test]
     async fn empty_evidence_is_rejected() {
         let trade_id = format!("t-{}", uuid::Uuid::new_v4());
@@ -653,6 +682,11 @@ mod tests {
         handle_admin_took_dispute(trade_id.clone(), admin_pk.to_string())
             .await
             .unwrap();
+
+        // Model the in-flight open_dispute call that raced the assignment:
+        // its pending marker is what authorizes the claim.
+        pending_opens().lock().unwrap().insert(trade_id.clone());
+        let _pending = PendingOpenGuard(trade_id.clone());
 
         // Exactly what open_dispute persists after a successful publish.
         let own = Dispute {
@@ -699,6 +733,87 @@ mod tests {
         let d = get_dispute(trade_id).await.unwrap().unwrap();
         assert!(d.initiated_by_me, "the initiator flag must be preserved");
         assert_eq!(d.reason.as_deref(), Some("no payment"));
+        assert_eq!(d.status, DisputeStatus::InReview);
+        assert_eq!(d.admin_pubkey.as_deref(), Some(admin_pk));
+    }
+
+    /// PR #253 review round 2 (ermeme): a placeholder with NO owned
+    /// in-flight open attempt is a genuinely peer-opened dispute — the
+    /// insert must preserve it and reject, never rewrite it as ours.
+    #[tokio::test]
+    async fn a_peer_owned_placeholder_is_not_claimed_without_a_pending_open() {
+        let trade_id = format!("t-{}", uuid::Uuid::new_v4());
+        let admin_pk = "0000000000000000000000000000000000000000000000000000000000000006";
+
+        handle_admin_took_dispute(trade_id.clone(), admin_pk.to_string())
+            .await
+            .unwrap();
+
+        let own = Dispute {
+            id: uuid::Uuid::new_v4().to_string(),
+            trade_id: trade_id.clone(),
+            status: DisputeStatus::Open,
+            initiated_by_me: true,
+            reason: Some("mine".to_string()),
+            admin_pubkey: None,
+            resolution: None,
+            opened_at: unix_now(),
+            resolved_at: None,
+            is_read: true,
+        };
+        let err = dispute_store()
+            .try_insert_if_absent_or_resolved(own)
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("DisputeAlreadyOpen"), "got: {err}");
+
+        let d = get_dispute(trade_id).await.unwrap().unwrap();
+        assert!(!d.initiated_by_me, "peer ownership must be preserved");
+        assert!(d.reason.is_none());
+        assert_eq!(d.admin_pubkey.as_deref(), Some(admin_pk));
+    }
+
+    /// PR #253 review round 2 (ermeme): the daemon may reassign an
+    /// in-progress dispute to a different write-capable solver and resend
+    /// admin-took-dispute — the new pubkey must replace the old one, or the
+    /// actual solver is unreachable.
+    #[tokio::test]
+    async fn a_solver_reassignment_replaces_the_stored_pubkey() {
+        let trade_id = format!("t-{}", uuid::Uuid::new_v4());
+        let first = "0000000000000000000000000000000000000000000000000000000000000007";
+        let second = "0000000000000000000000000000000000000000000000000000000000000008";
+        seed_dispute(&trade_id, None).await;
+
+        handle_admin_took_dispute(trade_id.clone(), first.to_string())
+            .await
+            .unwrap();
+        handle_admin_took_dispute(trade_id.clone(), second.to_string())
+            .await
+            .expect("reassignment must be accepted");
+
+        let d = get_dispute(trade_id).await.unwrap().unwrap();
+        assert_eq!(d.status, DisputeStatus::InReview);
+        assert_eq!(d.admin_pubkey.as_deref(), Some(second));
+        assert!(!d.is_read, "a reassignment is news the user has not seen");
+    }
+
+    /// PR #253 review round 2 (ermeme): a replayed assignment for the same
+    /// solver is the retry path for the best-effort key derivation and must
+    /// be idempotent, not InvalidState.
+    #[tokio::test]
+    async fn a_same_solver_assignment_replay_is_idempotent() {
+        let trade_id = format!("t-{}", uuid::Uuid::new_v4());
+        let admin_pk = "0000000000000000000000000000000000000000000000000000000000000009";
+        seed_dispute(&trade_id, None).await;
+
+        handle_admin_took_dispute(trade_id.clone(), admin_pk.to_string())
+            .await
+            .unwrap();
+        handle_admin_took_dispute(trade_id.clone(), admin_pk.to_string())
+            .await
+            .expect("same-solver replay must be an idempotent retry");
+
+        let d = get_dispute(trade_id).await.unwrap().unwrap();
         assert_eq!(d.status, DisputeStatus::InReview);
         assert_eq!(d.admin_pubkey.as_deref(), Some(admin_pk));
     }
