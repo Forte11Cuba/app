@@ -78,6 +78,11 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
         // Deduplication uses the same id check as _onIncomingMessage so the
         // invariant is identical in both paths.
         for (final msg in msgs) {
+          // This room is the buyer<->seller conversation only: solver
+          // messages from a dispute share the order key in the store but
+          // must never surface here — replying would go to the counterparty,
+          // not the solver (PR #254 review).
+          if (msg.messageType != rust_types.MessageType.peer) continue;
           if (!_messages.any((m) => m.id == msg.id)) {
             _messages.add(msg);
           }
@@ -142,6 +147,9 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
   // ── Incoming stream ───────────────────────────────────────────────────────
 
   void _onIncomingMessage(rust_types.ChatMessage msg) {
+    // Dispute-channel traffic never belongs in the peer room (see
+    // _loadHistory).
+    if (msg.messageType != rust_types.MessageType.peer) return;
     if (_messages.any((m) => m.id == msg.id)) return; // deduplicate
     setState(() => _messages.add(msg));
     _scrollToBottom();

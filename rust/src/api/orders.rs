@@ -2312,6 +2312,7 @@ async fn on_peer_pubkey_received(order_id: &str, peer_pubkey_hex: &str) {
     let order_id_owned = order_id.to_string();
     crate::rt::spawn(async move {
         crate::api::messages::subscribe_incoming_chat(
+            crate::api::messages::ChatChannel::Peer,
             order_id_owned,
             trade_keys,
             peer_pubkey,

@@ -61,6 +61,11 @@ pub async fn initialize(relays: Option<Vec<String>>) -> Result<()> {
                     // would resubscribe. Idempotent: orders with a live chat
                     // task are skipped by the single-owner guard.
                     crate::api::messages::resubscribe_active_chats().await;
+                    // Same rearm for dispute chats: solver assignments are
+                    // committed before listener startup, which can fail while
+                    // keys or connectivity are missing — coming online is the
+                    // retry point (PR #254 review).
+                    crate::api::disputes::resubscribe_active_dispute_chats().await;
                 }
                 Ok(state) => {
                     log::info!("[nostr] connection state changed: {state:?}");
