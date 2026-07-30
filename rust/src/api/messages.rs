@@ -60,6 +60,11 @@ struct MessageStore {
     unread_tx: broadcast::Sender<u32>,
     /// Broadcast channel for attachment progress (payload = (message_id, progress 0.0–1.0)).
     attachment_tx: broadcast::Sender<(String, f64)>,
+    /// Ids present in memory whose DB write failed — known for replay dedup,
+    /// but NOT durable: the `since` cursor must never advance past them, or
+    /// a restart loses the message with no relay copy left to refetch
+    /// (PR #254 review).
+    non_durable: Arc<RwLock<std::collections::HashSet<String>>>,
 }
 
 impl MessageStore {
@@ -69,6 +74,7 @@ impl MessageStore {
         let (attachment_tx, _) = broadcast::channel(64);
         Self {
             messages: Arc::new(RwLock::new(HashMap::new())),
+            non_durable: Arc::new(RwLock::new(std::collections::HashSet::new())),
             hydrated: Arc::new(RwLock::new(std::collections::HashSet::new())),
             new_message_tx,
             unread_tx,
@@ -134,6 +140,13 @@ impl MessageStore {
             },
             None => true,
         };
+        // Keep memory-only ids distinct from durably committed ones — the
+        // receive path consults this before advancing the cursor.
+        if stored {
+            self.non_durable.write().await.remove(&msg.id);
+        } else {
+            self.non_durable.write().await.insert(msg.id.clone());
+        }
         let _ = self.new_message_tx.send(msg.clone());
         let unread = self.unread_count_inner().await;
         let _ = self.unread_tx.send(unread);
@@ -161,6 +174,35 @@ impl MessageStore {
                 .await
                 .map_err(|e| anyhow!("dedup lookup failed: {e}")),
             None => Ok(false),
+        }
+    }
+
+    /// `true` when the already-known `id` is durably stored, retrying the DB
+    /// write for a memory-only copy first. Callers gate cursor advancement on
+    /// this: an id whose write failed must keep the cursor put so the relay
+    /// copy is refetched after a restart (PR #254 review).
+    async fn ensure_durable(&self, trade_id: &str, id: &str) -> bool {
+        if !self.non_durable.read().await.contains(id) {
+            return true;
+        }
+        let copy = {
+            let store = self.messages.read().await;
+            store
+                .get(trade_id)
+                .and_then(|msgs| msgs.iter().find(|m| m.id == id).cloned())
+        };
+        let (Some(db), Some(msg)) = (crate::db::app_db::db(), copy) else {
+            return false;
+        };
+        match db.save_message(&msg).await {
+            Ok(()) => {
+                self.non_durable.write().await.remove(id);
+                true
+            }
+            Err(e) => {
+                log::warn!("[messages] persist retry failed id={id}: {e}");
+                false
+            }
         }
     }
 
@@ -823,7 +865,7 @@ const MAX_STORED_BYTES_PER_TRADE: usize = 5 * 1024 * 1024;
 /// the new envelope. After the deadline the legacy subscription is simply
 /// not created. Trades in flight at the cutover keep working: the legacy
 /// path only reads, never writes.
-const LEGACY_CHAT_DEPRECATION_TS: i64 = 1_798_675_200;
+pub(crate) const LEGACY_CHAT_DEPRECATION_TS: i64 = 1_798_675_200;
 
 /// Subscription id for the chat envelope of one order — explicit so every
 /// exit path can unsubscribe and a lingering relay subscription never
@@ -869,17 +911,38 @@ impl ChatChannel {
         }
     }
 
-    /// Whether to also read the pre-migration gift-wrap form. Only the peer
-    /// chat ever had one; the dispute chat moves to the envelope directly, so
-    /// it never subscribes to kind 1059.
+    /// Durable `since`-cursor key for this channel of `order_id`.
+    ///
+    /// Channel-scoped (PR #254 review): the peer and dispute subscriptions
+    /// are independent event streams, and a shared cursor would let either
+    /// advance past backlog the other has not seen — e.g. a solver with a
+    /// slightly slower clock dating a reply before the peer cursor, which
+    /// the dispute filter would then never fetch. The peer key keeps its
+    /// historical shape so existing installs do not refetch their backlog.
+    fn cursor_key(self, order_id: &str) -> String {
+        crate::db::settings_keys::chat_cursor(&format!("{}{order_id}", self.id_prefix()))
+    }
+
+    /// Whether to also read the pre-migration gift-wrap form until
+    /// [`LEGACY_CHAT_DEPRECATION_TS`]. Both channels do: the peer chat for
+    /// pre-migration counterparties (#246), and the dispute chat because the
+    /// current solver client still speaks only gift wrap
+    /// (mostrix#102 tracks its migration) — without the dual-read its
+    /// replies would be invisible (PR #254 review).
     fn reads_legacy_gift_wrap(self) -> bool {
-        matches!(self, ChatChannel::Peer)
+        true
     }
 }
 
-/// Subscription id for the legacy gift-wrap dual-read of one order.
-fn legacy_chat_subscription_id(order_id: &str) -> nostr_sdk::SubscriptionId {
-    nostr_sdk::SubscriptionId::new(format!("mostro-chat-legacy-{order_id}"))
+/// Subscription id for the legacy gift-wrap dual-read of one channel of one
+/// order. Channel-scoped like the primary id: each task owns and cleans up
+/// exactly its own subscriptions, so a dispute listener exiting can never
+/// tear down the peer task's live legacy delivery (PR #254 review).
+fn legacy_chat_subscription_id(channel: ChatChannel, order_id: &str) -> nostr_sdk::SubscriptionId {
+    nostr_sdk::SubscriptionId::new(format!(
+        "mostro-chat-legacy-{}{order_id}",
+        channel.id_prefix()
+    ))
 }
 
 /// Orders with a live chat task. Single-owner guard: `on_peer_pubkey_received`
@@ -952,10 +1015,10 @@ impl TokenBucket {
     }
 }
 
-/// Read the persisted `since` cursor for `order_id`, if any.
-async fn load_chat_cursor(order_id: &str) -> Option<i64> {
+/// Read the persisted `since` cursor for one channel of `order_id`, if any.
+async fn load_chat_cursor(channel: ChatChannel, order_id: &str) -> Option<i64> {
     let db = crate::db::app_db::db()?;
-    db.get_setting(&crate::db::settings_keys::chat_cursor(order_id))
+    db.get_setting(&channel.cursor_key(order_id))
         .await
         .ok()
         .flatten()?
@@ -965,9 +1028,9 @@ async fn load_chat_cursor(order_id: &str) -> Option<i64> {
 
 /// Persist the `since` cursor. Best-effort: on web this is a no-op until
 /// IndexedDB lands (#233), so the backlog bound degrades to per-process.
-async fn store_chat_cursor(order_id: &str, ts: i64) {
+async fn store_chat_cursor(channel: ChatChannel, order_id: &str, ts: i64) {
     if let Some(db) = crate::db::app_db::db() {
-        let key = crate::db::settings_keys::chat_cursor(order_id);
+        let key = channel.cursor_key(order_id);
         if let Err(e) = db.set_setting(&key, &ts.to_string()).await {
             log::warn!("[messages] cursor persist failed order={order_id}: {e}");
         }
@@ -1062,7 +1125,7 @@ pub(crate) async fn subscribe_incoming_chat(
             .unsubscribe(&chat_subscription_id(channel, &order_id))
             .await;
         client
-            .unsubscribe(&legacy_chat_subscription_id(&order_id))
+            .unsubscribe(&legacy_chat_subscription_id(channel, &order_id))
             .await;
     }
     log::debug!("[messages] incoming-chat subscription exiting order={order_id}");
@@ -1070,6 +1133,7 @@ pub(crate) async fn subscribe_incoming_chat(
 
 /// Mutable per-conversation receive state (see `subscribe_incoming_chat`).
 struct ChatRxState {
+    channel: ChatChannel,
     outer_seen: BoundedIdSet,
     bucket: TokenBucket,
     consecutive_rejected: u32,
@@ -1082,8 +1146,9 @@ struct ChatRxState {
 }
 
 impl ChatRxState {
-    fn new(cursor: i64) -> Self {
+    fn new(channel: ChatChannel, cursor: i64) -> Self {
         Self {
+            channel,
             outer_seen: BoundedIdSet::new(OUTER_LRU_CAP),
             bucket: TokenBucket::new(crate::rt::time::Instant::now()),
             consecutive_rejected: 0,
@@ -1131,7 +1196,7 @@ impl ChatRxState {
         let accepted = event_ts.min(unix_now());
         if accepted > self.cursor {
             self.cursor = accepted;
-            store_chat_cursor(order_id, accepted).await;
+            store_chat_cursor(self.channel, order_id, accepted).await;
         }
     }
 }
@@ -1159,9 +1224,9 @@ async fn run_chat_subscription(
 
     // `since` from the persisted cursor: everything older is already stored
     // locally (the cursor only advances on durably stored messages).
-    let cursor = load_chat_cursor(order_id).await.unwrap_or(0);
+    let cursor = load_chat_cursor(channel, order_id).await.unwrap_or(0);
     let sub_id = chat_subscription_id(channel, order_id);
-    let legacy_sub_id = legacy_chat_subscription_id(order_id);
+    let legacy_sub_id = legacy_chat_subscription_id(channel, order_id);
     let reads_legacy = channel.reads_legacy_gift_wrap();
 
     let mut filter = nostr_sdk::Filter::new()
@@ -1186,13 +1251,18 @@ async fn run_chat_subscription(
     // pre-migration peers, read-only, until the deprecation date. The legacy
     // address is the old NIP-04-style shared pubkey.
     let legacy_shared: Option<nostr_sdk::Keys> = if reads_legacy && unix_now() < LEGACY_CHAT_DEPRECATION_TS {
-        // The legacy address doubles as the decryption key: v1 gift-wraps to
-        // the NIP-04-style shared pubkey, so the receiver must unwrap with
-        // the shared SECRET as its keypair.
-        let keys = crate::crypto::ecdh::derive_nip04_shared_key(trade_keys, peer_pubkey)
-            .ok()
-            .and_then(|raw| nostr_sdk::SecretKey::from_slice(&raw).ok())
-            .map(nostr_sdk::Keys::new);
+        // The legacy address doubles as the decryption key. For the peer
+        // chat, v1 gift-wraps to the NIP-04-style shared pubkey, so the
+        // receiver unwraps with the shared SECRET as its keypair. For the
+        // dispute chat, the pre-migration solver (mostrix) gift-wraps
+        // straight to the trade pubkey, so the trade keys unwrap it.
+        let keys = match channel {
+            ChatChannel::Peer => crate::crypto::ecdh::derive_nip04_shared_key(trade_keys, peer_pubkey)
+                .ok()
+                .and_then(|raw| nostr_sdk::SecretKey::from_slice(&raw).ok())
+                .map(nostr_sdk::Keys::new),
+            ChatChannel::Dispute => Some(trade_keys.clone()),
+        };
         match keys {
             None => {
                 log::warn!("[messages] legacy shared key derivation failed order={order_id}");
@@ -1225,7 +1295,7 @@ async fn run_chat_subscription(
         legacy_shared.is_some(),
     );
 
-    let mut state = ChatRxState::new(cursor);
+    let mut state = ChatRxState::new(channel, cursor);
 
     loop {
         match rx.recv().await {
@@ -1240,6 +1310,7 @@ async fn run_chat_subscription(
                 } else if subscription_id == legacy_sub_id {
                     if let Some(shared) = &legacy_shared {
                         handle_legacy_chat_event(
+                            channel,
                             order_id,
                             shared,
                             &my_trade_pubkey,
@@ -1337,11 +1408,16 @@ async fn handle_chat_event(
             return;
         }
         Ok(true) => {
-            // Already durably stored (an echo of our own send, or a replay).
+            // An echo of our own send, or a replay. Only advance the cursor
+            // if the known copy really is durable — a memory-only record
+            // (its DB write failed) gets one retry here, and failing that
+            // the cursor stays put so the relay copy survives a restart.
             log::debug!("[messages] incoming-chat duplicate inner id={inner_id}");
-            state
-                .advance_cursor(order_id, event.created_at.as_secs() as i64)
-                .await;
+            if message_store().ensure_durable(order_id, &inner_id).await {
+                state
+                    .advance_cursor(order_id, event.created_at.as_secs() as i64)
+                    .await;
+            }
             return;
         }
         Ok(false) => {}
@@ -1395,6 +1471,7 @@ async fn handle_chat_event(
 /// pre-migration counterparty is not cut off mid-trade, and disappears at
 /// [`LEGACY_CHAT_DEPRECATION_TS`].
 async fn handle_legacy_chat_event(
+    channel: ChatChannel,
     order_id: &str,
     legacy_shared: &nostr_sdk::Keys,
     my_trade_pubkey: &nostr_sdk::PublicKey,
@@ -1505,7 +1582,7 @@ async fn handle_legacy_chat_event(
         trade_id: order_id.to_string(),
         sender_pubkey: sender_hex.to_string(),
         content,
-        message_type: MessageType::Peer,
+        message_type: channel.message_type(),
         is_mine: is_echo,
         is_read: is_echo,
         has_attachment: attachment.is_some(),
@@ -1610,8 +1687,34 @@ mod tests {
     fn only_the_peer_channel_reads_the_legacy_gift_wrap() {
         // The dispute chat migrates straight to the envelope, so it has no
         // pre-migration form to dual-read and never subscribes to kind 1059.
+        // Both channels dual-read until the deprecation date: the peer chat
+        // for pre-migration counterparties, the dispute chat because the
+        // current solver client (mostrix#102) still writes only gift wrap.
         assert!(ChatChannel::Peer.reads_legacy_gift_wrap());
-        assert!(!ChatChannel::Dispute.reads_legacy_gift_wrap());
+        assert!(ChatChannel::Dispute.reads_legacy_gift_wrap());
+    }
+
+    /// PR #254 review: the peer and dispute streams are independent, so each
+    /// channel owns its own durable cursor (peer keeps the historical key so
+    /// existing installs do not refetch) and its own subscription ids.
+    #[test]
+    fn cursors_and_subscription_ids_are_channel_scoped() {
+        assert_eq!(
+            ChatChannel::Peer.cursor_key("o1"),
+            crate::db::settings_keys::chat_cursor("o1"),
+        );
+        assert_eq!(
+            ChatChannel::Dispute.cursor_key("o1"),
+            crate::db::settings_keys::chat_cursor("dispute-o1"),
+        );
+        assert_ne!(
+            ChatChannel::Peer.cursor_key("o1"),
+            ChatChannel::Dispute.cursor_key("o1"),
+        );
+        assert_ne!(
+            legacy_chat_subscription_id(ChatChannel::Peer, "o1"),
+            legacy_chat_subscription_id(ChatChannel::Dispute, "o1"),
+        );
     }
 
     #[test]
@@ -1894,7 +1997,7 @@ mod tests {
         // Pre-EOSE (catch-up): a backlog far above the burst size is all
         // accepted — dropping stored history would lose it permanently
         // because the cursor advances past it.
-        let mut state = ChatRxState::new(0);
+        let mut state = ChatRxState::new(ChatChannel::Peer, 0);
         assert!(!state.live);
         for _ in 0..(RATE_CAPACITY as u32 * 5) {
             assert!(state.budget_ok("order-x"));
@@ -1971,8 +2074,9 @@ mod tests {
         let event: Event = serde_json::from_str(&event_json).unwrap();
 
         let order_id = uuid::Uuid::new_v4().to_string();
-        let mut state = ChatRxState::new(0);
+        let mut state = ChatRxState::new(ChatChannel::Peer, 0);
         handle_legacy_chat_event(
+            ChatChannel::Peer,
             &order_id,
             &shared_keys,
             &my_keys.public_key(),
@@ -1998,6 +2102,7 @@ mod tests {
         .unwrap();
         let event2: Event = serde_json::from_str(&event_json2).unwrap();
         handle_legacy_chat_event(
+            ChatChannel::Peer,
             &order_id,
             &shared_keys,
             &my_keys.public_key(),
@@ -2019,6 +2124,7 @@ mod tests {
         .unwrap();
         let stranger_event: Event = serde_json::from_str(&stranger_json).unwrap();
         handle_legacy_chat_event(
+            ChatChannel::Peer,
             &order_id,
             &shared_keys,
             &my_keys.public_key(),

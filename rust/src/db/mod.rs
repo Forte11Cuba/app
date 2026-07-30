@@ -37,6 +37,20 @@ pub mod settings_keys {
     pub fn chat_cursor(order_id: &str) -> String {
         format!("{CHAT_CURSOR_PREFIX}{order_id}")
     }
+
+    /// Per-order solver pubkey (hex) for the dispute chat.
+    pub const DISPUTE_ADMIN_PREFIX: &str = "dispute_admin:";
+
+    /// Build the settings key holding the dispute solver's pubkey for
+    /// `order_id`.
+    ///
+    /// The dispute record itself stays in memory by design — status and
+    /// resolution are re-derivable from daemon events. This pubkey is not: it
+    /// arrives exactly once, in `admin-took-dispute`, and without it the
+    /// dispute chat keys cannot be derived again after a restart.
+    pub fn dispute_admin(order_id: &str) -> String {
+        format!("{DISPUTE_ADMIN_PREFIX}{order_id}")
+    }
 }
 
 /// Storage trait — implemented by both SQLite (native) and IndexedDB (WASM).

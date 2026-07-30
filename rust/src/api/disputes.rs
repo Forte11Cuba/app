@@ -47,6 +47,10 @@ impl DisputeStore {
         self.disputes.read().await.get(trade_id).cloned()
     }
 
+    async fn all(&self) -> Vec<Dispute> {
+        self.disputes.read().await.values().cloned().collect()
+    }
+
     /// Atomically update a dispute under the write lock.
     ///
     /// `f` receives a mutable reference to the dispute and should return
@@ -215,6 +219,40 @@ pub async fn submit_evidence(trade_id: String, text: String) -> Result<()> {
     let ctx = crate::api::messages::admin_chat_context(trade_index, &admin_pubkey).await?;
     let inner = crate::api::messages::publish_chat_payload_for(&ctx, &text).await?;
 
+    // Interop dual-write (PR #254 review): the current solver client
+    // (mostrix) still reads only NIP-59 gift wrap — its envelope migration is
+    // tracked in mostrix#102. Until the deprecation date the evidence also
+    // goes out in the pre-migration shape it understands, gift-wrapped
+    // straight to the solver. Best-effort: the envelope copy above is the
+    // durable one, and this copy disappears with the dual-read window.
+    if crate::rt::unix_now() < crate::api::messages::LEGACY_CHAT_DEPRECATION_TS {
+        let legacy_send: Result<()> = async {
+            let sender_keys = crate::api::identity::get_active_trade_keys(trade_index).await?;
+            let payload = serde_json::json!({
+                "type": "evidence",
+                "trade_id": trade_id,
+                "text": text,
+            })
+            .to_string();
+            let event_json = crate::nostr::gift_wrap::wrap(
+                &sender_keys,
+                &admin_pubkey,
+                &payload,
+                nostr_sdk::Kind::from(14u16),
+            )
+            .await
+            .map_err(|e| anyhow!("legacy wrap failed: {e}"))?;
+            crate::api::orders::publish_event(&event_json)
+                .await
+                .map_err(|e| anyhow!("legacy publish failed: {e}"))?;
+            Ok(())
+        }
+        .await;
+        if let Err(e) = legacy_send {
+            log::warn!("[disputes] legacy evidence copy not sent trade={trade_id}: {e}");
+        }
+    }
+
     // Record it locally so the dispute conversation has history, exactly as a
     // peer message does. Keyed by the inner event id, so our own echo arriving
     // from a relay dedups against this record instead of duplicating it.
@@ -263,6 +301,17 @@ pub async fn handle_admin_took_dispute(trade_id: String, admin_pubkey: String) -
 
     dispute_store()
         .update_conditional(&trade_id, move |dispute| {
+            // Idempotent same-solver replay (PR #254 review): the record is
+            // committed InReview before key derivation and listener startup,
+            // both of which can fail transiently (keys not hydrated yet,
+            // relay pool offline). A replayed assignment for the SAME solver
+            // is the retry path for exactly that window, so it must fall
+            // through to re-derive and re-arm instead of being rejected.
+            if dispute.status == DisputeStatus::InReview
+                && dispute.admin_pubkey.as_deref() == Some(admin_pubkey.as_str())
+            {
+                return Ok(());
+            }
             if dispute.status != DisputeStatus::Open {
                 return Err(anyhow!(
                     "InvalidState: dispute is not open (current: {:?})",
@@ -323,6 +372,26 @@ async fn derive_admin_shared_key(trade_id: &str, admin_pubkey_hex: &str) -> Resu
     }
 
     Ok(())
+}
+
+/// Re-arm the dispute-chat listener of every in-review dispute with a known
+/// solver. Called when the relay pool comes (back) online, mirroring
+/// `resubscribe_active_chats` for the peer channel (PR #254 review): listener
+/// startup is best-effort at assignment time and can fail while keys or
+/// connectivity are not there yet, and without a rearm path solver replies
+/// would stay invisible for the rest of the process. Idempotent — the
+/// per-channel single-owner guard makes a spawn for an already-listening
+/// dispute a no-op.
+pub(crate) async fn resubscribe_active_dispute_chats() {
+    for dispute in dispute_store().all().await {
+        if dispute.status != DisputeStatus::InReview {
+            continue;
+        }
+        let Some(admin) = dispute.admin_pubkey.clone() else {
+            continue;
+        };
+        let _ = derive_admin_shared_key(&dispute.trade_id, &admin).await;
+    }
 }
 
 /// Handle an incoming `adminSettled` event (admin resolved in buyer's favour).
@@ -459,6 +528,29 @@ mod tests {
             .await
             .unwrap_err();
         assert!(err.to_string().contains("DisputeAlreadyOpen"));
+    }
+
+    /// PR #254 review (ermeme): the record commits InReview before key
+    /// derivation and listener startup, which can fail transiently. A
+    /// replayed assignment for the same solver is the retry path and must
+    /// succeed instead of being rejected as InvalidState.
+    #[tokio::test]
+    async fn a_same_solver_assignment_replay_is_idempotent() {
+        let trade_id = format!("t-{}", uuid::Uuid::new_v4());
+        let admin_pk = "0000000000000000000000000000000000000000000000000000000000000005";
+        seed_dispute(&trade_id, None).await;
+
+        handle_admin_took_dispute(trade_id.clone(), admin_pk.to_string())
+            .await
+            .unwrap();
+        // The replay (daemon resend / reconnect backfill) must be accepted.
+        handle_admin_took_dispute(trade_id.clone(), admin_pk.to_string())
+            .await
+            .expect("same-solver replay must be an idempotent retry");
+
+        let d = get_dispute(trade_id).await.unwrap().unwrap();
+        assert_eq!(d.status, DisputeStatus::InReview);
+        assert_eq!(d.admin_pubkey.as_deref(), Some(admin_pk));
     }
 
     #[tokio::test]

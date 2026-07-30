@@ -12,8 +12,19 @@ random ephemeral authors made third-party flooding unattributable); it is
 still *read* from pre-migration peers until the dual-read deadline
 (`LEGACY_CHAT_DEPRECATION_TS`, 2026-12-31T00:00:00Z), bounded by the same
 LRU / rate budget / size cap / durable dedup / quota as the new envelope.
-Admin/dispute chat still uses gift wrap. Messages persist locally after
-validation. Supports encrypted file attachments via Blossom servers.
+Admin/dispute chat uses the **same chat envelope**, keyed to the solver's
+pubkey (from `admin-took-dispute`) instead of the counterparty's trade key
+(<https://mostro.network/protocol/dispute_chat.html>). Interop dual-path
+until `LEGACY_CHAT_DEPRECATION_TS`: the current solver client (mostrix)
+still speaks only NIP-59 gift wrap (mostrix#102), so outgoing evidence is
+additionally *written* as a gift wrap to the solver, and solver gift wraps
+addressed to the trade pubkey are still *read*, under the same bounds as
+the peer dual-read. Each channel keeps its **own** durable `since` cursor
+(`chat_cursor:<order>` for peer, `chat_cursor:dispute-<order>` for
+dispute) and its own subscription ids, so the two independent streams can
+never suppress or tear down each other. Messages persist locally after
+validation; the `since` cursor advances only past durably persisted
+messages. Supports encrypted file attachments via Blossom servers.
 
 **Security requirements implemented** (see the protocol spec for the
 normative list):
