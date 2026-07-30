@@ -3,8 +3,11 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path/path.dart' as p;
-import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+// Resolves the app's own data directory — never the user-visible Documents
+// folder. Web gets the stub; main() only calls it behind `!kIsWeb`.
+import 'package:mostro/core/storage/app_data_dir.dart'
+    if (dart.library.html) 'package:mostro/core/storage/app_data_dir_web.dart';
 import 'package:mostro/core/app.dart';
 import 'package:mostro/core/mostro_defaults.dart';
 import 'package:mostro/core/services/identity_service.dart';
@@ -58,8 +61,8 @@ Future<void> main() async {
   // operations that read or write trade keys and trade records.
   if (!kIsWeb) {
     try {
-      final docsDir = await getApplicationDocumentsDirectory();
-      await rust_api.initDb(path: p.join(docsDir.path, 'mostro.db'));
+      final dataDir = await appDataDirPath();
+      await rust_api.initDb(path: p.join(dataDir, 'mostro.db'));
     } catch (e, st) {
       // DB init failure is non-fatal: trade-key and role persistence won't
       // work for this session, but the app can still browse orders and relay
