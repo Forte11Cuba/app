@@ -203,29 +203,22 @@ pub async fn submit_evidence(trade_id: String, text: String) -> Result<()> {
         .await
         .ok_or_else(|| anyhow!("TradeNotFound: no trade key for {trade_id}"))?;
 
-    let sender_keys = crate::api::identity::get_active_trade_keys(trade_index).await?;
+    // Same envelope as the peer chat, keyed to the solver instead of the
+    // counterparty: inner kind 1 signed by our trade key, NIP-44 under K_conv,
+    // inside a kind 14 signed with K_sign and p-tagged to pub(K_conv). No gift
+    // wrap and no ephemeral key — see
+    // <https://mostro.network/protocol/dispute_chat.html>.
+    //
+    // The text travels as the message itself rather than a hand-rolled
+    // {"type":"evidence"} JSON: this is a conversation with the solver, and
+    // that shape had no reader on the other side of the envelope.
+    let ctx = crate::api::messages::admin_chat_context(trade_index, &admin_pubkey).await?;
+    let inner = crate::api::messages::publish_chat_payload_for(&ctx, &text).await?;
 
-    // Build the evidence payload.
-    let payload = serde_json::json!({
-        "type": "evidence",
-        "trade_id": trade_id,
-        "text": text,
-    })
-    .to_string();
-
-    // Wrap and send as NIP-59 Kind-14 DM to the admin.
-    let event_json = crate::nostr::gift_wrap::wrap(
-        &sender_keys,
-        &admin_pubkey,
-        &payload,
-        nostr_sdk::Kind::from(14u16),
-    )
-    .await
-    .map_err(|e| anyhow!("gift wrap failed: {e}"))?;
-
-    crate::api::orders::publish_event(&event_json)
-        .await
-        .map_err(|e| anyhow!("publish failed: {e}"))?;
+    // Record it locally so the dispute conversation has history, exactly as a
+    // peer message does. Keyed by the inner event id, so our own echo arriving
+    // from a relay dedups against this record instead of duplicating it.
+    crate::api::messages::store_outgoing_admin_message(&trade_id, &ctx, &text, &inner).await;
 
     log::info!("[disputes] evidence submitted for trade={trade_id}");
     Ok(())
@@ -286,36 +279,47 @@ pub async fn handle_admin_took_dispute(trade_id: String, admin_pubkey: String) -
     derive_admin_shared_key(&trade_id, &admin_pubkey_for_key).await
 }
 
-/// Derive the admin shared key for `trade_id` and store it in the session.
+/// Derive the dispute-chat keys for `trade_id` and start listening.
 ///
-/// This key allows the user to decrypt admin messages in the dispute chat (the
-/// admin encrypts to the trade pubkey, not the identity key).
+/// Both sides ECDH their trade key against the solver's pubkey and split the
+/// secret with HKDF exactly as the peer chat does, so `derive_chat_keys` is
+/// reused unchanged — the only difference is whose pubkey goes in
+/// (<https://mostro.network/protocol/dispute_chat.html>).
 ///
-/// Best-effort: if no trade key or session exists this logs a warning but does
-/// not fail — the dispute record has already been updated, and losing the
-/// derivation must not lose the admin pubkey with it.
+/// Best-effort: if no trade key exists yet this logs a warning but does not
+/// fail. The dispute record and the solver pubkey are already stored, so a
+/// later reconnect can start the listener; losing the derivation must not lose
+/// the pubkey with it.
 async fn derive_admin_shared_key(trade_id: &str, admin_pubkey_hex: &str) -> Result<()> {
     let trade_id = trade_id.to_string();
-    let admin_pubkey_for_key = admin_pubkey_hex.to_string();
+    let admin_pubkey_hex = admin_pubkey_hex.to_string();
 
-    let derive_result: Result<()> = async {
+    let start_result: Result<()> = async {
         let trade_index = crate::api::orders::trade_key_for_order(&trade_id)
             .await
             .ok_or_else(|| anyhow!("no trade key for trade {trade_id}"))?;
         let trade_keys = crate::api::identity::get_active_trade_keys(trade_index).await?;
-        let admin_pk = nostr_sdk::PublicKey::from_hex(&admin_pubkey_for_key)
+        let admin_pk = nostr_sdk::PublicKey::from_hex(&admin_pubkey_hex)
             .map_err(|e| anyhow!("invalid admin pubkey: {e}"))?;
-        let shared_key = crate::crypto::ecdh::derive_nip04_shared_key(&trade_keys, &admin_pk)?;
-        crate::mostro::session::session_manager()
-            .set_admin_shared_key(&trade_id, shared_key)
-            .await?;
-        log::info!("[disputes] adminSharedKey derived for trade={trade_id}");
+        let (conv, sign) = crate::crypto::chat_keys::derive_chat_keys(&trade_keys, &admin_pk)?;
+
+        // Own task, like the peer chat: the guard inside is keyed per channel,
+        // so this never collides with the peer conversation of the same order.
+        crate::rt::spawn(crate::api::messages::subscribe_incoming_chat(
+            crate::api::messages::ChatChannel::Dispute,
+            trade_id.clone(),
+            trade_keys,
+            admin_pk,
+            conv,
+            sign,
+        ));
+        log::info!("[disputes] dispute chat listening for trade={trade_id}");
         Ok(())
     }
     .await;
 
-    if let Err(e) = derive_result {
-        log::warn!("[disputes] could not derive adminSharedKey for trade={trade_id}: {e}");
+    if let Err(e) = start_result {
+        log::warn!("[disputes] could not start dispute chat for trade={trade_id}: {e}");
     }
 
     Ok(())

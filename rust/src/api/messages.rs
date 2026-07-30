@@ -228,7 +228,7 @@ fn message_store() -> &'static MessageStore {
 // ── Public API ────────────────────────────────────────────────────────────────
 
 /// The chat-key material for one conversation, derived from the session.
-struct ChatContext {
+pub(crate) struct ChatContext {
     trade_keys: nostr_sdk::Keys,
     /// `K_conv` — NIP-44 encryption; `pub(K_conv)` is the `p` tag.
     conv: nostr_sdk::Keys,
@@ -258,6 +258,49 @@ async fn chat_context(trade_key_index: u32, peer_hex: &str) -> Result<ChatContex
 ///
 /// Returns the signed inner event on success — its id and timestamp are the
 /// message's durable identity (shared with the recipient's replay dedup).
+/// [`chat_context`] for the dispute channel: the shared secret is with the
+/// solver's pubkey from `admin-took-dispute` instead of the counterparty's
+/// trade key. Derivation is identical — that is what the spec prescribes.
+pub(crate) async fn admin_chat_context(
+    trade_key_index: u32,
+    admin_pubkey: &nostr_sdk::PublicKey,
+) -> Result<ChatContext> {
+    chat_context(trade_key_index, &admin_pubkey.to_hex()).await
+}
+
+/// Publish over an already-built context. Exposed for the dispute channel,
+/// which owns its own send path but must not reimplement the envelope.
+pub(crate) async fn publish_chat_payload_for(
+    ctx: &ChatContext,
+    payload: &str,
+) -> Result<nostr_sdk::Event> {
+    publish_chat_payload(ctx, payload).await
+}
+
+/// Record a message we just sent to the solver, mirroring what `send_message`
+/// stores for the peer chat: identified by the inner event id so the relay
+/// echo dedups against it, and never unread (we wrote it).
+pub(crate) async fn store_outgoing_admin_message(
+    trade_id: &str,
+    ctx: &ChatContext,
+    content: &str,
+    inner: &nostr_sdk::Event,
+) {
+    let msg = ChatMessage {
+        id: inner.id.to_hex(),
+        trade_id: trade_id.to_string(),
+        sender_pubkey: ctx.trade_keys.public_key().to_hex(),
+        content: content.to_string(),
+        message_type: MessageType::Admin,
+        is_mine: true,
+        is_read: true,
+        has_attachment: false,
+        attachment: None,
+        created_at: inner.created_at.as_secs() as i64,
+    };
+    let _ = message_store().add_message(msg).await;
+}
+
 async fn publish_chat_payload(ctx: &ChatContext, payload: &str) -> Result<nostr_sdk::Event> {
     let (outer, inner) =
         crate::nostr::gift_wrap::mostro_wrap(&ctx.trade_keys, &ctx.conv, &ctx.sign, payload)
@@ -785,8 +828,53 @@ const LEGACY_CHAT_DEPRECATION_TS: i64 = 1_798_675_200;
 /// Subscription id for the chat envelope of one order — explicit so every
 /// exit path can unsubscribe and a lingering relay subscription never
 /// outlives its task.
-fn chat_subscription_id(order_id: &str) -> nostr_sdk::SubscriptionId {
-    nostr_sdk::SubscriptionId::new(format!("mostro-chat-{order_id}"))
+fn chat_subscription_id(channel: ChatChannel, order_id: &str) -> nostr_sdk::SubscriptionId {
+    nostr_sdk::SubscriptionId::new(format!("mostro-chat-{}{order_id}", channel.id_prefix()))
+}
+
+/// Which conversation an envelope subscription serves.
+///
+/// Both use the identical envelope and key derivation — the difference is who
+/// the shared secret is with, and therefore which key pair `derive_chat_keys`
+/// produces (<https://mostro.network/protocol/dispute_chat.html>).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum ChatChannel {
+    /// Buyer ↔ seller, keyed to the counterparty's trade key.
+    Peer,
+    /// Party ↔ solver, keyed to the admin pubkey from `admin-took-dispute`.
+    /// Each party has its own independent conversation with the admin.
+    Dispute,
+}
+
+impl ChatChannel {
+    /// Distinguishes the two conversations of one order everywhere they are
+    /// tracked by id: subscription ids and the single-owner guard. Without it
+    /// a dispute chat would be mistaken for the peer chat already running for
+    /// that order and silently never start.
+    fn id_prefix(self) -> &'static str {
+        match self {
+            ChatChannel::Peer => "",
+            ChatChannel::Dispute => "dispute-",
+        }
+    }
+
+    fn guard_key(self, order_id: &str) -> String {
+        format!("{}{order_id}", self.id_prefix())
+    }
+
+    fn message_type(self) -> MessageType {
+        match self {
+            ChatChannel::Peer => MessageType::Peer,
+            ChatChannel::Dispute => MessageType::Admin,
+        }
+    }
+
+    /// Whether to also read the pre-migration gift-wrap form. Only the peer
+    /// chat ever had one; the dispute chat moves to the envelope directly, so
+    /// it never subscribes to kind 1059.
+    fn reads_legacy_gift_wrap(self) -> bool {
+        matches!(self, ChatChannel::Peer)
+    }
 }
 
 /// Subscription id for the legacy gift-wrap dual-read of one order.
@@ -947,6 +1035,7 @@ fn parse_chat_payload(payload: &str) -> (String, Option<AttachmentInfo>) {
 /// only ever drops chat events; it cannot touch the order state machine, the
 /// daemon transport, or dispute flows.
 pub(crate) async fn subscribe_incoming_chat(
+    channel: ChatChannel,
     order_id: String,
     trade_keys: nostr_sdk::Keys,
     peer_pubkey: nostr_sdk::PublicKey,
@@ -956,20 +1045,22 @@ pub(crate) async fn subscribe_incoming_chat(
     // Single-owner guard: a second spawn for the same order is a no-op.
     {
         let mut active = active_chats().lock().await;
-        if !active.insert(order_id.clone()) {
+        if !active.insert(channel.guard_key(&order_id)) {
             log::debug!("[messages] chat task already active order={order_id}");
             return;
         }
     }
 
-    run_chat_subscription(&order_id, &trade_keys, &peer_pubkey, &conv, &sign).await;
+    run_chat_subscription(channel, &order_id, &trade_keys, &peer_pubkey, &conv, &sign).await;
 
     // Cleanup on every exit path: release ownership and drop the relay
     // subscriptions so they never outlive the task.
-    active_chats().lock().await.remove(&order_id);
+    active_chats().lock().await.remove(&channel.guard_key(&order_id));
     if let Ok(pool) = crate::api::nostr::get_pool() {
         let client = pool.client();
-        client.unsubscribe(&chat_subscription_id(&order_id)).await;
+        client
+            .unsubscribe(&chat_subscription_id(channel, &order_id))
+            .await;
         client
             .unsubscribe(&legacy_chat_subscription_id(&order_id))
             .await;
@@ -1046,6 +1137,7 @@ impl ChatRxState {
 }
 
 async fn run_chat_subscription(
+    channel: ChatChannel,
     order_id: &str,
     trade_keys: &nostr_sdk::Keys,
     peer_pubkey: &nostr_sdk::PublicKey,
@@ -1068,8 +1160,9 @@ async fn run_chat_subscription(
     // `since` from the persisted cursor: everything older is already stored
     // locally (the cursor only advances on durably stored messages).
     let cursor = load_chat_cursor(order_id).await.unwrap_or(0);
-    let sub_id = chat_subscription_id(order_id);
+    let sub_id = chat_subscription_id(channel, order_id);
     let legacy_sub_id = legacy_chat_subscription_id(order_id);
+    let reads_legacy = channel.reads_legacy_gift_wrap();
 
     let mut filter = nostr_sdk::Filter::new()
         .kind(nostr_sdk::Kind::PrivateDirectMessage)
@@ -1092,7 +1185,7 @@ async fn run_chat_subscription(
     // Dual-read window: also accept the superseded gift-wrap envelope from
     // pre-migration peers, read-only, until the deprecation date. The legacy
     // address is the old NIP-04-style shared pubkey.
-    let legacy_shared: Option<nostr_sdk::Keys> = if unix_now() < LEGACY_CHAT_DEPRECATION_TS {
+    let legacy_shared: Option<nostr_sdk::Keys> = if reads_legacy && unix_now() < LEGACY_CHAT_DEPRECATION_TS {
         // The legacy address doubles as the decryption key: v1 gift-wraps to
         // the NIP-04-style shared pubkey, so the receiver must unwrap with
         // the shared SECRET as its keypair.
@@ -1142,7 +1235,7 @@ async fn run_chat_subscription(
                 ..
             }) => {
                 if subscription_id == sub_id {
-                    handle_chat_event(order_id, &allowed_signers, conv, &sign_pubkey, &my_trade_pubkey, &event, &mut state)
+                    handle_chat_event(channel, order_id, &allowed_signers, conv, &sign_pubkey, &my_trade_pubkey, &event, &mut state)
                         .await;
                 } else if subscription_id == legacy_sub_id {
                     if let Some(shared) = &legacy_shared {
@@ -1184,7 +1277,12 @@ async fn run_chat_subscription(
 
 /// Validate and store one incoming chat-envelope event (see
 /// `subscribe_incoming_chat` for the pipeline description).
+// One more argument than clippy's default: the channel joins parameters this
+// function already threaded, and bundling them into a struct would just move
+// the same values behind a name that adds nothing.
+#[allow(clippy::too_many_arguments)]
 async fn handle_chat_event(
+    channel: ChatChannel,
     order_id: &str,
     allowed_signers: &[nostr_sdk::PublicKey],
     conv: &nostr_sdk::Keys,
@@ -1269,7 +1367,7 @@ async fn handle_chat_event(
         trade_id: order_id.to_string(),
         sender_pubkey: inner.pubkey.to_hex(),
         content,
-        message_type: MessageType::Peer,
+        message_type: channel.message_type(),
         is_mine: is_echo,
         is_read: is_echo,
         has_attachment: attachment.is_some(),
@@ -1453,7 +1551,7 @@ pub(crate) async fn resubscribe_active_chats() {
         };
         log::info!("[messages] resubscribing chat order={order_id}");
         crate::rt::spawn(subscribe_incoming_chat(
-            order_id, trade_keys, peer, conv, sign,
+            ChatChannel::Peer, order_id, trade_keys, peer, conv, sign,
         ));
     }
 }
@@ -1480,6 +1578,47 @@ fn chat_still_relevant(trade: &crate::api::types::TradeInfo) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_two_channels_of_one_order_never_collide() {
+        let order = "order-1";
+
+        // Same order, different conversations: the single-owner guard and the
+        // relay subscription id must tell them apart, or starting the dispute
+        // chat would be a no-op because the peer chat already "owns" the order.
+        assert_ne!(
+            ChatChannel::Peer.guard_key(order),
+            ChatChannel::Dispute.guard_key(order)
+        );
+        assert_ne!(
+            chat_subscription_id(ChatChannel::Peer, order),
+            chat_subscription_id(ChatChannel::Dispute, order)
+        );
+    }
+
+    #[test]
+    fn the_peer_channel_keeps_its_wire_identity() {
+        // The peer subscription id is unchanged by the channel refactor: a
+        // different string would orphan subscriptions across an app upgrade.
+        assert_eq!(
+            chat_subscription_id(ChatChannel::Peer, "order-1"),
+            nostr_sdk::SubscriptionId::new("mostro-chat-order-1")
+        );
+    }
+
+    #[test]
+    fn only_the_peer_channel_reads_the_legacy_gift_wrap() {
+        // The dispute chat migrates straight to the envelope, so it has no
+        // pre-migration form to dual-read and never subscribes to kind 1059.
+        assert!(ChatChannel::Peer.reads_legacy_gift_wrap());
+        assert!(!ChatChannel::Dispute.reads_legacy_gift_wrap());
+    }
+
+    #[test]
+    fn each_channel_stores_its_own_message_type() {
+        assert_eq!(ChatChannel::Peer.message_type(), MessageType::Peer);
+        assert_eq!(ChatChannel::Dispute.message_type(), MessageType::Admin);
+    }
 
     #[tokio::test]
     async fn send_and_get_messages() {
