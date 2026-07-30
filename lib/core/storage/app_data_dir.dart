@@ -25,17 +25,20 @@ const _appDirName = 'mostro';
 /// when `XDG_DATA_HOME` is unset, empty, or relative (the spec says a relative
 /// value must be ignored). Returns `null` when neither variable is usable, so
 /// the caller can fall back to path_provider instead of guessing.
+/// Uses `p.posix` rather than the ambient path style on purpose: these are
+/// Linux paths, and they must not pick up Windows separators when this runs on
+/// another host (the analyzer, or the test suite on a developer's machine).
 String? resolveLinuxDataDir(Map<String, String> env) {
   final xdgDataHome = env['XDG_DATA_HOME'];
   if (xdgDataHome != null &&
       xdgDataHome.isNotEmpty &&
-      p.isAbsolute(xdgDataHome)) {
-    return p.join(xdgDataHome, _appDirName);
+      p.posix.isAbsolute(xdgDataHome)) {
+    return p.posix.join(xdgDataHome, _appDirName);
   }
 
   final home = env['HOME'];
-  if (home != null && home.isNotEmpty && p.isAbsolute(home)) {
-    return p.join(home, '.local', 'share', _appDirName);
+  if (home != null && home.isNotEmpty && p.posix.isAbsolute(home)) {
+    return p.posix.join(home, '.local', 'share', _appDirName);
   }
 
   return null;
@@ -47,9 +50,18 @@ String? resolveLinuxDataDir(Map<String, String> env) {
 /// `getApplicationDocumentsDirectory()`, which is already app-private there
 /// (Android/iOS sandbox). macOS and Windows desktop have the same
 /// user-visible-folder problem and are left for their own change.
-Future<String> appDataDirPath() async {
-  if (Platform.isLinux) {
-    final resolved = resolveLinuxDataDir(Platform.environment);
+///
+/// [env], [isLinux] and [documentsDirPath] exist only as test seams — they
+/// default to the real platform, so callers pass nothing. They let a test drive
+/// the Linux branch and observe the fallback on any host, without a filesystem
+/// abstraction: an unwritable directory is provoked with a real path instead.
+Future<String> appDataDirPath({
+  Map<String, String>? env,
+  bool? isLinux,
+  Future<String> Function()? documentsDirPath,
+}) async {
+  if (isLinux ?? Platform.isLinux) {
+    final resolved = resolveLinuxDataDir(env ?? Platform.environment);
     if (resolved != null) {
       try {
         await Directory(resolved).create(recursive: true);
@@ -64,6 +76,8 @@ Future<String> appDataDirPath() async {
     }
   }
 
-  final dir = await getApplicationDocumentsDirectory();
-  return dir.path;
+  return (documentsDirPath ?? _documentsDirPath)();
 }
+
+Future<String> _documentsDirPath() async =>
+    (await getApplicationDocumentsDirectory()).path;

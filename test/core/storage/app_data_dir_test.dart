@@ -1,7 +1,75 @@
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mostro/core/storage/app_data_dir.dart';
+import 'package:path/path.dart' as p;
 
 void main() {
+  group('appDataDirPath', () {
+    late Directory tmp;
+
+    setUp(() async {
+      tmp = await Directory.systemTemp.createTemp('mostro_data_dir_test_');
+    });
+
+    tearDown(() async {
+      if (tmp.existsSync()) await tmp.delete(recursive: true);
+    });
+
+    test('creates the resolved directory and returns it', () async {
+      // Arrange — a data root that exists but has no 'mostro' subdirectory yet.
+      final env = {'XDG_DATA_HOME': tmp.path, 'HOME': tmp.path};
+
+      // Act
+      final path = await appDataDirPath(
+        env: env,
+        isLinux: true,
+        documentsDirPath: () async => fail('must not fall back'),
+      );
+
+      // Assert — created, and inside the data root rather than Documents.
+      expect(path, p.posix.join(tmp.path, 'mostro'));
+      expect(Directory(path).existsSync(), isTrue);
+    });
+
+    test('falls back to the documents directory when creation fails', () async {
+      // Arrange — XDG_DATA_HOME points at a *file*, so creating a directory
+      // under it fails the way an unwritable data root would.
+      final blocker = File(p.join(tmp.path, 'not-a-dir'))..writeAsStringSync('');
+      final env = {'XDG_DATA_HOME': blocker.path, 'HOME': blocker.path};
+
+      // Act
+      final path = await appDataDirPath(
+        env: env,
+        isLinux: true,
+        documentsDirPath: () async => '/fallback/documents',
+      );
+
+      // Assert — startup survives on the fallback instead of throwing.
+      expect(path, '/fallback/documents');
+    });
+
+    test('uses the documents directory on platforms other than Linux', () async {
+      final path = await appDataDirPath(
+        env: {'XDG_DATA_HOME': tmp.path},
+        isLinux: false,
+        documentsDirPath: () async => '/fallback/documents',
+      );
+
+      expect(path, '/fallback/documents');
+    });
+
+    test('falls back when the environment resolves to no path at all', () async {
+      final path = await appDataDirPath(
+        env: const {},
+        isLinux: true,
+        documentsDirPath: () async => '/fallback/documents',
+      );
+
+      expect(path, '/fallback/documents');
+    });
+  });
+
   group('resolveLinuxDataDir', () {
     test('uses XDG_DATA_HOME when it is set to an absolute path', () {
       // Arrange
