@@ -14,7 +14,7 @@ use std::sync::OnceLock;
 use tokio::sync::{broadcast, RwLock};
 use tokio::sync::broadcast::error::RecvError;
 
-use crate::api::types::{Dispute, DisputeResolution, DisputeStatus};
+use crate::api::types::{Dispute, DisputeResolution, DisputeStatus, OrderStatus};
 use crate::db::Storage;
 
 // ── Dispute store ─────────────────────────────────────────────────────────────
@@ -356,6 +356,48 @@ async fn persist_admin_pubkey(order_id: &str, admin_pubkey_hex: &str) {
     }
 }
 
+/// Drop the persisted solver pubkey for `order_id`.
+///
+/// The stored key is what rehydration reads as "this order has a live
+/// dispute", so it must not outlive the dispute: left behind, every restart
+/// would resurrect a finished dispute as `InReview`, arm a listener for it and
+/// keep accepting evidence. Called both when a resolution reaches the store and
+/// when rehydration meets an already-finished trade.
+///
+/// Best-effort like the write: a storage failure only means the stale key is
+/// seen again — and cleared again — on the next pass.
+async fn clear_admin_pubkey(order_id: &str) {
+    let Some(db) = crate::db::app_db::db() else {
+        return;
+    };
+    if let Err(e) = db
+        .delete_setting(&crate::db::settings_keys::dispute_admin(order_id))
+        .await
+    {
+        log::warn!("[disputes] could not clear solver pubkey for {order_id}: {e}");
+    }
+}
+
+/// `true` when the order reached a state in which no dispute can still be live.
+///
+/// This is what keeps rehydration from resurrecting finished disputes, and it
+/// deliberately reads the *trade* status rather than the dispute record: the
+/// daemon's `admin-settled` / `admin-canceled` are persisted by the status-sync
+/// arm in `orders.rs`, which does not route them into the dispute store, so the
+/// trade row is the durable evidence that the dispute is over.
+fn is_order_finished(status: &OrderStatus) -> bool {
+    matches!(
+        status,
+        OrderStatus::SettledByAdmin
+            | OrderStatus::CanceledByAdmin
+            | OrderStatus::CompletedByAdmin
+            | OrderStatus::Success
+            | OrderStatus::Canceled
+            | OrderStatus::CooperativelyCanceled
+            | OrderStatus::Expired
+    )
+}
+
 
 /// Derive the dispute-chat keys for `trade_id` and start listening.
 ///
@@ -420,7 +462,13 @@ async fn derive_admin_shared_key(trade_id: &str, admin_pubkey_hex: &str) -> Resu
 /// Status is `InReview`: a stored solver means one took the dispute, and any
 /// later resolution arrives as a daemon event. Restoring the record is what
 /// lets `submit_evidence` work again after a restart, since it refuses without
-/// one.
+/// one. Only *unfinished* trades are restored — see [`is_order_finished`].
+///
+/// **Web has no rehydration.** `lib/main.dart` skips `initDb` off native, and
+/// the IndexedDB store's `list_trades` is still the empty stub of #233, so both
+/// the store lookup and the enumeration source are missing there. A browser
+/// reload therefore still loses the solver pubkey; the persistence path lights
+/// up on web once #233 lands trade persistence, with no change needed here.
 async fn rehydrate_disputes_from_storage() {
     let Some(db) = crate::db::app_db::db() else {
         return;
@@ -450,6 +498,19 @@ async fn rehydrate_disputes_from_storage() {
             }
         };
 
+        // The trade already ended — the solver key is stale. Restoring it here
+        // would recreate the dispute as `InReview` on every single restart,
+        // arm a listener nobody is on the other end of, and keep letting
+        // evidence be submitted against a closed case. Clear it instead.
+        if is_order_finished(&trade.order.status) {
+            log::info!(
+                "[disputes] rehydrate: dropping stale solver for finished order={order_id} status={:?}",
+                trade.order.status
+            );
+            clear_admin_pubkey(&order_id).await;
+            continue;
+        }
+
         dispute_store()
             .upsert(Dispute {
                 id: uuid::Uuid::new_v4().to_string(),
@@ -461,7 +522,10 @@ async fn rehydrate_disputes_from_storage() {
                 resolution: None,
                 opened_at: unix_now(),
                 resolved_at: None,
-                is_read: true,
+                // The pre-restart read state is not recoverable, and this is
+                // an active dispute waiting on the user — default to unread so
+                // it surfaces rather than being silently marked as seen.
+                is_read: false,
             })
             .await;
         log::info!("[disputes] rehydrated dispute record order={order_id}");
@@ -507,7 +571,14 @@ async fn resolve_dispute(trade_id: String, resolution: DisputeResolution) -> Res
             dispute.is_read = false;
             Ok(())
         })
-        .await
+        .await?;
+
+    // The dispute is over, so the solver pubkey has nothing left to unlock —
+    // and leaving it stored would have the next restart rehydrate this exact
+    // dispute back to `InReview`. Only on success: a rejected resolution left
+    // the dispute live.
+    clear_admin_pubkey(&trade_id).await;
+    Ok(())
 }
 
 // ── Stream ────────────────────────────────────────────────────────────────────
@@ -683,6 +754,70 @@ mod tests {
 
         drop(db);
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[tokio::test]
+    async fn clearing_the_solver_key_stops_the_dispute_coming_back() {
+        // Rehydration reads the stored solver as "this order has a live
+        // dispute". Once the dispute ends the key must be gone, or every
+        // restart resurrects it as InReview forever.
+        let path = std::env::temp_dir().join(format!(
+            "mostro_dispute_kv_clear_{}.db",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&path);
+        let db = crate::db::sqlite::SqliteStorage::open(path.to_str().unwrap())
+            .await
+            .unwrap();
+
+        let key = crate::db::settings_keys::dispute_admin("order-resolved-1");
+        db.set_setting(&key, "00000000000000000000000000000000000000000000000000000000000000aa")
+            .await
+            .unwrap();
+        db.delete_setting(&key).await.unwrap();
+
+        // Reopen: the restart that used to bring the dispute back.
+        drop(db);
+        let db = crate::db::sqlite::SqliteStorage::open(path.to_str().unwrap())
+            .await
+            .unwrap();
+        assert_eq!(db.get_setting(&key).await.unwrap(), None);
+
+        drop(db);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn finished_orders_are_not_rehydrated() {
+        // The admin verdicts are the ones that end a dispute, and `orders.rs`
+        // persists them on the trade even though nothing routes them into the
+        // dispute store — so they are what rehydration has to check.
+        for status in [
+            OrderStatus::SettledByAdmin,
+            OrderStatus::CanceledByAdmin,
+            OrderStatus::CompletedByAdmin,
+            OrderStatus::Success,
+            OrderStatus::Canceled,
+            OrderStatus::CooperativelyCanceled,
+            OrderStatus::Expired,
+        ] {
+            assert!(is_order_finished(&status), "{status:?} should be finished");
+        }
+    }
+
+    #[test]
+    fn a_live_dispute_is_still_rehydrated() {
+        // The whole point of the feature: an order still under dispute (or
+        // otherwise mid-flight) must come back after a restart.
+        for status in [
+            OrderStatus::Dispute,
+            OrderStatus::InProgress,
+            OrderStatus::Active,
+            OrderStatus::FiatSent,
+            OrderStatus::SettledHoldInvoice,
+        ] {
+            assert!(!is_order_finished(&status), "{status:?} should stay live");
+        }
     }
 
     #[test]
