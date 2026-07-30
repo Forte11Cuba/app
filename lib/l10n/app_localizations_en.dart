@@ -233,6 +233,10 @@ class AppLocalizationsEn extends AppLocalizations {
       'This node requires an anti-abuse bond, which is not supported yet';
 
   @override
+  String get storageUnavailable =>
+      'The app cannot create or take orders while its local database is unavailable. Restart the app and try again';
+
+  @override
   String addInvoiceAmount(String sats) {
     return 'Amount to receive: $sats sats';
   }

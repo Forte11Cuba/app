@@ -238,6 +238,10 @@ class AppLocalizationsFr extends AppLocalizations {
       'Ce nœud exige une caution anti-abus, qui n\'est pas encore prise en charge';
 
   @override
+  String get storageUnavailable =>
+      'L\'application ne peut pas créer ni prendre d\'ordres tant que sa base de données locale est indisponible. Redémarrez l\'application et réessayez';
+
+  @override
   String addInvoiceAmount(String sats) {
     return 'Montant à recevoir : $sats sats';
   }

@@ -236,6 +236,10 @@ class AppLocalizationsIt extends AppLocalizations {
       'Questo nodo richiede una cauzione anti-abuso, non ancora supportata';
 
   @override
+  String get storageUnavailable =>
+      'L\'app non può creare né prendere ordini finché il suo database locale non è disponibile. Riavvia l\'app e riprova';
+
+  @override
   String addInvoiceAmount(String sats) {
     return 'Importo da ricevere: $sats sats';
   }
