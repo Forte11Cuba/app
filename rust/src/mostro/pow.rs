@@ -179,6 +179,7 @@ pub(crate) mod test_support {
     impl Drop for PowGuard {
         fn drop(&mut self) {
             super::CAPS.send_replace(None);
+            crate::mostro::protocol_version::clear_for_test();
         }
     }
 

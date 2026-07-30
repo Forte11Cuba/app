@@ -239,6 +239,16 @@ pub(crate) async fn fetch_and_set_node_capabilities() {
             let (difficulty, first_contact) = crate::mostro::pow::parse_pow_tags(&tags);
             crate::mostro::pow::set_pows(&mostro_pubkey_hex, difficulty, first_contact);
 
+            // Which wire format this node reads. Getting it wrong is silent —
+            // the daemon never decrypts the event — so the verdict is stored
+            // per node, only on a successful tag fetch (the Ok(None)/Err arms
+            // leave it alone, keeping "not fetched" distinct from "fetched,
+            // no tag"). See mostro::protocol_version.
+            crate::mostro::protocol_version::set_protocol_version(
+                &mostro_pubkey_hex,
+                crate::mostro::protocol_version::parse_protocol_version(&tags),
+            );
+
             // Today's daemons publish no escrow tags at all, so this resolves
             // to Unknown — which keeps every Cashu path shut. See escrow_mode.
             let (mode, config) = escrow_mode::parse_tags(&tags);

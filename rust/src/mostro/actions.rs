@@ -387,6 +387,14 @@ async fn wrap_message_at(
     msg: &Message,
     pow: u8,
 ) -> Result<String> {
+    // A node speaking a different wire protocol never decrypts what we send
+    // and never answers, so every caller would time out with no way to tell
+    // that apart from an unreachable daemon. Refuse up front — for every
+    // daemon-bound wrap, first-contact or not — with a marker Dart localizes.
+    // Protocol v1 (gift wrap) is being removed, not implemented: this client
+    // is v2-native, and the fix for such a node is to run a v2 daemon.
+    crate::mostro::protocol_version::ensure_supported(&mostro_pubkey.to_hex()).await?;
+
     let event =
         gift_wrap::wrap_mostro_message(identity_keys, trade_keys, mostro_pubkey, msg, pow).await?;
     Ok(event.as_json())
@@ -457,6 +465,7 @@ mod tests {
 
         let _pow = crate::mostro::pow::test_support::lock_pow();
         crate::mostro::pow::set_pows(&mostro_pubkey.to_hex(), 1, Some(4));
+        crate::mostro::protocol_version::set_protocol_version(&mostro_pubkey.to_hex(), Some(2));
 
         // Mining is probabilistic — cap wall time so a regression that stalls
         // does not hang CI indefinitely.
@@ -512,6 +521,7 @@ mod tests {
 
         let _pow = crate::mostro::pow::test_support::lock_pow();
         crate::mostro::pow::set_pows(&mostro_pubkey.to_hex(), 1, Some(4));
+        crate::mostro::protocol_version::set_protocol_version(&mostro_pubkey.to_hex(), Some(2));
 
         let json = crate::rt::time::timeout(
             Duration::from_secs(60),
@@ -548,6 +558,10 @@ mod tests {
         // are published — a test double for the Kind 38385 fetch.
         let _pow = crate::mostro::pow::test_support::lock_pow();
         crate::mostro::pow::set_pows(&mostro_keys.public_key().to_hex(), 0, None);
+        crate::mostro::protocol_version::set_protocol_version(
+            &mostro_keys.public_key().to_hex(),
+            Some(2),
+        );
 
         let params = NewOrderParams {
             kind: OrderKind::Sell,
@@ -598,6 +612,10 @@ mod tests {
         // are published — a test double for the Kind 38385 fetch.
         let _pow = crate::mostro::pow::test_support::lock_pow();
         crate::mostro::pow::set_pows(&mostro_keys.public_key().to_hex(), 0, None);
+        crate::mostro::protocol_version::set_protocol_version(
+            &mostro_keys.public_key().to_hex(),
+            Some(2),
+        );
 
         let json = take_sell(
             &identity_keys,
@@ -662,6 +680,10 @@ mod tests {
         // are published — a test double for the Kind 38385 fetch.
         let _pow = crate::mostro::pow::test_support::lock_pow();
         crate::mostro::pow::set_pows(&mostro_keys.public_key().to_hex(), 0, None);
+        crate::mostro::protocol_version::set_protocol_version(
+            &mostro_keys.public_key().to_hex(),
+            Some(2),
+        );
 
         let json = restore_session(&identity_keys, &trade_keys, &mostro_keys.public_key())
             .await

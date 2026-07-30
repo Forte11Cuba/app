@@ -28,7 +28,7 @@ on gift wrap. Delivered as **two PRs**: (1) the `mostro-core` 0.10 → 0.13.1 bu
 | **I. Rust Core, Flutter Shell** | ✅ PASS | All transport logic stays in Rust; Dart untouched. |
 | **II. Privacy by Design** | ✅ PASS | Identity privacy unchanged (proof inside NIP-44 ciphertext). v2 exposes only the ephemeral trade key's activity — accepted, bounded by per-trade rotation. |
 | **III. Protocol Compliance** | ⚠️ DEVIATION (justified) | v2-only means **not** interoperable with v1 daemons. Justified: no users, target node is v2, aligned with mostrod v0.19.0 (v1 removed). Recorded in reference doc §5. |
-| **VI. Simplicity Over Features** | ✅ PASS | Dropping dual support removes an enum, per-node resolution, and the `protocol_version` parse path. |
+| **VI. Simplicity Over Features** | ✅ PASS | Dropping dual support removes an enum and per-node transport resolution. The `protocol_version` parse path later returned in a reduced, diagnostic-only form (spec FR-002 exception): it never selects a transport, it only refuses incompatible nodes legibly. |
 | **VII. V1 UX is Non-Negotiable** | ✅ PASS | No UX change; transport is invisible to the user. |
 
 ## Phase 1 — Bump `mostro-core` 0.10.0 → 0.13.1 (PR #1)

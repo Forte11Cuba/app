@@ -236,6 +236,14 @@ class AppLocalizationsDe extends AppLocalizations {
       'Dieser Node verlangt eine Anti-Missbrauch-Kaution, die noch nicht unterstützt wird';
 
   @override
+  String get nodeProtocolUnsupported =>
+      'Dieser Mostro-Node nutzt eine Protokollversion, die diese App nicht unterstützt. Wähle in den Einstellungen einen anderen Node oder prüfe, ob ein App-Update verfügbar ist';
+
+  @override
+  String get nodeCapabilitiesUnknown =>
+      'Es wird noch geprüft, was der ausgewählte Mostro-Node unterstützt. Versuche es gleich noch einmal';
+
+  @override
   String get storageUnavailable =>
       'Die App kann keine Orders erstellen oder annehmen, solange ihre lokale Datenbank nicht verfügbar ist. Starte die App neu und versuche es erneut';
 

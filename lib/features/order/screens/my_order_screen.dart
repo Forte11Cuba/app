@@ -6,6 +6,7 @@ import 'package:intl/intl.dart';
 
 import 'package:mostro/core/app_routes.dart';
 import 'package:mostro/core/app_theme.dart';
+import 'package:mostro/core/daemon_errors.dart';
 import 'package:mostro/features/home/providers/home_order_providers.dart';
 import 'package:mostro/features/order/providers/trade_state_provider.dart';
 import 'package:mostro/features/trades/providers/trades_providers.dart';
@@ -71,7 +72,10 @@ class _MyOrderScreenState extends ConsumerState<MyOrderScreen> {
       debugPrint('[MyOrderScreen] cancel failed: $e\n$stackTrace');
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(l10n.cancelOrderFailed)),
+        SnackBar(
+          content:
+              Text(localizedDaemonError(l10n, e, fallback: l10n.cancelOrderFailed)),
+        ),
       );
     } finally {
       if (mounted) setState(() => _cancelling = false);

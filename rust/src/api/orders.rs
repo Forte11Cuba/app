@@ -711,6 +711,14 @@ pub async fn create_order(params: NewOrderParams) -> Result<OrderInfo> {
         days_active: 0,
     };
 
+    // Compatibility preflight (PR #252 review): refuse an unsupported node
+    // BEFORE deriving or persisting anything. The wrap re-checks as a defense,
+    // but by that point the trade-key index and the content fingerprint below
+    // are already stored — durably — and a bail there would leave orphaned
+    // maker-ownership records that any later public order with the same
+    // kind/currency/amount/payment-method fingerprint would match as "mine".
+    crate::mostro::protocol_version::ensure_supported(&active_mostro_pubkey()).await?;
+
     // Derive a fresh trade key — each order must use a unique derived key index
     // so the daemon can verify the trade index in the message.
     let trade_key_info = crate::api::identity::derive_trade_key().await?;
@@ -3438,6 +3446,49 @@ mod tests {
 
         // Unknown fingerprints never match anything.
         assert!(take_pending_create_by_content_key("content:unknown").is_none());
+    }
+
+    /// PR #252 review (ermeme P1): a create rejected for an unsupported node
+    /// protocol must fail BEFORE any maker-ownership record is persisted. The
+    /// content fingerprint is durable — were it stored, any later public order
+    /// with the same kind/currency/amount/payment-method would be marked
+    /// `is_mine` and bound to the unused trade key, including after restart.
+    #[tokio::test]
+    async fn an_unsupported_create_persists_no_maker_ownership() {
+        let _guard = crate::mostro::pow::test_support::lock_pow();
+        crate::mostro::protocol_version::set_protocol_version(
+            &active_mostro_pubkey(),
+            Some(1), // explicit v1: known-incompatible, no wait involved
+        );
+
+        let params = crate::api::types::NewOrderParams {
+            kind: crate::api::types::OrderKind::Sell,
+            fiat_amount: Some(100.0),
+            fiat_amount_min: None,
+            fiat_amount_max: None,
+            fiat_code: "USD".to_string(),
+            payment_method: "cashapp".to_string(),
+            premium: 0.0,
+            amount_sats: None,
+        };
+        let ck = order_content_key(
+            &params.kind,
+            &params.fiat_code,
+            params.fiat_amount,
+            params.fiat_amount_min,
+            params.fiat_amount_max,
+            &params.payment_method,
+        );
+
+        let err = create_order(params).await.unwrap_err();
+        assert_eq!(err.to_string(), "UnsupportedNodeProtocol:1");
+
+        // Neither the fingerprint nor anything else may have been stored —
+        // the preflight must run before derivation and persistence.
+        assert!(
+            trade_key_for_order(&ck).await.is_none(),
+            "a rejected create must leave no fingerprint mapping behind"
+        );
     }
 
     // ── Helper ────────────────────────────────────────────────────────────────

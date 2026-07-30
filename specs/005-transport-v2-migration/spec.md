@@ -61,7 +61,17 @@ delivery and decryption are unchanged.
 - **FR-001**: All Mostro-protocol traffic (typed `Message`) MUST use protocol v2
   (kind 14, NIP-44 direct) on both send and receive.
 - **FR-002**: The app MUST NOT retain any protocol-v1 (gift-wrap) path for Mostro
-  traffic, and MUST NOT parse `protocol_version` or resolve a per-node transport.
+  traffic, and MUST NOT resolve a per-node transport. **Diagnostic exception**:
+  the app MAY parse `protocol_version` from the node's Kind 38385 event — never
+  to select a transport, only to refuse sending to an incompatible node with an
+  explicit error (`UnsupportedNodeProtocol:{advertised}`) instead of the silent
+  timeout a v1 node otherwise produces. Only an explicit `protocol_version = 2`
+  proves compatibility: an absent tag means a pre-tag daemon speaking legacy v1
+  (per the protocol migration guide) and MUST be refused too. The verdict is
+  tagged with the node it was fetched from and, like FR-007's PoW snapshot,
+  senders MUST wait for the active node's fetch and fail closed (retryable
+  `NodeCapabilitiesUnknown`) rather than apply another node's — or no —
+  verdict.
 - **FR-003**: Incoming kind-14 Mostro replies MUST be disambiguated from NIP-17 peer
   chat by author = node pubkey (subscription author-pin + per-event re-check).
 - **FR-004**: NIP-17 peer-to-peer chat and dispute-admin chat MUST remain on gift
