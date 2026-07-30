@@ -724,6 +724,10 @@ pub async fn create_order(params: NewOrderParams) -> Result<OrderInfo> {
     let trade_key_info = crate::api::identity::derive_trade_key().await?;
     let trade_index = trade_key_info.index;
     let sender_keys = crate::api::identity::get_active_trade_keys(trade_index).await?;
+    // Fresh key: join the bulk Kind-14 coverage now, so daemon messages for
+    // it (e.g. a late admin-took-dispute) outlive the temporary per-trade
+    // receiver (PR #253 review).
+    ensure_global_dm_coverage(&sender_keys, trade_index).await;
 
     // Build the content fingerprint key BEFORE publishing so the subscription
     // loop never races against an empty TRADE_KEY_MAP when the daemon replies
@@ -946,6 +950,12 @@ pub async fn take_order(
     // Derive a fresh trade key so each take uses a unique Nostr identity.
     let trade_key_info = crate::api::identity::derive_trade_key().await?;
     let trade_index = trade_key_info.index;
+    if let Ok(keys) = crate::api::identity::get_active_trade_keys(trade_index).await {
+        // Fresh key: join the bulk Kind-14 coverage now, so daemon messages
+        // for it (e.g. a late admin-took-dispute) outlive the temporary
+        // per-trade receiver (PR #253 review).
+        ensure_global_dm_coverage(&keys, trade_index).await;
+    }
 
     // Key/node/event failures now surface as errors: nothing has been
     // published yet, so pretending the take went through (the old behavior)
@@ -2027,6 +2037,30 @@ async fn dispatch_mostro_message(
                 );
             }
         }
+        // The daemon announces which solver took the dispute, and carries their
+        // pubkey in the payload. That pubkey is what both sides ECDH against to
+        // establish the dispute-chat keys, so losing this message means there
+        // is no way to reach the solver at all — nothing routed it before.
+        Action::AdminTookDispute => {
+            let Some(order_id) = kind.id.map(|id| id.to_string()) else {
+                log::warn!("[orders] admin-took-dispute without an order id");
+                return;
+            };
+            match admin_pubkey_from_payload(kind.payload.as_ref()) {
+                Some(admin_pubkey) => {
+                    if let Err(e) =
+                        crate::api::disputes::handle_admin_took_dispute(order_id, admin_pubkey)
+                            .await
+                    {
+                        log::warn!("[orders] admin-took-dispute not applied: {e}");
+                    }
+                }
+                None => log::warn!(
+                    "[orders] admin-took-dispute for order={order_id} carried no peer pubkey"
+                ),
+            }
+        }
+
         Action::CantDo => {
             let reason = match &kind.payload {
                 Some(mostro_core::message::Payload::CantDo(Some(r))) => format!("{r:?}"),
@@ -2581,6 +2615,9 @@ pub(crate) async fn refresh_subscriptions_for_active_node() {
         .keys()
         .filter_map(|hex| nostr_sdk::PublicKey::from_hex(hex).ok())
         .collect();
+    // Seed the refreshable coverage map: keys derived after this point join
+    // it (and the relay filter) via ensure_global_dm_coverage.
+    *global_dm_keys().write().await = trade_key_map;
 
     if let Err(e) = subscribe_node_filters(&client, mostro_pubkey, trade_pubkeys).await {
         log::error!("[orders] node switch: re-subscribe failed: {e}");
@@ -2603,6 +2640,69 @@ pub(crate) async fn refresh_subscriptions_for_active_node() {
 
 /// Build a map of `trade_pubkey_hex → (Keys, trade_index)` for all derived
 /// trade keys so the global subscription can decrypt any gift-wrap.
+/// Trade-key decryption coverage for the bulk Kind-14 subscription:
+/// pubkey hex → (keys, index). Refreshable on purpose (PR #253 review): the
+/// global subscription used to snapshot the map once at startup, so a key
+/// derived later — a new order or take — was covered only by the 30-minute
+/// per-trade receiver, and a solver assignment arriving after that expired
+/// was never decrypted.
+static GLOBAL_DM_KEYS: std::sync::OnceLock<
+    tokio::sync::RwLock<HashMap<String, (nostr_sdk::Keys, u32)>>,
+> = std::sync::OnceLock::new();
+
+fn global_dm_keys() -> &'static tokio::sync::RwLock<HashMap<String, (nostr_sdk::Keys, u32)>> {
+    GLOBAL_DM_KEYS.get_or_init(|| tokio::sync::RwLock::new(HashMap::new()))
+}
+
+/// Add a freshly derived trade key to the global decryption map and refresh
+/// the bulk Kind-14 relay filter to include it, so daemon messages for this
+/// key (including an admin-took-dispute long after creation) are received
+/// for the whole life of the process, not just while the temporary per-trade
+/// receiver runs. Idempotent: a key already covered causes no relay churn.
+pub(crate) async fn ensure_global_dm_coverage(keys: &nostr_sdk::Keys, trade_index: u32) {
+    let hex = keys.public_key().to_hex();
+    {
+        let mut map = global_dm_keys().write().await;
+        if map.contains_key(&hex) {
+            return;
+        }
+        map.insert(hex, (keys.clone(), trade_index));
+    }
+    resubscribe_global_dm_filter().await;
+}
+
+/// Re-issue the bulk Kind-14 subscription with the current coverage set.
+/// Same stable id, so the relay replaces the filter in place. No-op before
+/// the pool exists — startup seeds the map and subscribes moments later.
+async fn resubscribe_global_dm_filter() {
+    let Ok(pool) = crate::api::nostr::get_pool() else {
+        return;
+    };
+    let Ok(mostro_pubkey) = nostr_sdk::PublicKey::from_hex(&active_mostro_pubkey()) else {
+        return;
+    };
+    let trade_pubkeys: Vec<nostr_sdk::PublicKey> = global_dm_keys()
+        .read()
+        .await
+        .keys()
+        .filter_map(|hex| nostr_sdk::PublicKey::from_hex(hex).ok())
+        .collect();
+    if trade_pubkeys.is_empty() {
+        return;
+    }
+    let dm_filter = nostr_sdk::Filter::new()
+        .kind(nostr_sdk::Kind::PrivateDirectMessage)
+        .author(mostro_pubkey)
+        .pubkeys(trade_pubkeys);
+    if let Err(e) = pool
+        .client()
+        .subscribe_with_id(mostro_dm_subscription_id(), dm_filter, None)
+        .await
+    {
+        log::warn!("[orders] bulk DM filter refresh failed: {e}");
+    }
+}
+
 async fn build_trade_key_map() -> HashMap<String, (nostr_sdk::Keys, u32)> {
     let mut map = HashMap::new();
     let max_index = match crate::api::identity::get_identity().await {
@@ -2678,6 +2778,20 @@ async fn handle_global_gift_wrap(
         Err(e) => crate::api::logging::blog_warn("gift-wrap", format!(
             "decrypt failed for trade={}: {e}", &recipient_hex[..8]
         )),
+    }
+}
+
+/// The solver's pubkey carried by `admin-took-dispute`, per
+/// <https://mostro.network/protocol/dispute_chat.html>: the daemon puts it in a
+/// `Peer` payload. Any other payload shape means the message cannot establish
+/// the dispute chat, so it is reported rather than guessed at.
+fn admin_pubkey_from_payload(
+    payload: Option<&mostro_core::message::Payload>,
+) -> Option<String> {
+    use mostro_core::message::Payload;
+    match payload {
+        Some(Payload::Peer(peer)) => Some(peer.pubkey.clone()),
+        _ => None,
     }
 }
 
@@ -2853,7 +2967,8 @@ async fn _run_order_subscription() {
                     if event.pubkey != active_mostro {
                         continue;
                     }
-                    handle_global_gift_wrap(&event, &trade_key_map).await;
+                    let keys = global_dm_keys().read().await.clone();
+                    handle_global_gift_wrap(&event, &keys).await;
                     continue;
                 }
 
@@ -2969,6 +3084,10 @@ pub async fn restore_session() -> Result<mostro_core::message::RestoreSessionInf
     let trade_key_info = crate::api::identity::derive_trade_key().await?;
     let trade_index = trade_key_info.index;
     let sender_keys = crate::api::identity::get_active_trade_keys(trade_index).await?;
+    // Fresh key: join the bulk Kind-14 coverage now, so daemon messages for
+    // it (e.g. a late admin-took-dispute) outlive the temporary per-trade
+    // receiver (PR #253 review).
+    ensure_global_dm_coverage(&sender_keys, trade_index).await;
     let trade_pk_hex = sender_keys.public_key().to_hex();
 
     let mostro_pubkey = nostr_sdk::PublicKey::from_hex(&active_mostro_pubkey())?;
@@ -3049,6 +3168,33 @@ mod tests {
         assert!(!request_id_matches(42, Some(41)));
         // Stale replayed events carry no request_id — they must never match.
         assert!(!request_id_matches(42, None));
+    }
+
+    #[test]
+    fn the_solver_pubkey_is_read_from_a_peer_payload() {
+        use mostro_core::message::{Payload, Peer};
+
+        let pubkey = "0000000000000000000000000000000000000000000000000000000000000001";
+        let payload = Payload::Peer(Peer {
+            pubkey: pubkey.to_string(),
+            reputation: None,
+        });
+
+        assert_eq!(
+            admin_pubkey_from_payload(Some(&payload)).as_deref(),
+            Some(pubkey)
+        );
+    }
+
+    #[test]
+    fn a_dispute_message_without_a_peer_payload_yields_no_solver() {
+        use mostro_core::message::Payload;
+
+        // Nothing is guessed: without the pubkey there is no dispute chat, and
+        // silently picking some other payload field would derive keys against
+        // the wrong party.
+        assert_eq!(admin_pubkey_from_payload(None), None);
+        assert_eq!(admin_pubkey_from_payload(Some(&Payload::Amount(42))), None);
     }
 
     fn insert_pending_create(key: &str, request_id: u64) -> tokio::sync::oneshot::Receiver<DaemonReply> {
@@ -3446,6 +3592,30 @@ mod tests {
 
         // Unknown fingerprints never match anything.
         assert!(take_pending_create_by_content_key("content:unknown").is_none());
+    }
+
+    /// PR #253 review round 2 (ermeme): a key derived after the global
+    /// subscription started must join the refreshable coverage map — that is
+    /// what lets the bulk Kind-14 path decrypt a solver assignment arriving
+    /// after the 30-minute per-trade receiver expired. (The relay-filter
+    /// refresh itself is a no-op here: no pool in unit tests.)
+    #[tokio::test]
+    async fn a_late_derived_key_joins_the_global_dm_coverage() {
+        let keys = nostr_sdk::Keys::generate();
+        let hex = keys.public_key().to_hex();
+
+        ensure_global_dm_coverage(&keys, 91).await;
+        {
+            let map = global_dm_keys().read().await;
+            let (stored, idx) = map.get(&hex).expect("key must be covered");
+            assert_eq!(stored.public_key(), keys.public_key());
+            assert_eq!(*idx, 91);
+        }
+
+        // Idempotent: a second call must not churn the map (or the relay).
+        let before = global_dm_keys().read().await.len();
+        ensure_global_dm_coverage(&keys, 91).await;
+        assert_eq!(global_dm_keys().read().await.len(), before);
     }
 
     /// PR #252 review (ermeme P1): a create rejected for an unsupported node
