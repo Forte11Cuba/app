@@ -102,7 +102,14 @@ Future<void> main() async {
   // a publication point (when the database knew a higher counter than secure
   // storage, the reconciled value is published so this copy catches up), and
   // the Tokio broadcast channel drops a value that has no receiver yet.
-  _mirrorTradeKeyIndex(await identity_api.onTradeKeyIndexChanged());
+  // Guarded like every other optional startup step: if the bridge is broken
+  // the mirror is simply absent — the database copy is still the primary
+  // record — rather than taking main() down before the UI renders.
+  try {
+    _mirrorTradeKeyIndex(await identity_api.onTradeKeyIndexChanged());
+  } catch (e) {
+    debugPrint('[identity] trade-key index mirror unavailable: $e');
+  }
 
   // Initialize identity: creates on first launch, reloads on subsequent launches.
   // Must run before Nostr init so the identity key is available for relay auth.
