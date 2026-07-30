@@ -51,8 +51,11 @@ fn trade_key_index_tx() -> &'static broadcast::Sender<u32> {
 /// storage — the one store that survives loss of `mostro.db` (issue #249).
 /// Send failures mean nobody is listening yet, which is not an error: the DB
 /// row remains the primary record and load-time reconciliation catches up.
-fn publish_trade_key_index(index: u32) {
-    let _ = trade_key_index_tx().send(index);
+///
+/// The channel is a parameter rather than the global so tests can assert on
+/// their own, giving each one a stream nothing else publishes to.
+fn publish_index(tx: &broadcast::Sender<u32>, index: u32) {
+    let _ = tx.send(index);
 }
 
 /// A stream of consumed trade-key indices for the Dart layer to persist.
@@ -189,8 +192,12 @@ pub async fn load_identity_from_mnemonic(
         },
         None => None,
     };
-    let trade_key_index =
-        reconcile_and_publish_trade_key_index(trade_key_index, stored.as_ref(), &public_key);
+    let trade_key_index = reconcile_and_publish_to(
+        trade_key_index_tx(),
+        trade_key_index,
+        stored.as_ref(),
+        &public_key,
+    );
 
     let created_at = match created_at {
         Some(ts) if ts > 0 => ts,
@@ -310,22 +317,53 @@ pub async fn delete_identity() -> Result<()> {
 /// Derive a new trade key, auto-incrementing the index.
 /// Returns the new key's info and updates the stored `trade_key_index`.
 pub async fn derive_trade_key() -> Result<TradeKeyInfo> {
+    let db = crate::db::app_db::db();
+
     // Precondition, checked before any identity work because it depends on
     // nothing else: without durable storage a derived index is consumed with
     // no record of it, so the next session re-derives the same key and the
     // daemon answers CantDo(InvalidTradeIndex). Memory-only mode therefore
     // cannot create or take orders — refusing here is what makes that
     // explicit instead of silently corrupting the counter (issue #249).
-    let Some(db) = crate::db::app_db::db() else {
-        bail!("StorageUnavailable: deriving a trade key requires durable storage");
-    };
+    #[cfg(not(target_arch = "wasm32"))]
+    require_durable_storage(db)?;
 
-    derive_trade_key_with(db).await
+    // Web is exempt: `init_db` is never called there (main.dart guards it with
+    // `!kIsWeb`) and the IndexedDB backend does not implement `save_identity`
+    // yet, so requiring a store would break every create/take on web. The
+    // published index still reaches Flutter, which persists it — that mirror
+    // is web's durable record until IndexedDB identity support lands (#233).
+    #[cfg(target_arch = "wasm32")]
+    if db.is_none() {
+        log::warn!(
+            "[identity] no local store on web — the trade-key counter is durable \
+             only through the Flutter mirror"
+        );
+    }
+
+    derive_trade_key_with(db, trade_key_index_tx()).await
 }
 
-/// [`derive_trade_key`] against an explicit store, so the increment / persist /
-/// publish sequence is testable without initialising the global singleton.
-async fn derive_trade_key_with<S: Storage>(db: &S) -> Result<TradeKeyInfo> {
+/// Fails when no durable store is available, with the marker Dart localizes.
+///
+/// Split out so the refusal is testable as a pure decision: asserting it
+/// through `derive_trade_key` would depend on the process-wide `APP_DB` being
+/// uninitialised, which any other test may change first.
+#[cfg(not(target_arch = "wasm32"))]
+fn require_durable_storage<S>(db: Option<&S>) -> Result<()> {
+    if db.is_none() {
+        bail!("StorageUnavailable: deriving a trade key requires durable storage");
+    }
+    Ok(())
+}
+
+/// [`derive_trade_key`] against an explicit store and publication channel, so
+/// the increment / persist / publish sequence is testable without touching the
+/// global singleton or the process-wide channel other tests share.
+async fn derive_trade_key_with<S: Storage>(
+    db: Option<&S>,
+    tx: &broadcast::Sender<u32>,
+) -> Result<TradeKeyInfo> {
     let mut guard = identity_lock().write().await;
     let state = guard.as_mut().ok_or_else(|| anyhow!("NoIdentity"))?;
 
@@ -345,13 +383,15 @@ async fn derive_trade_key_with<S: Storage>(db: &S) -> Result<TradeKeyInfo> {
     // consumption is not durably recorded reopens the counter-regression
     // window this exists to close. The in-memory increment is kept, so a
     // retry moves on to the next index — never back.
-    db.save_identity(&state.identity_info).await.map_err(|e| {
-        anyhow!("StorageError: failed to persist trade_key_index {candidate_index}: {e}")
-    })?;
+    if let Some(db) = db {
+        db.save_identity(&state.identity_info).await.map_err(|e| {
+            anyhow!("StorageError: failed to persist trade_key_index {candidate_index}: {e}")
+        })?;
+    }
 
     // Only after the primary record is durable: Flutter mirrors this into
     // secure storage, which outlives the database file itself.
-    publish_trade_key_index(candidate_index);
+    publish_index(tx, candidate_index);
 
     Ok(TradeKeyInfo {
         index: candidate_index,
@@ -467,14 +507,15 @@ fn reconcile_trade_key_index(
 /// where secure storage is behind — an installation from before it was kept in
 /// sync — so this is what lets it catch up without a derivation happening
 /// first (issue #249).
-fn reconcile_and_publish_trade_key_index(
+fn reconcile_and_publish_to(
+    tx: &broadcast::Sender<u32>,
     passed: u32,
     stored: Option<&IdentityInfo>,
     public_key: &str,
 ) -> u32 {
     let reconciled = reconcile_trade_key_index(passed, stored, public_key);
     if reconciled > passed {
-        publish_trade_key_index(reconciled);
+        publish_index(tx, reconciled);
     }
     reconciled
 }
@@ -529,6 +570,16 @@ pub(crate) async fn get_transport_identity_keys(trade_keys: &Keys) -> Result<Key
 mod tests {
     use super::*;
 
+    /// A throwaway SQLite store, named per test so parallel runs never collide.
+    async fn temp_store(tag: &str) -> crate::db::sqlite::SqliteStorage {
+        let path = std::env::temp_dir()
+            .join(format!("mostro_identity_{tag}_{}.db", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        crate::db::sqlite::SqliteStorage::open(path.to_str().unwrap())
+            .await
+            .unwrap()
+    }
+
     fn stored_identity(public_key: &str, trade_key_index: u32) -> IdentityInfo {
         IdentityInfo {
             public_key: public_key.to_string(),
@@ -539,15 +590,22 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn deriving_without_durable_storage_is_refused() {
-        // The DB singleton is uninitialised in unit tests, which is exactly
-        // the app's memory-only mode. Handing out an index there would consume
-        // it with no record, so the call must fail with a stable marker.
-        let err = match derive_trade_key().await {
-            Err(e) => e.to_string(),
-            Ok(info) => panic!("derived index {} without durable storage", info.index),
-        };
+    /// A channel of this test's own. The process-wide one is shared with every
+    /// other test in the binary, so asserting on it makes the value received
+    /// depend on what else happens to publish concurrently.
+    fn private_channel() -> (broadcast::Sender<u32>, TradeKeyIndexStream) {
+        let (tx, rx) = broadcast::channel(TRADE_KEY_INDEX_CHANNEL_CAPACITY);
+        (tx, TradeKeyIndexStream { rx })
+    }
+
+    #[test]
+    fn deriving_without_durable_storage_is_refused() {
+        // Asserted as a pure decision, not through `derive_trade_key`: that
+        // would depend on the process-wide APP_DB still being uninitialised,
+        // and other tests in this binary initialise it.
+        let err = require_durable_storage::<crate::db::sqlite::SqliteStorage>(None)
+            .unwrap_err()
+            .to_string();
 
         assert!(
             err.starts_with("StorageUnavailable:"),
@@ -556,10 +614,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_consumed_index_reaches_the_stream() {
-        let mut stream = on_trade_key_index_changed();
+    async fn a_store_being_present_satisfies_the_precondition() {
+        let db = temp_store("precondition").await;
 
-        publish_trade_key_index(7);
+        assert!(require_durable_storage(Some(&db)).is_ok());
+    }
+
+    #[tokio::test]
+    async fn a_consumed_index_reaches_the_stream() {
+        let (tx, mut stream) = private_channel();
+
+        publish_index(&tx, 7);
 
         assert_eq!(stream.next().await.unwrap(), 7);
     }
@@ -567,25 +632,16 @@ mod tests {
     #[tokio::test]
     async fn reconciliation_publishes_only_when_the_database_is_ahead() {
         let stored = stored_identity("abc", 22);
-        let mut stream = on_trade_key_index_changed();
+        let (tx, mut stream) = private_channel();
 
         // Secure storage behind the database: Dart must learn the real value.
-        assert_eq!(
-            reconcile_and_publish_trade_key_index(20, Some(&stored), "abc"),
-            22
-        );
+        assert_eq!(reconcile_and_publish_to(&tx, 20, Some(&stored), "abc"), 22);
         assert_eq!(stream.next().await.unwrap(), 22);
 
         // Already in sync, and a counter belonging to another mnemonic: no
         // publication, so Dart never rewrites a value it already holds.
-        assert_eq!(
-            reconcile_and_publish_trade_key_index(22, Some(&stored), "abc"),
-            22
-        );
-        assert_eq!(
-            reconcile_and_publish_trade_key_index(30, Some(&stored), "other"),
-            30
-        );
+        assert_eq!(reconcile_and_publish_to(&tx, 22, Some(&stored), "abc"), 22);
+        assert_eq!(reconcile_and_publish_to(&tx, 30, Some(&stored), "other"), 30);
         assert!(
             stream.rx.try_recv().is_err(),
             "nothing further should have been published"
@@ -628,21 +684,15 @@ mod tests {
             .unwrap();
         assert_eq!(info.trade_key_index, 20);
 
-        // A real store, but a throwaway one: derivation now requires durable
-        // storage, and the global singleton must stay uninitialised so the
-        // memory-only case remains testable in this same process.
-        let db_path = std::env::temp_dir().join(format!(
-            "mostro_identity_lifecycle_{}.db",
-            std::process::id()
-        ));
-        let db = crate::db::sqlite::SqliteStorage::open(db_path.to_str().unwrap())
-            .await
-            .unwrap();
+        // A real store, but a throwaway one, and a channel of this test's own:
+        // neither the global singleton nor the shared channel is touched, so
+        // this cannot make other tests in the binary flaky (or be made flaky
+        // by them).
+        let db = temp_store("lifecycle").await;
+        let (tx, mut published) = private_channel();
 
-        let mut published = on_trade_key_index_changed();
-
-        let first = derive_trade_key_with(&db).await.unwrap();
-        let second = derive_trade_key_with(&db).await.unwrap();
+        let first = derive_trade_key_with(Some(&db), &tx).await.unwrap();
+        let second = derive_trade_key_with(Some(&db), &tx).await.unwrap();
         assert_eq!(first.index, 21);
         assert_eq!(second.index, 22);
         assert_ne!(first.public_key, second.public_key);
