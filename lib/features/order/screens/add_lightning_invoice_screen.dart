@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import 'package:mostro/core/app_routes.dart';
 import 'package:mostro/core/app_theme.dart';
+import 'package:mostro/core/daemon_errors.dart';
 import 'package:mostro/l10n/app_localizations.dart';
 import 'package:mostro/features/order/providers/trade_state_provider.dart';
 import 'package:mostro/features/settings/providers/nwc_provider.dart';
@@ -93,9 +94,8 @@ class _AddLightningInvoiceScreenState
       final raw = e.toString();
       final anyhowMatch = RegExp(r'^.*?AnyhowException\((.+)\)$').firstMatch(raw);
       final msg = anyhowMatch != null ? anyhowMatch.group(1)! : raw;
-      final display = msg.contains('NoDaemonResponse')
-          ? AppLocalizations.of(context).sessionTimeoutMessage
-          : msg;
+      final display =
+          localizedDaemonError(AppLocalizations.of(context), msg, fallback: msg);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(display)),
       );

@@ -237,6 +237,10 @@ class AppLocalizationsEn extends AppLocalizations {
       'This Mostro node uses a protocol version this app does not support. Pick another node in Settings, or check for an app update';
 
   @override
+  String get nodeCapabilitiesUnknown =>
+      'Still checking what the selected Mostro node supports. Try again in a moment';
+
+  @override
   String get storageUnavailable =>
       'The app cannot create or take orders while its local database is unavailable. Restart the app and try again';
 

@@ -158,6 +158,8 @@
   "@bondRequired": {"description": "Error shown when the Mostro node asks for an anti-abuse bond before accepting the order — the app does not support bonds yet"},
   "nodeProtocolUnsupported": "This Mostro node uses a protocol version this app does not support. Pick another node in Settings, or check for an app update",
   "@nodeProtocolUnsupported": {"description": "Error shown when the selected Mostro node advertises a protocol version this v2-native client does not speak, so it would never read the request"},
+  "nodeCapabilitiesUnknown": "Still checking what the selected Mostro node supports. Try again in a moment",
+  "@nodeCapabilitiesUnknown": {"description": "Error shown when a send fails closed because the selected node's capability fetch (PoW, protocol version) has not completed yet — retrying shortly usually succeeds"},
   "storageUnavailable": "The app cannot create or take orders while its local database is unavailable. Restart the app and try again",
   "@storageUnavailable": {"description": "Error shown when a trade key cannot be derived because the local database is unavailable, so orders cannot be created or taken"},
   "addInvoiceAmount": "Amount to receive: {sats} sats",

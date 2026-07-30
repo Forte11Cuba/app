@@ -494,6 +494,12 @@ abstract class AppLocalizations {
   /// **'This Mostro node uses a protocol version this app does not support. Pick another node in Settings, or check for an app update'**
   String get nodeProtocolUnsupported;
 
+  /// Error shown when a send fails closed because the selected node's capability fetch (PoW, protocol version) has not completed yet — retrying shortly usually succeeds
+  ///
+  /// In en, this message translates to:
+  /// **'Still checking what the selected Mostro node supports. Try again in a moment'**
+  String get nodeCapabilitiesUnknown;
+
   /// Error shown when a trade key cannot be derived because the local database is unavailable, so orders cannot be created or taken
   ///
   /// In en, this message translates to:
