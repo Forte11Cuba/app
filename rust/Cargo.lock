@@ -2267,6 +2267,7 @@ dependencies = [
  "chacha20poly1305",
  "flutter_rust_bridge",
  "hex",
+ "hkdf",
  "indexed_db_futures",
  "k256",
  "log",

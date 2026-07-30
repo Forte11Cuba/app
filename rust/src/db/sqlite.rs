@@ -86,6 +86,58 @@ impl SqliteStorage {
             }
         }
 
+        // Migration 1 → 3: the original `messages` table stored one column per
+        // field (`sender_pubkey`, `content_encrypted`, …) instead of the JSON
+        // `data` blob. It also carries the FK, so without this the v2 → v3
+        // rebuild below fires and its `SELECT … data … FROM messages` aborts
+        // `open()` with "no such column: data" — killing the ENTIRE database
+        // (orders, trades, identity, outbox), not just chat.
+        //
+        // The rows are dropped rather than converted: `content_encrypted` holds
+        // ciphertext the current chat code cannot read back, so there is nothing
+        // to recover. Dropping the table takes its legacy indexes with it.
+        let messages_exists: bool = sqlx::query_scalar(
+            "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type = 'table' AND name = 'messages'",
+        )
+        .fetch_one(pool)
+        .await
+        .unwrap_or(false);
+        let messages_has_data: bool = sqlx::query_scalar(
+            "SELECT COUNT(*) > 0 FROM pragma_table_info('messages') WHERE name = 'data'",
+        )
+        .fetch_one(pool)
+        .await
+        .unwrap_or(false);
+        if messages_exists && !messages_has_data {
+            log::warn!(
+                "[db] migrating messages table from schema v1 (dropping unreadable rows)"
+            );
+            sqlx::query("DROP TABLE IF EXISTS messages")
+                .execute(pool)
+                .await?;
+        }
+
+        // Migration 2 → 3: drop the messages → trades foreign key. Chat keys
+        // (and therefore `messages.trade_id`) are per **order id**, while a
+        // taker's trades row uses a fresh UUID — with the FK in place every
+        // taker `save_message` failed and chat history/replay-dedup was lost
+        // on restart (PR #247 review). Rows are preserved.
+        //
+        // Gated on `data` as well: the rebuild copies that column, so it must
+        // never run against a schema that lacks it (the v1 case handled above).
+        let messages_has_fk: bool = sqlx::query_scalar(
+            "SELECT COUNT(*) > 0 FROM pragma_foreign_key_list('messages')",
+        )
+        .fetch_one(pool)
+        .await
+        .unwrap_or(false);
+        if messages_has_fk && messages_has_data {
+            log::warn!("[db] migrating messages table from schema v2 to v3 (dropping FK)");
+            sqlx::query(crate::db::schema::SQLITE_DROP_MESSAGES_FK_SQL)
+                .execute(pool)
+                .await?;
+        }
+
         Ok(())
     }
 }
@@ -209,9 +261,25 @@ impl Storage for SqliteStorage {
             .collect()
     }
 
+    async fn message_exists(&self, id: &str) -> Result<bool> {
+        let row: Option<(i64,)> = sqlx::query_as("SELECT 1 FROM messages WHERE id = ?")
+            .bind(id)
+            .fetch_optional(&self.pool)
+            .await?;
+        Ok(row.is_some())
+    }
+
     async fn mark_messages_read(&self, trade_id: &str) -> Result<()> {
+        // `list_messages` reconstructs ChatMessage from the JSON `data` blob,
+        // so the flag must be rewritten there too — updating only the
+        // denormalized column resurrects unread badges after a restart.
+        // `json('true')` keeps the field a JSON boolean (json_set with a bare
+        // 1 would turn it into a number and break deserialization).
         sqlx::query(
-            "UPDATE messages SET is_read = 1 WHERE trade_id = ? AND is_read = 0",
+            "UPDATE messages
+             SET is_read = 1,
+                 data = json_set(data, '$.is_read', json('true'))
+             WHERE trade_id = ? AND is_read = 0",
         )
         .bind(trade_id)
         .execute(&self.pool)
@@ -528,6 +596,206 @@ mod tests {
         static COUNTER: AtomicU32 = AtomicU32::new(0);
         let n = COUNTER.fetch_add(1, Ordering::Relaxed);
         std::env::temp_dir().join(format!("mostro_test_{}_{n}.db", std::process::id()))
+    }
+
+    #[tokio::test]
+    async fn message_exists_is_durable_replay_dedup() {
+        use crate::api::types::*;
+
+        let path = temp_db_path();
+        let storage = SqliteStorage::open(path.to_str().unwrap()).await.unwrap();
+
+        // Chat persists under the ORDER id — for takers there is no trades
+        // row with that id (trades.id is a fresh UUID), so this must succeed
+        // without any trades row at all (the old FK broke exactly this).
+        let trade_id = "order-dedup-1".to_string();
+
+        let inner_id = "3f".repeat(32);
+        assert!(!storage.message_exists(&inner_id).await.unwrap());
+
+        let msg = ChatMessage {
+            id: inner_id.clone(),
+            trade_id,
+            sender_pubkey: "peer".into(),
+            content: "I sent the fiat".into(),
+            message_type: MessageType::Peer,
+            is_mine: false,
+            is_read: false,
+            has_attachment: false,
+            attachment: None,
+            created_at: 2,
+        };
+        storage.save_message(&msg).await.unwrap();
+
+        // A re-wrapped replay carries the same inner id — now known, durably.
+        assert!(storage.message_exists(&inner_id).await.unwrap());
+        assert!(!storage.message_exists("un".repeat(32).as_str()).await.unwrap());
+
+        drop(storage);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[tokio::test]
+    async fn mark_messages_read_survives_rehydration() {
+        use crate::api::types::*;
+
+        let path = temp_db_path();
+        let storage = SqliteStorage::open(path.to_str().unwrap()).await.unwrap();
+
+        let trade_id = "order-read-1".to_string();
+        storage
+            .save_message(&ChatMessage {
+                id: "read-msg-1".into(),
+                trade_id: trade_id.clone(),
+                sender_pubkey: "peer".into(),
+                content: "hola".into(),
+                message_type: MessageType::Peer,
+                is_mine: false,
+                is_read: false,
+                has_attachment: false,
+                attachment: None,
+                created_at: 1,
+            })
+            .await
+            .unwrap();
+
+        storage.mark_messages_read(&trade_id).await.unwrap();
+
+        // Reopen: list_messages deserializes the JSON blob — the read flag
+        // must have been rewritten there, not only in the column.
+        drop(storage);
+        let storage = SqliteStorage::open(path.to_str().unwrap()).await.unwrap();
+        let msgs = storage.list_messages(&trade_id).await.unwrap();
+        assert_eq!(msgs.len(), 1);
+        assert!(msgs[0].is_read, "is_read lost on rehydration");
+
+        drop(storage);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[tokio::test]
+    async fn v2_messages_fk_is_dropped_and_rows_survive() {
+        let path = temp_db_path();
+        let url = format!("sqlite://{}?mode=rwc", path.to_str().unwrap());
+
+        // Build a v2-era database by hand: messages with the old FK and one
+        // row referencing a trades row (the maker case, which used to work).
+        {
+            let pool = SqlitePoolOptions::new().connect(&url).await.unwrap();
+            sqlx::query(
+                "CREATE TABLE trades (
+                     id TEXT PRIMARY KEY, data TEXT NOT NULL, status TEXT NOT NULL,
+                     started_at INTEGER NOT NULL, completed_at INTEGER);
+                 CREATE TABLE messages (
+                     id TEXT PRIMARY KEY, trade_id TEXT NOT NULL, data TEXT NOT NULL,
+                     is_read INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL,
+                     FOREIGN KEY (trade_id) REFERENCES trades(id));
+                 -- Leftover from a previous interrupted migration attempt:
+                 -- the rebuild must drop and recreate it, not fail.
+                 CREATE TABLE messages_v3 (leftover INTEGER);
+                 INSERT INTO trades VALUES ('t1', '{}', 'Active', 1, NULL);
+                 INSERT INTO messages VALUES ('m1', 't1',
+                     '{\"id\":\"m1\",\"trade_id\":\"t1\",\"sender_pubkey\":\"p\",\"content\":\"x\",\"message_type\":\"Peer\",\"is_mine\":false,\"is_read\":false,\"has_attachment\":false,\"attachment\":null,\"created_at\":1}',
+                     0, 1);",
+            )
+            .execute(&pool)
+            .await
+            .unwrap();
+            pool.close().await;
+        }
+
+        // open() must detect the FK, rebuild the table, and keep the row.
+        let storage = SqliteStorage::open(path.to_str().unwrap()).await.unwrap();
+        assert!(storage.message_exists("m1").await.unwrap());
+
+        // And an order-id message with no trades row now persists fine.
+        let msgs = storage.list_messages("t1").await.unwrap();
+        assert_eq!(msgs.len(), 1);
+
+        drop(storage);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[tokio::test]
+    async fn pre_v2_messages_table_is_rebuilt_not_copied() {
+        let path = temp_db_path();
+        let url = format!("sqlite://{}?mode=rwc", path.to_str().unwrap());
+
+        // Build a v1-era database by hand: `messages` still stores one column
+        // per field (no JSON `data` blob) and carries the FK to trades. The
+        // v2 → v3 rebuild copies `data`, so triggering it here used to abort
+        // `open()` with "no such column: data" — taking the WHOLE database
+        // down, not just chat (orders, trades, identity, outbox).
+        {
+            let pool = SqlitePoolOptions::new().connect(&url).await.unwrap();
+            sqlx::query(
+                "CREATE TABLE trades (
+                     id TEXT PRIMARY KEY, data TEXT NOT NULL, status TEXT NOT NULL,
+                     started_at INTEGER NOT NULL, completed_at INTEGER);
+                 CREATE TABLE messages (
+                     id                TEXT NOT NULL PRIMARY KEY,
+                     trade_id          TEXT NOT NULL REFERENCES trades(id),
+                     sender_pubkey     TEXT NOT NULL,
+                     content_encrypted BLOB NOT NULL,
+                     message_type      TEXT NOT NULL,
+                     is_mine           INTEGER NOT NULL DEFAULT 0,
+                     is_read           INTEGER NOT NULL DEFAULT 0,
+                     attachment_id     TEXT,
+                     created_at        INTEGER NOT NULL);
+                 CREATE INDEX idx_messages_trade_id ON messages(trade_id);
+                 CREATE INDEX idx_messages_is_read  ON messages(is_read);
+                 INSERT INTO trades VALUES ('t1', '{}', 'Active', 1, NULL);
+                 INSERT INTO messages VALUES
+                     ('m0', 't1', 'p', x'00', 'Peer', 0, 0, NULL, 1);",
+            )
+            .execute(&pool)
+            .await
+            .unwrap();
+            pool.close().await;
+        }
+
+        // open() must succeed — the legacy table is dropped, not copied.
+        let storage = SqliteStorage::open(path.to_str().unwrap()).await.unwrap();
+
+        // The rebuilt table is v3: JSON `data`, no foreign key.
+        let cols: Vec<(String,)> =
+            sqlx::query_as("SELECT name FROM pragma_table_info('messages')")
+                .fetch_all(&storage.pool)
+                .await
+                .unwrap();
+        let cols: Vec<String> = cols.into_iter().map(|(c,)| c).collect();
+        assert!(cols.contains(&"data".to_string()), "columns: {cols:?}");
+        assert!(
+            !cols.contains(&"content_encrypted".to_string()),
+            "legacy column survived: {cols:?}"
+        );
+        let fks: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM pragma_foreign_key_list('messages')")
+                .fetch_one(&storage.pool)
+                .await
+                .unwrap();
+        assert_eq!(fks, 0, "messages still has a foreign key");
+
+        // And it is usable: an order-id message with no matching trades row.
+        storage
+            .save_message(&crate::api::types::ChatMessage {
+                id: "m1".into(),
+                trade_id: "order-1".into(),
+                sender_pubkey: "peer".into(),
+                content: "hola".into(),
+                message_type: crate::api::types::MessageType::Peer,
+                is_mine: false,
+                is_read: false,
+                has_attachment: false,
+                attachment: None,
+                created_at: 1,
+            })
+            .await
+            .unwrap();
+        assert_eq!(storage.list_messages("order-1").await.unwrap().len(), 1);
+
+        drop(storage);
+        let _ = std::fs::remove_file(&path);
     }
 
     #[tokio::test]

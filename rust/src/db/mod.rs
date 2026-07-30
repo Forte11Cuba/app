@@ -25,6 +25,18 @@ pub mod settings_keys {
     /// Developer mint-URL override, pointing Cashu at a local mint instead of
     /// the one the node advertises.
     pub const CASHU_MINT_URL_OVERRIDE: &str = "cashu_mint_url_override";
+
+    /// Per-order chat `since` cursor — the `created_at` (unix seconds, decimal
+    /// string) of the newest accepted outer chat event, clamped to the local
+    /// clock. Full key is `chat_cursor:<order_id>`; build it with
+    /// [`chat_cursor`]. Bounds the chat subscription backlog so a flood is
+    /// never re-downloaded on restart (protocol chat spec, issue #246).
+    pub const CHAT_CURSOR_PREFIX: &str = "chat_cursor:";
+
+    /// Build the settings key holding the chat `since` cursor for `order_id`.
+    pub fn chat_cursor(order_id: &str) -> String {
+        format!("{CHAT_CURSOR_PREFIX}{order_id}")
+    }
 }
 
 /// Storage trait — implemented by both SQLite (native) and IndexedDB (WASM).
@@ -51,6 +63,15 @@ pub trait Storage: Send + Sync {
     async fn save_message(&self, msg: &crate::api::types::ChatMessage) -> Result<()>;
     async fn list_messages(&self, trade_id: &str) -> Result<Vec<crate::api::types::ChatMessage>>;
     async fn mark_messages_read(&self, trade_id: &str) -> Result<()>;
+
+    /// `true` if a message with this id was already accepted and stored.
+    ///
+    /// This is the **durable inner-event-id dedup** required by the chat spec:
+    /// both parties hold `K_sign`, so either can re-wrap a previously received
+    /// inner event inside a fresh outer one ("I sent the fiat", replayed). An
+    /// in-memory LRU is not enough — an evicted entry makes the message
+    /// replayable again — so the check must reach persisted history.
+    async fn message_exists(&self, id: &str) -> Result<bool>;
 
     async fn save_relay(&self, relay: &crate::api::types::RelayInfo) -> Result<()>;
     async fn delete_relay(&self, url: &str) -> Result<()>;

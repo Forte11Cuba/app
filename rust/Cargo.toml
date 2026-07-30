@@ -50,6 +50,10 @@ rand = { version = "0.8", features = ["getrandom"] }
 # Hashing (nym derivation)
 sha2 = "0.10"
 
+# HKDF-SHA256 split of the chat ECDH secret into K_conv / K_sign
+# (P2P chat envelope — https://mostro.network/protocol/chat.html, issue #246)
+hkdf = "0.12"
+
 # secp256k1 scalar math (ECDH shared-key derivation for P2P chat)
 k256 = { version = "0.13", features = ["ecdh", "arithmetic"] }
 
