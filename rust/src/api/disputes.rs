@@ -77,20 +77,68 @@ impl DisputeStore {
     /// dispute exists for the trade. Prevents TOCTOU races on concurrent
     /// `open_dispute` calls.
     async fn try_insert_if_absent_or_resolved(&self, dispute: Dispute) -> Result<Dispute> {
-        let mut store = self.disputes.write().await;
-        if let Some(existing) = store.get(&dispute.trade_id) {
-            if existing.status != DisputeStatus::Resolved {
-                bail!(
-                    "DisputeAlreadyOpen: dispute already exists for trade {}",
-                    dispute.trade_id
-                );
+        let stored = {
+            let mut store = self.disputes.write().await;
+            match store.get_mut(&dispute.trade_id) {
+                // `admin-took-dispute` landed between our publish and this
+                // insert (PR #253 review): the handler stored a placeholder —
+                // InReview, not ours, no reason, solver known. Claim it
+                // instead of failing: keep the solver and the InReview status
+                // it already learned, restore our initiator metadata.
+                Some(existing)
+                    if existing.status == DisputeStatus::InReview
+                        && !existing.initiated_by_me
+                        && existing.reason.is_none()
+                        && existing.admin_pubkey.is_some() =>
+                {
+                    existing.initiated_by_me = true;
+                    existing.reason = dispute.reason;
+                    existing.clone()
+                }
+                Some(existing) if existing.status != DisputeStatus::Resolved => {
+                    bail!(
+                        "DisputeAlreadyOpen: dispute already exists for trade {}",
+                        dispute.trade_id
+                    );
+                }
+                _ => {
+                    store.insert(dispute.trade_id.clone(), dispute.clone());
+                    dispute
+                }
             }
-        }
-        store.insert(dispute.trade_id.clone(), dispute.clone());
-        // Notify subscribers after releasing the write lock.
-        drop(store);
-        let _ = self.update_tx.send(dispute.clone());
-        Ok(dispute)
+        }; // write lock released here
+        let _ = self.update_tx.send(stored.clone());
+        Ok(stored)
+    }
+
+    /// Atomically create the dispute when the trade has none, or update the
+    /// existing record, under **one** write lock. `make` builds the new
+    /// record; `update` mutates the existing one, and its error aborts
+    /// without touching the store. One lock scope on purpose (PR #253
+    /// review): an incoming `admin-took-dispute` races `open_dispute`'s
+    /// post-publish insert, and a check-then-act here would let either side
+    /// overwrite the other. The broadcast fires after the lock is released.
+    async fn upsert_or_update<M, U>(&self, trade_id: &str, make: M, update: U) -> Result<()>
+    where
+        M: FnOnce() -> Dispute,
+        U: FnOnce(&mut Dispute) -> Result<()>,
+    {
+        let stored = {
+            let mut store = self.disputes.write().await;
+            match store.get_mut(trade_id) {
+                Some(dispute) => {
+                    update(dispute)?;
+                    dispute.clone()
+                }
+                None => {
+                    let dispute = make();
+                    store.insert(trade_id.to_string(), dispute.clone());
+                    dispute
+                }
+            }
+        }; // write lock released here
+        let _ = self.update_tx.send(stored);
+        Ok(())
     }
 }
 
@@ -277,52 +325,61 @@ pub async fn handle_admin_took_dispute(trade_id: String, admin_pubkey: String) -
     let admin_pubkey_for_key = admin_pubkey.clone();
 
     // The daemon sends `admin-took-dispute` to BOTH parties, and the side that
-    // did not open the dispute has no local record — `update_conditional` would
-    // fail with DisputeNotFound and the admin pubkey would be lost. That pubkey
-    // is the only way to reach the solver, so create the record instead.
-    if dispute_store().get(&trade_id).await.is_none() {
-        dispute_store()
-            .upsert(Dispute {
-                id: uuid::Uuid::new_v4().to_string(),
-                trade_id: trade_id.clone(),
-                status: DisputeStatus::InReview,
-                initiated_by_me: false,
-                reason: None,
-                admin_pubkey: Some(admin_pubkey.clone()),
-                resolution: None,
-                opened_at: unix_now(),
-                resolved_at: None,
-                is_read: false,
-            })
-            .await;
-        log::info!("[disputes] created record for peer-opened dispute trade={trade_id}");
-        return derive_admin_shared_key(&trade_id, &admin_pubkey_for_key).await;
-    }
-
+    // did not open the dispute has no local record — an update alone would
+    // fail with DisputeNotFound and the admin pubkey would be lost. That
+    // pubkey is the only way to reach the solver, so create the record when
+    // it is missing. Create-or-update runs under ONE store write lock (PR
+    // #253 review): a separate check-then-act races `open_dispute`'s
+    // post-publish insert in both directions — it could overwrite the
+    // initiator's fresh record, or insert first and make the initiator's own
+    // insert fail with its metadata lost.
+    let trade_id_for_new = trade_id.clone();
+    let admin_for_new = admin_pubkey.clone();
     dispute_store()
-        .update_conditional(&trade_id, move |dispute| {
-            // Idempotent same-solver replay (PR #254 review): the record is
-            // committed InReview before key derivation and listener startup,
-            // both of which can fail transiently (keys not hydrated yet,
-            // relay pool offline). A replayed assignment for the SAME solver
-            // is the retry path for exactly that window, so it must fall
-            // through to re-derive and re-arm instead of being rejected.
-            if dispute.status == DisputeStatus::InReview
-                && dispute.admin_pubkey.as_deref() == Some(admin_pubkey.as_str())
-            {
-                return Ok(());
-            }
-            if dispute.status != DisputeStatus::Open {
-                return Err(anyhow!(
-                    "InvalidState: dispute is not open (current: {:?})",
-                    dispute.status
-                ));
-            }
-            dispute.status = DisputeStatus::InReview;
-            dispute.admin_pubkey = Some(admin_pubkey);
-            dispute.is_read = false;
-            Ok(())
-        })
+        .upsert_or_update(
+            &trade_id,
+            || {
+                log::info!(
+                    "[disputes] created record for peer-opened dispute trade={trade_id_for_new}"
+                );
+                Dispute {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    trade_id: trade_id_for_new.clone(),
+                    status: DisputeStatus::InReview,
+                    initiated_by_me: false,
+                    reason: None,
+                    admin_pubkey: Some(admin_for_new),
+                    resolution: None,
+                    opened_at: unix_now(),
+                    resolved_at: None,
+                    is_read: false,
+                }
+            },
+            move |dispute| {
+                // Idempotent same-solver replay (PR #254 review): the record
+                // is committed InReview before key derivation and listener
+                // startup, both of which can fail transiently (keys not
+                // hydrated yet, relay pool offline). A replayed assignment
+                // for the SAME solver is the retry path for exactly that
+                // window, so it must fall through to re-derive and re-arm
+                // instead of being rejected.
+                if dispute.status == DisputeStatus::InReview
+                    && dispute.admin_pubkey.as_deref() == Some(admin_pubkey.as_str())
+                {
+                    return Ok(());
+                }
+                if dispute.status != DisputeStatus::Open {
+                    return Err(anyhow!(
+                        "InvalidState: dispute is not open (current: {:?})",
+                        dispute.status
+                    ));
+                }
+                dispute.status = DisputeStatus::InReview;
+                dispute.admin_pubkey = Some(admin_pubkey);
+                dispute.is_read = false;
+                Ok(())
+            },
+        )
         .await?;
 
     derive_admin_shared_key(&trade_id, &admin_pubkey_for_key).await
@@ -581,6 +638,69 @@ mod tests {
         assert_eq!(dispute.status, DisputeStatus::InReview);
         assert!(!dispute.initiated_by_me);
         assert!(!dispute.is_read, "a new solver assignment is unread");
+    }
+
+    /// PR #253 race, direction 1: `admin-took-dispute` lands between
+    /// `open_dispute`'s publish and its post-publish insert. The insert must
+    /// claim the handler's placeholder — keeping the solver and the InReview
+    /// status it already learned — instead of failing DisputeAlreadyOpen and
+    /// losing the initiator's metadata.
+    #[tokio::test]
+    async fn open_dispute_insert_claims_the_admin_took_placeholder() {
+        let trade_id = format!("t-{}", uuid::Uuid::new_v4());
+        let admin_pk = "0000000000000000000000000000000000000000000000000000000000000003";
+
+        handle_admin_took_dispute(trade_id.clone(), admin_pk.to_string())
+            .await
+            .unwrap();
+
+        // Exactly what open_dispute persists after a successful publish.
+        let own = Dispute {
+            id: uuid::Uuid::new_v4().to_string(),
+            trade_id: trade_id.clone(),
+            status: DisputeStatus::Open,
+            initiated_by_me: true,
+            reason: Some("no payment".to_string()),
+            admin_pubkey: None,
+            resolution: None,
+            opened_at: unix_now(),
+            resolved_at: None,
+            is_read: true,
+        };
+        let stored = dispute_store()
+            .try_insert_if_absent_or_resolved(own)
+            .await
+            .expect("the placeholder must be claimed, not rejected");
+
+        assert!(stored.initiated_by_me, "initiator metadata must be restored");
+        assert_eq!(stored.reason.as_deref(), Some("no payment"));
+        assert_eq!(
+            stored.status,
+            DisputeStatus::InReview,
+            "the solver assignment must survive the claim"
+        );
+        assert_eq!(stored.admin_pubkey.as_deref(), Some(admin_pk));
+    }
+
+    /// PR #253 race, direction 2: the initiator's record already exists when
+    /// `admin-took-dispute` arrives. The atomic create-or-update must update
+    /// it in place — never replace it with a peer-side placeholder
+    /// (`initiated_by_me: false`, `reason: None`).
+    #[tokio::test]
+    async fn admin_took_preserves_the_initiators_metadata() {
+        let trade_id = format!("t-{}", uuid::Uuid::new_v4());
+        let admin_pk = "0000000000000000000000000000000000000000000000000000000000000004";
+        seed_dispute(&trade_id, Some("no payment".to_string())).await;
+
+        handle_admin_took_dispute(trade_id.clone(), admin_pk.to_string())
+            .await
+            .unwrap();
+
+        let d = get_dispute(trade_id).await.unwrap().unwrap();
+        assert!(d.initiated_by_me, "the initiator flag must be preserved");
+        assert_eq!(d.reason.as_deref(), Some("no payment"));
+        assert_eq!(d.status, DisputeStatus::InReview);
+        assert_eq!(d.admin_pubkey.as_deref(), Some(admin_pk));
     }
 
     #[tokio::test]
