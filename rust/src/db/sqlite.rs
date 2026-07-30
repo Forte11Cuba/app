@@ -86,18 +86,52 @@ impl SqliteStorage {
             }
         }
 
+        // Migration 1 → 3: the original `messages` table stored one column per
+        // field (`sender_pubkey`, `content_encrypted`, …) instead of the JSON
+        // `data` blob. It also carries the FK, so without this the v2 → v3
+        // rebuild below fires and its `SELECT … data … FROM messages` aborts
+        // `open()` with "no such column: data" — killing the ENTIRE database
+        // (orders, trades, identity, outbox), not just chat.
+        //
+        // The rows are dropped rather than converted: `content_encrypted` holds
+        // ciphertext the current chat code cannot read back, so there is nothing
+        // to recover. Dropping the table takes its legacy indexes with it.
+        let messages_exists: bool = sqlx::query_scalar(
+            "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type = 'table' AND name = 'messages'",
+        )
+        .fetch_one(pool)
+        .await
+        .unwrap_or(false);
+        let messages_has_data: bool = sqlx::query_scalar(
+            "SELECT COUNT(*) > 0 FROM pragma_table_info('messages') WHERE name = 'data'",
+        )
+        .fetch_one(pool)
+        .await
+        .unwrap_or(false);
+        if messages_exists && !messages_has_data {
+            log::warn!(
+                "[db] migrating messages table from schema v1 (dropping unreadable rows)"
+            );
+            sqlx::query("DROP TABLE IF EXISTS messages")
+                .execute(pool)
+                .await?;
+        }
+
         // Migration 2 → 3: drop the messages → trades foreign key. Chat keys
         // (and therefore `messages.trade_id`) are per **order id**, while a
         // taker's trades row uses a fresh UUID — with the FK in place every
         // taker `save_message` failed and chat history/replay-dedup was lost
         // on restart (PR #247 review). Rows are preserved.
+        //
+        // Gated on `data` as well: the rebuild copies that column, so it must
+        // never run against a schema that lacks it (the v1 case handled above).
         let messages_has_fk: bool = sqlx::query_scalar(
             "SELECT COUNT(*) > 0 FROM pragma_foreign_key_list('messages')",
         )
         .fetch_one(pool)
         .await
         .unwrap_or(false);
-        if messages_has_fk {
+        if messages_has_fk && messages_has_data {
             log::warn!("[db] migrating messages table from schema v2 to v3 (dropping FK)");
             sqlx::query(crate::db::schema::SQLITE_DROP_MESSAGES_FK_SQL)
                 .execute(pool)
@@ -677,6 +711,88 @@ mod tests {
         // And an order-id message with no trades row now persists fine.
         let msgs = storage.list_messages("t1").await.unwrap();
         assert_eq!(msgs.len(), 1);
+
+        drop(storage);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[tokio::test]
+    async fn pre_v2_messages_table_is_rebuilt_not_copied() {
+        let path = temp_db_path();
+        let url = format!("sqlite://{}?mode=rwc", path.to_str().unwrap());
+
+        // Build a v1-era database by hand: `messages` still stores one column
+        // per field (no JSON `data` blob) and carries the FK to trades. The
+        // v2 → v3 rebuild copies `data`, so triggering it here used to abort
+        // `open()` with "no such column: data" — taking the WHOLE database
+        // down, not just chat (orders, trades, identity, outbox).
+        {
+            let pool = SqlitePoolOptions::new().connect(&url).await.unwrap();
+            sqlx::query(
+                "CREATE TABLE trades (
+                     id TEXT PRIMARY KEY, data TEXT NOT NULL, status TEXT NOT NULL,
+                     started_at INTEGER NOT NULL, completed_at INTEGER);
+                 CREATE TABLE messages (
+                     id                TEXT NOT NULL PRIMARY KEY,
+                     trade_id          TEXT NOT NULL REFERENCES trades(id),
+                     sender_pubkey     TEXT NOT NULL,
+                     content_encrypted BLOB NOT NULL,
+                     message_type      TEXT NOT NULL,
+                     is_mine           INTEGER NOT NULL DEFAULT 0,
+                     is_read           INTEGER NOT NULL DEFAULT 0,
+                     attachment_id     TEXT,
+                     created_at        INTEGER NOT NULL);
+                 CREATE INDEX idx_messages_trade_id ON messages(trade_id);
+                 CREATE INDEX idx_messages_is_read  ON messages(is_read);
+                 INSERT INTO trades VALUES ('t1', '{}', 'Active', 1, NULL);
+                 INSERT INTO messages VALUES
+                     ('m0', 't1', 'p', x'00', 'Peer', 0, 0, NULL, 1);",
+            )
+            .execute(&pool)
+            .await
+            .unwrap();
+            pool.close().await;
+        }
+
+        // open() must succeed — the legacy table is dropped, not copied.
+        let storage = SqliteStorage::open(path.to_str().unwrap()).await.unwrap();
+
+        // The rebuilt table is v3: JSON `data`, no foreign key.
+        let cols: Vec<(String,)> =
+            sqlx::query_as("SELECT name FROM pragma_table_info('messages')")
+                .fetch_all(&storage.pool)
+                .await
+                .unwrap();
+        let cols: Vec<String> = cols.into_iter().map(|(c,)| c).collect();
+        assert!(cols.contains(&"data".to_string()), "columns: {cols:?}");
+        assert!(
+            !cols.contains(&"content_encrypted".to_string()),
+            "legacy column survived: {cols:?}"
+        );
+        let fks: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM pragma_foreign_key_list('messages')")
+                .fetch_one(&storage.pool)
+                .await
+                .unwrap();
+        assert_eq!(fks, 0, "messages still has a foreign key");
+
+        // And it is usable: an order-id message with no matching trades row.
+        storage
+            .save_message(&crate::api::types::ChatMessage {
+                id: "m1".into(),
+                trade_id: "order-1".into(),
+                sender_pubkey: "peer".into(),
+                content: "hola".into(),
+                message_type: crate::api::types::MessageType::Peer,
+                is_mine: false,
+                is_read: false,
+                has_attachment: false,
+                attachment: None,
+                created_at: 1,
+            })
+            .await
+            .unwrap();
+        assert_eq!(storage.list_messages("order-1").await.unwrap().len(), 1);
 
         drop(storage);
         let _ = std::fs::remove_file(&path);

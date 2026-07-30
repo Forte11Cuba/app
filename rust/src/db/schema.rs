@@ -5,7 +5,11 @@ pub const SCHEMA_VERSION: u32 = 3;
 /// One-off rebuild for databases created while `messages` still carried a
 /// foreign key to `trades(id)` (schema v2). SQLite cannot drop a FK in place,
 /// so the table is recreated and the rows copied. Runs after the main DDL;
-/// `SqliteStorage::open` executes it only when the old FK is detected.
+/// `SqliteStorage::open` executes it only when the old FK is detected **and**
+/// the table already has the JSON `data` column this SQL copies — a v1
+/// database (one column per field) also carries that FK, and running this
+/// against it aborts `open()` with "no such column: data", taking the whole
+/// database down. `migrate()` drops that older table instead.
 /// Crash-safe: the rebuild runs inside one transaction (an interruption
 /// rolls back to the untouched v2 table), the stray `messages_v3` a previous
 /// interrupted attempt may have left is dropped first, and the
