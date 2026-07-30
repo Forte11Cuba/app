@@ -2019,6 +2019,30 @@ async fn dispatch_mostro_message(
                 );
             }
         }
+        // The daemon announces which solver took the dispute, and carries their
+        // pubkey in the payload. That pubkey is what both sides ECDH against to
+        // establish the dispute-chat keys, so losing this message means there
+        // is no way to reach the solver at all — nothing routed it before.
+        Action::AdminTookDispute => {
+            let Some(order_id) = kind.id.map(|id| id.to_string()) else {
+                log::warn!("[orders] admin-took-dispute without an order id");
+                return;
+            };
+            match admin_pubkey_from_payload(kind.payload.as_ref()) {
+                Some(admin_pubkey) => {
+                    if let Err(e) =
+                        crate::api::disputes::handle_admin_took_dispute(order_id, admin_pubkey)
+                            .await
+                    {
+                        log::warn!("[orders] admin-took-dispute not applied: {e}");
+                    }
+                }
+                None => log::warn!(
+                    "[orders] admin-took-dispute for order={order_id} carried no peer pubkey"
+                ),
+            }
+        }
+
         Action::CantDo => {
             let reason = match &kind.payload {
                 Some(mostro_core::message::Payload::CantDo(Some(r))) => format!("{r:?}"),
@@ -2673,6 +2697,20 @@ async fn handle_global_gift_wrap(
     }
 }
 
+/// The solver's pubkey carried by `admin-took-dispute`, per
+/// <https://mostro.network/protocol/dispute_chat.html>: the daemon puts it in a
+/// `Peer` payload. Any other payload shape means the message cannot establish
+/// the dispute chat, so it is reported rather than guessed at.
+fn admin_pubkey_from_payload(
+    payload: Option<&mostro_core::message::Payload>,
+) -> Option<String> {
+    use mostro_core::message::Payload;
+    match payload {
+        Some(Payload::Peer(peer)) => Some(peer.pubkey.clone()),
+        _ => None,
+    }
+}
+
 /// Parse a Kind 38383 event and upsert it into the order book, applying
 /// maker-order reconciliation (is_mine detection, local→daemon id bridging,
 /// trade-status sync).
@@ -3041,6 +3079,33 @@ mod tests {
         assert!(!request_id_matches(42, Some(41)));
         // Stale replayed events carry no request_id — they must never match.
         assert!(!request_id_matches(42, None));
+    }
+
+    #[test]
+    fn the_solver_pubkey_is_read_from_a_peer_payload() {
+        use mostro_core::message::{Payload, Peer};
+
+        let pubkey = "0000000000000000000000000000000000000000000000000000000000000001";
+        let payload = Payload::Peer(Peer {
+            pubkey: pubkey.to_string(),
+            reputation: None,
+        });
+
+        assert_eq!(
+            admin_pubkey_from_payload(Some(&payload)).as_deref(),
+            Some(pubkey)
+        );
+    }
+
+    #[test]
+    fn a_dispute_message_without_a_peer_payload_yields_no_solver() {
+        use mostro_core::message::Payload;
+
+        // Nothing is guessed: without the pubkey there is no dispute chat, and
+        // silently picking some other payload field would derive keys against
+        // the wrong party.
+        assert_eq!(admin_pubkey_from_payload(None), None);
+        assert_eq!(admin_pubkey_from_payload(Some(&Payload::Amount(42))), None);
     }
 
     fn insert_pending_create(key: &str, request_id: u64) -> tokio::sync::oneshot::Receiver<DaemonReply> {

@@ -245,6 +245,29 @@ pub async fn get_dispute(trade_id: String) -> Result<Option<Dispute>> {
 pub async fn handle_admin_took_dispute(trade_id: String, admin_pubkey: String) -> Result<()> {
     let admin_pubkey_for_key = admin_pubkey.clone();
 
+    // The daemon sends `admin-took-dispute` to BOTH parties, and the side that
+    // did not open the dispute has no local record — `update_conditional` would
+    // fail with DisputeNotFound and the admin pubkey would be lost. That pubkey
+    // is the only way to reach the solver, so create the record instead.
+    if dispute_store().get(&trade_id).await.is_none() {
+        dispute_store()
+            .upsert(Dispute {
+                id: uuid::Uuid::new_v4().to_string(),
+                trade_id: trade_id.clone(),
+                status: DisputeStatus::InReview,
+                initiated_by_me: false,
+                reason: None,
+                admin_pubkey: Some(admin_pubkey.clone()),
+                resolution: None,
+                opened_at: unix_now(),
+                resolved_at: None,
+                is_read: false,
+            })
+            .await;
+        log::info!("[disputes] created record for peer-opened dispute trade={trade_id}");
+        return derive_admin_shared_key(&trade_id, &admin_pubkey_for_key).await;
+    }
+
     dispute_store()
         .update_conditional(&trade_id, move |dispute| {
             if dispute.status != DisputeStatus::Open {
@@ -260,13 +283,21 @@ pub async fn handle_admin_took_dispute(trade_id: String, admin_pubkey: String) -
         })
         .await?;
 
-    // Derive adminSharedKey and store in session.
-    //
-    // This key allows the user to decrypt admin messages in the dispute
-    // chat (the admin encrypts to the trade pubkey, not the identity key).
-    //
-    // Best-effort: if no trade key or session exists we log a warning but
-    // do not fail — the dispute status update already succeeded.
+    derive_admin_shared_key(&trade_id, &admin_pubkey_for_key).await
+}
+
+/// Derive the admin shared key for `trade_id` and store it in the session.
+///
+/// This key allows the user to decrypt admin messages in the dispute chat (the
+/// admin encrypts to the trade pubkey, not the identity key).
+///
+/// Best-effort: if no trade key or session exists this logs a warning but does
+/// not fail — the dispute record has already been updated, and losing the
+/// derivation must not lose the admin pubkey with it.
+async fn derive_admin_shared_key(trade_id: &str, admin_pubkey_hex: &str) -> Result<()> {
+    let trade_id = trade_id.to_string();
+    let admin_pubkey_for_key = admin_pubkey_hex.to_string();
+
     let derive_result: Result<()> = async {
         let trade_index = crate::api::orders::trade_key_for_order(&trade_id)
             .await
@@ -433,6 +464,27 @@ mod tests {
 
         let err = submit_evidence(trade_id, "  ".into()).await.unwrap_err();
         assert!(err.to_string().contains("EvidenceEmpty"));
+    }
+
+    #[tokio::test]
+    async fn a_peer_opened_dispute_still_records_the_solver() {
+        // The party that did not open the dispute has no local record when
+        // `admin-took-dispute` arrives. Dropping it there would lose the only
+        // pubkey that can establish the dispute chat.
+        let trade_id = format!("t-{}", uuid::Uuid::new_v4());
+        let admin_pk = "0000000000000000000000000000000000000000000000000000000000000002";
+
+        assert!(get_dispute(trade_id.clone()).await.unwrap().is_none());
+
+        handle_admin_took_dispute(trade_id.clone(), admin_pk.to_string())
+            .await
+            .unwrap();
+
+        let dispute = get_dispute(trade_id).await.unwrap().expect("record created");
+        assert_eq!(dispute.admin_pubkey.as_deref(), Some(admin_pk));
+        assert_eq!(dispute.status, DisputeStatus::InReview);
+        assert!(!dispute.initiated_by_me);
+        assert!(!dispute.is_read, "a new solver assignment is unread");
     }
 
     #[tokio::test]
