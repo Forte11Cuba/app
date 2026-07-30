@@ -6,9 +6,10 @@ import 'package:uuid/uuid.dart';
 
 import 'package:mostro/features/notifications/models/notification_model.dart';
 
-// Platform-specific imports — path_provider is only needed on non-web.
-import 'package:path_provider/path_provider.dart'
-    if (dart.library.html) 'package:mostro/core/stubs/path_provider_stub.dart';
+// Platform-specific imports — the data directory only exists off web.
+import 'package:path/path.dart' as p;
+import 'package:mostro/core/storage/app_data_dir.dart'
+    if (dart.library.html) 'package:mostro/core/storage/app_data_dir_web.dart';
 import 'package:sembast/sembast.dart';
 import 'package:mostro/features/notifications/providers/sembast_factory_io.dart'
     if (dart.library.html) 'package:mostro/features/notifications/providers/sembast_factory_web.dart';
@@ -50,9 +51,8 @@ class SembastNotificationsStore {
       } else if (kIsWeb) {
         db = await databaseFactoryWeb.openDatabase(_dbName);
       } else {
-        final dir = await getApplicationDocumentsDirectory();
-        final path = '${dir.path}/$_dbName';
-        db = await databaseFactoryIo.openDatabase(path);
+        final dir = await appDataDirPath();
+        db = await databaseFactoryIo.openDatabase(p.join(dir, _dbName));
       }
       _db = db;
       _opening!.complete(db);
