@@ -156,7 +156,7 @@
   "@orderAlreadyTaken": {"description": "Error message when attempting to take an already-taken order"},
   "bondRequired": "This node requires an anti-abuse bond, which is not supported yet",
   "@bondRequired": {"description": "Error shown when the Mostro node asks for an anti-abuse bond before accepting the order — the app does not support bonds yet"},
-  "nodeProtocolUnsupported": "This Mostro node runs an older version of the protocol that this app no longer speaks. Pick another node in Settings",
+  "nodeProtocolUnsupported": "This Mostro node uses a protocol version this app does not support. Pick another node in Settings, or check for an app update",
   "@nodeProtocolUnsupported": {"description": "Error shown when the selected Mostro node advertises a protocol version this v2-native client does not speak, so it would never read the request"},
   "storageUnavailable": "The app cannot create or take orders while its local database is unavailable. Restart the app and try again",
   "@storageUnavailable": {"description": "Error shown when a trade key cannot be derived because the local database is unavailable, so orders cannot be created or taken"},

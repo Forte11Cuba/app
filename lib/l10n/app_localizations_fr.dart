@@ -239,7 +239,7 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get nodeProtocolUnsupported =>
-      'Ce nœud Mostro utilise une ancienne version du protocole que cette application ne parle plus. Choisissez un autre nœud dans les Paramètres';
+      'Ce nœud Mostro utilise une version du protocole que cette application ne prend pas en charge. Choisissez un autre nœud dans les Paramètres ou vérifiez si une mise à jour de l\'application est disponible';
 
   @override
   String get storageUnavailable =>

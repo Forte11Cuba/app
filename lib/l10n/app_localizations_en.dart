@@ -234,7 +234,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get nodeProtocolUnsupported =>
-      'This Mostro node runs an older version of the protocol that this app no longer speaks. Pick another node in Settings';
+      'This Mostro node uses a protocol version this app does not support. Pick another node in Settings, or check for an app update';
 
   @override
   String get storageUnavailable =>

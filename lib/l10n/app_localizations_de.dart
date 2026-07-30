@@ -237,7 +237,7 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get nodeProtocolUnsupported =>
-      'Dieser Mostro-Node nutzt eine ältere Protokollversion, die diese App nicht mehr spricht. Wähle in den Einstellungen einen anderen Node';
+      'Dieser Mostro-Node nutzt eine Protokollversion, die diese App nicht unterstützt. Wähle in den Einstellungen einen anderen Node oder prüfe, ob ein App-Update verfügbar ist';
 
   @override
   String get storageUnavailable =>

@@ -237,7 +237,7 @@ class AppLocalizationsEs extends AppLocalizations {
 
   @override
   String get nodeProtocolUnsupported =>
-      'Este nodo Mostro usa una versión antigua del protocolo que esta app ya no habla. Elige otro nodo en Ajustes';
+      'Este nodo Mostro usa una versión del protocolo que esta app no soporta. Elige otro nodo en Ajustes o busca una actualización de la app';
 
   @override
   String get storageUnavailable =>
