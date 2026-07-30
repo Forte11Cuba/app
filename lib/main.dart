@@ -25,6 +25,7 @@ import 'package:mostro/src/rust/api/nostr.dart' as nostr_api;
 import 'package:mostro/src/rust/api/orders.dart' as orders_api;
 import 'package:mostro/src/rust/api/settings.dart' as settings_api;
 import 'package:mostro/src/rust/api/bond.dart' as bond_api;
+import 'package:mostro/src/rust/api/identity.dart' as identity_api;
 import 'package:mostro/src/rust/api/types.dart' show SlashCause, BondSlashedEvent;
 import 'package:mostro/features/notifications/models/notification_model.dart';
 import 'package:mostro/features/notifications/providers/notifications_provider.dart';
@@ -94,6 +95,15 @@ Future<void> main() async {
     markBridgeFailed(e);
   }
 
+  // Mirror consumed trade-key indices into secure storage — the copy that
+  // outlives mostro.db, which Rust keeps as the primary record (issue #249).
+  //
+  // Subscribed BEFORE identity init on purpose: loading the identity is itself
+  // a publication point (when the database knew a higher counter than secure
+  // storage, the reconciled value is published so this copy catches up), and
+  // the Tokio broadcast channel drops a value that has no receiver yet.
+  _mirrorTradeKeyIndex(await identity_api.onTradeKeyIndexChanged());
+
   // Initialize identity: creates on first launch, reloads on subsequent launches.
   // Must run before Nostr init so the identity key is available for relay auth.
   try {
@@ -149,6 +159,27 @@ Future<void> main() async {
     container: container,
     child: const MostroApp(),
   ));
+}
+
+/// Persists every consumed trade-key index reported by Rust.
+///
+/// Runs for the process lifetime. A write failure is logged and the loop
+/// continues: the database copy is still authoritative, and the next index
+/// (or the load-time reconciliation) supersedes the one that was missed.
+void _mirrorTradeKeyIndex(identity_api.TradeKeyIndexStream stream) {
+  Future.microtask(() async {
+    while (true) {
+      final int index;
+      try {
+        index = await stream.next();
+      } catch (e) {
+        debugPrint('[identity] trade-key index stream closed: $e');
+        break;
+      }
+      debugPrint('[identity] mirroring trade-key index $index to secure storage');
+      await IdentityService.saveTradeKeyIndex(index);
+    }
+  });
 }
 
 /// Reconnect a previously saved NWC wallet in the background.

@@ -236,6 +236,10 @@ class AppLocalizationsEs extends AppLocalizations {
       'Este nodo requiere un bono anti-abuso, que aún no está soportado';
 
   @override
+  String get storageUnavailable =>
+      'La app no puede crear ni tomar órdenes mientras su base de datos local no esté disponible. Reinicia la app e inténtalo de nuevo';
+
+  @override
   String addInvoiceAmount(String sats) {
     return 'Cantidad a recibir: $sats sats';
   }

@@ -488,6 +488,12 @@ abstract class AppLocalizations {
   /// **'This node requires an anti-abuse bond, which is not supported yet'**
   String get bondRequired;
 
+  /// Error shown when a trade key cannot be derived because the local database is unavailable, so orders cannot be created or taken
+  ///
+  /// In en, this message translates to:
+  /// **'The app cannot create or take orders while its local database is unavailable. Restart the app and try again'**
+  String get storageUnavailable;
+
   /// Sats amount (calculated by the Mostro daemon) the buyer's invoice must be for, shown on the add-invoice screen
   ///
   /// In en, this message translates to:

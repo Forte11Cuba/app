@@ -204,7 +204,11 @@ class _AddOrderScreenState extends ConsumerState<AddOrderScreen> {
       // instead of the raw marker. The order was not created.
       final display = msg.contains('NoDaemonResponse')
           ? AppLocalizations.of(context).sessionTimeoutMessage
-          : msg;
+          // No durable storage means the trade-key counter cannot be recorded,
+          // so no key is derived and no order is created (issue #249).
+          : msg.contains('StorageUnavailable')
+              ? AppLocalizations.of(context).storageUnavailable
+              : msg;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(display)),
       );

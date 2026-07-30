@@ -165,7 +165,11 @@ class _TakeOrderScreenState extends ConsumerState<TakeOrderScreen> {
             ? l10n.sessionTimeoutMessage
             : msg.contains('BondRequired')
                 ? l10n.bondRequired
-                : msg;
+                // No durable storage means the trade-key counter cannot be
+                // recorded, so no key is derived and the take never happens.
+                : msg.contains('StorageUnavailable')
+                    ? l10n.storageUnavailable
+                    : msg;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(display)),
         );
