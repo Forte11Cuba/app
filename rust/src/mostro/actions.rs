@@ -76,7 +76,7 @@ pub async fn new_order(
         Action::NewOrder,
         payload,
     );
-    wrap_message(identity_keys, trade_keys, mostro_pubkey, &msg).await
+    wrap_message_first_contact(identity_keys, trade_keys, mostro_pubkey, &msg).await
 }
 
 /// Build and wrap a TakeBuy MostroMessage.
@@ -321,7 +321,7 @@ async fn take_order_impl(
         action,
         payload,
     );
-    wrap_message(identity_keys, trade_keys, mostro_pubkey, &msg).await
+    wrap_message_first_contact(identity_keys, trade_keys, mostro_pubkey, &msg).await
 }
 
 /// Helper for actions that only need an order ID and no additional payload.
@@ -347,7 +347,46 @@ async fn wrap_message(
     mostro_pubkey: &PublicKey,
     msg: &Message,
 ) -> Result<String> {
-    let pow = crate::mostro::pow::get_pow();
+    wrap_message_at(
+        identity_keys,
+        trade_keys,
+        mostro_pubkey,
+        msg,
+        crate::mostro::pow::get_pow(),
+    )
+    .await
+}
+
+/// [`wrap_message`] for a **first-contact** event — one whose visible sender is
+/// a trade key the daemon does not yet associate with an active order or
+/// dispute: creating an order, taking one, or a restore under a fresh trade
+/// key. Those pay `pow_first_contact`, which is never lower than `pow` and is
+/// typically higher; mining such an event at `pow` gets it dropped before the
+/// daemon decrypts anything, with no reply of any kind, so the caller sees only
+/// a timeout (issue #177).
+async fn wrap_message_first_contact(
+    identity_keys: &Keys,
+    trade_keys: &Keys,
+    mostro_pubkey: &PublicKey,
+    msg: &Message,
+) -> Result<String> {
+    wrap_message_at(
+        identity_keys,
+        trade_keys,
+        mostro_pubkey,
+        msg,
+        crate::mostro::pow::first_contact_pow(),
+    )
+    .await
+}
+
+async fn wrap_message_at(
+    identity_keys: &Keys,
+    trade_keys: &Keys,
+    mostro_pubkey: &PublicKey,
+    msg: &Message,
+    pow: u8,
+) -> Result<String> {
     let event =
         gift_wrap::wrap_mostro_message(identity_keys, trade_keys, mostro_pubkey, msg, pow).await?;
     Ok(event.as_json())
@@ -369,7 +408,7 @@ pub async fn restore_session(
     // daemon to look up the user's trades); trade_keys sign the rumor
     // (-> event.sender, the key the daemon replies to). Mirrors new_order.
     let msg = Message::new_restore(None);
-    wrap_message(identity_keys, trade_keys, mostro_pubkey, &msg).await
+    wrap_message_first_contact(identity_keys, trade_keys, mostro_pubkey, &msg).await
 }
 
 #[cfg(test)]

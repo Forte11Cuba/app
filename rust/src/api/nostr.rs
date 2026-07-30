@@ -229,20 +229,12 @@ pub(crate) async fn fetch_and_set_node_capabilities() {
     let mostro_pubkey_hex = crate::config::active_mostro_pubkey();
     match fetch_mostro_instance_tags(mostro_pubkey_hex).await {
         Ok(Some(tags)) => {
-            let pow_tag = tags
-                .iter()
-                .find(|t| t.first().map(|s| s.as_str()) == Some("pow"));
-            let difficulty = match pow_tag.and_then(|t| t.get(1)) {
-                Some(v) => match v.parse::<u8>() {
-                    Ok(d) => d,
-                    Err(_) => {
-                        log::warn!("[nostr] malformed pow tag value: {v:?} — defaulting to 0");
-                        0
-                    }
-                },
-                None => 0,
-            };
+            // Both difficulties: `pow` for every event, `pow_first_contact`
+            // for the first event of a trade. An absent first-contact tag is
+            // recorded as unknown rather than as `pow` — see mostro::pow.
+            let (difficulty, first_contact) = crate::mostro::pow::parse_pow_tags(&tags);
             crate::mostro::pow::set_pow(difficulty);
+            crate::mostro::pow::set_first_contact_pow(first_contact);
 
             // Today's daemons publish no escrow tags at all, so this resolves
             // to Unknown — which keeps every Cashu path shut. See escrow_mode.
@@ -252,6 +244,7 @@ pub(crate) async fn fetch_and_set_node_capabilities() {
         Ok(None) => {
             log::warn!("[nostr] no Kind 38385 event found — PoW defaults to 0");
             crate::mostro::pow::set_pow(0);
+            crate::mostro::pow::set_first_contact_pow(None);
             // Nothing was advertised: stay Unknown rather than assume
             // Lightning, and leave Cashu closed.
             escrow_mode::clear();
