@@ -16,68 +16,112 @@
 ///
 /// **An absent `pow_first_contact` tag means unknown, not zero and not `pow`.**
 /// Daemons that enforce a first-contact difficulty but predate the tag exist,
-/// so [`get_first_contact_pow`] returns `None` rather than a number and
-/// [`first_contact_pow`] falls back to at least `pow`.
-use std::sync::atomic::{AtomicU32, Ordering};
+/// so the tag parses to `None` rather than a number and
+/// [`first_contact_pow_for`] falls back to at least `pow`.
+use std::sync::LazyLock;
 
-const FIRST_CONTACT_ABSENT: u16 = u16::MAX;
+use anyhow::{anyhow, Result};
+use tokio::sync::watch;
 
-/// Both difficulties packed into one word — bits 0–7 hold `pow`, bits 8–23
-/// hold `pow_first_contact` as a `u16` whose [`FIRST_CONTACT_ABSENT`] value a
-/// `u8` difficulty can never occupy. One word, one store, one load: a reader
-/// can never observe `pow` from one capability refresh and
-/// `pow_first_contact` from another — e.g. mine a first-contact event at the
-/// old first-contact value while a refresh to a stricter node is mid-flight.
-static POW_SNAPSHOT: AtomicU32 = AtomicU32::new(encode(0, None));
+use crate::rt::time::Duration;
 
-const fn encode(pow: u8, first_contact: Option<u8>) -> u32 {
-    let fc = match first_contact {
-        Some(d) => d as u16,
-        None => FIRST_CONTACT_ABSENT,
-    };
-    ((fc as u32) << 8) | pow as u32
+/// How long a first-contact wrap waits for the destination node's capability
+/// fetch before failing closed. The fetch itself is bounded by a 10s relay
+/// query, so a snapshot that has not arrived by then is not coming.
+const CAPABILITY_WAIT: Duration = Duration::from_secs(10);
+
+/// One capability generation: both difficulties plus the node (hex pubkey)
+/// they were fetched from. Published as a single value so a reader can never
+/// observe `pow` from one refresh and `pow_first_contact` from another — and,
+/// as important, so a reader can tell *whose* difficulties these are: at
+/// startup nothing has been fetched yet, and right after a node switch the
+/// stored generation still belongs to the previous node.
+#[derive(Clone, Debug, PartialEq)]
+struct Capabilities {
+    node: String,
+    pow: u8,
+    first_contact: Option<u8>,
 }
 
-const fn decode(snapshot: u32) -> (u8, Option<u8>) {
-    let pow = (snapshot & 0xFF) as u8;
-    match (snapshot >> 8) as u16 {
-        FIRST_CONTACT_ABSENT => (pow, None),
-        d => (pow, Some(d as u8)),
-    }
-}
+/// `None` until the first successful capability fetch. A `watch` channel so a
+/// first-contact wrap can await the generation it needs instead of reading
+/// whatever happens to be stored.
+static CAPS: LazyLock<watch::Sender<Option<Capabilities>>> =
+    LazyLock::new(|| watch::channel(None).0);
 
-/// Store both PoW difficulties as one atomic snapshot: `pow` for every
-/// outgoing event, and `pow_first_contact` (`None` when the node published no
-/// such tag). A single setter on purpose — publishing them separately would
-/// let a concurrent wrap mine against one fresh and one stale value.
-pub fn set_pows(pow: u8, first_contact: Option<u8>) {
-    POW_SNAPSHOT.store(encode(pow, first_contact), Ordering::Relaxed);
+/// Store both PoW difficulties fetched from `node` (hex pubkey) as one
+/// snapshot: `pow` for every outgoing event, and `pow_first_contact` (`None`
+/// when the node published no such tag). A single setter on purpose —
+/// publishing the values separately would let a concurrent wrap mine against
+/// one fresh and one stale value.
+pub fn set_pows(node: &str, pow: u8, first_contact: Option<u8>) {
+    CAPS.send_replace(Some(Capabilities {
+        node: node.to_string(),
+        pow,
+        first_contact,
+    }));
     match first_contact {
-        Some(d) => log::info!("[pow] difficulty set to {pow}, first-contact to {d}"),
+        Some(d) => log::info!("[pow] node {node}: difficulty set to {pow}, first-contact to {d}"),
         None => log::info!(
-            "[pow] difficulty set to {pow}; node published no pow_first_contact — \
+            "[pow] node {node}: difficulty set to {pow}; no pow_first_contact published — \
              first-contact difficulty unknown"
         ),
     }
 }
 
 /// Current PoW difficulty.  Returns 0 when no PoW is required.
+///
+/// Deliberately node-agnostic, unlike [`first_contact_pow_for`]: the events
+/// mined at this difficulty act on orders the daemon already knows, which can
+/// only exist after at least one successful capability fetch, and blocking
+/// every mid-trade send on a re-fetch would hurt more than a briefly stale
+/// difficulty does.
 pub fn get_pow() -> u8 {
-    decode(POW_SNAPSHOT.load(Ordering::Relaxed)).0
+    CAPS.borrow().as_ref().map_or(0, |c| c.pow)
 }
 
-/// Advertised first-contact difficulty, or `None` when the node published no
-/// `pow_first_contact` tag — which means *unknown*, not zero.
-pub fn get_first_contact_pow() -> Option<u8> {
-    decode(POW_SNAPSHOT.load(Ordering::Relaxed)).1
+/// Difficulty to mine a first-contact event for `node` (hex pubkey) at,
+/// resolved per [`resolve_first_contact`] — but only from a capability
+/// snapshot that was actually fetched *from that node*.
+///
+/// Until such a snapshot exists this waits (capability fetches run
+/// asynchronously when the relay pool comes online and after a node switch),
+/// and after [`CAPABILITY_WAIT`] it fails closed with a `PowUnknown` error
+/// rather than guess: at startup the store holds nothing, and right after a
+/// node switch it still holds the previous node's — possibly lower —
+/// difficulties, and an under-mined first-contact event is dropped silently
+/// (issue #177), which is strictly worse than an explicit error the user can
+/// retry.
+pub async fn first_contact_pow_for(node: &str) -> Result<u8> {
+    first_contact_pow_within(node, CAPABILITY_WAIT).await
 }
 
-/// Difficulty to mine a first-contact event at. Both inputs come from a single
-/// atomic load, so they always belong to the same capability refresh. See
-/// [`resolve_first_contact`].
-pub fn first_contact_pow() -> u8 {
-    let (pow, first_contact) = decode(POW_SNAPSHOT.load(Ordering::Relaxed));
-    resolve_first_contact(pow, first_contact)
+/// [`first_contact_pow_for`] with an explicit wait bound, so tests can cover
+/// the fail-closed path without a 10-second stall.
+async fn first_contact_pow_within(node: &str, wait: Duration) -> Result<u8> {
+    let mut rx = CAPS.subscribe();
+    crate::rt::time::timeout(wait, async {
+        loop {
+            // Scoped so the watch borrow is released before awaiting.
+            let ready = rx
+                .borrow_and_update()
+                .as_ref()
+                .filter(|c| c.node == node)
+                .map(|c| resolve_first_contact(c.pow, c.first_contact));
+            if let Some(pow) = ready {
+                return pow;
+            }
+            if rx.changed().await.is_err() {
+                // The sender is a static and never drops; park until the
+                // timeout fires rather than spin.
+                std::future::pending::<()>().await;
+            }
+        }
+    })
+    .await
+    .map_err(|_| {
+        anyhow!("PowUnknown: capabilities for node {node} not fetched yet — refusing to mine a first-contact event at a difficulty that may be too low")
+    })
 }
 
 /// The first-contact difficulty implied by [`pow`](get_pow) and an optional
@@ -134,7 +178,7 @@ pub(crate) mod test_support {
 
     impl Drop for PowGuard {
         fn drop(&mut self) {
-            super::set_pows(0, None);
+            super::CAPS.send_replace(None);
         }
     }
 
@@ -172,35 +216,65 @@ mod tests {
         assert_eq!(resolve_first_contact(6, Some(2)), 6);
     }
 
-    #[test]
-    fn the_snapshot_roundtrips_every_boundary_value() {
-        for (pow, fc) in [
-            (0, None),
-            (255, None),
-            (0, Some(0)),
-            (255, Some(255)),
-            (6, Some(12)),
-        ] {
-            assert_eq!(decode(encode(pow, fc)), (pow, fc));
-        }
-    }
-
     /// Regression for the refresh race (PR #251 review): both difficulties are
     /// published as one snapshot, so the absent → advertised transition can
-    /// never be observed half-applied by `first_contact_pow`.
-    #[test]
-    fn a_refresh_publishes_both_difficulties_together() {
+    /// never be observed half-applied by a first-contact wrap.
+    #[tokio::test]
+    async fn a_refresh_publishes_both_difficulties_together() {
         let _guard = test_support::lock_pow();
 
-        set_pows(6, None);
+        set_pows("node-a", 6, None);
         assert_eq!(get_pow(), 6);
-        assert_eq!(get_first_contact_pow(), None);
-        assert_eq!(first_contact_pow(), 6);
+        assert_eq!(first_contact_pow_within("node-a", SHORT).await.unwrap(), 6);
 
-        set_pows(6, Some(12));
+        set_pows("node-a", 6, Some(12));
         assert_eq!(get_pow(), 6);
-        assert_eq!(get_first_contact_pow(), Some(12));
-        assert_eq!(first_contact_pow(), 12);
+        assert_eq!(first_contact_pow_within("node-a", SHORT).await.unwrap(), 12);
+    }
+
+    /// A short bound for waits the test expects to succeed immediately or to
+    /// fail closed without stalling the suite.
+    const SHORT: Duration = Duration::from_millis(50);
+
+    /// Regression for ermeme's P1 on PR #251, startup window: before any
+    /// capability fetch has completed there is no snapshot, and a
+    /// first-contact wrap must fail closed instead of mining at 0.
+    #[tokio::test]
+    async fn before_any_fetch_first_contact_fails_closed() {
+        let _guard = test_support::lock_pow();
+
+        let err = first_contact_pow_within("node-a", SHORT).await.unwrap_err();
+        assert!(err.to_string().starts_with("PowUnknown"), "got: {err}");
+    }
+
+    /// Regression for ermeme's P1 on PR #251, node-switch window: the previous
+    /// node's snapshot must never satisfy a first-contact wrap for the new
+    /// node, no matter how fresh it is.
+    #[tokio::test]
+    async fn a_previous_nodes_snapshot_never_serves_the_new_node() {
+        let _guard = test_support::lock_pow();
+
+        set_pows("node-a", 1, Some(2));
+        let err = first_contact_pow_within("node-b", SHORT).await.unwrap_err();
+        assert!(err.to_string().starts_with("PowUnknown"), "got: {err}");
+    }
+
+    /// The wait side of the gate: a wrap that arrives while the capability
+    /// fetch is still in flight blocks until the fetch lands, then mines at
+    /// the fetched difficulty — no error, no under-mining.
+    #[tokio::test]
+    async fn a_delayed_capability_fetch_unblocks_the_wait() {
+        let _guard = test_support::lock_pow();
+
+        crate::rt::spawn(async {
+            crate::rt::time::sleep(Duration::from_millis(20)).await;
+            set_pows("node-a", 6, Some(12));
+        });
+
+        let pow = first_contact_pow_within("node-a", Duration::from_secs(5))
+            .await
+            .unwrap();
+        assert_eq!(pow, 12);
     }
 
     #[test]

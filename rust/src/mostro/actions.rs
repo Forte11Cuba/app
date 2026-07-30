@@ -364,20 +364,20 @@ async fn wrap_message(
 /// typically higher; mining such an event at `pow` gets it dropped before the
 /// daemon decrypts anything, with no reply of any kind, so the caller sees only
 /// a timeout (issue #177).
+///
+/// The difficulty must come from a capability snapshot fetched *from
+/// `mostro_pubkey`*: at startup none exists yet, and right after a node switch
+/// the store still holds the previous node's values. `first_contact_pow_for`
+/// waits for the right generation and fails closed (`PowUnknown`) if it never
+/// arrives, rather than mine at a difficulty that may be silently rejected.
 async fn wrap_message_first_contact(
     identity_keys: &Keys,
     trade_keys: &Keys,
     mostro_pubkey: &PublicKey,
     msg: &Message,
 ) -> Result<String> {
-    wrap_message_at(
-        identity_keys,
-        trade_keys,
-        mostro_pubkey,
-        msg,
-        crate::mostro::pow::first_contact_pow(),
-    )
-    .await
+    let pow = crate::mostro::pow::first_contact_pow_for(&mostro_pubkey.to_hex()).await?;
+    wrap_message_at(identity_keys, trade_keys, mostro_pubkey, msg, pow).await
 }
 
 async fn wrap_message_at(
@@ -450,13 +450,13 @@ mod tests {
     async fn create_take_and_restore_mine_at_the_first_contact_difficulty() {
         use std::time::Duration;
 
-        let _pow = crate::mostro::pow::test_support::lock_pow();
-        crate::mostro::pow::set_pows(1, Some(4));
-
         let identity_keys = Keys::generate();
         let trade_keys = Keys::generate();
         let mostro_pubkey = Keys::generate().public_key();
         let order_id = "94486ae3-4083-4dfe-b543-53fe761025e9";
+
+        let _pow = crate::mostro::pow::test_support::lock_pow();
+        crate::mostro::pow::set_pows(&mostro_pubkey.to_hex(), 1, Some(4));
 
         // Mining is probabilistic — cap wall time so a regression that stalls
         // does not hang CI indefinitely.
@@ -506,12 +506,12 @@ mod tests {
     async fn generic_actions_mine_at_the_base_difficulty() {
         use std::time::Duration;
 
-        let _pow = crate::mostro::pow::test_support::lock_pow();
-        crate::mostro::pow::set_pows(1, Some(4));
-
         let identity_keys = Keys::generate();
         let trade_keys = Keys::generate();
         let mostro_pubkey = Keys::generate().public_key();
+
+        let _pow = crate::mostro::pow::test_support::lock_pow();
+        crate::mostro::pow::set_pows(&mostro_pubkey.to_hex(), 1, Some(4));
 
         let json = crate::rt::time::timeout(
             Duration::from_secs(60),
@@ -543,6 +543,11 @@ mod tests {
         let identity_keys = Keys::generate();
         let trade_keys = Keys::generate();
         let mostro_keys = Keys::generate();
+
+        // First-contact wrapping fails closed until this node's capabilities
+        // are published — a test double for the Kind 38385 fetch.
+        let _pow = crate::mostro::pow::test_support::lock_pow();
+        crate::mostro::pow::set_pows(&mostro_keys.public_key().to_hex(), 0, None);
 
         let params = NewOrderParams {
             kind: OrderKind::Sell,
@@ -588,6 +593,11 @@ mod tests {
         let trade_keys = Keys::generate();
         let mostro_keys = Keys::generate();
         let order_id = "94486ae3-4083-4dfe-b543-53fe761025e9";
+
+        // First-contact wrapping fails closed until this node's capabilities
+        // are published — a test double for the Kind 38385 fetch.
+        let _pow = crate::mostro::pow::test_support::lock_pow();
+        crate::mostro::pow::set_pows(&mostro_keys.public_key().to_hex(), 0, None);
 
         let json = take_sell(
             &identity_keys,
@@ -647,6 +657,12 @@ mod tests {
         let identity_keys = Keys::generate();
         let trade_keys = Keys::generate();
         let mostro_keys = Keys::generate();
+
+        // First-contact wrapping fails closed until this node's capabilities
+        // are published — a test double for the Kind 38385 fetch.
+        let _pow = crate::mostro::pow::test_support::lock_pow();
+        crate::mostro::pow::set_pows(&mostro_keys.public_key().to_hex(), 0, None);
+
         let json = restore_session(&identity_keys, &trade_keys, &mostro_keys.public_key())
             .await
             .unwrap();

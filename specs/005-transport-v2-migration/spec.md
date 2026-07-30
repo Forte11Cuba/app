@@ -81,8 +81,14 @@ delivery and decryption are unchanged.
     (the protocol states it is never lower; a node advertising otherwise is
     clamped rather than trusted).
   - Both difficulties MUST be refreshed together from the same Kind 38385 fetch
-    and published to senders as a single atomic snapshot, so a wrap in flight
-    during a refresh can never mix values from two generations.
+    and published to senders as a single snapshot, tagged with the node it was
+    fetched from, so a wrap in flight during a refresh can never mix values
+    from two generations.
+  - First-contact events MUST only be mined against a snapshot fetched from the
+    node they are addressed to: before the first fetch completes (startup) and
+    right after a node switch no such snapshot exists, and the sender MUST wait
+    for the fetch and fail closed (an explicit, retryable error) rather than
+    mine at a default or at the previous node's difficulty.
   - An under-powered event is dropped before the node decrypts anything, with no
     `cant-do` and no reply of any kind — the caller sees only a timeout.
 
