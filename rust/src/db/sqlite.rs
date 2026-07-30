@@ -656,6 +656,9 @@ mod tests {
                      id TEXT PRIMARY KEY, trade_id TEXT NOT NULL, data TEXT NOT NULL,
                      is_read INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL,
                      FOREIGN KEY (trade_id) REFERENCES trades(id));
+                 -- Leftover from a previous interrupted migration attempt:
+                 -- the rebuild must drop and recreate it, not fail.
+                 CREATE TABLE messages_v3 (leftover INTEGER);
                  INSERT INTO trades VALUES ('t1', '{}', 'Active', 1, NULL);
                  INSERT INTO messages VALUES ('m1', 't1',
                      '{\"id\":\"m1\",\"trade_id\":\"t1\",\"sender_pubkey\":\"p\",\"content\":\"x\",\"message_type\":\"Peer\",\"is_mine\":false,\"is_read\":false,\"has_attachment\":false,\"attachment\":null,\"created_at\":1}',

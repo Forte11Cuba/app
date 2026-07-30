@@ -6,9 +6,16 @@ pub const SCHEMA_VERSION: u32 = 3;
 /// foreign key to `trades(id)` (schema v2). SQLite cannot drop a FK in place,
 /// so the table is recreated and the rows copied. Runs after the main DDL;
 /// `SqliteStorage::open` executes it only when the old FK is detected.
+/// Crash-safe: the rebuild runs inside one transaction (an interruption
+/// rolls back to the untouched v2 table), the stray `messages_v3` a previous
+/// interrupted attempt may have left is dropped first, and the
+/// `foreign_keys` pragma toggles sit OUTSIDE the transaction — SQLite
+/// silently ignores that pragma inside one.
 #[cfg(not(target_arch = "wasm32"))]
 pub const SQLITE_DROP_MESSAGES_FK_SQL: &str = r#"
 PRAGMA foreign_keys = OFF;
+BEGIN;
+DROP TABLE IF EXISTS messages_v3;
 CREATE TABLE messages_v3 (
     id              TEXT PRIMARY KEY,
     trade_id        TEXT NOT NULL,
@@ -20,6 +27,7 @@ INSERT INTO messages_v3 SELECT id, trade_id, data, is_read, created_at FROM mess
 DROP TABLE messages;
 ALTER TABLE messages_v3 RENAME TO messages;
 CREATE INDEX IF NOT EXISTS idx_messages_trade ON messages(trade_id);
+COMMIT;
 PRAGMA foreign_keys = ON;
 "#;
 

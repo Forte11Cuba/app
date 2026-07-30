@@ -1346,23 +1346,33 @@ async fn handle_legacy_chat_event(
             return;
         }
     };
-    state.consecutive_rejected = 0;
 
     // The rumor is unsigned (NIP-59), so the claimed sender is only checked
     // for membership: this is exactly the weakness the new envelope fixes.
+    // Anyone can wrap to the public shared address, so an unauthorized or
+    // malformed sender still counts toward the flood breaker — resetting the
+    // streak before this check would let a flooder keep it at zero forever.
     let sender_hex = rumor.get("pubkey").and_then(|v| v.as_str()).unwrap_or("");
     let Ok(sender) = nostr_sdk::PublicKey::from_hex(sender_hex) else {
+        state.reject(order_id);
         return;
     };
     if !allowed_signers.contains(&sender) {
+        state.reject(order_id);
         return;
     }
+    state.consecutive_rejected = 0;
 
-    let rumor_id = rumor
+    // No id, no dedup identity: a fabricated fallback id would make the same
+    // rumor accepted again on every replay, so it is rejected outright.
+    let Some(rumor_id) = rumor
         .get("id")
         .and_then(|v| v.as_str())
         .map(|s| s.to_string())
-        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    else {
+        log::debug!("[messages] legacy rumor without id order={order_id} — dropped");
+        return;
+    };
     match message_store().is_known(order_id, &rumor_id).await {
         Err(e) => {
             log::warn!("[messages] {e} — dropping legacy event order={order_id}");
