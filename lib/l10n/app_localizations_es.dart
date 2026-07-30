@@ -236,6 +236,14 @@ class AppLocalizationsEs extends AppLocalizations {
       'Este nodo requiere un bono anti-abuso, que aún no está soportado';
 
   @override
+  String get nodeProtocolUnsupported =>
+      'Este nodo Mostro usa una versión del protocolo que esta app no soporta. Elige otro nodo en Ajustes o busca una actualización de la app';
+
+  @override
+  String get nodeCapabilitiesUnknown =>
+      'Aún se está comprobando qué soporta el nodo Mostro seleccionado. Inténtalo de nuevo en un momento';
+
+  @override
   String get storageUnavailable =>
       'La app no puede crear ni tomar órdenes mientras su base de datos local no esté disponible. Reinicia la app e inténtalo de nuevo';
 

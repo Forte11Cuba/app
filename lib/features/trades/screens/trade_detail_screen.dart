@@ -8,6 +8,7 @@ import 'package:go_router/go_router.dart';
 
 import 'package:mostro/core/app_routes.dart';
 import 'package:mostro/core/app_theme.dart';
+import 'package:mostro/core/daemon_errors.dart';
 import 'package:mostro/src/rust/api/disputes.dart' as disputes_api;
 import 'package:mostro/src/rust/api/orders.dart' as orders_api;
 import 'package:mostro/features/account/providers/privacy_mode_provider.dart';
@@ -198,7 +199,10 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen> {
       debugPrint('[TradeDetailScreen] cancelOrder error: $e\n$st');
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(l10n.cancelRequestFailed)),
+        SnackBar(
+          content:
+              Text(localizedDaemonError(l10n, e, fallback: l10n.cancelRequestFailed)),
+        ),
       );
       rethrow;
     }
@@ -211,7 +215,10 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen> {
       debugPrint('[TradeDetailScreen] sendFiatSent error: $e\n$st');
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(AppLocalizations.of(context).fiatSentFailed)),
+        SnackBar(
+          content: Text(localizedDaemonError(AppLocalizations.of(context), e,
+              fallback: AppLocalizations.of(context).fiatSentFailed)),
+        ),
       );
       rethrow;
     }
@@ -239,7 +246,10 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen> {
       debugPrint('[TradeDetailScreen] openDispute error: $e\n$st');
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(AppLocalizations.of(context).openDisputeFailed)),
+        SnackBar(
+          content: Text(localizedDaemonError(AppLocalizations.of(context), e,
+              fallback: AppLocalizations.of(context).openDisputeFailed)),
+        ),
       );
       rethrow;
     }
@@ -264,7 +274,10 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen> {
       debugPrint('[TradeDetailScreen] releaseOrder error: $e\n$st');
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(AppLocalizations.of(context).releaseFailed)),
+        SnackBar(
+          content: Text(localizedDaemonError(AppLocalizations.of(context), e,
+              fallback: AppLocalizations.of(context).releaseFailed)),
+        ),
       );
       rethrow;
     }

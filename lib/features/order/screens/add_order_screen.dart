@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import 'package:mostro/core/app_routes.dart';
 import 'package:mostro/l10n/app_localizations.dart';
 import 'package:mostro/core/app_theme.dart';
+import 'package:mostro/core/daemon_errors.dart';
 import 'package:mostro/features/order/widgets/currency_section.dart';
 import 'package:mostro/features/settings/providers/settings_provider.dart';
 import 'package:mostro/features/order/widgets/order_preset_selector.dart';
@@ -202,13 +203,8 @@ class _AddOrderScreenState extends ConsumerState<AddOrderScreen> {
       final msg = anyhowMatch != null ? anyhowMatch.group(1)! : raw;
       // The daemon never answered: show the localized "no response" message
       // instead of the raw marker. The order was not created.
-      final display = msg.contains('NoDaemonResponse')
-          ? AppLocalizations.of(context).sessionTimeoutMessage
-          // No durable storage means the trade-key counter cannot be recorded,
-          // so no key is derived and no order is created (issue #249).
-          : msg.contains('StorageUnavailable')
-              ? AppLocalizations.of(context).storageUnavailable
-              : msg;
+      final display =
+          localizedDaemonError(AppLocalizations.of(context), msg, fallback: msg);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(display)),
       );

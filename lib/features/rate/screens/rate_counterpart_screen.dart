@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import 'package:mostro/core/app_theme.dart';
+import 'package:mostro/core/daemon_errors.dart';
 import 'package:mostro/features/rate/widgets/star_rating.dart';
 import 'package:mostro/l10n/app_localizations.dart';
 import 'package:mostro/src/rust/api/reputation.dart' as reputation_api;
@@ -47,7 +48,10 @@ class _RateCounterpartScreenState
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(AppLocalizations.of(context).ratingFailed)),
+        SnackBar(
+          content: Text(localizedDaemonError(AppLocalizations.of(context), e,
+              fallback: AppLocalizations.of(context).ratingFailed)),
+        ),
       );
     } finally {
       if (mounted) setState(() => _isSubmitting = false);
