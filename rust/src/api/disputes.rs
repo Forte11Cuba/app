@@ -15,6 +15,7 @@ use tokio::sync::{broadcast, RwLock};
 use tokio::sync::broadcast::error::RecvError;
 
 use crate::api::types::{Dispute, DisputeResolution, DisputeStatus};
+use crate::db::Storage;
 
 // ── Dispute store ─────────────────────────────────────────────────────────────
 
@@ -296,6 +297,7 @@ pub async fn handle_admin_took_dispute(trade_id: String, admin_pubkey: String) -
             })
             .await;
         log::info!("[disputes] created record for peer-opened dispute trade={trade_id}");
+        persist_admin_pubkey(&trade_id, &admin_pubkey_for_key).await;
         return derive_admin_shared_key(&trade_id, &admin_pubkey_for_key).await;
     }
 
@@ -325,8 +327,35 @@ pub async fn handle_admin_took_dispute(trade_id: String, admin_pubkey: String) -
         })
         .await?;
 
+    persist_admin_pubkey(&trade_id, &admin_pubkey_for_key).await;
     derive_admin_shared_key(&trade_id, &admin_pubkey_for_key).await
 }
+
+/// Persist the solver pubkey so the dispute chat survives a restart.
+///
+/// Deliberately narrow: the dispute record stays in memory (its status and
+/// resolution come back from daemon events), but this pubkey arrives exactly
+/// once and cannot be re-derived. Without it, a restart mid-dispute leaves the
+/// party unable to reach the solver at all.
+///
+/// Best-effort — a storage failure must not undo an already-applied dispute
+/// update, and the live listener keeps working for this session.
+async fn persist_admin_pubkey(order_id: &str, admin_pubkey_hex: &str) {
+    let Some(db) = crate::db::app_db::db() else {
+        log::warn!("[disputes] no store — solver pubkey will not survive a restart");
+        return;
+    };
+    if let Err(e) = db
+        .set_setting(
+            &crate::db::settings_keys::dispute_admin(order_id),
+            admin_pubkey_hex,
+        )
+        .await
+    {
+        log::warn!("[disputes] could not persist solver pubkey for {order_id}: {e}");
+    }
+}
+
 
 /// Derive the dispute-chat keys for `trade_id` and start listening.
 ///
@@ -382,7 +411,69 @@ async fn derive_admin_shared_key(trade_id: &str, admin_pubkey_hex: &str) -> Resu
 /// would stay invisible for the rest of the process. Idempotent — the
 /// per-channel single-owner guard makes a spawn for an already-listening
 /// dispute a no-op.
+/// Rebuild dispute records for orders with a persisted solver pubkey.
+///
+/// Trades are the enumeration source, so no key-prefix scan is needed: each
+/// persisted trade is asked whether it has a stored solver. Records already in
+/// memory win — they are at least as fresh as storage.
+///
+/// Status is `InReview`: a stored solver means one took the dispute, and any
+/// later resolution arrives as a daemon event. Restoring the record is what
+/// lets `submit_evidence` work again after a restart, since it refuses without
+/// one.
+async fn rehydrate_disputes_from_storage() {
+    let Some(db) = crate::db::app_db::db() else {
+        return;
+    };
+    let trades = match db.list_trades().await {
+        Ok(t) => t,
+        Err(e) => {
+            log::warn!("[disputes] rehydrate: list_trades failed: {e}");
+            return;
+        }
+    };
+
+    for trade in trades {
+        let order_id = trade.order.id.clone();
+        if dispute_store().get(&order_id).await.is_some() {
+            continue;
+        }
+        let admin_hex = match db
+            .get_setting(&crate::db::settings_keys::dispute_admin(&order_id))
+            .await
+        {
+            Ok(Some(hex)) => hex,
+            Ok(None) => continue,
+            Err(e) => {
+                log::warn!("[disputes] rehydrate: reading solver for {order_id}: {e}");
+                continue;
+            }
+        };
+
+        dispute_store()
+            .upsert(Dispute {
+                id: uuid::Uuid::new_v4().to_string(),
+                trade_id: order_id.clone(),
+                status: DisputeStatus::InReview,
+                initiated_by_me: false,
+                reason: None,
+                admin_pubkey: Some(admin_hex),
+                resolution: None,
+                opened_at: unix_now(),
+                resolved_at: None,
+                is_read: true,
+            })
+            .await;
+        log::info!("[disputes] rehydrated dispute record order={order_id}");
+    }
+}
+
 pub(crate) async fn resubscribe_active_dispute_chats() {
+    // A restart leaves the in-memory store empty, so the loop below would find
+    // nothing to re-arm. Refill it from the persisted solver pubkeys first —
+    // that is the one piece of a dispute that cannot be re-derived.
+    rehydrate_disputes_from_storage().await;
+
     for dispute in dispute_store().all().await {
         if dispute.status != DisputeStatus::InReview {
             continue;
@@ -560,6 +651,49 @@ mod tests {
 
         let err = submit_evidence(trade_id, "  ".into()).await.unwrap_err();
         assert!(err.to_string().contains("EvidenceEmpty"));
+    }
+
+    #[tokio::test]
+    async fn the_solver_pubkey_outlives_the_in_memory_record() {
+        // The dispute record is in-memory by design, so a restart drops it.
+        // The solver pubkey must not go with it: it arrives once, in
+        // admin-took-dispute, and without it the chat keys cannot be derived
+        // again — the party would be left unable to reach the solver.
+        let path = std::env::temp_dir()
+            .join(format!("mostro_dispute_kv_{}.db", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let db = crate::db::sqlite::SqliteStorage::open(path.to_str().unwrap())
+            .await
+            .unwrap();
+
+        let order_id = "order-dispute-1";
+        let admin_pk = "0000000000000000000000000000000000000000000000000000000000000003";
+        let key = crate::db::settings_keys::dispute_admin(order_id);
+
+        assert_eq!(db.get_setting(&key).await.unwrap(), None);
+
+        db.set_setting(&key, admin_pk).await.unwrap();
+
+        // Reopen: this is the restart the persistence exists for.
+        drop(db);
+        let db = crate::db::sqlite::SqliteStorage::open(path.to_str().unwrap())
+            .await
+            .unwrap();
+        assert_eq!(db.get_setting(&key).await.unwrap().as_deref(), Some(admin_pk));
+
+        drop(db);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn each_order_gets_its_own_solver_key() {
+        // One party can have several disputed orders, each with its own solver.
+        assert_ne!(
+            crate::db::settings_keys::dispute_admin("order-a"),
+            crate::db::settings_keys::dispute_admin("order-b")
+        );
+        assert!(crate::db::settings_keys::dispute_admin("order-a")
+            .starts_with(crate::db::settings_keys::DISPUTE_ADMIN_PREFIX));
     }
 
     #[tokio::test]
