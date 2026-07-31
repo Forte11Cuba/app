@@ -142,7 +142,7 @@ class _ChatAppBar extends StatelessWidget {
             tooltip: AppLocalizations.of(context).menuTooltip,
           ),
           const Spacer(),
-          Image.asset('assets/images/mostro_logo.png', height: 32),
+          Image.asset('assets/images/mostro_logo.webp', height: 32),
           const Spacer(),
           const NotificationBell(),
           const SizedBox(width: AppSpacing.sm),

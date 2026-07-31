@@ -120,7 +120,7 @@ class _SidebarContent extends StatelessWidget {
                 AppSpacing.lg,
               ),
               child: Image.asset(
-                'assets/images/mostro_logo_beta.png',
+                'assets/images/mostro_logo_beta.webp',
                 height: 56,
                 fit: BoxFit.contain,
                 semanticLabel: '${l10n.drawerTitle} ${l10n.betaBadgeLabel}',

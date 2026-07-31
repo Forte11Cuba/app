@@ -315,7 +315,7 @@ class _MostroAppBar extends StatelessWidget {
             child: Stack(
               alignment: Alignment.center,
               children: [
-                Image.asset('assets/images/mostro_logo.png', height: 32),
+                Image.asset('assets/images/mostro_logo.webp', height: 32),
                 Row(
                   children: [
                     if (onMenuTap != null)

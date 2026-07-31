@@ -137,7 +137,7 @@ class _TradesScreenState extends ConsumerState<TradesScreen> {
           tooltip: l10n.menuTooltip,
         ),
         title: Image.asset(
-          'assets/images/mostro_logo.png',
+          'assets/images/mostro_logo.webp',
           height: 32,
           errorBuilder: (_, __, ___) => Text(
             'Mostro',

@@ -89,32 +89,32 @@ class WalkthroughScreen extends ConsumerWidget {
       (
         title: l10n.walkthroughSlideOneTitle,
         body: l10n.walkthroughSlideOneBody,
-        image: 'assets/images/wt-1.png',
+        image: 'assets/images/wt-1.webp',
       ),
       (
         title: l10n.walkthroughSlideTwoTitle,
         body: l10n.walkthroughSlideTwoBody,
-        image: 'assets/images/wt-2.png',
+        image: 'assets/images/wt-2.webp',
       ),
       (
         title: l10n.walkthroughSlideThreeTitle,
         body: l10n.walkthroughSlideThreeBody,
-        image: 'assets/images/wt-3.png',
+        image: 'assets/images/wt-3.webp',
       ),
       (
         title: l10n.walkthroughSlideFourTitle,
         body: l10n.walkthroughSlideFourBody,
-        image: 'assets/images/wt-4.png',
+        image: 'assets/images/wt-4.webp',
       ),
       (
         title: l10n.walkthroughSlideFiveTitle,
         body: l10n.walkthroughSlideFiveBody,
-        image: 'assets/images/wt-5.png',
+        image: 'assets/images/wt-5.webp',
       ),
       (
         title: l10n.walkthroughSlideSixTitle,
         body: l10n.walkthroughSlideSixBody,
-        image: 'assets/images/wt-6.png',
+        image: 'assets/images/wt-6.webp',
       ),
     ];
 
