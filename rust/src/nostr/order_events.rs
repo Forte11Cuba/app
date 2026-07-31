@@ -48,7 +48,17 @@ pub fn parse_order_event(event: &Event, my_pubkey: Option<&PublicKey>) -> Option
     };
     let status = parse_status(&get("s")?)?;
     let fiat_code = get("f")?;
-    let payment_method = get("pm").unwrap_or_default();
+    // The `pm` tag carries one value per accepted payment method
+    // (`["pm", "Revolut", "Zelle"]` — mostro's `nip33` splits the order's
+    // comma-separated methods into tag values), so it cannot go through
+    // `get`, which only reads the first value. Re-join with commas: the Dart
+    // payment filter tokenizes this string on `,`.
+    let payment_method = event
+        .tags
+        .iter()
+        .find(|t| t.as_slice().first().map(|s| s.as_str()) == Some("pm"))
+        .map(|t| t.as_slice()[1..].join(", "))
+        .unwrap_or_default();
     let premium: f64 = get("premium")
         .and_then(|v| v.parse().ok())
         .unwrap_or(0.0);
@@ -255,6 +265,32 @@ mod tests {
         assert_eq!(order.fiat_amount, Some(20.0));
         assert_eq!(order.fiat_amount_min, None);
         assert_eq!(order.fiat_amount_max, None);
+        // Single-method order: the sole `pm` value comes through unchanged.
+        assert_eq!(order.payment_method, "cashapp");
+    }
+
+    /// The `pm` tag carries one value per payment method and every one must
+    /// survive parsing (regression: only the first value was read, so the
+    /// book showed one method and the payment filter missed the rest).
+    #[test]
+    fn parses_all_payment_methods_from_multi_value_pm_tag() {
+        let keys = Keys::generate();
+        let event = EventBuilder::new(Kind::from(KIND_ORDER), "")
+            .tags([
+                Tag::parse(["d", "308e1272-d5f4-47e6-bd97-3504baea9c23"]).unwrap(),
+                Tag::parse(["k", "sell"]).unwrap(),
+                Tag::parse(["s", "pending"]).unwrap(),
+                Tag::parse(["f", "USD"]).unwrap(),
+                Tag::parse(["pm", "Revolut", "Zelle", "Strike"]).unwrap(),
+                Tag::parse(["premium", "1"]).unwrap(),
+                Tag::parse(["amt", "0"]).unwrap(),
+                Tag::parse(["fa", "20"]).unwrap(),
+                Tag::parse(["z", "order"]).unwrap(),
+            ])
+            .sign_with_keys(&keys)
+            .unwrap();
+        let order = parse_order_event(&event, None).unwrap();
+        assert_eq!(order.payment_method, "Revolut, Zelle, Strike");
     }
 
     #[test]
