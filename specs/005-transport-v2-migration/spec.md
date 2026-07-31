@@ -61,7 +61,17 @@ delivery and decryption are unchanged.
 - **FR-001**: All Mostro-protocol traffic (typed `Message`) MUST use protocol v2
   (kind 14, NIP-44 direct) on both send and receive.
 - **FR-002**: The app MUST NOT retain any protocol-v1 (gift-wrap) path for Mostro
-  traffic, and MUST NOT parse `protocol_version` or resolve a per-node transport.
+  traffic, and MUST NOT resolve a per-node transport. **Diagnostic exception**:
+  the app MAY parse `protocol_version` from the node's Kind 38385 event — never
+  to select a transport, only to refuse sending to an incompatible node with an
+  explicit error (`UnsupportedNodeProtocol:{advertised}`) instead of the silent
+  timeout a v1 node otherwise produces. Only an explicit `protocol_version = 2`
+  proves compatibility: an absent tag means a pre-tag daemon speaking legacy v1
+  (per the protocol migration guide) and MUST be refused too. The verdict is
+  tagged with the node it was fetched from and, like FR-007's PoW snapshot,
+  senders MUST wait for the active node's fetch and fail closed (retryable
+  `NodeCapabilitiesUnknown`) rather than apply another node's — or no —
+  verdict.
 - **FR-003**: Incoming kind-14 Mostro replies MUST be disambiguated from NIP-17 peer
   chat by author = node pubkey (subscription author-pin + per-event re-check).
 - **FR-004**: NIP-17 peer-to-peer chat and dispute-admin chat MUST remain on gift
@@ -69,6 +79,28 @@ delivery and decryption are unchanged.
 - **FR-005**: Outgoing v2 events MUST carry no NIP-40 expiration tag (`expiration:
   None`), mirroring the reference client; the daemon fills its own.
 - **FR-006**: Full-privacy mode MUST behave as today (identity key = trade key).
+- **FR-007**: Outgoing v2 events MUST be mined (NIP-13) to the difficulty the
+  connected node advertises in its Kind 38385 event: `pow` for every event, and
+  `pow_first_contact` for **first-contact** events — ones whose visible sender is
+  a trade key the node does not yet associate with an active order or dispute:
+  creating an order, taking one, or a restore under a fresh trade key. Selection
+  rules (issue #177):
+  - An absent `pow_first_contact` tag means *unknown* — not zero and not `pow`;
+    first-contact events then fall back to mining at `pow`.
+  - A published `pow_first_contact` lower than `pow` MUST be clamped up to `pow`
+    (the protocol states it is never lower; a node advertising otherwise is
+    clamped rather than trusted).
+  - Both difficulties MUST be refreshed together from the same Kind 38385 fetch
+    and published to senders as a single snapshot, tagged with the node it was
+    fetched from, so a wrap in flight during a refresh can never mix values
+    from two generations.
+  - First-contact events MUST only be mined against a snapshot fetched from the
+    node they are addressed to: before the first fetch completes (startup) and
+    right after a node switch no such snapshot exists, and the sender MUST wait
+    for the fetch and fail closed (an explicit, retryable error) rather than
+    mine at a default or at the previous node's difficulty.
+  - An under-powered event is dropped before the node decrypts anything, with no
+    `cant-do` and no reply of any kind — the caller sees only a timeout.
 
 ## Out of Scope
 
