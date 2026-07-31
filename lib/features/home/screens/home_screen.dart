@@ -291,8 +291,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   }
 }
 
-/// Custom app bar per the mock: hamburger left, notification bell right,
-/// empty center, 52px tall over a 1px hairline.
+/// Custom app bar per the mock: hamburger left, Mostro logo centered,
+/// notification bell right, 52px tall over a 1px hairline.
 class _MostroAppBar extends StatelessWidget {
   const _MostroAppBar({
     required this.palette,
@@ -312,17 +312,23 @@ class _MostroAppBar extends StatelessWidget {
           height: 52,
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 4),
-            child: Row(
+            child: Stack(
+              alignment: Alignment.center,
               children: [
-                if (onMenuTap != null)
-                  IconButton(
-                    onPressed: onMenuTap,
-                    iconSize: 22,
-                    icon: Icon(Icons.menu, color: palette.textPrimary),
-                    tooltip: AppLocalizations.of(context).menuTooltip,
-                  ),
-                const Spacer(),
-                const NotificationBell(),
+                Image.asset('assets/images/mostro_logo.png', height: 32),
+                Row(
+                  children: [
+                    if (onMenuTap != null)
+                      IconButton(
+                        onPressed: onMenuTap,
+                        iconSize: 22,
+                        icon: Icon(Icons.menu, color: palette.textPrimary),
+                        tooltip: AppLocalizations.of(context).menuTooltip,
+                      ),
+                    const Spacer(),
+                    const NotificationBell(),
+                  ],
+                ),
               ],
             ),
           ),

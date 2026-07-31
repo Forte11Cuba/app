@@ -138,7 +138,7 @@ class _TradesScreenState extends ConsumerState<TradesScreen> {
         ),
         title: Image.asset(
           'assets/images/mostro_logo.png',
-          height: 28,
+          height: 32,
           errorBuilder: (_, __, ___) => Text(
             'Mostro',
             style: Theme.of(context).textTheme.headlineMedium,
