@@ -13,6 +13,9 @@ import 'package:mostro/l10n/app_localizations.dart';
 /// Layout, colors, and proportions mirror the mock's offer card:
 /// reason pill + timestamp, 26px amount row with premium pill, "Market price"
 /// caption, elevated numeric-reputation strip, and payment-method line.
+/// Every card carries the palette's 9% hairline border; a [highlighted] card
+/// swaps it for the green glow ring (at most one per screen — the selected /
+/// action-required card).
 /// Each card may carry one [OrderReason] pill (computed once per visible list
 /// and passed in — never computed here).
 class OrderListItem extends StatelessWidget {
@@ -22,6 +25,7 @@ class OrderListItem extends StatelessWidget {
     this.onTap,
     this.currencyFlags = const {},
     this.reason,
+    this.highlighted = false,
   });
 
   final OrderItem order;
@@ -32,6 +36,12 @@ class OrderListItem extends StatelessWidget {
   /// visible list (see [orderReasonsProvider]) and passed in by the screen.
   final OrderReason? reason;
 
+  /// Marks this card as the screen's selected / action-required one:
+  /// green [OrderBookPalette.glowBorder] + [OrderBookPalette.glowRing]
+  /// instead of the plain hairline. Callers must set it on at most one
+  /// card per screen — if all cards glow, none stands out.
+  final bool highlighted;
+
   @override
   Widget build(BuildContext context) {
     final pal = OrderBookPalette.of(context);
@@ -40,9 +50,10 @@ class OrderListItem extends StatelessWidget {
     final flag = currencyFlags[order.fiatCode] ?? '';
 
     // Premium pill: green < 2 (incl. negative), amber 2–5, red > 5.
-    final premiumColor = order.premium < 2
-        ? pal.green
-        : order.premium > 5
+    final premiumColor =
+        order.premium < 2
+            ? pal.green
+            : order.premium > 5
             ? pal.red
             : pal.amber;
     final premiumText =
@@ -50,178 +61,203 @@ class OrderListItem extends StatelessWidget {
 
     final (reasonLabel, reasonColor, reasonBg) = switch (reason) {
       OrderReason.bestPremium => (
-          l10n.reasonBestPremium,
-          pal.green,
-          pal.greenDim,
-        ),
+        l10n.reasonBestPremium,
+        pal.green,
+        pal.greenDim,
+      ),
       OrderReason.mostReputable => (
-          l10n.reasonMostReputable,
-          pal.gold,
-          pal.goldDim,
-        ),
+        l10n.reasonMostReputable,
+        pal.gold,
+        pal.goldDim,
+      ),
       OrderReason.justPublished => (
-          l10n.reasonJustPublished,
-          pal.blue,
-          pal.blueFill,
-        ),
+        l10n.reasonJustPublished,
+        pal.blue,
+        pal.blueFill,
+      ),
       null => (null, null, null),
     };
 
     // The mock's cards carry no buy/sell pill (the tabs already scope the
     // side); the only functional signal kept is "yours" on own orders.
-    final mineLabel = order.isMine
-        ? (order.kind == 'sell'
-            ? l10n.orderPillYouAreSelling
-            : l10n.orderPillYouAreBuying)
-        : null;
+    final mineLabel =
+        order.isMine
+            ? (order.kind == 'sell'
+                ? l10n.orderPillYouAreSelling
+                : l10n.orderPillYouAreBuying)
+            : null;
 
     // Material + InkWell (not GestureDetector) so each offer card is
-    // focusable, keyboard-activatable, and announced as a button.
-    return Material(
-      color: pal.bgCard,
-      borderRadius: BorderRadius.circular(16),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(16),
-        child: Padding(
-        padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Row 1: reason pill (+ "yours" pill) · relative timestamp
-            Row(
+    // focusable, keyboard-activatable, and announced as a button. The depth
+    // shadow (and the glow ring) live on an outer DecoratedBox because
+    // Material shapes clip shadows; the border rides the Material shape so
+    // InkWell clips to it. With bgCard == bg the shadow is what separates
+    // the card from the page.
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: highlighted
+            ? [...pal.glowRing, ...pal.cardShadow]
+            : pal.cardShadow,
+      ),
+      child: Material(
+        color: pal.bgCard,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+          side: BorderSide(color: highlighted ? pal.glowBorder : pal.border),
+        ),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(20),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                if (reasonLabel != null) ...[
-                  Flexible(
-                    child: _Pill(
-                      label: reasonLabel,
-                      color: reasonColor!,
-                      background: reasonBg!,
+                // Row 1: reason pill (+ "yours" pill) · relative timestamp
+                Row(
+                  children: [
+                    if (reasonLabel != null) ...[
+                      Flexible(
+                        child: _Pill(
+                          label: reasonLabel,
+                          color: reasonColor!,
+                          background: reasonBg!,
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                    ],
+                    if (mineLabel != null) ...[
+                      Flexible(
+                        child: _Pill(
+                          label: mineLabel,
+                          color: pal.textSecondary,
+                          background: pal.bgElevated,
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                    ],
+                    const Spacer(),
+                    Text(
+                      _relativeTime(order.createdAt, l10n),
+                      style: TextStyle(fontSize: 11, color: pal.textTertiary),
                     ),
-                  ),
-                  const SizedBox(width: 6),
-                ],
-                if (mineLabel != null) ...[
-                  Flexible(
-                    child: _Pill(
-                      label: mineLabel,
-                      color: pal.textSecondary,
-                      background: pal.bgElevated,
+                  ],
+                ),
+                const SizedBox(height: 10),
+
+                // Row 2: amount + currency + flag · premium pill
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.baseline,
+                  textBaseline: TextBaseline.alphabetic,
+                  children: [
+                    Flexible(
+                      child: Text(
+                        order.displayAmount,
+                        style: TextStyle(
+                          fontSize: 26,
+                          fontWeight: FontWeight.w700,
+                          color: pal.textPrimary,
+                          height: 1.2,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
-                  ),
-                  const SizedBox(width: 6),
-                ],
-                const Spacer(),
+                    const SizedBox(width: 8),
+                    Text(
+                      order.fiatCode,
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: pal.textSecondary,
+                      ),
+                    ),
+                    if (flag.isNotEmpty) ...[
+                      const SizedBox(width: 8),
+                      Text(flag, style: const TextStyle(fontSize: 18)),
+                    ],
+                    const Spacer(),
+                    _Pill(
+                      label: premiumText,
+                      color: premiumColor,
+                      background: premiumColor.withValues(alpha: 0.13),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+
+                // Row 3: "Market price" caption
                 Text(
-                  _relativeTime(order.createdAt, l10n),
+                  l10n.marketPriceCaption,
                   style: TextStyle(fontSize: 11, color: pal.textTertiary),
                 ),
-              ],
-            ),
-            const SizedBox(height: 10),
+                const SizedBox(height: 10),
 
-            // Row 2: amount + currency + flag · premium pill
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.baseline,
-              textBaseline: TextBaseline.alphabetic,
-              children: [
-                Flexible(
-                  child: Text(
-                    order.displayAmount,
-                    style: TextStyle(
-                      fontSize: 26,
-                      fontWeight: FontWeight.w700,
-                      color: pal.textPrimary,
-                      height: 1.2,
-                    ),
-                    overflow: TextOverflow.ellipsis,
+                // Row 4: numeric reputation — ★ 4.9 · 47 trades · 312 days
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 10,
+                  ),
+                  decoration: BoxDecoration(
+                    color: pal.bgElevated,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.star, size: 16, color: pal.gold),
+                      const SizedBox(width: 4),
+                      Text(
+                        _formatRating(order.rating, locale),
+                        style: TextStyle(
+                          color: pal.textPrimary,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(width: 14),
+                      Text(
+                        '·',
+                        style: TextStyle(fontSize: 12, color: pal.textTertiary),
+                      ),
+                      const SizedBox(width: 14),
+                      _StatText(
+                        value: NumberFormat.decimalPattern(
+                          locale,
+                        ).format(order.tradeCount),
+                        label: l10n.reputationTradesLabel(order.tradeCount),
+                        palette: pal,
+                      ),
+                      const SizedBox(width: 14),
+                      Text(
+                        '·',
+                        style: TextStyle(fontSize: 12, color: pal.textTertiary),
+                      ),
+                      const SizedBox(width: 14),
+                      Flexible(
+                        child: _StatText(
+                          value: NumberFormat.decimalPattern(
+                            locale,
+                          ).format(order.daysActive),
+                          label: l10n.reputationDaysLabel(order.daysActive),
+                          palette: pal,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-                const SizedBox(width: 8),
+                const SizedBox(height: 8),
+
+                // Row 5: payment methods
                 Text(
-                  order.fiatCode,
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: pal.textSecondary,
-                  ),
-                ),
-                if (flag.isNotEmpty) ...[
-                  const SizedBox(width: 8),
-                  Text(flag, style: const TextStyle(fontSize: 18)),
-                ],
-                const Spacer(),
-                _Pill(
-                  label: premiumText,
-                  color: premiumColor,
-                  background: premiumColor.withValues(alpha: 0.13),
+                  order.paymentMethod,
+                  style: TextStyle(fontSize: 12, color: pal.textSecondary),
+                  overflow: TextOverflow.ellipsis,
                 ),
               ],
             ),
-            const SizedBox(height: 4),
-
-            // Row 3: "Market price" caption
-            Text(
-              l10n.marketPriceCaption,
-              style: TextStyle(fontSize: 11, color: pal.textTertiary),
-            ),
-            const SizedBox(height: 10),
-
-            // Row 4: numeric reputation — ★ 4.9 · 47 trades · 312 days
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-              decoration: BoxDecoration(
-                color: pal.bgElevated,
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Row(
-                children: [
-                  Icon(Icons.star, size: 16, color: pal.gold),
-                  const SizedBox(width: 4),
-                  Text(
-                    _formatRating(order.rating, locale),
-                    style: TextStyle(
-                      color: pal.textPrimary,
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  const SizedBox(width: 14),
-                  Text('·',
-                      style: TextStyle(fontSize: 12, color: pal.textTertiary)),
-                  const SizedBox(width: 14),
-                  _StatText(
-                    value:
-                        NumberFormat.decimalPattern(locale).format(order.tradeCount),
-                    label: l10n.reputationTradesLabel(order.tradeCount),
-                    palette: pal,
-                  ),
-                  const SizedBox(width: 14),
-                  Text('·',
-                      style: TextStyle(fontSize: 12, color: pal.textTertiary)),
-                  const SizedBox(width: 14),
-                  Flexible(
-                    child: _StatText(
-                      value: NumberFormat.decimalPattern(locale)
-                          .format(order.daysActive),
-                      label: l10n.reputationDaysLabel(order.daysActive),
-                      palette: pal,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 8),
-
-            // Row 5: payment methods
-            Text(
-              order.paymentMethod,
-              style: TextStyle(fontSize: 12, color: pal.textSecondary),
-              overflow: TextOverflow.ellipsis,
-            ),
-          ],
-        ),
+          ),
         ),
       ),
     );
@@ -321,7 +357,9 @@ class OrderListItemSkeleton extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
       decoration: BoxDecoration(
         color: pal.bgCard,
-        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: pal.border),
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: pal.cardShadow,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
