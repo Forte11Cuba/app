@@ -88,23 +88,27 @@ class OrderListItem extends StatelessWidget {
             : null;
 
     // Material + InkWell (not GestureDetector) so each offer card is
-    // focusable, keyboard-activatable, and announced as a button. The glow
-    // ring lives on an outer DecoratedBox because Material shapes clip
-    // shadows; the border rides the Material shape so InkWell clips to it.
+    // focusable, keyboard-activatable, and announced as a button. The depth
+    // shadow (and the glow ring) live on an outer DecoratedBox because
+    // Material shapes clip shadows; the border rides the Material shape so
+    // InkWell clips to it. With bgCard == bg the shadow is what separates
+    // the card from the page.
     return DecoratedBox(
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: highlighted ? pal.glowRing : null,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: highlighted
+            ? [...pal.glowRing, ...pal.cardShadow]
+            : pal.cardShadow,
       ),
       child: Material(
         color: pal.bgCard,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(20),
           side: BorderSide(color: highlighted ? pal.glowBorder : pal.border),
         ),
         child: InkWell(
           onTap: onTap,
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(20),
           child: Padding(
             padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
             child: Column(
@@ -198,7 +202,7 @@ class OrderListItem extends StatelessWidget {
                   ),
                   decoration: BoxDecoration(
                     color: pal.bgElevated,
-                    borderRadius: BorderRadius.circular(10),
+                    borderRadius: BorderRadius.circular(12),
                   ),
                   child: Row(
                     children: [
@@ -354,7 +358,8 @@ class OrderListItemSkeleton extends StatelessWidget {
       decoration: BoxDecoration(
         color: pal.bgCard,
         border: Border.all(color: pal.border),
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: pal.cardShadow,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
