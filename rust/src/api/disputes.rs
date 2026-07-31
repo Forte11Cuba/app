@@ -841,35 +841,117 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
+    /// A persisted trade for `order_id` in `status`, so `list_trades` — the
+    /// enumeration source rehydration walks — has something to return.
+    fn persisted_trade(order_id: &str, status: OrderStatus) -> crate::api::types::TradeInfo {
+        use crate::api::types::*;
+        TradeInfo {
+            id: order_id.to_string(),
+            order: OrderInfo {
+                id: order_id.to_string(),
+                kind: OrderKind::Sell,
+                status,
+                amount_sats: None,
+                fiat_amount: None,
+                fiat_amount_min: None,
+                fiat_amount_max: None,
+                fiat_code: "VES".into(),
+                payment_method: "bank".into(),
+                premium: 0.0,
+                creator_pubkey: "maker".into(),
+                created_at: 1,
+                expires_at: None,
+                is_mine: true,
+                rating: 0.0,
+                total_reviews: 0,
+                days_active: 0,
+            },
+            role: TradeRole::Buyer,
+            counterparty_pubkey: "peer".into(),
+            current_step: TradeStep::Buyer(BuyerStep::FiatSent),
+            hold_invoice: None,
+            buyer_invoice: None,
+            trade_key_index: 1,
+            cooperative_cancel_state: None,
+            timeout_at: None,
+            started_at: 1,
+            completed_at: None,
+            outcome: None,
+        }
+    }
+
+    /// End-to-end over `rehydrate_disputes_from_storage`: a restart is exactly
+    /// an empty in-memory store plus whatever the trades table and the settings
+    /// KV kept, so all three of its rules are exercised against the real store
+    /// rather than against the helpers in isolation.
+    ///
+    /// One test, not three: rehydration is a single pass over every persisted
+    /// trade, and `app_db` is a process-wide `OnceCell` — splitting it would
+    /// have each case re-walk the others' rows for no added coverage.
     #[tokio::test]
-    async fn clearing_the_solver_key_stops_the_dispute_coming_back() {
-        // Rehydration reads the stored solver as "this order has a live
-        // dispute". Once the dispute ends the key must be gone, or every
-        // restart resurrects it as InReview forever.
-        let path = std::env::temp_dir().join(format!(
-            "mostro_dispute_kv_clear_{}.db",
-            std::process::id()
-        ));
-        let _ = std::fs::remove_file(&path);
-        let db = crate::db::sqlite::SqliteStorage::open(path.to_str().unwrap())
+    async fn rehydration_restores_live_disputes_and_clears_finished_ones() {
+        // `init_db` is a OnceCell: the first test to call it wins, and any
+        // SqliteStorage serves — this asserts about its own order ids only, so
+        // rows other tests may have left behind are irrelevant.
+        let path = std::env::temp_dir()
+            .join(format!("mostro_dispute_rehydrate_{}.db", std::process::id()));
+        let _ = crate::db::app_db::init_db(path.to_str().unwrap()).await;
+        let Some(db) = crate::db::app_db::db() else {
+            panic!("no store: rehydration cannot be exercised");
+        };
+
+        let live = format!("live-{}", uuid::Uuid::new_v4());
+        let finished = format!("finished-{}", uuid::Uuid::new_v4());
+        let in_memory = format!("mem-{}", uuid::Uuid::new_v4());
+        let stored_solver = "0000000000000000000000000000000000000000000000000000000000000011";
+        let fresher_solver = "0000000000000000000000000000000000000000000000000000000000000022";
+
+        for (order_id, status) in [
+            (&live, OrderStatus::Dispute),
+            (&finished, OrderStatus::SettledByAdmin),
+            (&in_memory, OrderStatus::Dispute),
+        ] {
+            db.save_trade(&persisted_trade(order_id, status))
+                .await
+                .unwrap();
+            db.set_setting(
+                &crate::db::settings_keys::dispute_admin(order_id),
+                stored_solver,
+            )
             .await
             .unwrap();
+        }
 
-        let key = crate::db::settings_keys::dispute_admin("order-resolved-1");
-        db.set_setting(&key, "00000000000000000000000000000000000000000000000000000000000000aa")
-            .await
-            .unwrap();
-        db.delete_setting(&key).await.unwrap();
+        // The record that survived in memory — it must win over storage.
+        let mut live_record = seed_dispute(&in_memory, None).await;
+        live_record.admin_pubkey = Some(fresher_solver.to_string());
+        live_record.status = DisputeStatus::InReview;
+        dispute_store().upsert(live_record).await;
 
-        // Reopen: the restart that used to bring the dispute back.
-        drop(db);
-        let db = crate::db::sqlite::SqliteStorage::open(path.to_str().unwrap())
-            .await
-            .unwrap();
-        assert_eq!(db.get_setting(&key).await.unwrap(), None);
+        rehydrate_disputes_from_storage().await;
 
-        drop(db);
-        let _ = std::fs::remove_file(&path);
+        // 1. The live dispute came back — this is what makes the dispute chat
+        //    reachable and `submit_evidence` work again after a restart.
+        let restored = get_dispute(live.clone()).await.unwrap().expect("restored");
+        assert_eq!(restored.status, DisputeStatus::InReview);
+        assert_eq!(restored.admin_pubkey.as_deref(), Some(stored_solver));
+        assert!(!restored.is_read, "an active dispute must surface as unread");
+
+        // 2. The finished one did not, and its stale key is gone — otherwise
+        //    every later restart resurrects it as InReview.
+        assert!(get_dispute(finished.clone()).await.unwrap().is_none());
+        assert_eq!(
+            db.get_setting(&crate::db::settings_keys::dispute_admin(&finished))
+                .await
+                .unwrap(),
+            None,
+            "the stale solver key must be cleared, not just skipped"
+        );
+
+        // 3. The in-memory record is at least as fresh as storage, so the
+        //    older stored solver must not overwrite it.
+        let kept = get_dispute(in_memory.clone()).await.unwrap().expect("kept");
+        assert_eq!(kept.admin_pubkey.as_deref(), Some(fresher_solver));
     }
 
     #[test]
