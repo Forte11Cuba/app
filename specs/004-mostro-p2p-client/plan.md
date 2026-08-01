@@ -139,7 +139,7 @@ test/
 └── rust/                     # Cargo unit tests (also in rust/src/**/*.rs)
 specs/                        # Planning artifacts (this directory)
 assets/
-├── images/                   # Walkthrough images (wt-1.png … wt-6.png), logos
+├── images/                   # Walkthrough images (wt-1.webp … wt-6.webp), logos
 ├── data/
 │   └── fiat.json             # Fiat currency + country flag data
 └── l10n/                     # ARB localization files (EN, ES, IT, FR, DE)

@@ -17,7 +17,7 @@ import 'package:mostro/shared/widgets/bottom_nav_bar.dart'
 /// **Persistent mode** (`persistent: true`): renders as a fixed-width
 /// [240 px] sidebar column, suitable for embedding in a [Row] on desktop.
 ///
-/// Header: Mostro mascot icon + "Beta" label + "MOSTRO" title.
+/// Header: Mostro beta logo.
 /// Desktop nav: Order Book, My Trades, Chat — active item highlighted.
 /// Account items: Account, Settings, About.
 class DrawerMenu extends ConsumerWidget {
@@ -50,7 +50,6 @@ class DrawerMenu extends ConsumerWidget {
     final panel = _SidebarContent(
       green: green,
       cardBg: cardBg,
-      theme: theme,
       persistent: persistent,
       tradesCount: tradesCount,
       chatCount: chatCount,
@@ -86,7 +85,6 @@ class _SidebarContent extends StatelessWidget {
   const _SidebarContent({
     required this.green,
     required this.cardBg,
-    required this.theme,
     required this.persistent,
     required this.tradesCount,
     required this.chatCount,
@@ -95,7 +93,6 @@ class _SidebarContent extends StatelessWidget {
 
   final Color green;
   final Color cardBg;
-  final ThemeData theme;
   final bool persistent;
   final int tradesCount;
   final int chatCount;
@@ -122,45 +119,11 @@ class _SidebarContent extends StatelessWidget {
                 AppSpacing.xl,
                 AppSpacing.lg,
               ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Icon(Icons.psychology_outlined, size: 48, color: green),
-                  const SizedBox(height: AppSpacing.md),
-                  Row(
-                    children: [
-                      Text(
-                        l10n.drawerTitle,
-                        style: (theme.textTheme.headlineLarge ??
-                                theme.textTheme.headlineMedium ??
-                                const TextStyle(
-                                  fontSize: 24,
-                                  fontWeight: FontWeight.bold,
-                                ))
-                            .copyWith(color: green, letterSpacing: 2),
-                      ),
-                      const SizedBox(width: AppSpacing.sm),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: AppSpacing.sm,
-                          vertical: 2,
-                        ),
-                        decoration: BoxDecoration(
-                          border: Border.all(color: green),
-                          borderRadius: BorderRadius.circular(AppRadius.chip),
-                        ),
-                        child: Text(
-                          l10n.betaBadgeLabel,
-                          style: TextStyle(
-                            color: green,
-                            fontSize: 10,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
+              child: Image.asset(
+                'assets/images/mostro_logo_beta.webp',
+                height: 56,
+                fit: BoxFit.contain,
+                semanticLabel: '${l10n.drawerTitle} ${l10n.betaBadgeLabel}',
               ),
             ),
 
