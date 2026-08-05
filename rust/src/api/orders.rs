@@ -1830,22 +1830,66 @@ async fn dispatch_mostro_message(
             log::info!("[orders] gift-wrap Canceled for trade={trade_pubkey_hex}");
             if let Some(order_id) = &kind.id {
                 let oid = order_id.to_string();
-                order_book().remove_order(&oid).await;
-                // Sync the Canceled status into the trade DB so My Trades
-                // reflects the cancellation immediately.
+                // Deliberately NOT removed from the order book. The book is
+                // fed only by the daemon's Kind 38383 events, and on a
+                // taker-responsible timeout mostrod republishes the order as
+                // `pending` BEFORE sending this Canceled (scheduler.rs:
+                // update_order_event, then notify) — a blind remove here
+                // races that republish and leaves the order missing from the
+                // book until restart. A genuine cancel arrives as a 38383
+                // status update and the UI already filters non-pending.
                 if let Some(db) = crate::db::app_db::db() {
-                    if let Err(e) = db
-                        .update_trade_fields(
-                            &oid,
-                            Some(crate::api::types::OrderStatus::Canceled),
-                            None,
-                            None,
-                        )
-                        .await
+                    let local_status = match db.get_trade_by_order_id(&oid).await {
+                        Ok(Some(trade)) => Some(trade.order.status),
+                        Ok(None) => None,
+                        Err(e) => {
+                            log::warn!("[orders] Canceled: trade lookup failed for {oid}: {e}");
+                            None
+                        }
+                    };
+                    if local_status
+                        .as_ref()
+                        .is_some_and(cancellation_wipes_history)
                     {
-                        log::warn!("[orders] failed to sync Canceled status for {oid}: {e}");
+                        // The trade never went active (no peer, no chat, no
+                        // exchange — typically a waiting-state timeout):
+                        // wipe it instead of keeping a meaningless
+                        // Canceled history row. Mirrors v1, which deletes
+                        // pending/waiting sessions on cancel.
+                        match db.delete_trade_by_order_id(&oid).await {
+                            Ok(()) => crate::api::logging::blog_info(
+                                "orders",
+                                format!(
+                                    "Canceled before active — removed trade for order={oid}"
+                                ),
+                            ),
+                            Err(e) => log::warn!(
+                                "[orders] failed to remove canceled trade for {oid}: {e}"
+                            ),
+                        }
+                        crate::mostro::session::session_manager()
+                            .remove_session(&oid)
+                            .await;
+                    } else {
+                        // Sync the Canceled status into the trade DB so My
+                        // Trades reflects the cancellation immediately.
+                        if let Err(e) = db
+                            .update_trade_fields(
+                                &oid,
+                                Some(crate::api::types::OrderStatus::Canceled),
+                                None,
+                                None,
+                            )
+                            .await
+                        {
+                            log::warn!("[orders] failed to sync Canceled status for {oid}: {e}");
+                        }
                     }
                 }
+                // Push the cancellation to Dart: after a wipe there is no DB
+                // row left to poll, and after a timeout republish the book
+                // reads `pending` — screens need this signal either way.
+                emit_trade_update(&oid, crate::api::types::OrderStatus::Canceled);
             }
         }
         // Seller receives BuyerTookOrder → peer is buyer_trade_pubkey.
@@ -2204,6 +2248,25 @@ fn status_for_action(action: &mostro_core::message::Action) -> Option<OrderStatu
     }
 }
 
+/// Whether a daemon `canceled` should wipe the local trade record instead of
+/// keeping a Canceled history row.
+///
+/// True only while the trade never reached Active — no peer pubkey, no chat,
+/// no exchange happened (typically a waiting-state timeout, or a maker
+/// canceling their own pending order). Anything further along keeps its row
+/// (and chat) as history. `InProgress` is deliberately NOT wiped: mostrod
+/// never sends it over kind-14 — it only lands in a maker row via the Kind
+/// 38383 sync, where it masks both waiting AND active phases (mostrod
+/// nip33.rs publishes taken orders as `in-progress`), so it is ambiguous.
+fn cancellation_wipes_history(status: &OrderStatus) -> bool {
+    matches!(
+        status,
+        OrderStatus::Pending
+            | OrderStatus::WaitingBuyerInvoice
+            | OrderStatus::WaitingPayment
+    )
+}
+
 fn map_core_status(s: mostro_core::order::Status) -> Option<OrderStatus> {
     use mostro_core::order::Status as S;
     Some(match s {
@@ -2474,6 +2537,165 @@ pub async fn subscribe_orders() {
         let _guard = ResetGuard;
         _run_order_subscription().await;
     });
+
+    // Reconciles state the gift-wrap channel missed (e.g. a waiting-state
+    // timeout that fired while the app was closed). Idempotent across
+    // re-subscribes — at most one sweep loop per process.
+    spawn_stale_sweep();
+}
+
+// ── Stale-state sweep ─────────────────────────────────────────────────────────
+
+/// Delay before the first sweep so the initial Kind 38383 fetch can populate
+/// the book — the sweep only acts on positive book signals, so it must not
+/// run against an empty cache.
+const SWEEP_INITIAL_DELAY_SECS: u64 = 60;
+/// Cadence mirrors v1's 30-minute cleanup job.
+const SWEEP_INTERVAL_SECS: u64 = 30 * 60;
+/// Waiting trades younger than this are never touched: the daemon's own
+/// waiting window (default `expiration_seconds`) has not elapsed yet.
+const SWEEP_MIN_AGE_SECS: i64 = 900;
+/// Keyless in-memory sessions older than this are dropped. Any order that
+/// can still activate does so long before; a missing session self-heals in
+/// the peer-pubkey handler anyway.
+const SWEEP_SESSION_TTL_SECS: i64 = 24 * 3600;
+
+static SWEEP_ACTIVE: AtomicBool = AtomicBool::new(false);
+
+/// What the sweep does with one stale waiting trade, given the daemon's
+/// current public (Kind 38383) status for that order.
+#[derive(Debug, PartialEq)]
+enum SweepAction {
+    /// The trade never went active and the daemon moved on — republished as
+    /// pending (taker side) or canceled outright: wipe row + session, same
+    /// as the live `Canceled` gift-wrap path.
+    Wipe,
+    /// Own maker order republished as pending: the order is alive again,
+    /// sync the row back so My Trades reflects it.
+    SyncPending,
+    /// No positive daemon signal — absent from the book, or the ambiguous
+    /// `in-progress` public marker: leave untouched.
+    Keep,
+}
+
+fn sweep_action(
+    is_mine: bool,
+    book_status: Option<&crate::api::types::OrderStatus>,
+) -> SweepAction {
+    use crate::api::types::OrderStatus as S;
+    match book_status {
+        Some(S::Pending) if is_mine => SweepAction::SyncPending,
+        Some(S::Pending) => SweepAction::Wipe,
+        Some(S::Canceled | S::Expired | S::CanceledByAdmin) => SweepAction::Wipe,
+        _ => SweepAction::Keep,
+    }
+}
+
+fn spawn_stale_sweep() {
+    if SWEEP_ACTIVE
+        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+        .is_err()
+    {
+        return;
+    }
+    crate::rt::spawn(async {
+        crate::rt::time::sleep(crate::rt::time::Duration::from_secs(
+            SWEEP_INITIAL_DELAY_SECS,
+        ))
+        .await;
+        loop {
+            run_stale_sweep_once().await;
+            crate::rt::time::sleep(crate::rt::time::Duration::from_secs(
+                SWEEP_INTERVAL_SECS,
+            ))
+            .await;
+        }
+    });
+}
+
+/// Reconcile trades stuck in waiting states with the daemon's public book.
+///
+/// Covers cancellations whose gift wrap the app never received (closed or
+/// offline when the daemon's waiting window expired). The clock only
+/// *triggers* the check — every decision needs a positive daemon signal
+/// (see [`sweep_action`]); the daemon stays the authority on order state.
+async fn run_stale_sweep_once() {
+    let Some(db) = crate::db::app_db::db() else {
+        return;
+    };
+    let trades = match db.list_trades().await {
+        Ok(trades) => trades,
+        Err(e) => {
+            log::warn!("[orders] sweep: list_trades failed: {e}");
+            return;
+        }
+    };
+    let now = crate::rt::unix_now();
+    let (mut examined, mut wiped, mut resynced) = (0usize, 0usize, 0usize);
+    for trade in trades {
+        if !matches!(
+            trade.order.status,
+            crate::api::types::OrderStatus::WaitingBuyerInvoice
+                | crate::api::types::OrderStatus::WaitingPayment
+        ) {
+            continue;
+        }
+        // Age gate: never race the take/propagation window of a live trade.
+        let deadline = trade
+            .timeout_at
+            .unwrap_or(trade.started_at + SWEEP_MIN_AGE_SECS);
+        if now <= deadline {
+            continue;
+        }
+        examined += 1;
+        let oid = trade.order.id.clone();
+        let book_status = order_book().get_order(&oid).await.map(|o| o.status);
+        match sweep_action(trade.order.is_mine, book_status.as_ref()) {
+            SweepAction::Wipe => match db.delete_trade_by_order_id(&oid).await {
+                Ok(()) => {
+                    crate::mostro::session::session_manager()
+                        .remove_session(&oid)
+                        .await;
+                    emit_trade_update(&oid, crate::api::types::OrderStatus::Canceled);
+                    log::info!("[orders] sweep: wiped stale waiting trade order={oid}");
+                    wiped += 1;
+                }
+                Err(e) => log::warn!("[orders] sweep: failed to wipe {oid}: {e}"),
+            },
+            SweepAction::SyncPending => {
+                match db
+                    .update_trade_fields(
+                        &oid,
+                        Some(crate::api::types::OrderStatus::Pending),
+                        None,
+                        None,
+                    )
+                    .await
+                {
+                    Ok(()) => {
+                        emit_trade_update(&oid, crate::api::types::OrderStatus::Pending);
+                        log::info!(
+                            "[orders] sweep: resynced republished maker order={oid} to pending"
+                        );
+                        resynced += 1;
+                    }
+                    Err(e) => log::warn!("[orders] sweep: failed to resync {oid}: {e}"),
+                }
+            }
+            SweepAction::Keep => {}
+        }
+    }
+    let sessions_dropped = crate::mostro::session::session_manager()
+        .cleanup_stale_sessions(SWEEP_SESSION_TTL_SECS)
+        .await;
+    if examined > 0 || sessions_dropped > 0 {
+        crate::api::logging::blog_info(
+            "orders",
+            format!(
+                "stale sweep: examined={examined} wiped={wiped} resynced={resynced} sessions_dropped={sessions_dropped}"
+            ),
+        );
+    }
 }
 
 /// Refresh the order book on demand (UI "Refresh" action).
@@ -2995,6 +3217,62 @@ async fn _run_order_subscription() {
                 continue;
             }
             _ => {}
+        }
+    }
+}
+
+/// Buffered trade lifecycle updates; cancellations are rare, so a small
+/// buffer is ample.
+const TRADE_UPDATES_CAPACITY: usize = 64;
+
+static TRADE_UPDATES: std::sync::OnceLock<
+    broadcast::Sender<crate::api::types::TradeUpdate>,
+> = std::sync::OnceLock::new();
+
+fn trade_updates_tx() -> &'static broadcast::Sender<crate::api::types::TradeUpdate> {
+    TRADE_UPDATES.get_or_init(|| broadcast::channel(TRADE_UPDATES_CAPACITY).0)
+}
+
+/// Broadcasts a trade lifecycle change to any active [`TradeUpdatesStream`].
+pub(crate) fn emit_trade_update(order_id: &str, status: crate::api::types::OrderStatus) {
+    let _ = trade_updates_tx().send(crate::api::types::TradeUpdate {
+        order_id: order_id.to_string(),
+        status,
+    });
+}
+
+/// Stream of trade lifecycle changes (daemon-driven cancellations).
+///
+/// Complements the 2s status polling: after a never-active trade is wiped
+/// (see `cancellation_wipes_history`) there is no DB row left to poll, and
+/// after a timeout republish the book shows `pending` again — in both cases
+/// this push is the only signal the affected screens can react to.
+pub async fn on_trade_updated() -> Result<TradeUpdatesStream> {
+    Ok(TradeUpdatesStream {
+        rx: trade_updates_tx().subscribe(),
+    })
+}
+
+/// Wrapper for flutter_rust_bridge Dart Stream generation.
+pub struct TradeUpdatesStream {
+    rx: broadcast::Receiver<crate::api::types::TradeUpdate>,
+}
+
+impl TradeUpdatesStream {
+    pub async fn next(&mut self) -> Option<crate::api::types::TradeUpdate> {
+        loop {
+            match self.rx.recv().await {
+                Ok(update) => return Some(update),
+                // Dropped updates degrade, not corrupt: the trades list
+                // refetches on any later emission, kept-history trades are
+                // covered by the 2s status poll, and the sweep re-emits
+                // within 30 min. Log so the (unlikely) case is observable.
+                Err(broadcast::error::RecvError::Lagged(n)) => {
+                    log::warn!("[orders] trade-updates stream lagged, dropped {n} updates");
+                    continue;
+                }
+                Err(broadcast::error::RecvError::Closed) => return None,
+            }
         }
     }
 }
@@ -3660,6 +3938,65 @@ mod tests {
             trade_key_for_order(&ck).await.is_none(),
             "a rejected create must leave no fingerprint mapping behind"
         );
+    }
+
+    // ── Cancellation cleanup ──────────────────────────────────────────────────
+
+    /// Only never-active trades are wiped on a daemon `canceled`; anything
+    /// that progressed (or is ambiguous, like InProgress) keeps its history row.
+    #[test]
+    fn cancellation_wipes_history_only_for_never_active_trades() {
+        use crate::api::types::OrderStatus as S;
+        for s in [S::Pending, S::WaitingBuyerInvoice, S::WaitingPayment] {
+            assert!(cancellation_wipes_history(&s), "{s:?} must be wiped");
+        }
+        for s in [
+            S::InProgress,
+            S::Active,
+            S::FiatSent,
+            S::Dispute,
+            S::Success,
+            S::Canceled,
+            S::CooperativelyCanceled,
+            S::CanceledByAdmin,
+        ] {
+            assert!(!cancellation_wipes_history(&s), "{s:?} must keep history");
+        }
+    }
+
+    /// A subscriber created before the emit receives the update; emitting
+    /// with no subscribers must not error or panic.
+    #[tokio::test]
+    async fn trade_updates_reach_subscribers() {
+        // No subscriber yet: emit is a silent no-op.
+        emit_trade_update("order-nobody", crate::api::types::OrderStatus::Canceled);
+
+        let mut stream = on_trade_updated().await.unwrap();
+        emit_trade_update("order-x", crate::api::types::OrderStatus::Canceled);
+        let update = stream.next().await.expect("subscriber must receive the update");
+        assert_eq!(update.order_id, "order-x");
+        assert!(matches!(
+            update.status,
+            crate::api::types::OrderStatus::Canceled
+        ));
+    }
+
+    /// The sweep only acts on positive daemon signals: pending republish
+    /// (wipe for takers, resync for makers) and outright cancellation;
+    /// absence from the book or ambiguous statuses leave the trade alone.
+    #[test]
+    fn sweep_action_requires_a_positive_book_signal() {
+        use crate::api::types::OrderStatus as S;
+        assert_eq!(sweep_action(true, Some(&S::Pending)), SweepAction::SyncPending);
+        assert_eq!(sweep_action(false, Some(&S::Pending)), SweepAction::Wipe);
+        for s in [S::Canceled, S::Expired, S::CanceledByAdmin] {
+            assert_eq!(sweep_action(false, Some(&s)), SweepAction::Wipe);
+            assert_eq!(sweep_action(true, Some(&s)), SweepAction::Wipe);
+        }
+        assert_eq!(sweep_action(false, None), SweepAction::Keep);
+        for s in [S::InProgress, S::Active, S::Success] {
+            assert_eq!(sweep_action(false, Some(&s)), SweepAction::Keep);
+        }
     }
 
     // ── Helper ────────────────────────────────────────────────────────────────

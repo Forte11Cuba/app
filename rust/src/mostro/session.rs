@@ -144,14 +144,16 @@ impl SessionManager {
     }
 
     /// Remove sessions older than `timeout_secs` that have no shared key
-    /// (i.e., the take action was never acknowledged by Mostro).
-    pub async fn cleanup_stale_sessions(&self, timeout_secs: i64) {
+    /// (i.e., the trade never went active). Returns how many were dropped.
+    pub async fn cleanup_stale_sessions(&self, timeout_secs: i64) -> usize {
         let now = crate::rt::unix_now();
 
         let mut sessions = self.sessions.write().await;
+        let before = sessions.len();
         sessions.retain(|_, s| {
             s.shared_key.is_some() || (now - s.created_at) < timeout_secs
         });
+        before - sessions.len()
     }
 }
 
