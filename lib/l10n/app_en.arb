@@ -701,6 +701,8 @@
   "@aboutBondClaimWindowValue": {"description": "About screen — bond payout claim window value with a pluralized day count", "placeholders": {"count": {"type": "int"}}},
   "openDisputeFailed": "Could not open dispute. Please try again.",
   "@openDisputeFailed": {"description": "Snackbar shown when opening a dispute fails"},
+  "tradeNotDisputable": "A dispute can only be opened once the funds are locked for this trade.",
+  "@tradeNotDisputable": {"description": "Snackbar shown when a dispute is attempted before the trade reaches a disputable state"},
   "tradeWaitingInvoiceBuyerInstruction": "Submit your Lightning invoice so the seller can lock the funds.",
   "@tradeWaitingInvoiceBuyerInstruction": {"description": "Instruction shown to the buyer while waiting to submit their Lightning invoice"},
   "tradeWaitingInvoiceSellerInstruction": "Waiting for the buyer to submit their Lightning invoice.",

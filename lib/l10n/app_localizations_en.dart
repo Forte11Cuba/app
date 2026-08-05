@@ -1058,6 +1058,10 @@ class AppLocalizationsEn extends AppLocalizations {
   String get openDisputeFailed => 'Could not open dispute. Please try again.';
 
   @override
+  String get tradeNotDisputable =>
+      'A dispute can only be opened once the funds are locked for this trade.';
+
+  @override
   String get tradeWaitingInvoiceBuyerInstruction =>
       'Submit your Lightning invoice so the seller can lock the funds.';
 

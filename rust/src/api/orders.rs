@@ -2273,7 +2273,7 @@ fn is_terminal_status(s: &OrderStatus) -> bool {
 /// Status already held for `order_id`, or `None` when the order is not one of
 /// ours. The persisted trade wins over the in-memory book: it is the record fed
 /// exclusively by daemon messages.
-async fn local_trade_status(order_id: &str) -> Option<OrderStatus> {
+pub(crate) async fn local_trade_status(order_id: &str) -> Option<OrderStatus> {
     if let Some(db) = crate::db::app_db::db() {
         if let Ok(Some(trade)) = db.get_trade_by_order_id(order_id).await {
             return Some(trade.order.status);

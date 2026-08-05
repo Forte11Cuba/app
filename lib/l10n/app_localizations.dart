@@ -2024,6 +2024,12 @@ abstract class AppLocalizations {
   /// **'Could not open dispute. Please try again.'**
   String get openDisputeFailed;
 
+  /// Snackbar shown when a dispute is attempted before the trade reaches a disputable state
+  ///
+  /// In en, this message translates to:
+  /// **'A dispute can only be opened once the funds are locked for this trade.'**
+  String get tradeNotDisputable;
+
   /// Instruction shown to the buyer while waiting to submit their Lightning invoice
   ///
   /// In en, this message translates to:

@@ -1070,6 +1070,10 @@ class AppLocalizationsIt extends AppLocalizations {
   String get openDisputeFailed => 'Impossibile aprire la disputa. Riprovare.';
 
   @override
+  String get tradeNotDisputable =>
+      'Una disputa può essere aperta solo quando i fondi sono bloccati per questo scambio.';
+
+  @override
   String get tradeWaitingInvoiceBuyerInstruction =>
       'Invia la tua fattura Lightning per permettere al venditore di bloccare i fondi.';
 

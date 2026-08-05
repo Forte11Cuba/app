@@ -1075,6 +1075,10 @@ class AppLocalizationsFr extends AppLocalizations {
       'Impossible d\'ouvrir le litige. Veuillez réessayer.';
 
   @override
+  String get tradeNotDisputable =>
+      'Un litige ne peut être ouvert qu\'une fois les fonds bloqués pour cet échange.';
+
+  @override
   String get tradeWaitingInvoiceBuyerInstruction =>
       'Soumettez votre facture Lightning pour que le vendeur puisse bloquer les fonds.';
 
