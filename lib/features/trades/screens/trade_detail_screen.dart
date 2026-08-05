@@ -51,6 +51,11 @@ enum TradeStatus {
   waitingInvoice('Waiting Invoice'),
   /// Seller must pay hold invoice (waitingPayment).
   waitingPayment('Waiting Payment'),
+  /// Taken, real state unknown: the public order book only publishes NIP-69's
+  /// coarse buckets, so `in-progress` says the order left the book — never
+  /// that the escrow is locked. Offering the actions of [active] here is what
+  /// the daemon rejects with `CantDo` (issue #203).
+  inProgress('In Progress'),
   active('Active'),
   fiatSent('Fiat Sent'),
   completed('Completed'),
@@ -74,6 +79,7 @@ extension TradeStatusL10n on TradeStatus {
         TradeStatus.pending => l10n.tradeFilterPending,
         TradeStatus.waitingInvoice => l10n.tradeFilterWaitingInvoice,
         TradeStatus.waitingPayment => l10n.tradeFilterWaitingPayment,
+        TradeStatus.inProgress => l10n.orderStatusInProgress,
         TradeStatus.active => l10n.tradeStatusActive,
         TradeStatus.fiatSent => l10n.tradeStatusFiatSent,
         TradeStatus.completed => l10n.tradeStatusCompleted,
@@ -152,7 +158,8 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen> {
     OrderStatus.pending => TradeStatus.pending,
     OrderStatus.waitingBuyerInvoice => TradeStatus.waitingInvoice,
     OrderStatus.waitingPayment => TradeStatus.waitingPayment,
-    OrderStatus.active || OrderStatus.inProgress => TradeStatus.active,
+    OrderStatus.active => TradeStatus.active,
+    OrderStatus.inProgress => TradeStatus.inProgress,
     OrderStatus.fiatSent => TradeStatus.fiatSent,
     OrderStatus.settledHoldInvoice ||
     OrderStatus.success ||
@@ -351,6 +358,7 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen> {
       TradeStatus.waitingPayment => isBuyer
           ? l10n.tradeHeadlineWaitingPaymentBuyer
           : l10n.tradeHeadlineWaitingPaymentSeller,
+      TradeStatus.inProgress => l10n.tradeHeadlineInProgress,
       TradeStatus.active => isBuyer
           ? l10n.tradeHeadlineActiveBuyer(amount)
           : l10n.tradeHeadlineActiveSeller(amount),
@@ -406,7 +414,8 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen> {
   (Color, Color) _statusPillColors(TradeStatus status) => switch (status) {
         TradeStatus.pending => AppColors.statusPending,
         TradeStatus.waitingInvoice ||
-        TradeStatus.waitingPayment => AppColors.statusWaiting,
+        TradeStatus.waitingPayment ||
+        TradeStatus.inProgress => AppColors.statusWaiting,
         TradeStatus.active => AppColors.statusActive,
         TradeStatus.fiatSent => AppColors.statusSettled,
         TradeStatus.pendingRating ||
@@ -420,7 +429,11 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen> {
   /// once the trade is fully done.
   int _currentStep(TradeStatus status) => switch (status) {
         TradeStatus.pending => 0,
-        TradeStatus.waitingInvoice || TradeStatus.waitingPayment => 1,
+        // The Lightning setup step: it is the widest the coarse in-progress
+        // bucket can honestly claim.
+        TradeStatus.waitingInvoice ||
+        TradeStatus.waitingPayment ||
+        TradeStatus.inProgress => 1,
         TradeStatus.active => 2,
         TradeStatus.fiatSent => 3,
         TradeStatus.pendingRating || TradeStatus.completed => 4,
@@ -479,6 +492,7 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen> {
     final inFlight = const {
       TradeStatus.waitingInvoice,
       TradeStatus.waitingPayment,
+      TradeStatus.inProgress,
       TradeStatus.active,
       TradeStatus.fiatSent,
       TradeStatus.disputed,
@@ -611,10 +625,13 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen> {
       TradeStatus.pending,
       TradeStatus.waitingInvoice,
       TradeStatus.waitingPayment,
+      TradeStatus.inProgress,
       TradeStatus.active,
       TradeStatus.fiatSent,
     }.contains(status) ||
         (status == TradeStatus.disputed && !isBuyer);
+    // Matches the daemon's own precondition; in-progress is deliberately out,
+    // it only means the order left the public book (issue #203).
     final canDispute =
         status == TradeStatus.active || status == TradeStatus.fiatSent;
     final canRelease = status == TradeStatus.disputed && !isBuyer;
@@ -943,6 +960,8 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen> {
         return [_waitingButton(l10n.waitingForBuyer, colors)];
       case (TradeStatus.waitingPayment, true):
         return [_waitingButton(l10n.waitingForSeller, colors)];
+      case (TradeStatus.inProgress, _):
+        return [_waitingButton(l10n.waitingForTradeSetup, colors)];
       case (TradeStatus.active, false):
         return [_waitingButton(l10n.waitingForFiatPayment, colors)];
       case (TradeStatus.fiatSent, true):

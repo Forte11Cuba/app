@@ -1515,6 +1515,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get tradeHeadlinePending => 'Waiting for someone to take your order';
 
   @override
+  String get tradeHeadlineInProgress => 'The trade is being set up';
+
+  @override
   String get tradeHeadlineWaitingInvoiceBuyer =>
       'Share a Lightning invoice to receive your sats';
 
@@ -1688,6 +1691,9 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get waitingForCounterpart => 'Waiting for a counterpart…';
+
+  @override
+  String get waitingForTradeSetup => 'Setting up the trade…';
 
   @override
   String get yourTradeTimelineTitle => 'YOUR TRADE';

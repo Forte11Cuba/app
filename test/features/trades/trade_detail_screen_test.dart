@@ -96,6 +96,41 @@ void main() {
       expect(_anyPopupMenuButton(), findsOneWidget);
     });
 
+    /// `in-progress` is the public order book's coarse bucket: the order left
+    /// the book, which says nothing about the escrow. Presenting it as an
+    /// active trade offered a dispute and a fiat-sent the daemon rejects with
+    /// CantDo (issue #203).
+    testWidgets('buyer + inProgress: no Dispute and no Fiat Sent CTA',
+        (tester) async {
+      await _pumpTradeDetail(
+        tester,
+        orderId: 'order-in-progress-buyer',
+        isBuyer: true,
+        status: OrderStatus.inProgress,
+      );
+
+      expect(find.text('Mark fiat sent'), findsNothing);
+      expect(_outlinedButtonWithText('Open dispute'), findsNothing);
+      expect(_outlinedButtonWithText('Release sats'), findsNothing);
+      // Cancel stays: the daemon accepts it in every pre-settlement state.
+      expect(_outlinedButtonWithText('Cancel trade'), findsOneWidget);
+      expect(find.text('Setting up the trade…'), findsOneWidget);
+    });
+
+    testWidgets('seller + inProgress: no Dispute and no Release',
+        (tester) async {
+      await _pumpTradeDetail(
+        tester,
+        orderId: 'order-in-progress-seller',
+        isBuyer: false,
+        status: OrderStatus.inProgress,
+      );
+
+      expect(_outlinedButtonWithText('Open dispute'), findsNothing);
+      expect(_outlinedButtonWithText('Release sats'), findsNothing);
+      expect(_outlinedButtonWithText('Cancel trade'), findsOneWidget);
+    });
+
     testWidgets('buyer + fiatSent: Cancel + Dispute, no Release',
         (tester) async {
       await _pumpTradeDetail(
