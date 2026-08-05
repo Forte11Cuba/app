@@ -1830,7 +1830,14 @@ async fn dispatch_mostro_message(
             log::info!("[orders] gift-wrap Canceled for trade={trade_pubkey_hex}");
             if let Some(order_id) = &kind.id {
                 let oid = order_id.to_string();
-                order_book().remove_order(&oid).await;
+                // Deliberately NOT removed from the order book. The book is
+                // fed only by the daemon's Kind 38383 events, and on a
+                // taker-responsible timeout mostrod republishes the order as
+                // `pending` BEFORE sending this Canceled (scheduler.rs:
+                // update_order_event, then notify) — a blind remove here
+                // races that republish and leaves the order missing from the
+                // book until restart. A genuine cancel arrives as a 38383
+                // status update and the UI already filters non-pending.
                 if let Some(db) = crate::db::app_db::db() {
                     let local_status = match db.get_trade_by_order_id(&oid).await {
                         Ok(Some(trade)) => Some(trade.order.status),
