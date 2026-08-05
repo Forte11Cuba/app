@@ -1901,8 +1901,14 @@ async fn dispatch_mostro_message(
             on_peer_pubkey_received(&order_id, &peer_pubkey_hex).await;
 
             // Sync the order status from the payload so the trade doesn't stay
-            // stuck at Pending in the DB and in-memory order book.
-            if let Some(new_status) = small_order.status.and_then(map_core_status) {
+            // stuck at Pending in the DB and in-memory order book. Both actions
+            // mean the escrow is locked, so a payload without an explicit
+            // status still implies Active.
+            if let Some(new_status) = small_order
+                .status
+                .and_then(map_core_status)
+                .or_else(|| status_for_action(&kind.action))
+            {
                 log::info!(
                     "[orders] gift-wrap {:?}: syncing order={order_id} status={:?}",
                     kind.action,
@@ -2180,7 +2186,9 @@ fn status_for_action(action: &mostro_core::message::Action) -> Option<OrderStatu
     match action {
         Action::WaitingSellerToPay => Some(OrderStatus::WaitingPayment),
         Action::WaitingBuyerInvoice => Some(OrderStatus::WaitingBuyerInvoice),
-        Action::BuyerInvoiceAccepted => Some(OrderStatus::Active),
+        Action::BuyerTookOrder
+        | Action::HoldInvoicePaymentAccepted
+        | Action::BuyerInvoiceAccepted => Some(OrderStatus::Active),
         Action::FiatSentOk => Some(OrderStatus::FiatSent),
         Action::HoldInvoicePaymentSettled | Action::Released | Action::PurchaseCompleted => {
             Some(OrderStatus::SettledHoldInvoice)
@@ -3460,6 +3468,23 @@ mod tests {
             }
             _ => panic!("expected TakeAccepted"),
         }
+    }
+
+    /// Both sides learn the escrow is locked from these two actions — the
+    /// only signal that the trade reached Active, which is what the daemon
+    /// requires before it accepts a dispute or a fiat-sent (issue #203).
+    #[test]
+    fn escrow_locked_actions_imply_active() {
+        use mostro_core::message::Action;
+
+        assert_eq!(
+            status_for_action(&Action::BuyerTookOrder),
+            Some(OrderStatus::Active)
+        );
+        assert_eq!(
+            status_for_action(&Action::HoldInvoicePaymentAccepted),
+            Some(OrderStatus::Active)
+        );
     }
 
     fn small_order_with(
