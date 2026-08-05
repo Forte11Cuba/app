@@ -8,11 +8,13 @@ import 'package:url_launcher/url_launcher.dart';
 
 import 'package:mostro/core/app_routes.dart';
 import 'package:mostro/core/app_theme.dart';
+import 'package:mostro/core/daemon_errors.dart';
 import 'package:mostro/features/order/providers/trade_state_provider.dart';
 import 'package:mostro/features/settings/providers/nwc_provider.dart';
 import 'package:mostro/features/trades/providers/trades_providers.dart'
     show refreshTrades;
 import 'package:mostro/l10n/app_localizations.dart';
+import 'package:mostro/src/rust/api/orders.dart' as orders_api;
 import 'package:mostro/src/rust/api/types.dart' show OrderStatus, TradeUpdate;
 import 'package:mostro/shared/widgets/nwc_payment_widget.dart';
 
@@ -44,6 +46,49 @@ class _PayLightningInvoiceScreenState
   void _onPaymentDetected() {
     if (!mounted) return;
     setState(() => _waiting = true);
+  }
+
+  /// Cancel button = cancel the trade itself (confirmed via dialog), not
+  /// just leave the screen — going back is what lands on trade detail (#268).
+  Future<void> _cancelOrder() async {
+    final l10n = AppLocalizations.of(context);
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(l10n.cancelTradeDialogTitle),
+        content: Text(l10n.cancelTradeDialogContent),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text(l10n.noButtonLabel),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(l10n.yesCancelButtonLabel),
+          ),
+        ],
+      ),
+    );
+    if (!mounted || confirmed != true) return;
+    try {
+      await orders_api.cancelOrder(orderId: widget.orderId);
+      if (!mounted) return;
+      _navigated = true;
+      refreshTrades(ref);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(l10n.cancelRequestSent)),
+      );
+      context.go(AppRoute.home);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            localizedDaemonError(l10n, e, fallback: l10n.cancelRequestFailed),
+          ),
+        ),
+      );
+    }
   }
 
   @override
@@ -364,7 +409,7 @@ class _PayLightningInvoiceScreenState
                   SizedBox(
                     width: double.infinity,
                     child: OutlinedButton(
-                      onPressed: () => context.pop(),
+                      onPressed: _cancelOrder,
                       style: OutlinedButton.styleFrom(
                         foregroundColor:
                             colors?.destructiveRed ?? const Color(0xFFD84D4D),

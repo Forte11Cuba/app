@@ -66,6 +66,49 @@ class _AddLightningInvoiceScreenState
     return true;
   }
 
+  /// Cancel button = cancel the trade itself (confirmed via dialog), not
+  /// just leave the screen — going back is what lands on trade detail (#268).
+  Future<void> _cancelOrder() async {
+    final l10n = AppLocalizations.of(context);
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(l10n.cancelTradeDialogTitle),
+        content: Text(l10n.cancelTradeDialogContent),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text(l10n.noButtonLabel),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(l10n.yesCancelButtonLabel),
+          ),
+        ],
+      ),
+    );
+    if (!mounted || confirmed != true) return;
+    try {
+      await orders_api.cancelOrder(orderId: widget.orderId);
+      if (!mounted) return;
+      _navigated = true;
+      refreshTrades(ref);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(l10n.cancelRequestSent)),
+      );
+      context.go(AppRoute.home);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            localizedDaemonError(l10n, e, fallback: l10n.cancelRequestFailed),
+          ),
+        ),
+      );
+    }
+  }
+
   Future<void> _submit(WidgetRef ref) async {
     if (_submitting) return;
     final input = _invoiceController.text.trim();
@@ -271,7 +314,7 @@ class _AddLightningInvoiceScreenState
               children: [
                 Expanded(
                   child: TextButton(
-                    onPressed: () => context.pop(),
+                    onPressed: _cancelOrder,
                     child: Text(
                       l10n.cancel,
                       style: TextStyle(color: colors?.textSecondary),

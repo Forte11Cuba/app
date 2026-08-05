@@ -49,6 +49,10 @@ class _TakeOrderScreenState extends ConsumerState<TakeOrderScreen> {
   @override
   void initState() {
     super.initState();
+    // Defense in depth (#268): if the user already participates in this
+    // order (deep link, stale book entry, back navigation), Take Order
+    // must not offer to take it again — land on the trade instead.
+    _redirectIfParticipant();
     // Try immediately in case the provider already has data.
     _tryStartCountdown();
     // If the provider is still loading, listen for the first value.
@@ -56,6 +60,12 @@ class _TakeOrderScreenState extends ConsumerState<TakeOrderScreen> {
       ref.listenManual(orderBookProvider, (_, __) => _tryStartCountdown(),
           fireImmediately: true);
     });
+  }
+
+  Future<void> _redirectIfParticipant() async {
+    final role = await orders_api.getTradeRole(orderId: widget.orderId);
+    if (!mounted || role == null) return;
+    context.go(AppRoute.tradeDetailPath(widget.orderId));
   }
 
   void _tryStartCountdown() {
@@ -142,9 +152,15 @@ class _TakeOrderScreenState extends ConsumerState<TakeOrderScreen> {
           // LN address was included in take-sell payload — go straight to trade.
           context.go(AppRoute.tradeDetailPath(widget.orderId));
         } else {
+          // Rebuild the stack with trade detail as the base so back/close
+          // from add-invoice lands on the trade, never back on Take Order
+          // offering to take an already-taken order (#268).
+          context.go(AppRoute.tradeDetailPath(widget.orderId));
           context.push(AppRoute.addInvoicePath(widget.orderId));
         }
       } else {
+        // Same stack shape for the seller's pay-invoice screen (#268).
+        context.go(AppRoute.tradeDetailPath(widget.orderId));
         context.push(AppRoute.payInvoicePath(widget.orderId));
       }
     } catch (e) {
