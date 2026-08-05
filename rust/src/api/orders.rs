@@ -1831,19 +1831,49 @@ async fn dispatch_mostro_message(
             if let Some(order_id) = &kind.id {
                 let oid = order_id.to_string();
                 order_book().remove_order(&oid).await;
-                // Sync the Canceled status into the trade DB so My Trades
-                // reflects the cancellation immediately.
                 if let Some(db) = crate::db::app_db::db() {
-                    if let Err(e) = db
-                        .update_trade_fields(
-                            &oid,
-                            Some(crate::api::types::OrderStatus::Canceled),
-                            None,
-                            None,
-                        )
-                        .await
+                    let local_status = match db.get_trade_by_order_id(&oid).await {
+                        Ok(Some(trade)) => Some(trade.order.status),
+                        Ok(None) => None,
+                        Err(e) => {
+                            log::warn!("[orders] Canceled: trade lookup failed for {oid}: {e}");
+                            None
+                        }
+                    };
+                    if local_status
+                        .as_ref()
+                        .is_some_and(cancellation_wipes_history)
                     {
-                        log::warn!("[orders] failed to sync Canceled status for {oid}: {e}");
+                        // The trade never went active (no peer, no chat, no
+                        // exchange — typically a waiting-state timeout):
+                        // wipe it instead of keeping a meaningless
+                        // Canceled history row. Mirrors v1, which deletes
+                        // pending/waiting sessions on cancel.
+                        match db.delete_trade_by_order_id(&oid).await {
+                            Ok(()) => log::info!(
+                                "[orders] Canceled before active — removed trade for order={oid}"
+                            ),
+                            Err(e) => log::warn!(
+                                "[orders] failed to remove canceled trade for {oid}: {e}"
+                            ),
+                        }
+                        crate::mostro::session::session_manager()
+                            .remove_session(&oid)
+                            .await;
+                    } else {
+                        // Sync the Canceled status into the trade DB so My
+                        // Trades reflects the cancellation immediately.
+                        if let Err(e) = db
+                            .update_trade_fields(
+                                &oid,
+                                Some(crate::api::types::OrderStatus::Canceled),
+                                None,
+                                None,
+                            )
+                            .await
+                        {
+                            log::warn!("[orders] failed to sync Canceled status for {oid}: {e}");
+                        }
                     }
                 }
             }
@@ -2202,6 +2232,25 @@ fn status_for_action(action: &mostro_core::message::Action) -> Option<OrderStatu
         Action::AdminCanceled => Some(OrderStatus::CanceledByAdmin),
         _ => None,
     }
+}
+
+/// Whether a daemon `canceled` should wipe the local trade record instead of
+/// keeping a Canceled history row.
+///
+/// True only while the trade never reached Active — no peer pubkey, no chat,
+/// no exchange happened (typically a waiting-state timeout, or a maker
+/// canceling their own pending order). Anything further along keeps its row
+/// (and chat) as history. `InProgress` is deliberately NOT wiped: mostrod
+/// never sends it over kind-14 — it only lands in a maker row via the Kind
+/// 38383 sync, where it masks both waiting AND active phases (mostrod
+/// nip33.rs publishes taken orders as `in-progress`), so it is ambiguous.
+fn cancellation_wipes_history(status: &OrderStatus) -> bool {
+    matches!(
+        status,
+        OrderStatus::Pending
+            | OrderStatus::WaitingBuyerInvoice
+            | OrderStatus::WaitingPayment
+    )
 }
 
 fn map_core_status(s: mostro_core::order::Status) -> Option<OrderStatus> {
@@ -3660,6 +3709,30 @@ mod tests {
             trade_key_for_order(&ck).await.is_none(),
             "a rejected create must leave no fingerprint mapping behind"
         );
+    }
+
+    // ── Cancellation cleanup ──────────────────────────────────────────────────
+
+    /// Only never-active trades are wiped on a daemon `canceled`; anything
+    /// that progressed (or is ambiguous, like InProgress) keeps its history row.
+    #[test]
+    fn cancellation_wipes_history_only_for_never_active_trades() {
+        use crate::api::types::OrderStatus as S;
+        for s in [S::Pending, S::WaitingBuyerInvoice, S::WaitingPayment] {
+            assert!(cancellation_wipes_history(&s), "{s:?} must be wiped");
+        }
+        for s in [
+            S::InProgress,
+            S::Active,
+            S::FiatSent,
+            S::Dispute,
+            S::Success,
+            S::Canceled,
+            S::CooperativelyCanceled,
+            S::CanceledByAdmin,
+        ] {
+            assert!(!cancellation_wipes_history(&s), "{s:?} must keep history");
+        }
     }
 
     // ── Helper ────────────────────────────────────────────────────────────────
