@@ -1857,8 +1857,11 @@ async fn dispatch_mostro_message(
                         // Canceled history row. Mirrors v1, which deletes
                         // pending/waiting sessions on cancel.
                         match db.delete_trade_by_order_id(&oid).await {
-                            Ok(()) => log::info!(
-                                "[orders] Canceled before active — removed trade for order={oid}"
+                            Ok(()) => crate::api::logging::blog_info(
+                                "orders",
+                                format!(
+                                    "Canceled before active — removed trade for order={oid}"
+                                ),
                             ),
                             Err(e) => log::warn!(
                                 "[orders] failed to remove canceled trade for {oid}: {e}"
