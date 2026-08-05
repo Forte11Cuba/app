@@ -3263,7 +3263,14 @@ impl TradeUpdatesStream {
         loop {
             match self.rx.recv().await {
                 Ok(update) => return Some(update),
-                Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                // Dropped updates degrade, not corrupt: the trades list
+                // refetches on any later emission, kept-history trades are
+                // covered by the 2s status poll, and the sweep re-emits
+                // within 30 min. Log so the (unlikely) case is observable.
+                Err(broadcast::error::RecvError::Lagged(n)) => {
+                    log::warn!("[orders] trade-updates stream lagged, dropped {n} updates");
+                    continue;
+                }
                 Err(broadcast::error::RecvError::Closed) => return None,
             }
         }

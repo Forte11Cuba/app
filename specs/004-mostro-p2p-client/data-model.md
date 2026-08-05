@@ -111,9 +111,10 @@ trade at a time (v2.0 scope constraint).
 | completed_at | Timestamp? | When trade finished (null if active) |
 | outcome | Enum? | `Success`, `Canceled`, `Expired`, `DisputeWon`, `DisputeLost` |
 
-Trade rows are history and normally only mutate `status` — with one
-exception: a trade canceled by the daemon while still in
-pending/waiting states (never active) is **deleted** rather than kept
+Trade rows are history: they are updated in place (`status`,
+`hold_invoice`, `amount_sats` — see `update_trade_fields`) but never
+deleted, with one exception: a trade canceled by the daemon while still
+in pending/waiting states (never active) is **deleted** rather than kept
 (see `contracts/orders.md` — Daemon cancellation semantics).
 
 **Buyer progress steps**: `OrderTaken`, `PayInvoice`, `PaymentLocked`,
