@@ -10,8 +10,10 @@ import 'package:mostro/core/app_routes.dart';
 import 'package:mostro/core/app_theme.dart';
 import 'package:mostro/features/order/providers/trade_state_provider.dart';
 import 'package:mostro/features/settings/providers/nwc_provider.dart';
+import 'package:mostro/features/trades/providers/trades_providers.dart'
+    show refreshTrades;
 import 'package:mostro/l10n/app_localizations.dart';
-import 'package:mostro/src/rust/api/types.dart' show OrderStatus;
+import 'package:mostro/src/rust/api/types.dart' show OrderStatus, TradeUpdate;
 import 'package:mostro/shared/widgets/nwc_payment_widget.dart';
 
 /// Pay Lightning Invoice screen — Route `/pay_invoice/:orderId`.
@@ -94,6 +96,30 @@ class _PayLightningInvoiceScreenState
         }
       },
     );
+
+    // Push-based cancellation signal. The polling listener above cannot see
+    // a daemon cancel anymore: the wiped trade has no DB row left, and after
+    // a timeout republish the book reads `pending` — a status the switch
+    // above deliberately ignores.
+    ref.listen<AsyncValue<TradeUpdate>>(tradeUpdatesProvider, (prev, next) {
+      final update = next.valueOrNull;
+      if (update == null || _navigated || !mounted) return;
+      if (update.orderId != widget.orderId) return;
+      switch (update.status) {
+        case OrderStatus.canceled:
+        case OrderStatus.cooperativelyCanceled:
+        case OrderStatus.canceledByAdmin:
+        case OrderStatus.expired:
+          _navigated = true;
+          refreshTrades(ref);
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(l10n.orderNoLongerActive)),
+          );
+          context.go(AppRoute.home);
+        default:
+          break;
+      }
+    });
 
     return tradeAsync.when(
       loading: () => Scaffold(
