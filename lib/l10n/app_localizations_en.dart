@@ -1058,6 +1058,10 @@ class AppLocalizationsEn extends AppLocalizations {
   String get openDisputeFailed => 'Could not open dispute. Please try again.';
 
   @override
+  String get tradeNotDisputable =>
+      'A dispute can only be opened once the funds are locked for this trade.';
+
+  @override
   String get tradeWaitingInvoiceBuyerInstruction =>
       'Submit your Lightning invoice so the seller can lock the funds.';
 
@@ -1511,6 +1515,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get tradeHeadlinePending => 'Waiting for someone to take your order';
 
   @override
+  String get tradeHeadlineInProgress => 'The trade is being set up';
+
+  @override
   String get tradeHeadlineWaitingInvoiceBuyer =>
       'Share a Lightning invoice to receive your sats';
 
@@ -1684,6 +1691,9 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get waitingForCounterpart => 'Waiting for a counterpart…';
+
+  @override
+  String get waitingForTradeSetup => 'Setting up the trade…';
 
   @override
   String get yourTradeTimelineTitle => 'YOUR TRADE';

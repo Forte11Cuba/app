@@ -1072,6 +1072,10 @@ class AppLocalizationsDe extends AppLocalizations {
       'Streit konnte nicht eröffnet werden. Bitte erneut versuchen.';
 
   @override
+  String get tradeNotDisputable =>
+      'Ein Streit kann erst eröffnet werden, wenn die Gelder für diesen Handel gesperrt sind.';
+
+  @override
   String get tradeWaitingInvoiceBuyerInstruction =>
       'Sende deine Lightning-Rechnung, damit der Verkäufer die Gelder sperren kann.';
 
@@ -1537,6 +1541,9 @@ class AppLocalizationsDe extends AppLocalizations {
       'Warte darauf, dass jemand deine Bestellung annimmt';
 
   @override
+  String get tradeHeadlineInProgress => 'Der Handel wird vorbereitet';
+
+  @override
   String get tradeHeadlineWaitingInvoiceBuyer =>
       'Teile eine Lightning-Rechnung, um deine Sats zu erhalten';
 
@@ -1712,6 +1719,9 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get waitingForCounterpart => 'Warte auf eine Gegenpartei…';
+
+  @override
+  String get waitingForTradeSetup => 'Handel wird vorbereitet…';
 
   @override
   String get yourTradeTimelineTitle => 'DEIN TRADE';

@@ -87,6 +87,12 @@ Pending
 SettledHoldInvoice, Success, Canceled, CooperativelyCanceled, Dispute, InProgress,
 SettledByAdmin, CanceledByAdmin, CompletedByAdmin, Expired.
 
+This is the protocol state machine, which only daemon messages expose in full.
+The public Kind 38383 event carries NIP-69's four-bucket view instead, so an
+`InProgress` reaching this client stands for "taken, real state unknown" rather
+than for the admin-took-dispute transition above. See "Public status vs. trade
+status" in `contracts/orders.md`.
+
 ---
 
 ### Trade

@@ -2024,6 +2024,12 @@ abstract class AppLocalizations {
   /// **'Could not open dispute. Please try again.'**
   String get openDisputeFailed;
 
+  /// Snackbar shown when a dispute is attempted before the trade reaches a disputable state
+  ///
+  /// In en, this message translates to:
+  /// **'A dispute can only be opened once the funds are locked for this trade.'**
+  String get tradeNotDisputable;
+
   /// Instruction shown to the buyer while waiting to submit their Lightning invoice
   ///
   /// In en, this message translates to:
@@ -2822,6 +2828,12 @@ abstract class AppLocalizations {
   /// **'Waiting for someone to take your order'**
   String get tradeHeadlinePending;
 
+  /// Headline while the order is taken but the trade state is not known in detail
+  ///
+  /// In en, this message translates to:
+  /// **'The trade is being set up'**
+  String get tradeHeadlineInProgress;
+
   /// Headline for buyer while waiting for invoice
   ///
   /// In en, this message translates to:
@@ -3109,6 +3121,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Waiting for a counterpart…'**
   String get waitingForCounterpart;
+
+  /// Disabled CTA while the order is taken but the trade state is not known in detail
+  ///
+  /// In en, this message translates to:
+  /// **'Setting up the trade…'**
+  String get waitingForTradeSetup;
 
   /// Header of the trade step timeline
   ///

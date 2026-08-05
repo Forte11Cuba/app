@@ -1070,6 +1070,10 @@ class AppLocalizationsIt extends AppLocalizations {
   String get openDisputeFailed => 'Impossibile aprire la disputa. Riprovare.';
 
   @override
+  String get tradeNotDisputable =>
+      'Una disputa può essere aperta solo quando i fondi sono bloccati per questo scambio.';
+
+  @override
   String get tradeWaitingInvoiceBuyerInstruction =>
       'Invia la tua fattura Lightning per permettere al venditore di bloccare i fondi.';
 
@@ -1528,6 +1532,9 @@ class AppLocalizationsIt extends AppLocalizations {
       'In attesa che qualcuno prenda il tuo ordine';
 
   @override
+  String get tradeHeadlineInProgress => 'Lo scambio è in preparazione';
+
+  @override
   String get tradeHeadlineWaitingInvoiceBuyer =>
       'Condividi una fattura Lightning per ricevere i tuoi sats';
 
@@ -1703,6 +1710,9 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get waitingForCounterpart => 'In attesa di una controparte…';
+
+  @override
+  String get waitingForTradeSetup => 'Preparazione dello scambio…';
 
   @override
   String get yourTradeTimelineTitle => 'LA TUA OPERAZIONE';

@@ -181,6 +181,18 @@ fn dispute_store() -> &'static DisputeStore {
 
 use crate::rt::unix_now;
 
+/// Mirrors the daemon's own precondition: it only accepts a dispute on an
+/// Active or FiatSent order, and answers anything earlier with `CantDo`
+/// (issue #203). `InProgress` is the public order-book bucket — a trade whose
+/// real state we don't know — so that call is left to the daemon.
+fn status_allows_dispute(status: &crate::api::types::OrderStatus) -> bool {
+    use crate::api::types::OrderStatus;
+    matches!(
+        status,
+        OrderStatus::Active | OrderStatus::FiatSent | OrderStatus::InProgress
+    )
+}
+
 // ── Public API ────────────────────────────────────────────────────────────────
 
 /// Initiate a dispute on an active trade.
@@ -206,6 +218,12 @@ pub async fn open_dispute(trade_id: String, reason: Option<String>) -> Result<Di
             bail!("DisputeAlreadyOpen: dispute already exists for trade {trade_id}");
         }
     }
+    if let Some(status) = crate::api::orders::local_trade_status(&trade_id).await {
+        if !status_allows_dispute(&status) {
+            bail!("TradeNotDisputable: trade {trade_id} is {status:?}");
+        }
+    }
+
     // Mark this process's concrete in-flight open attempt: only while the
     // marker is held may the post-publish insert claim an admin-took
     // placeholder as ours. Dropped on every exit path.
@@ -586,6 +604,28 @@ mod tests {
             .try_insert_if_absent_or_resolved(dispute)
             .await
             .expect("seed_dispute: insert failed")
+    }
+
+    #[test]
+    fn only_a_funded_trade_is_disputable() {
+        use crate::api::types::OrderStatus as S;
+
+        for allowed in [S::Active, S::FiatSent, S::InProgress] {
+            assert!(status_allows_dispute(&allowed), "{allowed:?} must pass");
+        }
+        for rejected in [
+            S::Pending,
+            S::WaitingBuyerInvoice,
+            S::WaitingPayment,
+            S::Canceled,
+            S::Success,
+            S::Dispute,
+        ] {
+            assert!(
+                !status_allows_dispute(&rejected),
+                "{rejected:?} must not reach the daemon"
+            );
+        }
     }
 
     #[tokio::test]

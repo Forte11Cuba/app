@@ -141,5 +141,11 @@ bridged by flutter_rust_bridge.
   Chat history persists to the `messages` table since #246 (web still memory-only, #233).
 - **Order book is sourced only from daemon Kind 38383 events.** `create_order` waits for daemon
   confirmation; on timeout it returns an error and **persists nothing** (no phantom order).
+- **The Kind 38383 `s` tag is never a trade's status.** It is NIP-69's four-bucket public view
+  (`pending`, `in-progress`, `success`, `canceled`), and the daemon stops publishing once the
+  trade turns private — `active`/`fiat-sent`/`dispute` never reach the wire. So `InProgress`
+  means "taken, real state unknown", and a trade's status comes from daemon messages only
+  (`wire_status_applies` guards both ingest paths). Treating it as `Active` offers actions the
+  daemon rejects with `CantDo` (#203).
 
 <!-- MANUAL ADDITIONS END -->

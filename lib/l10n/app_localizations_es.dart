@@ -1072,6 +1072,10 @@ class AppLocalizationsEs extends AppLocalizations {
       'No se pudo abrir la disputa. Por favor, inténtelo de nuevo.';
 
   @override
+  String get tradeNotDisputable =>
+      'Solo se puede abrir una disputa cuando los fondos ya están bloqueados para este intercambio.';
+
+  @override
   String get tradeWaitingInvoiceBuyerInstruction =>
       'Envía tu factura Lightning para que el vendedor pueda bloquear los fondos.';
 
@@ -1528,6 +1532,9 @@ class AppLocalizationsEs extends AppLocalizations {
   String get tradeHeadlinePending => 'Esperando a que alguien tome tu orden';
 
   @override
+  String get tradeHeadlineInProgress => 'Se está preparando el intercambio';
+
+  @override
   String get tradeHeadlineWaitingInvoiceBuyer =>
       'Comparte una factura Lightning para recibir tus sats';
 
@@ -1702,6 +1709,9 @@ class AppLocalizationsEs extends AppLocalizations {
 
   @override
   String get waitingForCounterpart => 'Esperando una contraparte…';
+
+  @override
+  String get waitingForTradeSetup => 'Preparando el intercambio…';
 
   @override
   String get yourTradeTimelineTitle => 'TU OPERACIÓN';
