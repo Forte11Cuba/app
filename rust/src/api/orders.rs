@@ -1138,8 +1138,10 @@ pub async fn take_order(
             log::warn!("[orders] failed to persist trade: {e}");
         }
     }
-    // Subscribe to d-tag K38383 updates for this specific order so we
-    // receive status changes (pending → in-progress → waiting-payment …).
+    // Subscribe to d-tag K38383 updates for this specific order so we still
+    // see the public buckets the daemon does publish (in-progress once taken,
+    // success / canceled at the end); the fine-grained states only ever arrive
+    // as daemon messages.
     subscribe_single_order(&order_id).await;
     // Create a session so the chat API can look up keys immediately.
     let _ = crate::mostro::session::session_manager()
@@ -2237,6 +2239,49 @@ fn map_core_status(s: mostro_core::order::Status) -> Option<OrderStatus> {
     })
 }
 
+// ── Public vs private order status ────────────────────────────────────────────
+
+/// Whether a status parsed from a public Kind 38383 event may replace the one
+/// already held for that trade.
+///
+/// The wire status is NIP-69's four-bucket view (`pending`, `in-progress`,
+/// `success`, `canceled`): mostrod stops publishing once a trade turns private,
+/// so `in-progress` means "taken", never "escrow locked". Letting it overwrite
+/// a status learned from a daemon message drags an Active trade back to
+/// InProgress and offers actions the daemon then rejects (issue #203).
+fn wire_status_applies(local: Option<&OrderStatus>, wire: &OrderStatus) -> bool {
+    match local {
+        None | Some(OrderStatus::Pending) => true,
+        Some(_) => is_terminal_status(wire),
+    }
+}
+
+fn is_terminal_status(s: &OrderStatus) -> bool {
+    matches!(
+        s,
+        OrderStatus::Success
+            | OrderStatus::SettledHoldInvoice
+            | OrderStatus::SettledByAdmin
+            | OrderStatus::CompletedByAdmin
+            | OrderStatus::Canceled
+            | OrderStatus::CanceledByAdmin
+            | OrderStatus::CooperativelyCanceled
+            | OrderStatus::Expired
+    )
+}
+
+/// Status already held for `order_id`, or `None` when the order is not one of
+/// ours. The persisted trade wins over the in-memory book: it is the record fed
+/// exclusively by daemon messages.
+async fn local_trade_status(order_id: &str) -> Option<OrderStatus> {
+    if let Some(db) = crate::db::app_db::db() {
+        if let Ok(Some(trade)) = db.get_trade_by_order_id(order_id).await {
+            return Some(trade.order.status);
+        }
+    }
+    order_book().get_order(order_id).await.map(|info| info.status)
+}
+
 // ── Peer-pubkey resolution ────────────────────────────────────────────────────
 
 /// Called when the daemon sends `BuyerTookOrder` or `HoldInvoicePaymentAccepted`.
@@ -2382,7 +2427,8 @@ async fn subscribe_single_order(order_id: &str) {
 
             match timeout(remaining, rx.recv()).await {
                 Ok(Ok(RelayPoolNotification::Event { event, .. })) => {
-                    if let Some(order) = crate::nostr::order_events::parse_order_event(&event, None)
+                    if let Some(mut order) =
+                        crate::nostr::order_events::parse_order_event(&event, None)
                     {
                         if order.id == order_id {
                             log::info!(
@@ -2391,12 +2437,13 @@ async fn subscribe_single_order(order_id: &str) {
                                 order.status
                             );
                             last_activity = crate::rt::time::Instant::now();
-                            // Sync trade status in DB so My Trades reflects it.
+                            let local = local_trade_status(&order.id).await;
+                            let applies = wire_status_applies(local.as_ref(), &order.status);
                             if let Some(db) = crate::db::app_db::db() {
                                 if let Err(e) = db
                                     .update_trade_fields(
                                         &order.id,
-                                        Some(order.status.clone()),
+                                        applies.then(|| order.status.clone()),
                                         None,
                                         order.amount_sats,
                                     )
@@ -2406,6 +2453,11 @@ async fn subscribe_single_order(order_id: &str) {
                                         "[orders] failed to sync d-tag trade status for order={}: {e}",
                                         order.id
                                     );
+                                }
+                            }
+                            if !applies {
+                                if let Some(local) = local {
+                                    order.status = local;
                                 }
                             }
                             order_book().upsert_order(order).await;
@@ -2878,21 +2930,30 @@ async fn ingest_order_event(event: &nostr_sdk::Event) {
             }
             // Sync trade status in DB for own orders so My Trades
             // reflects status changes even without gift-wrap delivery.
-            if info.is_mine && info.status != crate::api::types::OrderStatus::Pending {
-                if let Some(db) = crate::db::app_db::db() {
-                    if let Err(e) = db
-                        .update_trade_fields(
-                            &info.id,
-                            Some(info.status.clone()),
-                            None,
-                            info.amount_sats,
-                        )
-                        .await
-                    {
-                        log::warn!(
-                            "[orders] failed to sync trade status for order={}: {e}",
-                            info.id
-                        );
+            if info.status != crate::api::types::OrderStatus::Pending {
+                let local = local_trade_status(&info.id).await;
+                let applies = wire_status_applies(local.as_ref(), &info.status);
+                if info.is_mine {
+                    if let Some(db) = crate::db::app_db::db() {
+                        if let Err(e) = db
+                            .update_trade_fields(
+                                &info.id,
+                                applies.then(|| info.status.clone()),
+                                None,
+                                info.amount_sats,
+                            )
+                            .await
+                        {
+                            log::warn!(
+                                "[orders] failed to sync trade status for order={}: {e}",
+                                info.id
+                            );
+                        }
+                    }
+                }
+                if !applies {
+                    if let Some(local) = local {
+                        info.status = local;
                     }
                 }
             }
@@ -3485,6 +3546,34 @@ mod tests {
             status_for_action(&Action::HoldInvoicePaymentAccepted),
             Some(OrderStatus::Active)
         );
+    }
+
+    /// The public event is NIP-69's coarse view and stops updating once the
+    /// trade turns private, so it may only fill an unknown or still-pending
+    /// status — or announce a terminal one (issue #203).
+    #[test]
+    fn the_public_status_never_replaces_a_finer_local_one() {
+        use OrderStatus as S;
+
+        assert!(wire_status_applies(None, &S::InProgress));
+        assert!(wire_status_applies(Some(&S::Pending), &S::InProgress));
+
+        for local in [S::WaitingPayment, S::WaitingBuyerInvoice, S::Active, S::FiatSent, S::Dispute]
+        {
+            assert!(
+                !wire_status_applies(Some(&local), &S::InProgress),
+                "in-progress must not overwrite {local:?}"
+            );
+            assert!(
+                !wire_status_applies(Some(&local), &S::Pending),
+                "pending must not overwrite {local:?}"
+            );
+            assert!(
+                wire_status_applies(Some(&local), &S::Canceled),
+                "a terminal wire status must reach {local:?}"
+            );
+            assert!(wire_status_applies(Some(&local), &S::Success));
+        }
     }
 
     fn small_order_with(
