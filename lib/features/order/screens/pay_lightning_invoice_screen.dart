@@ -35,6 +35,8 @@ class PayLightningInvoiceScreen extends ConsumerStatefulWidget {
 class _PayLightningInvoiceScreenState
     extends ConsumerState<PayLightningInvoiceScreen> {
   bool _waiting = false;
+  /// `true` while a protocol cancel is in flight — blocks re-entry.
+  bool _canceling = false;
   /// `true` when NWC is connected but payment failed → show QR fallback.
   bool _manualMode = false;
   /// One-shot guard so we don't navigate twice as further statuses stream in.
@@ -51,6 +53,8 @@ class _PayLightningInvoiceScreenState
   /// Cancel button = cancel the trade itself (confirmed via dialog), not
   /// just leave the screen — going back is what lands on trade detail (#268).
   Future<void> _cancelOrder() async {
+    // Serialize state-changing requests: one cancel at a time (review round 1).
+    if (_canceling) return;
     final l10n = AppLocalizations.of(context);
     final confirmed = await showDialog<bool>(
       context: context,
@@ -70,6 +74,7 @@ class _PayLightningInvoiceScreenState
       ),
     );
     if (!mounted || confirmed != true) return;
+    setState(() => _canceling = true);
     try {
       await orders_api.cancelOrder(orderId: widget.orderId);
       if (!mounted) return;
@@ -88,6 +93,8 @@ class _PayLightningInvoiceScreenState
           ),
         ),
       );
+    } finally {
+      if (mounted) setState(() => _canceling = false);
     }
   }
 
@@ -409,7 +416,7 @@ class _PayLightningInvoiceScreenState
                   SizedBox(
                     width: double.infinity,
                     child: OutlinedButton(
-                      onPressed: _cancelOrder,
+                      onPressed: _canceling ? null : _cancelOrder,
                       style: OutlinedButton.styleFrom(
                         foregroundColor:
                             colors?.destructiveRed ?? const Color(0xFFD84D4D),

@@ -111,6 +111,16 @@ class _TakeOrderScreenState extends ConsumerState<TakeOrderScreen> {
     final order = orders.where((o) => o.id == widget.orderId).firstOrNull;
     if (order == null || _submitting) return;
 
+    // Serialize with the async initState redirect: a participant racing the
+    // role lookup must never dispatch a second take (which the daemon would
+    // reject and strand them on home instead of their trade).
+    final role = await orders_api.getTradeRole(orderId: widget.orderId);
+    if (!mounted) return;
+    if (role != null) {
+      context.go(AppRoute.tradeDetailPath(widget.orderId));
+      return;
+    }
+
     // Range orders: show amount modal first.
     if (order.isRange) {
       final amount = await showRangeAmountModal(
