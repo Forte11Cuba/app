@@ -2534,6 +2534,165 @@ pub async fn subscribe_orders() {
         let _guard = ResetGuard;
         _run_order_subscription().await;
     });
+
+    // Reconciles state the gift-wrap channel missed (e.g. a waiting-state
+    // timeout that fired while the app was closed). Idempotent across
+    // re-subscribes — at most one sweep loop per process.
+    spawn_stale_sweep();
+}
+
+// ── Stale-state sweep ─────────────────────────────────────────────────────────
+
+/// Delay before the first sweep so the initial Kind 38383 fetch can populate
+/// the book — the sweep only acts on positive book signals, so it must not
+/// run against an empty cache.
+const SWEEP_INITIAL_DELAY_SECS: u64 = 60;
+/// Cadence mirrors v1's 30-minute cleanup job.
+const SWEEP_INTERVAL_SECS: u64 = 30 * 60;
+/// Waiting trades younger than this are never touched: the daemon's own
+/// waiting window (default `expiration_seconds`) has not elapsed yet.
+const SWEEP_MIN_AGE_SECS: i64 = 900;
+/// Keyless in-memory sessions older than this are dropped. Any order that
+/// can still activate does so long before; a missing session self-heals in
+/// the peer-pubkey handler anyway.
+const SWEEP_SESSION_TTL_SECS: i64 = 24 * 3600;
+
+static SWEEP_ACTIVE: AtomicBool = AtomicBool::new(false);
+
+/// What the sweep does with one stale waiting trade, given the daemon's
+/// current public (Kind 38383) status for that order.
+#[derive(Debug, PartialEq)]
+enum SweepAction {
+    /// The trade never went active and the daemon moved on — republished as
+    /// pending (taker side) or canceled outright: wipe row + session, same
+    /// as the live `Canceled` gift-wrap path.
+    Wipe,
+    /// Own maker order republished as pending: the order is alive again,
+    /// sync the row back so My Trades reflects it.
+    SyncPending,
+    /// No positive daemon signal — absent from the book, or the ambiguous
+    /// `in-progress` public marker: leave untouched.
+    Keep,
+}
+
+fn sweep_action(
+    is_mine: bool,
+    book_status: Option<&crate::api::types::OrderStatus>,
+) -> SweepAction {
+    use crate::api::types::OrderStatus as S;
+    match book_status {
+        Some(S::Pending) if is_mine => SweepAction::SyncPending,
+        Some(S::Pending) => SweepAction::Wipe,
+        Some(S::Canceled | S::Expired | S::CanceledByAdmin) => SweepAction::Wipe,
+        _ => SweepAction::Keep,
+    }
+}
+
+fn spawn_stale_sweep() {
+    if SWEEP_ACTIVE
+        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+        .is_err()
+    {
+        return;
+    }
+    crate::rt::spawn(async {
+        crate::rt::time::sleep(crate::rt::time::Duration::from_secs(
+            SWEEP_INITIAL_DELAY_SECS,
+        ))
+        .await;
+        loop {
+            run_stale_sweep_once().await;
+            crate::rt::time::sleep(crate::rt::time::Duration::from_secs(
+                SWEEP_INTERVAL_SECS,
+            ))
+            .await;
+        }
+    });
+}
+
+/// Reconcile trades stuck in waiting states with the daemon's public book.
+///
+/// Covers cancellations whose gift wrap the app never received (closed or
+/// offline when the daemon's waiting window expired). The clock only
+/// *triggers* the check — every decision needs a positive daemon signal
+/// (see [`sweep_action`]); the daemon stays the authority on order state.
+async fn run_stale_sweep_once() {
+    let Some(db) = crate::db::app_db::db() else {
+        return;
+    };
+    let trades = match db.list_trades().await {
+        Ok(trades) => trades,
+        Err(e) => {
+            log::warn!("[orders] sweep: list_trades failed: {e}");
+            return;
+        }
+    };
+    let now = crate::rt::unix_now();
+    let (mut examined, mut wiped, mut resynced) = (0usize, 0usize, 0usize);
+    for trade in trades {
+        if !matches!(
+            trade.order.status,
+            crate::api::types::OrderStatus::WaitingBuyerInvoice
+                | crate::api::types::OrderStatus::WaitingPayment
+        ) {
+            continue;
+        }
+        // Age gate: never race the take/propagation window of a live trade.
+        let deadline = trade
+            .timeout_at
+            .unwrap_or(trade.started_at + SWEEP_MIN_AGE_SECS);
+        if now <= deadline {
+            continue;
+        }
+        examined += 1;
+        let oid = trade.order.id.clone();
+        let book_status = order_book().get_order(&oid).await.map(|o| o.status);
+        match sweep_action(trade.order.is_mine, book_status.as_ref()) {
+            SweepAction::Wipe => match db.delete_trade_by_order_id(&oid).await {
+                Ok(()) => {
+                    crate::mostro::session::session_manager()
+                        .remove_session(&oid)
+                        .await;
+                    emit_trade_update(&oid, crate::api::types::OrderStatus::Canceled);
+                    log::info!("[orders] sweep: wiped stale waiting trade order={oid}");
+                    wiped += 1;
+                }
+                Err(e) => log::warn!("[orders] sweep: failed to wipe {oid}: {e}"),
+            },
+            SweepAction::SyncPending => {
+                match db
+                    .update_trade_fields(
+                        &oid,
+                        Some(crate::api::types::OrderStatus::Pending),
+                        None,
+                        None,
+                    )
+                    .await
+                {
+                    Ok(()) => {
+                        emit_trade_update(&oid, crate::api::types::OrderStatus::Pending);
+                        log::info!(
+                            "[orders] sweep: resynced republished maker order={oid} to pending"
+                        );
+                        resynced += 1;
+                    }
+                    Err(e) => log::warn!("[orders] sweep: failed to resync {oid}: {e}"),
+                }
+            }
+            SweepAction::Keep => {}
+        }
+    }
+    let sessions_dropped = crate::mostro::session::session_manager()
+        .cleanup_stale_sessions(SWEEP_SESSION_TTL_SECS)
+        .await;
+    if examined > 0 || sessions_dropped > 0 {
+        crate::api::logging::blog_info(
+            "orders",
+            format!(
+                "stale sweep: examined={examined} wiped={wiped} resynced={resynced} sessions_dropped={sessions_dropped}"
+            ),
+        );
+    }
 }
 
 /// Refresh the order book on demand (UI "Refresh" action).
@@ -3810,6 +3969,24 @@ mod tests {
             update.status,
             crate::api::types::OrderStatus::Canceled
         ));
+    }
+
+    /// The sweep only acts on positive daemon signals: pending republish
+    /// (wipe for takers, resync for makers) and outright cancellation;
+    /// absence from the book or ambiguous statuses leave the trade alone.
+    #[test]
+    fn sweep_action_requires_a_positive_book_signal() {
+        use crate::api::types::OrderStatus as S;
+        assert_eq!(sweep_action(true, Some(&S::Pending)), SweepAction::SyncPending);
+        assert_eq!(sweep_action(false, Some(&S::Pending)), SweepAction::Wipe);
+        for s in [S::Canceled, S::Expired, S::CanceledByAdmin] {
+            assert_eq!(sweep_action(false, Some(&s)), SweepAction::Wipe);
+            assert_eq!(sweep_action(true, Some(&s)), SweepAction::Wipe);
+        }
+        assert_eq!(sweep_action(false, None), SweepAction::Keep);
+        for s in [S::InProgress, S::Active, S::Success] {
+            assert_eq!(sweep_action(false, Some(&s)), SweepAction::Keep);
+        }
     }
 
     // ── Helper ────────────────────────────────────────────────────────────────
