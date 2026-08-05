@@ -264,6 +264,16 @@ pub struct TradeInfo {
     pub outcome: Option<TradeOutcome>,
 }
 
+/// A trade lifecycle change pushed from Rust so the UI does not have to poll
+/// for it. Emitted on daemon-driven cancellation — including the wipe of a
+/// never-active trade, whose DB row no longer exists by the time this
+/// arrives, so polling could never observe the transition.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct TradeUpdate {
+    pub order_id: String,
+    pub status: OrderStatus,
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AttachmentInfo {
     pub file_name: String,

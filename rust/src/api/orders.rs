@@ -1883,6 +1883,10 @@ async fn dispatch_mostro_message(
                         }
                     }
                 }
+                // Push the cancellation to Dart: after a wipe there is no DB
+                // row left to poll, and after a timeout republish the book
+                // reads `pending` — screens need this signal either way.
+                emit_trade_update(&oid, crate::api::types::OrderStatus::Canceled);
             }
         }
         // Seller receives BuyerTookOrder → peer is buyer_trade_pubkey.
@@ -3055,6 +3059,55 @@ async fn _run_order_subscription() {
     }
 }
 
+/// Buffered trade lifecycle updates; cancellations are rare, so a small
+/// buffer is ample.
+const TRADE_UPDATES_CAPACITY: usize = 64;
+
+static TRADE_UPDATES: std::sync::OnceLock<
+    broadcast::Sender<crate::api::types::TradeUpdate>,
+> = std::sync::OnceLock::new();
+
+fn trade_updates_tx() -> &'static broadcast::Sender<crate::api::types::TradeUpdate> {
+    TRADE_UPDATES.get_or_init(|| broadcast::channel(TRADE_UPDATES_CAPACITY).0)
+}
+
+/// Broadcasts a trade lifecycle change to any active [`TradeUpdatesStream`].
+pub(crate) fn emit_trade_update(order_id: &str, status: crate::api::types::OrderStatus) {
+    let _ = trade_updates_tx().send(crate::api::types::TradeUpdate {
+        order_id: order_id.to_string(),
+        status,
+    });
+}
+
+/// Stream of trade lifecycle changes (daemon-driven cancellations).
+///
+/// Complements the 2s status polling: after a never-active trade is wiped
+/// (see `cancellation_wipes_history`) there is no DB row left to poll, and
+/// after a timeout republish the book shows `pending` again — in both cases
+/// this push is the only signal the affected screens can react to.
+pub async fn on_trade_updated() -> Result<TradeUpdatesStream> {
+    Ok(TradeUpdatesStream {
+        rx: trade_updates_tx().subscribe(),
+    })
+}
+
+/// Wrapper for flutter_rust_bridge Dart Stream generation.
+pub struct TradeUpdatesStream {
+    rx: broadcast::Receiver<crate::api::types::TradeUpdate>,
+}
+
+impl TradeUpdatesStream {
+    pub async fn next(&mut self) -> Option<crate::api::types::TradeUpdate> {
+        loop {
+            match self.rx.recv().await {
+                Ok(update) => return Some(update),
+                Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(broadcast::error::RecvError::Closed) => return None,
+            }
+        }
+    }
+}
+
 /// Stream that emits whenever the order list changes.
 pub async fn on_orders_updated() -> Result<OrdersStream> {
     let rx = order_book().subscribe();
@@ -3740,6 +3793,23 @@ mod tests {
         ] {
             assert!(!cancellation_wipes_history(&s), "{s:?} must keep history");
         }
+    }
+
+    /// A subscriber created before the emit receives the update; emitting
+    /// with no subscribers must not error or panic.
+    #[tokio::test]
+    async fn trade_updates_reach_subscribers() {
+        // No subscriber yet: emit is a silent no-op.
+        emit_trade_update("order-nobody", crate::api::types::OrderStatus::Canceled);
+
+        let mut stream = on_trade_updated().await.unwrap();
+        emit_trade_update("order-x", crate::api::types::OrderStatus::Canceled);
+        let update = stream.next().await.expect("subscriber must receive the update");
+        assert_eq!(update.order_id, "order-x");
+        assert!(matches!(
+            update.status,
+            crate::api::types::OrderStatus::Canceled
+        ));
     }
 
     // ── Helper ────────────────────────────────────────────────────────────────
