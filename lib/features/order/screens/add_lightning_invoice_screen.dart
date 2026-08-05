@@ -38,6 +38,8 @@ class _AddLightningInvoiceScreenState
     extends ConsumerState<AddLightningInvoiceScreen> {
   final _invoiceController = TextEditingController();
   bool _submitting = false;
+  /// `true` while a protocol cancel is in flight — blocks re-entry and submit.
+  bool _canceling = false;
   /// `true` when NWC is connected but generation failed → show manual form.
   bool _manualMode = false;
   /// One-shot guard so we don't navigate twice as further updates stream in.
@@ -66,8 +68,57 @@ class _AddLightningInvoiceScreenState
     return true;
   }
 
+  /// Cancel button = cancel the trade itself (confirmed via dialog), not
+  /// just leave the screen — going back is what lands on trade detail (#268).
+  Future<void> _cancelOrder() async {
+    // Serialize state-changing requests: no cancel while a submit or another
+    // cancel is in flight (review round 1).
+    if (_submitting || _canceling) return;
+    final l10n = AppLocalizations.of(context);
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(l10n.cancelTradeDialogTitle),
+        content: Text(l10n.cancelTradeDialogContent),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text(l10n.noButtonLabel),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(l10n.yesCancelButtonLabel),
+          ),
+        ],
+      ),
+    );
+    if (!mounted || confirmed != true) return;
+    setState(() => _canceling = true);
+    try {
+      await orders_api.cancelOrder(orderId: widget.orderId);
+      if (!mounted) return;
+      _navigated = true;
+      refreshTrades(ref);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(l10n.cancelRequestSent)),
+      );
+      context.go(AppRoute.home);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            localizedDaemonError(l10n, e, fallback: l10n.cancelRequestFailed),
+          ),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _canceling = false);
+    }
+  }
+
   Future<void> _submit(WidgetRef ref) async {
-    if (_submitting) return;
+    if (_submitting || _canceling) return;
     final input = _invoiceController.text.trim();
     // For Lightning Addresses, the sats amount must be resolved before sending —
     // the Rust side uses it to resolve the address. Bolt11 invoices encode
@@ -271,7 +322,8 @@ class _AddLightningInvoiceScreenState
               children: [
                 Expanded(
                   child: TextButton(
-                    onPressed: () => context.pop(),
+                    onPressed:
+                        (_submitting || _canceling) ? null : _cancelOrder,
                     child: Text(
                       l10n.cancel,
                       style: TextStyle(color: colors?.textSecondary),
@@ -281,7 +333,9 @@ class _AddLightningInvoiceScreenState
                 const SizedBox(width: AppSpacing.md),
                 Expanded(
                   child: FilledButton(
-                    onPressed: _isValid(ref) ? () => _submit(ref) : null,
+                    onPressed: (!_canceling && _isValid(ref))
+                        ? () => _submit(ref)
+                        : null,
                     style: FilledButton.styleFrom(
                       backgroundColor: green,
                       foregroundColor: Colors.black,
