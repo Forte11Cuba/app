@@ -244,6 +244,29 @@ what to listen to. Reference: <https://mostro.network/protocol/seller_pay_hold_i
 screens reading from the DB (e.g. `tradeInfoStreamProvider`) will miss
 transitions that only affected in-memory state.
 
+### Public status vs. trade status
+
+The `s` tag of a Kind 38383 event is NIP-69's four-bucket view of an order
+(`pending`, `in-progress`, `success`, `canceled`), not its protocol status.
+mostrod publishes `in-progress` when an order leaves the book and then stops
+publishing altogether while the trade is private: `Active`, `FiatSent`,
+`Dispute` and `SettledHoldInvoice` never reach the wire (`create_status_tags`
+returns `create_event = false`, so no event is emitted at all). `WaitingTakerBond`
+publishes as `pending`; `WaitingMakerBond` publishes nothing.
+
+Therefore `OrderStatus::InProgress` on this client means **taken, real state
+unknown** — never that the escrow is locked. The fine-grained states are only
+ever learned from daemon messages, so:
+
+- Both wire ingest paths (`ingest_order_event`, `subscribe_single_order`) MUST
+  gate the status through `wire_status_applies`: a wire status may only fill an
+  unknown or still-`Pending` local status, or announce a terminal one. It MUST
+  NOT overwrite a status already learned from a daemon message, in the trade row
+  or in the order book.
+- UI MUST NOT treat `InProgress` as `Active`. Actions the daemon gates on
+  `Active`/`FiatSent` (dispute, fiat-sent) are rejected with `CantDo` in that
+  state (issue #203).
+
 ### `update_trade_fields(order_id, status?, hold_invoice?, amount_sats?)` (DB contract)
 
 SQLite native backend updates the `trades.data` JSON column atomically
