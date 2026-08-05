@@ -161,6 +161,13 @@ pub trait Storage: Send + Sync {
         order_id: &str,
     ) -> Result<Option<crate::api::types::TradeInfo>>;
 
+    /// Delete a persisted trade by the order ID it is associated with.
+    ///
+    /// Chat messages are keyed separately (`messages.trade_id` holds the
+    /// order id, no FK) and are deliberately NOT touched here. No-op when
+    /// no matching trade exists.
+    async fn delete_trade_by_order_id(&self, order_id: &str) -> Result<()>;
+
     /// Update the order ID inside a persisted trade (e.g. local UUID → daemon UUID).
     ///
     /// Loads the trade whose `order.id == old_order_id`, replaces `order.id`

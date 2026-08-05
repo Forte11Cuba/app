@@ -275,6 +275,10 @@ impl Storage for IndexedDbStorage {
         Ok(None) // no persisted trade: role lookup returns None (#233)
     }
 
+    async fn delete_trade_by_order_id(&self, _order_id: &str) -> Result<()> {
+        Ok(()) // no persisted trades on web: nothing to delete (#233)
+    }
+
     async fn update_trade_order_id(
         &self,
         _old_order_id: &str,
