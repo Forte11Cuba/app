@@ -1231,8 +1231,9 @@ pub async fn send_invoice(
     crate::api::logging::blog_info(
         "orders",
         format!(
-            "add_invoice published for order={order_id} trade_index={trade_index} \
+            "add_invoice published for order={} trade_index={trade_index} \
              ln_address={} amount={:?} — waiting for daemon",
+            crate::api::logging::short_id(&order_id),
             invoice_or_address.contains('@'),
             amount_opt
         ),
@@ -1295,7 +1296,10 @@ pub async fn send_fiat_sent(order_id: String) -> Result<()> {
     publish_event_json(&event_json).await?;
     crate::api::logging::blog_info(
         "orders",
-        format!("fiat_sent published for order={order_id} trade_index={trade_index}"),
+        format!(
+            "fiat_sent published for order={} trade_index={trade_index}",
+            crate::api::logging::short_id(&order_id),
+        ),
     );
     Ok(())
 }
@@ -1323,7 +1327,10 @@ pub async fn release_order(order_id: String) -> Result<()> {
     publish_event_json(&event_json).await?;
     crate::api::logging::blog_info(
         "orders",
-        format!("release published for order={order_id} trade_index={trade_index}"),
+        format!(
+            "release published for order={} trade_index={trade_index}",
+            crate::api::logging::short_id(&order_id),
+        ),
     );
     Ok(())
 }
@@ -1371,7 +1378,10 @@ pub async fn cancel_order(order_id: String) -> Result<()> {
 
     crate::api::logging::blog_info(
         "orders",
-        format!("cancel published for order={order_id} trade_index={trade_index}"),
+        format!(
+            "cancel published for order={} trade_index={trade_index}",
+            crate::api::logging::short_id(&order_id),
+        ),
     );
     Ok(())
 }
@@ -2637,8 +2647,9 @@ async fn publish_event_json(event_json: &str) -> Result<()> {
         crate::api::logging::blog_warn(
             "publish",
             format!(
-                "ev={} kind={kind} relay={relay} FAIL: {err}",
-                crate::api::logging::short_id(&eid)
+                "ev={} kind={kind} relay={relay} FAIL: {}",
+                crate::api::logging::short_id(&eid),
+                crate::api::logging::sanitize_relay_text(err),
             ),
         );
     }
@@ -3449,14 +3460,18 @@ async fn _run_order_subscription() {
                         crate::api::logging::blog_warn(
                             "relay",
                             format!(
-                                "closed sub={subscription_id} relay={relay_url} msg={message}"
+                                "closed sub={subscription_id} relay={relay_url} msg={}",
+                                crate::api::logging::sanitize_relay_text(&message),
                             ),
                         );
                     }
                     RelayMessage::Notice(msg) => {
                         crate::api::logging::blog_warn(
                             "relay",
-                            format!("notice relay={relay_url} msg={msg}"),
+                            format!(
+                                "notice relay={relay_url} msg={}",
+                                crate::api::logging::sanitize_relay_text(&msg),
+                            ),
                         );
                     }
                     RelayMessage::Auth { .. } => {

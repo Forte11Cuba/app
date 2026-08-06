@@ -68,7 +68,7 @@ impl MessageOutbox {
         let msg = QueuedMessage::new(event_json, now);
         let mut q = self.queue.lock().unwrap_or_else(|e| e.into_inner());
         q.push(msg);
-        crate::api::logging::blog_info("queue", format!("enqueued pending={}", q.len()));
+        crate::api::logging::blog_info("queue", format!("enqueued total={}", q.len()));
     }
 
     /// Attempt to publish all pending messages.
@@ -124,7 +124,10 @@ impl MessageOutbox {
                         msg.status = QueuedMessageStatus::Failed;
                         crate::api::logging::blog_warn(
                             "queue",
-                            format!("giving up after {MAX_RETRIES} retries: {e}"),
+                            format!(
+                                "giving up after {MAX_RETRIES} failures: {}",
+                                crate::api::logging::sanitize_relay_text(&e.to_string()),
+                            ),
                         );
                     } else {
                         msg.status = QueuedMessageStatus::Pending;
@@ -132,9 +135,10 @@ impl MessageOutbox {
                         crate::api::logging::blog_warn(
                             "queue",
                             format!(
-                                "publish failed (attempt {}), retrying in {}s: {e}",
+                                "publish failed (attempt {}), retrying in {}s: {}",
                                 msg.retry_count,
                                 msg.next_retry_delay_secs(),
+                                crate::api::logging::sanitize_relay_text(&e.to_string()),
                             ),
                         );
                     }

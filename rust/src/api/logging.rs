@@ -211,18 +211,28 @@ pub(crate) fn short_id(id: &str) -> &str {
 }
 
 /// Safety net applied to every record before any sink: masks `nsec1…` key
-/// material wherever it appears. Call-site discipline is the primary rule
-/// (never log secrets); this guarantees a slip cannot reach the console,
-/// logcat, or the retained buffer. Returns the input unchanged (no
-/// allocation) when there is nothing to mask.
+/// material wherever it appears, in any casing (bech32 also allows uniform
+/// uppercase). Call-site discipline is the primary rule (never log secrets);
+/// this guarantees a slip cannot reach the console, logcat, or the retained
+/// buffer. Returns the input unchanged (no allocation) when there is nothing
+/// to mask.
 pub(crate) fn scrub_secrets(message: &str) -> std::borrow::Cow<'_, str> {
-    const MARKER: &str = "nsec1";
-    if !message.contains(MARKER) {
+    const MARKER: &[u8] = b"nsec1";
+
+    // Case-insensitive marker search without allocating on the clean path.
+    fn find_marker(haystack: &str) -> Option<usize> {
+        haystack
+            .as_bytes()
+            .windows(MARKER.len())
+            .position(|w| w.eq_ignore_ascii_case(MARKER))
+    }
+
+    if find_marker(message).is_none() {
         return std::borrow::Cow::Borrowed(message);
     }
     let mut out = String::with_capacity(message.len());
     let mut rest = message;
-    while let Some(pos) = rest.find(MARKER) {
+    while let Some(pos) = find_marker(rest) {
         let after = pos + MARKER.len();
         out.push_str(&rest[..after]);
         out.push_str("[redacted]");
@@ -235,6 +245,18 @@ pub(crate) fn scrub_secrets(message: &str) -> std::borrow::Cow<'_, str> {
     }
     out.push_str(rest);
     std::borrow::Cow::Owned(out)
+}
+
+/// Bounds and normalizes text that originates from a remote peer (relay error
+/// strings, NOTICE/CLOSED messages) before it enters a log record: control
+/// characters are replaced (a newline could forge log-entry boundaries) and
+/// the length is capped so a hostile relay cannot bloat the retained buffer.
+pub(crate) fn sanitize_relay_text(text: &str) -> String {
+    const MAX_CHARS: usize = 200;
+    text.chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .take(MAX_CHARS)
+        .collect()
 }
 
 // ── Buffer and Flutter stream ────────────────────────────────────────────────
@@ -399,6 +421,23 @@ mod tests {
         // Multiple occurrences, including at the end of the string.
         let double = "a nsec1abc b nsec1def";
         assert_eq!(scrub_secrets(double), "a nsec1[redacted] b nsec1[redacted]");
+
+        // bech32 allows uniform uppercase — the marker must match any casing.
+        let upper = "key NSEC1QYFXW6VLX3S24R0UZKK end";
+        assert_eq!(scrub_secrets(upper), "key NSEC1[redacted] end");
+        let mixed = "key NsEc1abcDEF end";
+        assert_eq!(scrub_secrets(mixed), "key NsEc1[redacted] end");
+    }
+
+    #[test]
+    fn sanitize_relay_text_strips_control_chars_and_caps_length() {
+        assert_eq!(
+            sanitize_relay_text("auth-required:\nplease\tauth"),
+            "auth-required: please auth"
+        );
+        let long = "x".repeat(500);
+        assert_eq!(sanitize_relay_text(&long).chars().count(), 200);
+        assert_eq!(sanitize_relay_text("plain error"), "plain error");
     }
 
     /// The #241 invariant: key material logged by mistake must reach neither

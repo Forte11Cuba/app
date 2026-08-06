@@ -364,7 +364,11 @@ async fn publish_chat_payload(ctx: &ChatContext, payload: &str) -> Result<nostr_
     for (relay, err) in &output.failed {
         crate::api::logging::blog_warn(
             "publish",
-            format!("ev={} kind=14 relay={relay} FAIL: {err}", crate::api::logging::short_id(&eid)),
+            format!(
+                "ev={} kind=14 relay={relay} FAIL: {}",
+                crate::api::logging::short_id(&eid),
+                crate::api::logging::sanitize_relay_text(err),
+            ),
         );
     }
     Ok(inner)
