@@ -31,6 +31,11 @@ String localizedDaemonError(
   if (raw.contains('NoDaemonResponse')) {
     return l10n.sessionTimeoutMessage;
   }
+  // No relay accepted the event — it never left the device. Same remedy as
+  // a daemon timeout: check the connection and retry.
+  if (raw.contains('NoRelayAccepted')) {
+    return l10n.sessionTimeoutMessage;
+  }
   // No durable storage: no trade key can be derived (issue #249).
   if (raw.contains('StorageUnavailable')) {
     return l10n.storageUnavailable;

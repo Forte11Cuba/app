@@ -348,10 +348,34 @@ async fn publish_chat_payload(ctx: &ChatContext, payload: &str) -> Result<nostr_
         crate::nostr::gift_wrap::mostro_wrap(&ctx.trade_keys, &ctx.conv, &ctx.sign, payload)
             .await?;
     let pool = crate::api::nostr::get_pool().map_err(|_| anyhow!("relay pool not ready"))?;
-    pool.client()
+    let output = pool
+        .client()
         .send_event(&outer)
         .await
         .map_err(|e| anyhow!("publish failed: {e}"))?;
+    // Envelope metadata only — chat plaintext never enters a log record.
+    let eid = outer.id.to_hex();
+    for relay in &output.success {
+        crate::api::logging::blog_info(
+            "publish",
+            format!(
+                "ev={} kind=14 relay={} OK",
+                crate::api::logging::short_id(&eid),
+                crate::api::logging::display_relay(&relay.to_string()),
+            ),
+        );
+    }
+    for (relay, err) in &output.failed {
+        crate::api::logging::blog_warn(
+            "publish",
+            format!(
+                "ev={} kind=14 relay={} FAIL: {}",
+                crate::api::logging::short_id(&eid),
+                crate::api::logging::display_relay(&relay.to_string()),
+                crate::api::logging::sanitize_relay_text(err),
+            ),
+        );
+    }
     Ok(inner)
 }
 

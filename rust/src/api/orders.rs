@@ -1228,11 +1228,15 @@ pub async fn send_invoice(
         remove_pending_request(&trade_pk_hex, request_id);
         return Err(e);
     }
-    log::info!(
-        "[orders] add_invoice published for order={order_id} trade_index={trade_index} \
-         ln_address={} amount={:?} — waiting for daemon",
-        invoice_or_address.contains('@'),
-        amount_opt
+    crate::api::logging::blog_info(
+        "orders",
+        format!(
+            "add_invoice published for order={} trade_index={trade_index} \
+             ln_address={} amount={:?} — waiting for daemon",
+            crate::api::logging::short_id(&order_id),
+            invoice_or_address.contains('@'),
+            amount_opt
+        ),
     );
 
     // Wait for the daemon's verdict: a rejected invoice (e.g. InvalidInvoice)
@@ -1290,7 +1294,13 @@ pub async fn send_fiat_sent(order_id: String) -> Result<()> {
     )
     .await?;
     publish_event_json(&event_json).await?;
-    log::info!("[orders] fiat_sent published for order={order_id} trade_index={trade_index}");
+    crate::api::logging::blog_info(
+        "orders",
+        format!(
+            "fiat_sent published for order={} trade_index={trade_index}",
+            crate::api::logging::short_id(&order_id),
+        ),
+    );
     Ok(())
 }
 
@@ -1315,7 +1325,13 @@ pub async fn release_order(order_id: String) -> Result<()> {
     )
     .await?;
     publish_event_json(&event_json).await?;
-    log::info!("[orders] release published for order={order_id} trade_index={trade_index}");
+    crate::api::logging::blog_info(
+        "orders",
+        format!(
+            "release published for order={} trade_index={trade_index}",
+            crate::api::logging::short_id(&order_id),
+        ),
+    );
     Ok(())
 }
 
@@ -1360,7 +1376,13 @@ pub async fn cancel_order(order_id: String) -> Result<()> {
         }
     }
 
-    log::info!("[orders] cancel published for order={order_id} trade_index={trade_index}");
+    crate::api::logging::blog_info(
+        "orders",
+        format!(
+            "cancel published for order={} trade_index={trade_index}",
+            crate::api::logging::short_id(&order_id),
+        ),
+    );
     Ok(())
 }
 
@@ -1476,6 +1498,13 @@ pub(crate) async fn subscribe_gift_wraps(trade_pubkey: nostr_sdk::PublicKey, tra
 
                     let eid = event.id.to_hex();
                     if is_duplicate_gift_wrap(&eid) {
+                        crate::api::logging::blog_debug(
+                            "gift-wrap",
+                            format!(
+                                "drop ev={} reason=duplicate",
+                                crate::api::logging::short_id(&eid)
+                            ),
+                        );
                         continue;
                     }
                     crate::api::logging::blog_info("gift-wrap", format!(
@@ -1875,6 +1904,13 @@ async fn dispatch_mostro_message(
                     } else {
                         // Sync the Canceled status into the trade DB so My
                         // Trades reflects the cancellation immediately.
+                        crate::api::logging::blog_info(
+                            "orders",
+                            format!(
+                                "status order={} →Canceled src=kind14/Canceled (history kept)",
+                                crate::api::logging::short_id(&oid),
+                            ),
+                        );
                         if let Err(e) = db
                             .update_trade_fields(
                                 &oid,
@@ -1955,10 +1991,13 @@ async fn dispatch_mostro_message(
                 .and_then(map_core_status)
                 .or_else(|| status_for_action(&kind.action))
             {
-                log::info!(
-                    "[orders] gift-wrap {:?}: syncing order={order_id} status={:?}",
-                    kind.action,
-                    new_status
+                crate::api::logging::blog_info(
+                    "orders",
+                    format!(
+                        "status order={} →{new_status:?} src=kind14/{:?}",
+                        crate::api::logging::short_id(&order_id),
+                        kind.action,
+                    ),
                 );
                 order_book().update_order_status(&order_id, new_status.clone()).await;
                 if let Some(db) = crate::db::app_db::db() {
@@ -2015,6 +2054,13 @@ async fn dispatch_mostro_message(
                 amount
             );
             // Save the hold invoice and update status to WaitingPayment.
+            crate::api::logging::blog_info(
+                "orders",
+                format!(
+                    "status order={} →WaitingPayment src=kind14/PayInvoice",
+                    crate::api::logging::short_id(&order_id),
+                ),
+            );
             order_book().update_order_status(&order_id, crate::api::types::OrderStatus::WaitingPayment).await;
             if let Some(db) = crate::db::app_db::db() {
                 if let Err(e) = db
@@ -2066,10 +2112,13 @@ async fn dispatch_mostro_message(
             // reply classification).
             let new_status = status_for_action(&kind.action);
             if let Some(status) = new_status {
-                log::info!(
-                    "[orders] gift-wrap {:?}: syncing order={order_id} status={:?}",
-                    kind.action,
-                    status
+                crate::api::logging::blog_info(
+                    "orders",
+                    format!(
+                        "status order={} →{status:?} src=kind14/{:?}",
+                        crate::api::logging::short_id(&order_id),
+                        kind.action,
+                    ),
                 );
                 order_book().update_order_status(&order_id, status.clone()).await;
                 if let Some(db) = crate::db::app_db::db() {
@@ -2312,6 +2361,29 @@ fn map_core_status(s: mostro_core::order::Status) -> Option<OrderStatus> {
 /// so `in-progress` means "taken", never "escrow locked". Letting it overwrite
 /// a status learned from a daemon message drags an Active trade back to
 /// InProgress and offers actions the daemon then rejects (issue #203).
+/// Logs one wire→trade status sync decision. A real transition logs at info;
+/// blocked (`applies=false`) and no-op decisions log at debug so relay
+/// redelivery churn stays out of a shipped build's log while remaining
+/// visible in a debugging session (#277).
+fn log_wire_status_sync(
+    order_id: &str,
+    wire: &OrderStatus,
+    local: Option<&OrderStatus>,
+    applies: bool,
+    src: &str,
+) {
+    let line = format!(
+        "status order={} wire={wire:?} local={} applies={applies} src={src}",
+        crate::api::logging::short_id(order_id),
+        local.map_or_else(|| "-".to_string(), |s| format!("{s:?}")),
+    );
+    if applies && local != Some(wire) {
+        crate::api::logging::blog_info("orders", line);
+    } else {
+        crate::api::logging::blog_debug("orders", line);
+    }
+}
+
 fn wire_status_applies(local: Option<&OrderStatus>, wire: &OrderStatus) -> bool {
     match local {
         None | Some(OrderStatus::Pending) => true,
@@ -2502,6 +2574,15 @@ async fn subscribe_single_order(order_id: &str) {
                             last_activity = crate::rt::time::Instant::now();
                             let local = local_trade_status(&order.id).await;
                             let applies = wire_status_applies(local.as_ref(), &order.status);
+                            // This subscription only exists for orders we
+                            // created or took, so every decision is ours to log.
+                            log_wire_status_sync(
+                                &order.id,
+                                &order.status,
+                                local.as_ref(),
+                                applies,
+                                "38383/d-tag",
+                            );
                             if let Some(db) = crate::db::app_db::db() {
                                 if let Err(e) = db
                                     .update_trade_fields(
@@ -2547,10 +2628,45 @@ async fn publish_event_json(event_json: &str) -> Result<()> {
         crate::api::nostr::get_pool().map_err(|_| anyhow::anyhow!("RelayPoolNotInitialized"))?;
     let event: nostr_sdk::Event =
         serde_json::from_str(event_json).map_err(|e| anyhow::anyhow!("invalid event JSON: {e}"))?;
-    pool.client()
+    let kind = event.kind.as_u16();
+    let eid = event.id.to_hex();
+    let output = pool
+        .client()
         .send_event(&event)
         .await
         .map_err(|e| anyhow::anyhow!("publish failed: {e}"))?;
+    // Per-relay outcome: with one relay habitually down, knowing WHERE each
+    // event actually landed is what makes delivery issues diagnosable.
+    for relay in &output.success {
+        crate::api::logging::blog_info(
+            "publish",
+            format!(
+                "ev={} kind={kind} relay={} OK",
+                crate::api::logging::short_id(&eid),
+                crate::api::logging::display_relay(&relay.to_string()),
+            ),
+        );
+    }
+    for (relay, err) in &output.failed {
+        crate::api::logging::blog_warn(
+            "publish",
+            format!(
+                "ev={} kind={kind} relay={} FAIL: {}",
+                crate::api::logging::short_id(&eid),
+                crate::api::logging::display_relay(&relay.to_string()),
+                crate::api::logging::sanitize_relay_text(err),
+            ),
+        );
+    }
+    // The SDK returns Ok even when every relay rejected the event (verified
+    // in nostr-relay-pool 0.44: `send_event_to` has no empty-success guard).
+    // Without this, fire-and-forget actions (fiat-sent, release, cancel)
+    // would report success having reached zero relays, and correlated ones
+    // would wait 10s for a reply that can never arrive. Partial success
+    // stays Ok. Stable marker — Dart maps it to a localized message.
+    if output.success.is_empty() {
+        anyhow::bail!("NoRelayAccepted");
+    }
     Ok(())
 }
 
@@ -2836,6 +2952,14 @@ async fn subscribe_node_filters(
         .subscribe_with_id(orders_subscription_id(), order_filter, None)
         .await
         .map_err(|e| anyhow::anyhow!("order subscribe failed: {e}"))?;
+    crate::api::logging::blog_info(
+        "relay",
+        format!(
+            "sub created id={} kinds=[38383] author={}",
+            orders_subscription_id(),
+            crate::api::logging::short_id(&mostro_pubkey.to_hex()),
+        ),
+    );
 
     // Kind-14 NIP-44 replies authored by Mostro for all known trade pubkeys.
     // The author pin disambiguates from NIP-17 peer chat (also kind 14).
@@ -2845,6 +2969,7 @@ async fn subscribe_node_filters(
     // changes and late reconciliations are never lost. Only the ephemeral
     // per-trade subscription (subscribe_gift_wraps) carries a cutoff.
     if !trade_pubkeys.is_empty() {
+        let p_count = trade_pubkeys.len();
         let dm_filter = nostr_sdk::Filter::new()
             .kind(nostr_sdk::Kind::PrivateDirectMessage)
             .author(mostro_pubkey)
@@ -2853,6 +2978,13 @@ async fn subscribe_node_filters(
             .subscribe_with_id(mostro_dm_subscription_id(), dm_filter, None)
             .await
             .map_err(|e| anyhow::anyhow!("dm subscribe failed: {e}"))?;
+        crate::api::logging::blog_info(
+            "relay",
+            format!(
+                "sub created id={} kinds=[14] p_count={p_count}",
+                mostro_dm_subscription_id(),
+            ),
+        );
     }
     Ok(())
 }
@@ -2973,6 +3105,7 @@ async fn resubscribe_global_dm_filter() {
     if trade_pubkeys.is_empty() {
         return;
     }
+    let p_count = trade_pubkeys.len();
     let dm_filter = nostr_sdk::Filter::new()
         .kind(nostr_sdk::Kind::PrivateDirectMessage)
         .author(mostro_pubkey)
@@ -2983,6 +3116,14 @@ async fn resubscribe_global_dm_filter() {
         .await
     {
         log::warn!("[orders] bulk DM filter refresh failed: {e}");
+    } else {
+        crate::api::logging::blog_info(
+            "relay",
+            format!(
+                "sub replaced id={} kinds=[14] p_count={p_count}",
+                mostro_dm_subscription_id(),
+            ),
+        );
     }
 }
 
@@ -3031,7 +3172,17 @@ async fn handle_global_gift_wrap(
         match found {
             Some(f) => f,
             None => {
-                // Not addressed to any of our known trade keys — skip silently.
+                // The bulk filter pins author + our own p-tags, so a kind-14
+                // that reaches here without a matching key is an anomaly
+                // (stale filter after regenerate? key map gap?) — worth a warn.
+                crate::api::logging::blog_warn(
+                    "gift-wrap",
+                    format!(
+                        "drop ev={} reason=no-matching-p-tag map={}",
+                        crate::api::logging::short_id(&event.id.to_hex()),
+                        trade_key_map.len(),
+                    ),
+                );
                 return;
             }
         }
@@ -3039,6 +3190,10 @@ async fn handle_global_gift_wrap(
 
     let eid = event.id.to_hex();
     if is_duplicate_gift_wrap(&eid) {
+        crate::api::logging::blog_debug(
+            "gift-wrap",
+            format!("drop ev={} reason=duplicate", crate::api::logging::short_id(&eid)),
+        );
         return;
     }
     crate::api::logging::blog_info("gift-wrap", format!(
@@ -3156,6 +3311,16 @@ async fn ingest_order_event(event: &nostr_sdk::Event) {
                 let local = local_trade_status(&info.id).await;
                 let applies = wire_status_applies(local.as_ref(), &info.status);
                 if info.is_mine {
+                    // Only own orders: for stranger book entries `local`
+                    // falls back to the book itself and would log every
+                    // public update.
+                    log_wire_status_sync(
+                        &info.id,
+                        &info.status,
+                        local.as_ref(),
+                        applies,
+                        "38383/book",
+                    );
                     if let Some(db) = crate::db::app_db::db() {
                         if let Err(e) = db
                             .update_trade_fields(
@@ -3273,6 +3438,74 @@ async fn _run_order_subscription() {
                 }
                 ingest_order_event(&event).await;
             }
+            // Raw relay control messages. Observation only — every arm just
+            // logs. CLOSED and NOTICE are anomalies (a relay refusing or
+            // complaining about a subscription) that were previously
+            // swallowed by the catch-all and undiagnosable in the field.
+            Ok(RelayPoolNotification::Message { relay_url, message }) => {
+                use nostr_sdk::RelayMessage;
+                match message {
+                    // Ground truth for delivery questions: this fires for
+                    // every frame the relay pushes, BEFORE the SDK's
+                    // first-time-seen dedup that gates the Event
+                    // notification above (#277).
+                    RelayMessage::Event { subscription_id, event } => {
+                        let kind = event.kind.as_u16();
+                        if kind == 14 || kind == 1059 {
+                            crate::api::logging::blog_debug(
+                                "relay",
+                                format!(
+                                    "raw ev={} kind={kind} sub={subscription_id} relay={}",
+                                    crate::api::logging::short_id(&event.id.to_hex()),
+                                    crate::api::logging::display_relay(&relay_url.to_string()),
+                                ),
+                            );
+                        }
+                    }
+                    RelayMessage::EndOfStoredEvents(sub_id) => {
+                        crate::api::logging::blog_debug(
+                            "relay",
+                            format!(
+                                "eose sub={sub_id} relay={}",
+                                crate::api::logging::display_relay(&relay_url.to_string()),
+                            ),
+                        );
+                    }
+                    RelayMessage::Closed {
+                        subscription_id,
+                        message,
+                    } => {
+                        crate::api::logging::blog_warn(
+                            "relay",
+                            format!(
+                                "closed sub={subscription_id} relay={} msg={}",
+                                crate::api::logging::display_relay(&relay_url.to_string()),
+                                crate::api::logging::sanitize_relay_text(&message),
+                            ),
+                        );
+                    }
+                    RelayMessage::Notice(msg) => {
+                        crate::api::logging::blog_warn(
+                            "relay",
+                            format!(
+                                "notice relay={} msg={}",
+                                crate::api::logging::display_relay(&relay_url.to_string()),
+                                crate::api::logging::sanitize_relay_text(&msg),
+                            ),
+                        );
+                    }
+                    RelayMessage::Auth { .. } => {
+                        crate::api::logging::blog_debug(
+                            "relay",
+                            format!(
+                                "auth-challenge relay={}",
+                                crate::api::logging::display_relay(&relay_url.to_string()),
+                            ),
+                        );
+                    }
+                    _ => {}
+                }
+            }
             Ok(RelayPoolNotification::Shutdown) => {
                 log::info!("[orders] relay pool shutdown — subscription loop exiting");
                 break;
@@ -3285,7 +3518,6 @@ async fn _run_order_subscription() {
                 log::warn!("[orders] lagged by {n} messages");
                 continue;
             }
-            _ => {}
         }
     }
 }
