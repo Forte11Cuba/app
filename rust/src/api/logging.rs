@@ -256,7 +256,9 @@ pub(crate) fn display_relay(url: &str) -> String {
     };
     let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
     let host = authority.rsplit('@').next().unwrap_or(authority);
-    format!("{scheme}://{host}")
+    // The authority may still carry control characters — same policy as any
+    // remote-influenced text before it enters a log record.
+    sanitize_relay_text(&format!("{scheme}://{host}"))
 }
 
 /// Bounds and normalizes text that originates from a remote peer (relay error
@@ -451,6 +453,11 @@ mod tests {
         );
         // Not a URL at all: falls back to plain sanitization.
         assert_eq!(display_relay("not a url"), "not a url");
+        // Control characters in the authority cannot forge log boundaries.
+        assert_eq!(
+            display_relay("wss://relay.example\nforged"),
+            "wss://relay.example forged"
+        );
     }
 
     #[test]

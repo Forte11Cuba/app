@@ -121,7 +121,7 @@ mod native {
             crate::api::logging::blog_info(
                 "nwc",
                 format!(
-                    "connected relays={} wallet-relay={}",
+                    "client ready relays-configured={} wallet-relay={}",
                     relay_urls.len(),
                     relay_urls
                         .first()
@@ -150,7 +150,7 @@ mod native {
         /// even if the wallet replies before EOSE.
         async fn send_request(&self, request: Request) -> Result<Nip47Response> {
             // Method name only — params (invoices, amounts) never enter a log.
-            let method = format!("{:?}", request.method);
+            let method = request.method.to_string();
             crate::api::logging::blog_info("nwc", format!("→ {method}"));
             let event = request
                 .to_event(&self.uri)
@@ -220,7 +220,16 @@ mod native {
                             crate::api::logging::sanitize_relay_text(&err.to_string()),
                         ),
                     ),
-                    None => crate::api::logging::blog_info("nwc", format!("← {method} OK")),
+                    None if resp.result.is_some() => {
+                        crate::api::logging::blog_info("nwc", format!("← {method} OK"))
+                    }
+                    // Neither error nor result: the wallet answered with an
+                    // incomplete payload — callers will fail to parse it, so
+                    // the log must not claim success.
+                    None => crate::api::logging::blog_warn(
+                        "nwc",
+                        format!("← {method} EMPTY_RESPONSE"),
+                    ),
                 },
                 Err(e) => crate::api::logging::blog_warn(
                     "nwc",
