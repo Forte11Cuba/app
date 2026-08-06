@@ -358,15 +358,20 @@ async fn publish_chat_payload(ctx: &ChatContext, payload: &str) -> Result<nostr_
     for relay in &output.success {
         crate::api::logging::blog_info(
             "publish",
-            format!("ev={} kind=14 relay={relay} OK", crate::api::logging::short_id(&eid)),
+            format!(
+                "ev={} kind=14 relay={} OK",
+                crate::api::logging::short_id(&eid),
+                crate::api::logging::display_relay(&relay.to_string()),
+            ),
         );
     }
     for (relay, err) in &output.failed {
         crate::api::logging::blog_warn(
             "publish",
             format!(
-                "ev={} kind=14 relay={relay} FAIL: {}",
+                "ev={} kind=14 relay={} FAIL: {}",
                 crate::api::logging::short_id(&eid),
+                crate::api::logging::display_relay(&relay.to_string()),
                 crate::api::logging::sanitize_relay_text(err),
             ),
         );

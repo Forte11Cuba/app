@@ -2640,15 +2640,20 @@ async fn publish_event_json(event_json: &str) -> Result<()> {
     for relay in &output.success {
         crate::api::logging::blog_info(
             "publish",
-            format!("ev={} kind={kind} relay={relay} OK", crate::api::logging::short_id(&eid)),
+            format!(
+                "ev={} kind={kind} relay={} OK",
+                crate::api::logging::short_id(&eid),
+                crate::api::logging::display_relay(&relay.to_string()),
+            ),
         );
     }
     for (relay, err) in &output.failed {
         crate::api::logging::blog_warn(
             "publish",
             format!(
-                "ev={} kind={kind} relay={relay} FAIL: {}",
+                "ev={} kind={kind} relay={} FAIL: {}",
                 crate::api::logging::short_id(&eid),
+                crate::api::logging::display_relay(&relay.to_string()),
                 crate::api::logging::sanitize_relay_text(err),
             ),
         );
@@ -3450,8 +3455,9 @@ async fn _run_order_subscription() {
                             crate::api::logging::blog_debug(
                                 "relay",
                                 format!(
-                                    "raw ev={} kind={kind} sub={subscription_id} relay={relay_url}",
+                                    "raw ev={} kind={kind} sub={subscription_id} relay={}",
                                     crate::api::logging::short_id(&event.id.to_hex()),
+                                    crate::api::logging::display_relay(&relay_url.to_string()),
                                 ),
                             );
                         }
@@ -3459,7 +3465,10 @@ async fn _run_order_subscription() {
                     RelayMessage::EndOfStoredEvents(sub_id) => {
                         crate::api::logging::blog_debug(
                             "relay",
-                            format!("eose sub={sub_id} relay={relay_url}"),
+                            format!(
+                                "eose sub={sub_id} relay={}",
+                                crate::api::logging::display_relay(&relay_url.to_string()),
+                            ),
                         );
                     }
                     RelayMessage::Closed {
@@ -3469,7 +3478,8 @@ async fn _run_order_subscription() {
                         crate::api::logging::blog_warn(
                             "relay",
                             format!(
-                                "closed sub={subscription_id} relay={relay_url} msg={}",
+                                "closed sub={subscription_id} relay={} msg={}",
+                                crate::api::logging::display_relay(&relay_url.to_string()),
                                 crate::api::logging::sanitize_relay_text(&message),
                             ),
                         );
@@ -3478,7 +3488,8 @@ async fn _run_order_subscription() {
                         crate::api::logging::blog_warn(
                             "relay",
                             format!(
-                                "notice relay={relay_url} msg={}",
+                                "notice relay={} msg={}",
+                                crate::api::logging::display_relay(&relay_url.to_string()),
                                 crate::api::logging::sanitize_relay_text(&msg),
                             ),
                         );
@@ -3486,7 +3497,10 @@ async fn _run_order_subscription() {
                     RelayMessage::Auth { .. } => {
                         crate::api::logging::blog_debug(
                             "relay",
-                            format!("auth-challenge relay={relay_url}"),
+                            format!(
+                                "auth-challenge relay={}",
+                                crate::api::logging::display_relay(&relay_url.to_string()),
+                            ),
                         );
                     }
                     _ => {}
