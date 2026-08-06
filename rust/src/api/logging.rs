@@ -247,6 +247,18 @@ pub(crate) fn scrub_secrets(message: &str) -> std::borrow::Cow<'_, str> {
     std::borrow::Cow::Owned(out)
 }
 
+/// Renders a relay URL as `scheme://host[:port]` only — userinfo, path,
+/// query and fragment are dropped so tokenized/private relay URLs never
+/// enter a log record.
+pub(crate) fn display_relay(url: &str) -> String {
+    let Some((scheme, rest)) = url.split_once("://") else {
+        return sanitize_relay_text(url);
+    };
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    let host = authority.rsplit('@').next().unwrap_or(authority);
+    format!("{scheme}://{host}")
+}
+
 /// Bounds and normalizes text that originates from a remote peer (relay error
 /// strings, NOTICE/CLOSED messages) before it enters a log record: control
 /// characters are replaced (a newline could forge log-entry boundaries) and
@@ -427,6 +439,18 @@ mod tests {
         assert_eq!(scrub_secrets(upper), "key NSEC1[redacted] end");
         let mixed = "key NsEc1abcDEF end";
         assert_eq!(scrub_secrets(mixed), "key NsEc1[redacted] end");
+    }
+
+    #[test]
+    fn display_relay_keeps_only_scheme_and_host() {
+        assert_eq!(display_relay("wss://nos.lol"), "wss://nos.lol");
+        assert_eq!(display_relay("wss://relay.example.com:7777"), "wss://relay.example.com:7777");
+        assert_eq!(
+            display_relay("wss://user:token@relay.example.com/path?secret=x#f"),
+            "wss://relay.example.com"
+        );
+        // Not a URL at all: falls back to plain sanitization.
+        assert_eq!(display_relay("not a url"), "not a url");
     }
 
     #[test]

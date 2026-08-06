@@ -183,7 +183,13 @@ impl RelayPool {
                             // matters (INFO); the connecting↔disconnected
                             // retry churn of an unreachable relay stays at
                             // DEBUG so it doesn't drown a shipped build's log.
-                            let line = format!("relay {url} {:?}→{new_status:?}", info.status);
+                            // Host-only display: a user-added relay URL may
+                            // carry tokens/userinfo that must not be retained.
+                            let line = format!(
+                                "relay {} {:?}→{new_status:?}",
+                                crate::api::logging::display_relay(&url),
+                                info.status,
+                            );
                             if matches!(info.status, RelayStatus::Connected)
                                 || matches!(new_status, RelayStatus::Connected)
                             {
