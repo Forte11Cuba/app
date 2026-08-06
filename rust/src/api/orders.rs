@@ -1290,7 +1290,10 @@ pub async fn send_fiat_sent(order_id: String) -> Result<()> {
     )
     .await?;
     publish_event_json(&event_json).await?;
-    log::info!("[orders] fiat_sent published for order={order_id} trade_index={trade_index}");
+    crate::api::logging::blog_info(
+        "orders",
+        format!("fiat_sent published for order={order_id} trade_index={trade_index}"),
+    );
     Ok(())
 }
 
@@ -1315,7 +1318,10 @@ pub async fn release_order(order_id: String) -> Result<()> {
     )
     .await?;
     publish_event_json(&event_json).await?;
-    log::info!("[orders] release published for order={order_id} trade_index={trade_index}");
+    crate::api::logging::blog_info(
+        "orders",
+        format!("release published for order={order_id} trade_index={trade_index}"),
+    );
     Ok(())
 }
 
@@ -1360,7 +1366,10 @@ pub async fn cancel_order(order_id: String) -> Result<()> {
         }
     }
 
-    log::info!("[orders] cancel published for order={order_id} trade_index={trade_index}");
+    crate::api::logging::blog_info(
+        "orders",
+        format!("cancel published for order={order_id} trade_index={trade_index}"),
+    );
     Ok(())
 }
 
@@ -1476,6 +1485,13 @@ pub(crate) async fn subscribe_gift_wraps(trade_pubkey: nostr_sdk::PublicKey, tra
 
                     let eid = event.id.to_hex();
                     if is_duplicate_gift_wrap(&eid) {
+                        crate::api::logging::blog_debug(
+                            "gift-wrap",
+                            format!(
+                                "drop ev={} reason=duplicate",
+                                crate::api::logging::short_id(&eid)
+                            ),
+                        );
                         continue;
                     }
                     crate::api::logging::blog_info("gift-wrap", format!(
@@ -2547,10 +2563,30 @@ async fn publish_event_json(event_json: &str) -> Result<()> {
         crate::api::nostr::get_pool().map_err(|_| anyhow::anyhow!("RelayPoolNotInitialized"))?;
     let event: nostr_sdk::Event =
         serde_json::from_str(event_json).map_err(|e| anyhow::anyhow!("invalid event JSON: {e}"))?;
-    pool.client()
+    let kind = event.kind.as_u16();
+    let eid = event.id.to_hex();
+    let output = pool
+        .client()
         .send_event(&event)
         .await
         .map_err(|e| anyhow::anyhow!("publish failed: {e}"))?;
+    // Per-relay outcome: with one relay habitually down, knowing WHERE each
+    // event actually landed is what makes delivery issues diagnosable.
+    for relay in &output.success {
+        crate::api::logging::blog_info(
+            "publish",
+            format!("ev={} kind={kind} relay={relay} OK", crate::api::logging::short_id(&eid)),
+        );
+    }
+    for (relay, err) in &output.failed {
+        crate::api::logging::blog_warn(
+            "publish",
+            format!(
+                "ev={} kind={kind} relay={relay} FAIL: {err}",
+                crate::api::logging::short_id(&eid)
+            ),
+        );
+    }
     Ok(())
 }
 
@@ -3056,7 +3092,17 @@ async fn handle_global_gift_wrap(
         match found {
             Some(f) => f,
             None => {
-                // Not addressed to any of our known trade keys — skip silently.
+                // The bulk filter pins author + our own p-tags, so a kind-14
+                // that reaches here without a matching key is an anomaly
+                // (stale filter after regenerate? key map gap?) — worth a warn.
+                crate::api::logging::blog_warn(
+                    "gift-wrap",
+                    format!(
+                        "drop ev={} reason=no-matching-p-tag map={}",
+                        crate::api::logging::short_id(&event.id.to_hex()),
+                        trade_key_map.len(),
+                    ),
+                );
                 return;
             }
         }
@@ -3064,6 +3110,10 @@ async fn handle_global_gift_wrap(
 
     let eid = event.id.to_hex();
     if is_duplicate_gift_wrap(&eid) {
+        crate::api::logging::blog_debug(
+            "gift-wrap",
+            format!("drop ev={} reason=duplicate", crate::api::logging::short_id(&eid)),
+        );
         return;
     }
     crate::api::logging::blog_info("gift-wrap", format!(
@@ -3305,6 +3355,22 @@ async fn _run_order_subscription() {
             Ok(RelayPoolNotification::Message { relay_url, message }) => {
                 use nostr_sdk::RelayMessage;
                 match message {
+                    // Ground truth for delivery questions: this fires for
+                    // every frame the relay pushes, BEFORE the SDK's
+                    // first-time-seen dedup that gates the Event
+                    // notification above (#277).
+                    RelayMessage::Event { subscription_id, event } => {
+                        let kind = event.kind.as_u16();
+                        if kind == 14 || kind == 1059 {
+                            crate::api::logging::blog_debug(
+                                "relay",
+                                format!(
+                                    "raw ev={} kind={kind} sub={subscription_id} relay={relay_url}",
+                                    crate::api::logging::short_id(&event.id.to_hex()),
+                                ),
+                            );
+                        }
+                    }
                     RelayMessage::EndOfStoredEvents(sub_id) => {
                         crate::api::logging::blog_debug(
                             "relay",

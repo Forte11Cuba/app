@@ -206,9 +206,6 @@ fn platform_console(level: log::Level, target: &str, message: &str) {
 
 /// First 8 chars of an id (event id, order UUID, pubkey) — enough to correlate
 /// log lines, deliberately not enough to reconstruct the full identifier.
-// TODO(#241): the allow goes away when the wire-boundary instrumentation
-// commits start consuming this.
-#[allow(dead_code)]
 pub(crate) fn short_id(id: &str) -> &str {
     id.get(..8).unwrap_or(id)
 }
