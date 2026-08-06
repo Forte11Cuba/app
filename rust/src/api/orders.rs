@@ -2653,6 +2653,15 @@ async fn publish_event_json(event_json: &str) -> Result<()> {
             ),
         );
     }
+    // The SDK returns Ok even when every relay rejected the event (verified
+    // in nostr-relay-pool 0.44: `send_event_to` has no empty-success guard).
+    // Without this, fire-and-forget actions (fiat-sent, release, cancel)
+    // would report success having reached zero relays, and correlated ones
+    // would wait 10s for a reply that can never arrive. Partial success
+    // stays Ok. Stable marker — Dart maps it to a localized message.
+    if output.success.is_empty() {
+        anyhow::bail!("NoRelayAccepted");
+    }
     Ok(())
 }
 
