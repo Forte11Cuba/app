@@ -1228,11 +1228,14 @@ pub async fn send_invoice(
         remove_pending_request(&trade_pk_hex, request_id);
         return Err(e);
     }
-    log::info!(
-        "[orders] add_invoice published for order={order_id} trade_index={trade_index} \
-         ln_address={} amount={:?} — waiting for daemon",
-        invoice_or_address.contains('@'),
-        amount_opt
+    crate::api::logging::blog_info(
+        "orders",
+        format!(
+            "add_invoice published for order={order_id} trade_index={trade_index} \
+             ln_address={} amount={:?} — waiting for daemon",
+            invoice_or_address.contains('@'),
+            amount_opt
+        ),
     );
 
     // Wait for the daemon's verdict: a rejected invoice (e.g. InvalidInvoice)
@@ -1891,6 +1894,13 @@ async fn dispatch_mostro_message(
                     } else {
                         // Sync the Canceled status into the trade DB so My
                         // Trades reflects the cancellation immediately.
+                        crate::api::logging::blog_info(
+                            "orders",
+                            format!(
+                                "status order={} →Canceled src=kind14/Canceled (history kept)",
+                                crate::api::logging::short_id(&oid),
+                            ),
+                        );
                         if let Err(e) = db
                             .update_trade_fields(
                                 &oid,
@@ -1971,10 +1981,13 @@ async fn dispatch_mostro_message(
                 .and_then(map_core_status)
                 .or_else(|| status_for_action(&kind.action))
             {
-                log::info!(
-                    "[orders] gift-wrap {:?}: syncing order={order_id} status={:?}",
-                    kind.action,
-                    new_status
+                crate::api::logging::blog_info(
+                    "orders",
+                    format!(
+                        "status order={} →{new_status:?} src=kind14/{:?}",
+                        crate::api::logging::short_id(&order_id),
+                        kind.action,
+                    ),
                 );
                 order_book().update_order_status(&order_id, new_status.clone()).await;
                 if let Some(db) = crate::db::app_db::db() {
@@ -2031,6 +2044,13 @@ async fn dispatch_mostro_message(
                 amount
             );
             // Save the hold invoice and update status to WaitingPayment.
+            crate::api::logging::blog_info(
+                "orders",
+                format!(
+                    "status order={} →WaitingPayment src=kind14/PayInvoice",
+                    crate::api::logging::short_id(&order_id),
+                ),
+            );
             order_book().update_order_status(&order_id, crate::api::types::OrderStatus::WaitingPayment).await;
             if let Some(db) = crate::db::app_db::db() {
                 if let Err(e) = db
@@ -2082,10 +2102,13 @@ async fn dispatch_mostro_message(
             // reply classification).
             let new_status = status_for_action(&kind.action);
             if let Some(status) = new_status {
-                log::info!(
-                    "[orders] gift-wrap {:?}: syncing order={order_id} status={:?}",
-                    kind.action,
-                    status
+                crate::api::logging::blog_info(
+                    "orders",
+                    format!(
+                        "status order={} →{status:?} src=kind14/{:?}",
+                        crate::api::logging::short_id(&order_id),
+                        kind.action,
+                    ),
                 );
                 order_book().update_order_status(&order_id, status.clone()).await;
                 if let Some(db) = crate::db::app_db::db() {
@@ -2328,6 +2351,29 @@ fn map_core_status(s: mostro_core::order::Status) -> Option<OrderStatus> {
 /// so `in-progress` means "taken", never "escrow locked". Letting it overwrite
 /// a status learned from a daemon message drags an Active trade back to
 /// InProgress and offers actions the daemon then rejects (issue #203).
+/// Logs one wire→trade status sync decision. A real transition logs at info;
+/// blocked (`applies=false`) and no-op decisions log at debug so relay
+/// redelivery churn stays out of a shipped build's log while remaining
+/// visible in a debugging session (#277).
+fn log_wire_status_sync(
+    order_id: &str,
+    wire: &OrderStatus,
+    local: Option<&OrderStatus>,
+    applies: bool,
+    src: &str,
+) {
+    let line = format!(
+        "status order={} wire={wire:?} local={} applies={applies} src={src}",
+        crate::api::logging::short_id(order_id),
+        local.map_or_else(|| "-".to_string(), |s| format!("{s:?}")),
+    );
+    if applies && local != Some(wire) {
+        crate::api::logging::blog_info("orders", line);
+    } else {
+        crate::api::logging::blog_debug("orders", line);
+    }
+}
+
 fn wire_status_applies(local: Option<&OrderStatus>, wire: &OrderStatus) -> bool {
     match local {
         None | Some(OrderStatus::Pending) => true,
@@ -2518,6 +2564,15 @@ async fn subscribe_single_order(order_id: &str) {
                             last_activity = crate::rt::time::Instant::now();
                             let local = local_trade_status(&order.id).await;
                             let applies = wire_status_applies(local.as_ref(), &order.status);
+                            // This subscription only exists for orders we
+                            // created or took, so every decision is ours to log.
+                            log_wire_status_sync(
+                                &order.id,
+                                &order.status,
+                                local.as_ref(),
+                                applies,
+                                "38383/d-tag",
+                            );
                             if let Some(db) = crate::db::app_db::db() {
                                 if let Err(e) = db
                                     .update_trade_fields(
@@ -3231,6 +3286,16 @@ async fn ingest_order_event(event: &nostr_sdk::Event) {
                 let local = local_trade_status(&info.id).await;
                 let applies = wire_status_applies(local.as_ref(), &info.status);
                 if info.is_mine {
+                    // Only own orders: for stranger book entries `local`
+                    // falls back to the book itself and would log every
+                    // public update.
+                    log_wire_status_sync(
+                        &info.id,
+                        &info.status,
+                        local.as_ref(),
+                        applies,
+                        "38383/book",
+                    );
                     if let Some(db) = crate::db::app_db::db() {
                         if let Err(e) = db
                             .update_trade_fields(

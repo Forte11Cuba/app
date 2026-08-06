@@ -94,6 +94,15 @@ impl SessionManager {
         if sessions.contains_key(&order_id) {
             return Err(anyhow!("SessionAlreadyExists: {}", order_id));
         }
+        crate::api::logging::blog_info(
+            "session",
+            format!(
+                "created order={} idx={} role={:?}",
+                crate::api::logging::short_id(&order_id),
+                session.trade_key_index,
+                session.role,
+            ),
+        );
         sessions.insert(order_id, session.clone());
         Ok(session)
     }
@@ -122,7 +131,12 @@ impl SessionManager {
 
     /// Remove a session (on completion, cancellation, or timeout).
     pub async fn remove_session(&self, order_id: &str) {
-        self.sessions.write().await.remove(order_id);
+        if self.sessions.write().await.remove(order_id).is_some() {
+            crate::api::logging::blog_info(
+                "session",
+                format!("removed order={}", crate::api::logging::short_id(order_id)),
+            );
+        }
     }
 
     /// Store the ECDH admin shared key derived from `adminTookDispute`.
