@@ -179,6 +179,18 @@ impl RelayPool {
                     let mut relays_w = relays.write().await;
                     if let Some(info) = relays_w.iter_mut().find(|r| r.url == url) {
                         if info.status != new_status {
+                            // Gaining/losing a connection is the signal that
+                            // matters (INFO); the connecting↔disconnected
+                            // retry churn of an unreachable relay stays at
+                            // DEBUG so it doesn't drown a shipped build's log.
+                            let line = format!("relay {url} {:?}→{new_status:?}", info.status);
+                            if matches!(info.status, RelayStatus::Connected)
+                                || matches!(new_status, RelayStatus::Connected)
+                            {
+                                crate::api::logging::blog_info("relay", line);
+                            } else {
+                                crate::api::logging::blog_debug("relay", line);
+                            }
                             info.status = new_status;
                             if matches!(info.status, RelayStatus::Connected) {
                                 info.last_connected_at = Some(unix_now());

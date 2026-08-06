@@ -2836,6 +2836,14 @@ async fn subscribe_node_filters(
         .subscribe_with_id(orders_subscription_id(), order_filter, None)
         .await
         .map_err(|e| anyhow::anyhow!("order subscribe failed: {e}"))?;
+    crate::api::logging::blog_info(
+        "relay",
+        format!(
+            "sub created id={} kinds=[38383] author={}",
+            orders_subscription_id(),
+            crate::api::logging::short_id(&mostro_pubkey.to_hex()),
+        ),
+    );
 
     // Kind-14 NIP-44 replies authored by Mostro for all known trade pubkeys.
     // The author pin disambiguates from NIP-17 peer chat (also kind 14).
@@ -2845,6 +2853,7 @@ async fn subscribe_node_filters(
     // changes and late reconciliations are never lost. Only the ephemeral
     // per-trade subscription (subscribe_gift_wraps) carries a cutoff.
     if !trade_pubkeys.is_empty() {
+        let p_count = trade_pubkeys.len();
         let dm_filter = nostr_sdk::Filter::new()
             .kind(nostr_sdk::Kind::PrivateDirectMessage)
             .author(mostro_pubkey)
@@ -2853,6 +2862,13 @@ async fn subscribe_node_filters(
             .subscribe_with_id(mostro_dm_subscription_id(), dm_filter, None)
             .await
             .map_err(|e| anyhow::anyhow!("dm subscribe failed: {e}"))?;
+        crate::api::logging::blog_info(
+            "relay",
+            format!(
+                "sub created id={} kinds=[14] p_count={p_count}",
+                mostro_dm_subscription_id(),
+            ),
+        );
     }
     Ok(())
 }
@@ -2973,6 +2989,7 @@ async fn resubscribe_global_dm_filter() {
     if trade_pubkeys.is_empty() {
         return;
     }
+    let p_count = trade_pubkeys.len();
     let dm_filter = nostr_sdk::Filter::new()
         .kind(nostr_sdk::Kind::PrivateDirectMessage)
         .author(mostro_pubkey)
@@ -2983,6 +3000,14 @@ async fn resubscribe_global_dm_filter() {
         .await
     {
         log::warn!("[orders] bulk DM filter refresh failed: {e}");
+    } else {
+        crate::api::logging::blog_info(
+            "relay",
+            format!(
+                "sub replaced id={} kinds=[14] p_count={p_count}",
+                mostro_dm_subscription_id(),
+            ),
+        );
     }
 }
 
@@ -3273,6 +3298,45 @@ async fn _run_order_subscription() {
                 }
                 ingest_order_event(&event).await;
             }
+            // Raw relay control messages. Observation only — every arm just
+            // logs. CLOSED and NOTICE are anomalies (a relay refusing or
+            // complaining about a subscription) that were previously
+            // swallowed by the catch-all and undiagnosable in the field.
+            Ok(RelayPoolNotification::Message { relay_url, message }) => {
+                use nostr_sdk::RelayMessage;
+                match message {
+                    RelayMessage::EndOfStoredEvents(sub_id) => {
+                        crate::api::logging::blog_debug(
+                            "relay",
+                            format!("eose sub={sub_id} relay={relay_url}"),
+                        );
+                    }
+                    RelayMessage::Closed {
+                        subscription_id,
+                        message,
+                    } => {
+                        crate::api::logging::blog_warn(
+                            "relay",
+                            format!(
+                                "closed sub={subscription_id} relay={relay_url} msg={message}"
+                            ),
+                        );
+                    }
+                    RelayMessage::Notice(msg) => {
+                        crate::api::logging::blog_warn(
+                            "relay",
+                            format!("notice relay={relay_url} msg={msg}"),
+                        );
+                    }
+                    RelayMessage::Auth { .. } => {
+                        crate::api::logging::blog_debug(
+                            "relay",
+                            format!("auth-challenge relay={relay_url}"),
+                        );
+                    }
+                    _ => {}
+                }
+            }
             Ok(RelayPoolNotification::Shutdown) => {
                 log::info!("[orders] relay pool shutdown — subscription loop exiting");
                 break;
@@ -3285,7 +3349,6 @@ async fn _run_order_subscription() {
                 log::warn!("[orders] lagged by {n} messages");
                 continue;
             }
-            _ => {}
         }
     }
 }
