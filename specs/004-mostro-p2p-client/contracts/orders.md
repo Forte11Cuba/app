@@ -251,6 +251,39 @@ call — it arrives as a Kind 14 (NIP-44) message from mostrod. This
 section documents the full chain so Flutter providers and screens know
 what to listen to. Reference: <https://mostro.network/protocol/seller_pay_hold_invoice.html>.
 
+### Kind-14 delivery & decryption coverage
+
+Receiving a daemon Kind 14 takes two independent layers, and BOTH must
+cover the trade or its messages are lost (dropped as
+`no-matching-p-tag`, observable in the logs with the map size):
+
+- **Delivery** — the bulk `mostro-dm` relay subscription, author-pinned to
+  the active node, whose `#p` filter must include the trade key's pubkey.
+- **Decryption** — the refreshable coverage map (`global_dm_keys`,
+  pubkey → keys+index) the event loop decrypts against.
+
+Coverage invariants:
+
+- **Both subscription entry points seed in full.** Startup
+  (`_run_order_subscription`) and node switch derive every known trade key
+  (indexes `1..=identity.trade_key_index`) and seed the map through the
+  shared `seed_global_dm_coverage()` before subscribing. A session that
+  does not rehydrate leaves every previous session's trade deaf: statuses
+  freeze at whatever the public Kind 38383 shows (masked `in-progress`),
+  requests like add-invoice never reach the user, and the daemon
+  eventually cancels by timeout (#277 cause 3).
+- **Seeding is a union, never a replace** — a key derived concurrently by
+  a create/take in flight must survive the seed.
+- **Mid-session keys join incrementally**: every derive path calls
+  `ensure_global_dm_coverage`, which inserts the key and re-issues the
+  relay filter under the same stable subscription id.
+- **The relay filter is always rebuilt from the full map** — never from
+  session-local state. A rebuild from a subset silently unsubscribes the
+  missing trades at the relay.
+- The temporary 30-minute per-trade receivers (see #182) are an
+  additional delivery path, not a substitute: they exist only for trades
+  touched this session and mask coverage gaps while they run.
+
 ### Inbound Kind 14 actions consumed by `dispatch_mostro_message`
 
 | Action                             | Payload variant                                     | Effect on the local trade row                                                    |
@@ -264,6 +297,19 @@ what to listen to. Reference: <https://mostro.network/protocol/seller_pay_hold_i
 | `CooperativeCancelAccepted`        | (status sync)                                       | `status → CooperativelyCanceled`                                                 |
 | `AdminSettled` / `AdminCanceled`   | (status sync)                                       | `status → SettledByAdmin` / `CanceledByAdmin`                                    |
 | `Canceled`                         | (none)                                              | Never-active trade (pending/waiting): row + in-memory session **deleted**; otherwise `status → Canceled` (history kept). See below. |
+
+A sync that would move a trade out of a **hard-terminal** status
+(`Canceled` / `CanceledByAdmin` / `CooperativelyCanceled` / `Expired` /
+`Success` / `SettledByAdmin` / `CompletedByAdmin`) is skipped entirely —
+no book/DB write, no emission, and no session side effect either (the
+guard runs before the peer-key/chat setup of the escrow-locked arm). Relays deliver the startup backlog
+newest-first, so such a message is an out-of-order replay, not a real
+transition; mostrod never reopens a finished trade. `SettledHoldInvoice`
+and `Dispute` still progress and are deliberately not in the set.
+`Canceled` applies the same guard — a stale timeout-cancel replayed over
+an order that was later re-taken and completed must not overwrite the
+outcome; its wipe path is unaffected, since it starts from non-terminal
+waiting states.
 
 Every arm above that syncs a status also emits a `TradeUpdate` (see
 `on_trade_updated`) after the in-memory book update and the DB

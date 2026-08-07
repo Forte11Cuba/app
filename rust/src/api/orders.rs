@@ -1861,6 +1861,14 @@ async fn dispatch_mostro_message(
             log::info!("[orders] gift-wrap Canceled for trade={trade_pubkey_hex}");
             if let Some(order_id) = &kind.id {
                 let oid = order_id.to_string();
+                // A stale Canceled replayed over a finished trade — e.g. the
+                // taker-timeout cancel of an order that was later re-taken
+                // and completed — must not overwrite the terminal outcome.
+                // The wipe path below is unaffected: it starts from
+                // pending/waiting, which are not terminal.
+                if status_sync_blocked_by_terminal(&oid, &kind.action).await {
+                    return;
+                }
                 // Deliberately NOT removed from the order book. The book is
                 // fed only by the daemon's Kind 38383 events, and on a
                 // taker-responsible timeout mostrod republishes the order as
@@ -1941,6 +1949,14 @@ async fn dispatch_mostro_message(
                     return;
                 }
             };
+            // Before ANY side effect — a stale replay over a finished trade
+            // must not re-derive the peer key, recreate session state, or
+            // respawn the chat subscription either (the legit re-take of a
+            // timeout-canceled order is unaffected: its wiped row leaves the
+            // book's `pending` as the local status, which passes).
+            if status_sync_blocked_by_terminal(&order_id, &kind.action).await {
+                return;
+            }
             let small_order = match &kind.payload {
                 Some(mostro_core::message::Payload::Order(o)) => o.clone(),
                 _ => {
@@ -2034,6 +2050,9 @@ async fn dispatch_mostro_message(
                 );
                 return;
             };
+            if status_sync_blocked_by_terminal(&order_id, &kind.action).await {
+                return;
+            }
             crate::api::logging::blog_info(
                 "orders",
                 format!(
@@ -2108,6 +2127,9 @@ async fn dispatch_mostro_message(
                 bolt11.len(),
                 amount
             );
+            if status_sync_blocked_by_terminal(&order_id, &kind.action).await {
+                return;
+            }
             // Save the hold invoice and update status to WaitingPayment.
             crate::api::logging::blog_info(
                 "orders",
@@ -2168,6 +2190,9 @@ async fn dispatch_mostro_message(
             // reply classification).
             let new_status = status_for_action(&kind.action);
             if let Some(status) = new_status {
+                if status_sync_blocked_by_terminal(&order_id, &kind.action).await {
+                    return;
+                }
                 crate::api::logging::blog_info(
                     "orders",
                     format!(
@@ -2363,6 +2388,58 @@ fn status_for_action(action: &mostro_core::message::Action) -> Option<OrderStatu
         Action::AdminCanceled => Some(OrderStatus::CanceledByAdmin),
         _ => None,
     }
+}
+
+/// Statuses no daemon message may leave: mostrod never reopens a canceled
+/// or completed trade. `SettledHoldInvoice` and `Dispute` are deliberately
+/// NOT here — they still progress (to `Success` / admin resolutions).
+fn is_hard_terminal(status: &OrderStatus) -> bool {
+    matches!(
+        status,
+        OrderStatus::Canceled
+            | OrderStatus::CanceledByAdmin
+            | OrderStatus::CooperativelyCanceled
+            | OrderStatus::Expired
+            | OrderStatus::Success
+            | OrderStatus::SettledByAdmin
+            | OrderStatus::CompletedByAdmin
+    )
+}
+
+/// Current locally known status for a trade: the DB row when present
+/// (authoritative across restarts), else the in-memory book entry.
+async fn current_local_status(order_id: &str) -> Option<OrderStatus> {
+    if let Some(db) = crate::db::app_db::db() {
+        if let Ok(Some(trade)) = db.get_trade_by_order_id(order_id).await {
+            return Some(trade.order.status);
+        }
+    }
+    order_book().get_order(order_id).await.map(|o| o.status)
+}
+
+/// True when a Kind 14 status sync must be skipped: the trade already sits
+/// in a hard-terminal status. Relays deliver the startup backlog
+/// newest-first, so a progression message that would move a finished trade
+/// is an out-of-order replay, not a real transition — applying it walks
+/// the status backwards and re-emits action requests to the UI.
+async fn status_sync_blocked_by_terminal(
+    order_id: &str,
+    action: &mostro_core::message::Action,
+) -> bool {
+    let Some(local) = current_local_status(order_id).await else {
+        return false;
+    };
+    if is_hard_terminal(&local) {
+        crate::api::logging::blog_debug(
+            "orders",
+            format!(
+                "skip replayed {action:?} order={}: already {local:?}",
+                crate::api::logging::short_id(order_id),
+            ),
+        );
+        return true;
+    }
+    false
 }
 
 /// Extracts the status and calculated sats to persist from an inbound
@@ -3109,14 +3186,7 @@ pub(crate) async fn refresh_subscriptions_for_active_node() {
         }
     };
 
-    let trade_key_map = build_trade_key_map().await;
-    let trade_pubkeys: Vec<nostr_sdk::PublicKey> = trade_key_map
-        .keys()
-        .filter_map(|hex| nostr_sdk::PublicKey::from_hex(hex).ok())
-        .collect();
-    // Seed the refreshable coverage map: keys derived after this point join
-    // it (and the relay filter) via ensure_global_dm_coverage.
-    *global_dm_keys().write().await = trade_key_map;
+    let trade_pubkeys = seed_global_dm_coverage().await;
 
     if let Err(e) = subscribe_node_filters(&client, mostro_pubkey, trade_pubkeys).await {
         log::error!("[orders] node switch: re-subscribe failed: {e}");
@@ -3145,6 +3215,13 @@ pub(crate) async fn refresh_subscriptions_for_active_node() {
 /// derived later — a new order or take — was covered only by the 30-minute
 /// per-trade receiver, and a solver assignment arriving after that expired
 /// was never decrypted.
+///
+/// Seeded in full by BOTH subscription entry points — startup and node
+/// switch — via [`seed_global_dm_coverage`]; `ensure_global_dm_coverage`
+/// adds keys derived mid-session. The event loop decrypts against this map
+/// and `resubscribe_global_dm_filter` rebuilds the relay filter from it
+/// alone, so an unseeded or shrunk map makes previous sessions' trades
+/// undecryptable and silently unsubscribes them.
 static GLOBAL_DM_KEYS: std::sync::OnceLock<
     tokio::sync::RwLock<HashMap<String, (nostr_sdk::Keys, u32)>>,
 > = std::sync::OnceLock::new();
@@ -3209,6 +3286,22 @@ async fn resubscribe_global_dm_filter() {
             ),
         );
     }
+}
+
+/// Derive every known trade key and merge it into the refreshable coverage
+/// map, returning the full pubkey set for the relay filter.
+///
+/// Union, not replace: a session key inserted concurrently (create/take in
+/// flight while subscriptions restart) must never be evicted.
+async fn seed_global_dm_coverage() -> Vec<nostr_sdk::PublicKey> {
+    let derived = build_trade_key_map().await;
+    let mut map = global_dm_keys().write().await;
+    for (hex, entry) in derived {
+        map.entry(hex).or_insert(entry);
+    }
+    map.keys()
+        .filter_map(|hex| nostr_sdk::PublicKey::from_hex(hex).ok())
+        .collect()
 }
 
 async fn build_trade_key_map() -> HashMap<String, (nostr_sdk::Keys, u32)> {
@@ -3464,13 +3557,12 @@ async fn _run_order_subscription() {
     };
     crate::api::logging::blog_info("orders", format!("subscribing to Kind 38383 from mostro={}", mostro_pubkey.to_hex()));
 
-    // Build a map of all known trade keys so we can decrypt ANY kind-14
-    // Mostro reply, not just those from the current session.
-    let trade_key_map = build_trade_key_map().await;
-    let trade_pubkeys: Vec<nostr_sdk::PublicKey> = trade_key_map
-        .keys()
-        .filter_map(|hex| nostr_sdk::PublicKey::from_hex(hex).ok())
-        .collect();
+    // Derive and seed the decryption coverage for ALL known trade keys —
+    // the event loop decrypts against global_dm_keys, not a local map, and
+    // resubscribe_global_dm_filter rebuilds the relay filter from it alone.
+    // Unseeded, every previous session's trade is undecryptable and falls
+    // off the filter on the session's first create or take.
+    let trade_pubkeys = seed_global_dm_coverage().await;
     crate::api::logging::blog_info("orders", format!("trade key map: {} keys derived for gift-wrap decryption", trade_pubkeys.len()));
 
     // Get notifications receiver before subscribing to avoid missing
@@ -4394,6 +4486,217 @@ mod tests {
         let before = global_dm_keys().read().await.len();
         ensure_global_dm_coverage(&keys, 91).await;
         assert_eq!(global_dm_keys().read().await.len(), before);
+    }
+
+    /// The hard-terminal set must match protocol finality: statuses mostrod
+    /// never reopens block replayed syncs, while statuses that still
+    /// progress (settled → success, dispute → admin resolution) must not.
+    #[test]
+    fn hard_terminal_matches_protocol_finality() {
+        use crate::api::types::OrderStatus as S;
+        for s in [
+            S::Canceled,
+            S::CanceledByAdmin,
+            S::CooperativelyCanceled,
+            S::Expired,
+            S::Success,
+            S::SettledByAdmin,
+            S::CompletedByAdmin,
+        ] {
+            assert!(is_hard_terminal(&s), "{s:?} must be terminal");
+        }
+        for s in [
+            S::Pending,
+            S::WaitingBuyerInvoice,
+            S::WaitingPayment,
+            S::Active,
+            S::FiatSent,
+            S::SettledHoldInvoice,
+            S::Dispute,
+            S::InProgress,
+        ] {
+            assert!(!is_hard_terminal(&s), "{s:?} must not be terminal");
+        }
+    }
+
+    /// Startup replays arrive newest-first: a progression message for a
+    /// trade already terminal is an out-of-order replay and must be
+    /// skipped; open trades and unknown orders must not be blocked.
+    #[tokio::test]
+    async fn terminal_trades_block_replayed_status_syncs() {
+        use mostro_core::message::Action;
+
+        let canceled_id = uuid::Uuid::new_v4().to_string();
+        let mut canceled = dummy_order_info(&canceled_id);
+        canceled.status = crate::api::types::OrderStatus::Canceled;
+        order_book().upsert_order(canceled).await;
+        assert!(
+            status_sync_blocked_by_terminal(&canceled_id, &Action::WaitingSellerToPay)
+                .await
+        );
+
+        let active_id = uuid::Uuid::new_v4().to_string();
+        let mut active = dummy_order_info(&active_id);
+        active.status = crate::api::types::OrderStatus::Active;
+        order_book().upsert_order(active).await;
+        assert!(
+            !status_sync_blocked_by_terminal(&active_id, &Action::FiatSentOk).await
+        );
+
+        // Unknown order: nothing local to protect, sync proceeds.
+        assert!(
+            !status_sync_blocked_by_terminal("no-such-order", &Action::AddInvoice).await
+        );
+    }
+
+    /// A stale Canceled replayed over a finished trade (the taker-timeout
+    /// cancel of an order later re-taken and completed) must be skipped
+    /// entirely at the handler level: no status write, no TradeUpdate.
+    #[tokio::test]
+    async fn replayed_cancel_over_terminal_trade_is_skipped() {
+        use mostro_core::message::{Action, Message};
+
+        let order_uuid = uuid::Uuid::new_v4();
+        let order_id = order_uuid.to_string();
+        let mut done = dummy_order_info(&order_id);
+        done.status = crate::api::types::OrderStatus::Success;
+        order_book().upsert_order(done).await;
+
+        let mut rx = trade_updates_tx().subscribe();
+
+        let sender = nostr_sdk::PublicKey::from_hex(&active_mostro_pubkey())
+            .expect("valid mostro pubkey");
+        let unwrapped = mostro_core::nip59::UnwrappedMessage {
+            message: Message::new_order(
+                Some(order_uuid),
+                None,
+                None,
+                Action::Canceled,
+                None,
+            ),
+            signature: None,
+            sender,
+            identity: sender,
+            created_at: nostr_sdk::Timestamp::from(0u64),
+        };
+        dispatch_mostro_message(unwrapped, "test-cancel-replay", "ff00ff00", 1).await;
+
+        // The book entry keeps its terminal outcome...
+        let status = order_book()
+            .get_order(&order_id)
+            .await
+            .expect("order still cached")
+            .status;
+        assert_eq!(status, crate::api::types::OrderStatus::Success);
+
+        // ...and no TradeUpdate was emitted for this order. Drain the
+        // broadcast (parallel tests may emit for other orders) and filter
+        // by our id; the suppressed emission would already be buffered by
+        // the time dispatch returned.
+        let mut leaked = false;
+        while let Ok(update) = rx.try_recv() {
+            if update.order_id == order_id {
+                leaked = true;
+            }
+        }
+        assert!(!leaked, "stale Canceled must not emit a TradeUpdate");
+    }
+
+    /// A stale BuyerTookOrder replayed over a finished trade must be skipped
+    /// BEFORE its side effects: no peer-key/session/chat setup, no status
+    /// write, no TradeUpdate. (The status assertions are the counterfactual:
+    /// an unguarded arm would flip the book back to Active and emit.)
+    #[tokio::test]
+    async fn replayed_take_over_terminal_trade_has_no_side_effects() {
+        use mostro_core::message::{Action, Message, Payload};
+
+        let order_uuid = uuid::Uuid::new_v4();
+        let order_id = order_uuid.to_string();
+        let mut done = dummy_order_info(&order_id);
+        done.status = crate::api::types::OrderStatus::Success;
+        order_book().upsert_order(done).await;
+        store_trade_key_index(&order_id, 93).await;
+
+        let mut rx = trade_updates_tx().subscribe();
+
+        let peer_hex =
+            "0000000000000000000000000000000000000000000000000000000000000002";
+        let so = mostro_core::order::SmallOrder::new(
+            Some(order_uuid),
+            Some(mostro_core::order::Kind::Sell),
+            Some(mostro_core::order::Status::Active),
+            457,
+            "USD".to_string(),
+            None,
+            None,
+            100,
+            "bank".to_string(),
+            0,
+            Some(peer_hex.to_string()),
+            None,
+            None,
+            None,
+            None,
+        );
+        let sender = nostr_sdk::PublicKey::from_hex(&active_mostro_pubkey())
+            .expect("valid mostro pubkey");
+        let unwrapped = mostro_core::nip59::UnwrappedMessage {
+            message: Message::new_order(
+                Some(order_uuid),
+                None,
+                None,
+                Action::BuyerTookOrder,
+                Some(Payload::Order(so)),
+            ),
+            signature: None,
+            sender,
+            identity: sender,
+            created_at: nostr_sdk::Timestamp::from(0u64),
+        };
+        dispatch_mostro_message(unwrapped, "test-take-replay", "ff00ff01", 93).await;
+
+        // No session/chat state for the finished trade...
+        assert!(crate::mostro::session::session_manager()
+            .get_session(&order_id)
+            .await
+            .is_none());
+        // ...the book keeps its terminal outcome (unguarded, this would be
+        // Active again)...
+        let status = order_book()
+            .get_order(&order_id)
+            .await
+            .expect("order still cached")
+            .status;
+        assert_eq!(status, crate::api::types::OrderStatus::Success);
+        // ...and nothing was emitted for this order.
+        let mut leaked = false;
+        while let Ok(update) = rx.try_recv() {
+            if update.order_id == order_id {
+                leaked = true;
+            }
+        }
+        assert!(!leaked, "stale BuyerTookOrder must not emit a TradeUpdate");
+    }
+
+    /// #277 cause 3: the coverage seed must be a union that never evicts a
+    /// key already in the map. A replace (or a missing seed at startup)
+    /// leaves previous sessions' trades undecryptable — their kind-14s drop
+    /// as no-matching-p-tag — and the next relay-filter rebuild silently
+    /// unsubscribes them.
+    #[tokio::test]
+    async fn seeding_coverage_never_evicts_existing_keys() {
+        let session = nostr_sdk::Keys::generate();
+        ensure_global_dm_coverage(&session, 92).await;
+
+        // No identity in unit tests → the derived set is empty; the seed
+        // must still keep the session key and report it for the filter.
+        let pubkeys = seed_global_dm_coverage().await;
+
+        assert!(global_dm_keys()
+            .read()
+            .await
+            .contains_key(&session.public_key().to_hex()));
+        assert!(pubkeys.contains(&session.public_key()));
     }
 
     /// PR #252 review (ermeme P1): a create rejected for an unsupported node
