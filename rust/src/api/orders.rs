@@ -2012,6 +2012,55 @@ async fn dispatch_mostro_message(
                 }
             }
         }
+        // Mostro asks the buyer for a Lightning invoice with AddInvoice. A
+        // taker's first copy is consumed by the take waiter as the take
+        // reply; this arm covers the maker-buyer, whose buy order was taken
+        // and the hold invoice paid. The message arrives on the global feed
+        // with no trade_index, so the order id is the only usable key.
+        Action::AddInvoice => {
+            let order_id = match &kind.id {
+                Some(id) => id.to_string(),
+                None => {
+                    log::warn!("[orders] gift-wrap AddInvoice has no order id");
+                    return;
+                }
+            };
+            let Some((new_status, amount)) = add_invoice_sync(&kind.payload) else {
+                // The daemon follows up with a second AddInvoice carrying a
+                // Peer payload (counterparty reputation) — ignored for now.
+                log::debug!(
+                    "[orders] gift-wrap AddInvoice for order={order_id}: no Order payload, ignoring"
+                );
+                return;
+            };
+            crate::api::logging::blog_info(
+                "orders",
+                format!(
+                    "status order={} →{new_status:?} src=kind14/AddInvoice",
+                    crate::api::logging::short_id(&order_id),
+                ),
+            );
+            // Sync the book with status AND calculated sats: the add-invoice
+            // screen polls the book for the amount (tradeAmountProvider) and
+            // refuses to submit an LN address without it.
+            if let Some(mut info) = order_book().get_order(&order_id).await {
+                info.status = new_status.clone();
+                if amount.is_some() {
+                    info.amount_sats = amount;
+                }
+                order_book().upsert_order(info).await;
+            }
+            if let Some(db) = crate::db::app_db::db() {
+                if let Err(e) = db
+                    .update_trade_fields(&order_id, Some(new_status), None, amount)
+                    .await
+                {
+                    log::warn!(
+                        "[orders] failed to sync add-invoice for order={order_id}: {e}"
+                    );
+                }
+            }
+        }
         // Mostro sends PayInvoice to the seller with the hold invoice bolt11
         // when a buyer takes a sell order (or a seller takes a buy order).
         Action::PayInvoice => {
@@ -2279,6 +2328,7 @@ async fn dispatch_mostro_message(
 fn status_for_action(action: &mostro_core::message::Action) -> Option<OrderStatus> {
     use mostro_core::message::Action;
     match action {
+        Action::AddInvoice => Some(OrderStatus::WaitingBuyerInvoice),
         Action::WaitingSellerToPay => Some(OrderStatus::WaitingPayment),
         Action::WaitingBuyerInvoice => Some(OrderStatus::WaitingBuyerInvoice),
         Action::BuyerTookOrder
@@ -2303,6 +2353,32 @@ fn status_for_action(action: &mostro_core::message::Action) -> Option<OrderStatu
         }
         Action::AdminSettled => Some(OrderStatus::SettledByAdmin),
         Action::AdminCanceled => Some(OrderStatus::CanceledByAdmin),
+        _ => None,
+    }
+}
+
+/// Extracts the status and calculated sats to persist from an inbound
+/// `add-invoice` payload.
+///
+/// Returns `None` when the payload carries no order data — notably the
+/// daemon's follow-up `add-invoice` with a `Peer` payload (counterparty
+/// reputation), which is deliberately not consumed yet.
+fn add_invoice_sync(
+    payload: &Option<mostro_core::message::Payload>,
+) -> Option<(OrderStatus, Option<u64>)> {
+    match payload {
+        Some(mostro_core::message::Payload::Order(so)) => {
+            let status = so
+                .status
+                .and_then(map_core_status)
+                .unwrap_or(OrderStatus::WaitingBuyerInvoice);
+            let amount = if so.amount > 0 {
+                Some(so.amount as u64)
+            } else {
+                None
+            };
+            Some((status, amount))
+        }
         _ => None,
     }
 }
@@ -4178,6 +4254,45 @@ mod tests {
             }
             _ => panic!("expected TakeAccepted"),
         }
+    }
+
+    /// Inbound add-invoice (maker-buyer path): the Order payload carries the
+    /// status and calculated sats to persist; anything else — notably the
+    /// daemon's follow-up Peer payload with the counterparty's reputation —
+    /// syncs nothing.
+    #[test]
+    fn add_invoice_sync_maps_payloads() {
+        use mostro_core::message::Payload;
+        use mostro_core::order::Status;
+
+        // Real-world shape from the reproduction: status + calculated sats.
+        let so = small_order_with(Status::WaitingBuyerInvoice, 484);
+        match add_invoice_sync(&Some(Payload::Order(so))) {
+            Some((status, amount)) => {
+                assert_eq!(status, crate::api::types::OrderStatus::WaitingBuyerInvoice);
+                assert_eq!(amount, Some(484));
+            }
+            None => panic!("expected Order payload to sync"),
+        }
+
+        // Unpriced amount must not persist as Some(0).
+        let so = small_order_with(Status::WaitingBuyerInvoice, 0);
+        let (_, amount) =
+            add_invoice_sync(&Some(Payload::Order(so))).expect("Order payload must sync");
+        assert_eq!(amount, None);
+
+        // No payload → nothing to sync.
+        assert!(add_invoice_sync(&None).is_none());
+    }
+
+    /// A payload-less add-invoice must still imply WaitingBuyerInvoice, both
+    /// for the ingest fallback and for action-only take replies.
+    #[test]
+    fn status_for_action_maps_add_invoice() {
+        assert_eq!(
+            status_for_action(&mostro_core::message::Action::AddInvoice),
+            Some(crate::api::types::OrderStatus::WaitingBuyerInvoice)
+        );
     }
 
     /// Only the pending create's own local UUID may be rebound to an incoming
