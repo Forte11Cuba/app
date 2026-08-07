@@ -251,6 +251,39 @@ call — it arrives as a Kind 14 (NIP-44) message from mostrod. This
 section documents the full chain so Flutter providers and screens know
 what to listen to. Reference: <https://mostro.network/protocol/seller_pay_hold_invoice.html>.
 
+### Kind-14 delivery & decryption coverage
+
+Receiving a daemon Kind 14 takes two independent layers, and BOTH must
+cover the trade or its messages are lost (dropped as
+`no-matching-p-tag`, observable in the logs with the map size):
+
+- **Delivery** — the bulk `mostro-dm` relay subscription, author-pinned to
+  the active node, whose `#p` filter must include the trade key's pubkey.
+- **Decryption** — the refreshable coverage map (`global_dm_keys`,
+  pubkey → keys+index) the event loop decrypts against.
+
+Coverage invariants:
+
+- **Both subscription entry points seed in full.** Startup
+  (`_run_order_subscription`) and node switch derive every known trade key
+  (indexes `1..=identity.trade_key_index`) and seed the map through the
+  shared `seed_global_dm_coverage()` before subscribing. A session that
+  does not rehydrate leaves every previous session's trade deaf: statuses
+  freeze at whatever the public Kind 38383 shows (masked `in-progress`),
+  requests like add-invoice never reach the user, and the daemon
+  eventually cancels by timeout (#277 cause 3).
+- **Seeding is a union, never a replace** — a key derived concurrently by
+  a create/take in flight must survive the seed.
+- **Mid-session keys join incrementally**: every derive path calls
+  `ensure_global_dm_coverage`, which inserts the key and re-issues the
+  relay filter under the same stable subscription id.
+- **The relay filter is always rebuilt from the full map** — never from
+  session-local state. A rebuild from a subset silently unsubscribes the
+  missing trades at the relay.
+- The temporary 30-minute per-trade receivers (see #182) are an
+  additional delivery path, not a substitute: they exist only for trades
+  touched this session and mask coverage gaps while they run.
+
 ### Inbound Kind 14 actions consumed by `dispatch_mostro_message`
 
 | Action                             | Payload variant                                     | Effect on the local trade row                                                    |
