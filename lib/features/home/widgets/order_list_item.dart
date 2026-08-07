@@ -126,17 +126,21 @@ class OrderListItem extends StatelessWidget {
                         spacing: 6,
                         runSpacing: 4,
                         children: [
-                          if (reasonLabel != null)
-                            _Pill(
-                              label: reasonLabel,
-                              color: reasonColor!,
-                              background: reasonBg!,
-                            ),
+                          // Own-order pill first: on an own order it must
+                          // always be readable, so the reason badge is the
+                          // one that drops to the next run when they don't
+                          // fit together.
                           if (mineLabel != null)
                             _Pill(
                               label: mineLabel,
                               color: pal.textSecondary,
                               background: pal.bgElevated,
+                            ),
+                          if (reasonLabel != null)
+                            _Pill(
+                              label: reasonLabel,
+                              color: reasonColor!,
+                              background: reasonBg!,
                             ),
                         ],
                       ),
