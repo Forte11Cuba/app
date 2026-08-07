@@ -1991,6 +1991,9 @@ async fn dispatch_mostro_message(
                 .and_then(map_core_status)
                 .or_else(|| status_for_action(&kind.action))
             {
+                if status_sync_blocked_by_terminal(&order_id, &kind.action).await {
+                    return;
+                }
                 crate::api::logging::blog_info(
                     "orders",
                     format!(
@@ -2034,6 +2037,9 @@ async fn dispatch_mostro_message(
                 );
                 return;
             };
+            if status_sync_blocked_by_terminal(&order_id, &kind.action).await {
+                return;
+            }
             crate::api::logging::blog_info(
                 "orders",
                 format!(
@@ -2108,6 +2114,9 @@ async fn dispatch_mostro_message(
                 bolt11.len(),
                 amount
             );
+            if status_sync_blocked_by_terminal(&order_id, &kind.action).await {
+                return;
+            }
             // Save the hold invoice and update status to WaitingPayment.
             crate::api::logging::blog_info(
                 "orders",
@@ -2168,6 +2177,9 @@ async fn dispatch_mostro_message(
             // reply classification).
             let new_status = status_for_action(&kind.action);
             if let Some(status) = new_status {
+                if status_sync_blocked_by_terminal(&order_id, &kind.action).await {
+                    return;
+                }
                 crate::api::logging::blog_info(
                     "orders",
                     format!(
@@ -2363,6 +2375,54 @@ fn status_for_action(action: &mostro_core::message::Action) -> Option<OrderStatu
         Action::AdminCanceled => Some(OrderStatus::CanceledByAdmin),
         _ => None,
     }
+}
+
+/// Statuses no daemon message may leave: mostrod never reopens a canceled
+/// or completed trade. `SettledHoldInvoice` and `Dispute` are deliberately
+/// NOT here — they still progress (to `Success` / admin resolutions).
+fn is_hard_terminal(status: &OrderStatus) -> bool {
+    matches!(
+        status,
+        OrderStatus::Canceled
+            | OrderStatus::CanceledByAdmin
+            | OrderStatus::CooperativelyCanceled
+            | OrderStatus::Expired
+            | OrderStatus::Success
+            | OrderStatus::SettledByAdmin
+            | OrderStatus::CompletedByAdmin
+    )
+}
+
+/// Current locally known status for a trade: the DB row when present
+/// (authoritative across restarts), else the in-memory book entry.
+async fn current_local_status(order_id: &str) -> Option<OrderStatus> {
+    if let Some(db) = crate::db::app_db::db() {
+        if let Ok(Some(trade)) = db.get_trade_by_order_id(order_id).await {
+            return Some(trade.order.status);
+        }
+    }
+    order_book().get_order(order_id).await.map(|o| o.status)
+}
+
+/// True when a Kind 14 status sync must be skipped: the trade already sits
+/// in a hard-terminal status. Relays deliver the startup backlog
+/// newest-first, so a progression message that would move a finished trade
+/// is an out-of-order replay, not a real transition — applying it walks
+/// the status backwards and re-emits action requests to the UI.
+async fn status_sync_blocked_by_terminal(
+    order_id: &str,
+    action: &mostro_core::message::Action,
+) -> bool {
+    let Some(local) = current_local_status(order_id).await else {
+        return false;
+    };
+    if is_hard_terminal(&local) {
+        log::debug!(
+            "[orders] skip replayed {action:?} for order={order_id}: trade already {local:?}"
+        );
+        return true;
+    }
+    false
 }
 
 /// Extracts the status and calculated sats to persist from an inbound
@@ -4409,6 +4469,67 @@ mod tests {
         let before = global_dm_keys().read().await.len();
         ensure_global_dm_coverage(&keys, 91).await;
         assert_eq!(global_dm_keys().read().await.len(), before);
+    }
+
+    /// The hard-terminal set must match protocol finality: statuses mostrod
+    /// never reopens block replayed syncs, while statuses that still
+    /// progress (settled → success, dispute → admin resolution) must not.
+    #[test]
+    fn hard_terminal_matches_protocol_finality() {
+        use crate::api::types::OrderStatus as S;
+        for s in [
+            S::Canceled,
+            S::CanceledByAdmin,
+            S::CooperativelyCanceled,
+            S::Expired,
+            S::Success,
+            S::SettledByAdmin,
+            S::CompletedByAdmin,
+        ] {
+            assert!(is_hard_terminal(&s), "{s:?} must be terminal");
+        }
+        for s in [
+            S::Pending,
+            S::WaitingBuyerInvoice,
+            S::WaitingPayment,
+            S::Active,
+            S::FiatSent,
+            S::SettledHoldInvoice,
+            S::Dispute,
+            S::InProgress,
+        ] {
+            assert!(!is_hard_terminal(&s), "{s:?} must not be terminal");
+        }
+    }
+
+    /// Startup replays arrive newest-first: a progression message for a
+    /// trade already terminal is an out-of-order replay and must be
+    /// skipped; open trades and unknown orders must not be blocked.
+    #[tokio::test]
+    async fn terminal_trades_block_replayed_status_syncs() {
+        use mostro_core::message::Action;
+
+        let canceled_id = uuid::Uuid::new_v4().to_string();
+        let mut canceled = dummy_order_info(&canceled_id);
+        canceled.status = crate::api::types::OrderStatus::Canceled;
+        order_book().upsert_order(canceled).await;
+        assert!(
+            status_sync_blocked_by_terminal(&canceled_id, &Action::WaitingSellerToPay)
+                .await
+        );
+
+        let active_id = uuid::Uuid::new_v4().to_string();
+        let mut active = dummy_order_info(&active_id);
+        active.status = crate::api::types::OrderStatus::Active;
+        order_book().upsert_order(active).await;
+        assert!(
+            !status_sync_blocked_by_terminal(&active_id, &Action::FiatSentOk).await
+        );
+
+        // Unknown order: nothing local to protect, sync proceeds.
+        assert!(
+            !status_sync_blocked_by_terminal("no-such-order", &Action::AddInvoice).await
+        );
     }
 
     /// #277 cause 3: the coverage seed must be a union that never evicts a

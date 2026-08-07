@@ -298,6 +298,14 @@ Coverage invariants:
 | `AdminSettled` / `AdminCanceled`   | (status sync)                                       | `status → SettledByAdmin` / `CanceledByAdmin`                                    |
 | `Canceled`                         | (none)                                              | Never-active trade (pending/waiting): row + in-memory session **deleted**; otherwise `status → Canceled` (history kept). See below. |
 
+A sync that would move a trade out of a **hard-terminal** status
+(`Canceled` / `CanceledByAdmin` / `CooperativelyCanceled` / `Expired` /
+`Success` / `SettledByAdmin` / `CompletedByAdmin`) is skipped entirely —
+no book/DB write, no emission. Relays deliver the startup backlog
+newest-first, so such a message is an out-of-order replay, not a real
+transition; mostrod never reopens a finished trade. `SettledHoldInvoice`
+and `Dispute` still progress and are deliberately not in the set.
+
 Every arm above that syncs a status also emits a `TradeUpdate` (see
 `on_trade_updated`) after the in-memory book update and the DB
 persistence attempt — DB failures are logged, never suppress the
