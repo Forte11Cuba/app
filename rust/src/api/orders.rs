@@ -1949,6 +1949,14 @@ async fn dispatch_mostro_message(
                     return;
                 }
             };
+            // Before ANY side effect — a stale replay over a finished trade
+            // must not re-derive the peer key, recreate session state, or
+            // respawn the chat subscription either (the legit re-take of a
+            // timeout-canceled order is unaffected: its wiped row leaves the
+            // book's `pending` as the local status, which passes).
+            if status_sync_blocked_by_terminal(&order_id, &kind.action).await {
+                return;
+            }
             let small_order = match &kind.payload {
                 Some(mostro_core::message::Payload::Order(o)) => o.clone(),
                 _ => {
@@ -1999,9 +2007,6 @@ async fn dispatch_mostro_message(
                 .and_then(map_core_status)
                 .or_else(|| status_for_action(&kind.action))
             {
-                if status_sync_blocked_by_terminal(&order_id, &kind.action).await {
-                    return;
-                }
                 crate::api::logging::blog_info(
                     "orders",
                     format!(
@@ -4595,6 +4600,82 @@ mod tests {
             }
         }
         assert!(!leaked, "stale Canceled must not emit a TradeUpdate");
+    }
+
+    /// A stale BuyerTookOrder replayed over a finished trade must be skipped
+    /// BEFORE its side effects: no peer-key/session/chat setup, no status
+    /// write, no TradeUpdate. (The status assertions are the counterfactual:
+    /// an unguarded arm would flip the book back to Active and emit.)
+    #[tokio::test]
+    async fn replayed_take_over_terminal_trade_has_no_side_effects() {
+        use mostro_core::message::{Action, Message, Payload};
+
+        let order_uuid = uuid::Uuid::new_v4();
+        let order_id = order_uuid.to_string();
+        let mut done = dummy_order_info(&order_id);
+        done.status = crate::api::types::OrderStatus::Success;
+        order_book().upsert_order(done).await;
+        store_trade_key_index(&order_id, 93).await;
+
+        let mut rx = trade_updates_tx().subscribe();
+
+        let peer_hex =
+            "0000000000000000000000000000000000000000000000000000000000000002";
+        let so = mostro_core::order::SmallOrder::new(
+            Some(order_uuid),
+            Some(mostro_core::order::Kind::Sell),
+            Some(mostro_core::order::Status::Active),
+            457,
+            "USD".to_string(),
+            None,
+            None,
+            100,
+            "bank".to_string(),
+            0,
+            Some(peer_hex.to_string()),
+            None,
+            None,
+            None,
+            None,
+        );
+        let sender = nostr_sdk::PublicKey::from_hex(&active_mostro_pubkey())
+            .expect("valid mostro pubkey");
+        let unwrapped = mostro_core::nip59::UnwrappedMessage {
+            message: Message::new_order(
+                Some(order_uuid),
+                None,
+                None,
+                Action::BuyerTookOrder,
+                Some(Payload::Order(so)),
+            ),
+            signature: None,
+            sender,
+            identity: sender,
+            created_at: nostr_sdk::Timestamp::from(0u64),
+        };
+        dispatch_mostro_message(unwrapped, "test-take-replay", "ff00ff01", 93).await;
+
+        // No session/chat state for the finished trade...
+        assert!(crate::mostro::session::session_manager()
+            .get_session(&order_id)
+            .await
+            .is_none());
+        // ...the book keeps its terminal outcome (unguarded, this would be
+        // Active again)...
+        let status = order_book()
+            .get_order(&order_id)
+            .await
+            .expect("order still cached")
+            .status;
+        assert_eq!(status, crate::api::types::OrderStatus::Success);
+        // ...and nothing was emitted for this order.
+        let mut leaked = false;
+        while let Ok(update) = rx.try_recv() {
+            if update.order_id == order_id {
+                leaked = true;
+            }
+        }
+        assert!(!leaked, "stale BuyerTookOrder must not emit a TradeUpdate");
     }
 
     /// #277 cause 3: the coverage seed must be a union that never evicts a

@@ -301,7 +301,8 @@ Coverage invariants:
 A sync that would move a trade out of a **hard-terminal** status
 (`Canceled` / `CanceledByAdmin` / `CooperativelyCanceled` / `Expired` /
 `Success` / `SettledByAdmin` / `CompletedByAdmin`) is skipped entirely —
-no book/DB write, no emission. Relays deliver the startup backlog
+no book/DB write, no emission, and no session side effect either (the
+guard runs before the peer-key/chat setup of the escrow-locked arm). Relays deliver the startup backlog
 newest-first, so such a message is an out-of-order replay, not a real
 transition; mostrod never reopens a finished trade. `SettledHoldInvoice`
 and `Dispute` still progress and are deliberately not in the set.
