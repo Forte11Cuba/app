@@ -3109,14 +3109,7 @@ pub(crate) async fn refresh_subscriptions_for_active_node() {
         }
     };
 
-    let trade_key_map = build_trade_key_map().await;
-    let trade_pubkeys: Vec<nostr_sdk::PublicKey> = trade_key_map
-        .keys()
-        .filter_map(|hex| nostr_sdk::PublicKey::from_hex(hex).ok())
-        .collect();
-    // Seed the refreshable coverage map: keys derived after this point join
-    // it (and the relay filter) via ensure_global_dm_coverage.
-    *global_dm_keys().write().await = trade_key_map;
+    let trade_pubkeys = seed_global_dm_coverage().await;
 
     if let Err(e) = subscribe_node_filters(&client, mostro_pubkey, trade_pubkeys).await {
         log::error!("[orders] node switch: re-subscribe failed: {e}");
@@ -3145,6 +3138,13 @@ pub(crate) async fn refresh_subscriptions_for_active_node() {
 /// derived later — a new order or take — was covered only by the 30-minute
 /// per-trade receiver, and a solver assignment arriving after that expired
 /// was never decrypted.
+///
+/// Seeded in full by BOTH subscription entry points — startup and node
+/// switch — via [`seed_global_dm_coverage`]; `ensure_global_dm_coverage`
+/// adds keys derived mid-session. The event loop decrypts against this map
+/// and `resubscribe_global_dm_filter` rebuilds the relay filter from it
+/// alone, so an unseeded or shrunk map makes previous sessions' trades
+/// undecryptable and silently unsubscribes them.
 static GLOBAL_DM_KEYS: std::sync::OnceLock<
     tokio::sync::RwLock<HashMap<String, (nostr_sdk::Keys, u32)>>,
 > = std::sync::OnceLock::new();
@@ -3209,6 +3209,22 @@ async fn resubscribe_global_dm_filter() {
             ),
         );
     }
+}
+
+/// Derive every known trade key and merge it into the refreshable coverage
+/// map, returning the full pubkey set for the relay filter.
+///
+/// Union, not replace: a session key inserted concurrently (create/take in
+/// flight while subscriptions restart) must never be evicted.
+async fn seed_global_dm_coverage() -> Vec<nostr_sdk::PublicKey> {
+    let derived = build_trade_key_map().await;
+    let mut map = global_dm_keys().write().await;
+    for (hex, entry) in derived {
+        map.entry(hex).or_insert(entry);
+    }
+    map.keys()
+        .filter_map(|hex| nostr_sdk::PublicKey::from_hex(hex).ok())
+        .collect()
 }
 
 async fn build_trade_key_map() -> HashMap<String, (nostr_sdk::Keys, u32)> {
@@ -3464,13 +3480,12 @@ async fn _run_order_subscription() {
     };
     crate::api::logging::blog_info("orders", format!("subscribing to Kind 38383 from mostro={}", mostro_pubkey.to_hex()));
 
-    // Build a map of all known trade keys so we can decrypt ANY kind-14
-    // Mostro reply, not just those from the current session.
-    let trade_key_map = build_trade_key_map().await;
-    let trade_pubkeys: Vec<nostr_sdk::PublicKey> = trade_key_map
-        .keys()
-        .filter_map(|hex| nostr_sdk::PublicKey::from_hex(hex).ok())
-        .collect();
+    // Derive and seed the decryption coverage for ALL known trade keys —
+    // the event loop decrypts against global_dm_keys, not a local map, and
+    // resubscribe_global_dm_filter rebuilds the relay filter from it alone.
+    // Unseeded, every previous session's trade is undecryptable and falls
+    // off the filter on the session's first create or take.
+    let trade_pubkeys = seed_global_dm_coverage().await;
     crate::api::logging::blog_info("orders", format!("trade key map: {} keys derived for gift-wrap decryption", trade_pubkeys.len()));
 
     // Get notifications receiver before subscribing to avoid missing
@@ -4394,6 +4409,27 @@ mod tests {
         let before = global_dm_keys().read().await.len();
         ensure_global_dm_coverage(&keys, 91).await;
         assert_eq!(global_dm_keys().read().await.len(), before);
+    }
+
+    /// #277 cause 3: the coverage seed must be a union that never evicts a
+    /// key already in the map. A replace (or a missing seed at startup)
+    /// leaves previous sessions' trades undecryptable — their kind-14s drop
+    /// as no-matching-p-tag — and the next relay-filter rebuild silently
+    /// unsubscribes them.
+    #[tokio::test]
+    async fn seeding_coverage_never_evicts_existing_keys() {
+        let session = nostr_sdk::Keys::generate();
+        ensure_global_dm_coverage(&session, 92).await;
+
+        // No identity in unit tests → the derived set is empty; the seed
+        // must still keep the session key and report it for the filter.
+        let pubkeys = seed_global_dm_coverage().await;
+
+        assert!(global_dm_keys()
+            .read()
+            .await
+            .contains_key(&session.public_key().to_hex()));
+        assert!(pubkeys.contains(&session.public_key()));
     }
 
     /// PR #252 review (ermeme P1): a create rejected for an unsupported node
