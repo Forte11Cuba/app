@@ -10,10 +10,13 @@ import 'package:mostro/src/rust/api/types.dart';
 ///
 /// Both `add-invoice` and `pay-invoice` carry expiration timeouts, so the
 /// user must learn about them no matter which screen is open. This widget
-/// wraps the app root and listens to [tradeUpdatesProvider] (pushed by the
-/// Rust ingest after book and DB are synced): `WaitingBuyerInvoice` sends
-/// the buyer to the add-invoice screen, `WaitingPayment` sends the seller
-/// to the pay-invoice screen.
+/// wraps the app root and listens to [tradeUpdatesProvider], pushed by the
+/// Rust ingest after the in-memory book update and the DB persistence
+/// attempt (a DB failure never suppresses the emission): the trade row may
+/// therefore be missing or stale, which the role lookup tolerates — no
+/// role, no navigation. `WaitingBuyerInvoice` sends the buyer to the
+/// add-invoice screen, `WaitingPayment` sends the seller to the
+/// pay-invoice screen.
 ///
 /// Only makers ever reach this path — a taker's first reply is consumed by
 /// the take waiter in Rust and produces no emission (TakeOrderScreen

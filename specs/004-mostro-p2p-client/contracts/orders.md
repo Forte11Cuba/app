@@ -197,8 +197,12 @@ expirations). Used to keep the UI order list in sync.
 
 ### on_trade_updated() → Stream<TradeUpdate>
 Push channel for daemon-driven trade lifecycle changes. Every status a
-Kind 14 dispatch arm persists is emitted here after book **and** DB are
-synced, plus the stale-state sweep's maker resync. Two consumer needs:
+Kind 14 dispatch arm syncs is emitted here after the in-memory book
+update and the DB persistence **attempt** — a DB write failure (or a
+memory-only session, where `db()` is `None`) is logged and does not
+suppress the notification, so listeners must not assume the trade row
+already reflects the status. Also emitted by the stale-state sweep's
+maker resync. Two consumer needs:
 changes the 2s status polling cannot observe (a never-active trade is
 **wiped** from the DB on the daemon's `Canceled` — no row left to poll —
 and after a taker-timeout republish the book reads `pending` again), and
@@ -262,8 +266,10 @@ what to listen to. Reference: <https://mostro.network/protocol/seller_pay_hold_i
 | `Canceled`                         | (none)                                              | Never-active trade (pending/waiting): row + in-memory session **deleted**; otherwise `status → Canceled` (history kept). See below. |
 
 Every arm above that syncs a status also emits a `TradeUpdate` (see
-`on_trade_updated`) after both stores are consistent — `Canceled`
-included, which emits whether it wiped the row or kept it as history.
+`on_trade_updated`) after the in-memory book update and the DB
+persistence attempt — DB failures are logged, never suppress the
+emission, and leave the row behind the book. `Canceled` included, which
+emits whether it wiped the row or kept it as history.
 
 ### Daemon cancellation semantics
 

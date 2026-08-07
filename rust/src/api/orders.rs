@@ -2061,9 +2061,10 @@ async fn dispatch_mostro_message(
                     );
                 }
             }
-            // After both stores are consistent, so a listener that reacts to
-            // the push (e.g. auto-opening the add-invoice screen) reads the
-            // synced status and amount.
+            // After the book update and the DB attempt, so a listener that
+            // reacts to the push (e.g. auto-opening the add-invoice screen)
+            // reads the freshest state available; a logged DB failure does
+            // not suppress the notification.
             emit_trade_update(&order_id, new_status);
         }
         // Mostro sends PayInvoice to the seller with the hold invoice bolt11
@@ -3628,9 +3629,13 @@ pub(crate) fn emit_trade_update(order_id: &str, status: crate::api::types::Order
 
 /// Stream of trade lifecycle changes pushed by the daemon-message ingest.
 ///
-/// Every status a Kind 14 dispatch arm persists is emitted here, after both
-/// the order book and the trade DB are synced. Complements the 2s status
-/// polling in two ways: cancellations that polling cannot observe (a wiped
+/// Every status a Kind 14 dispatch arm syncs is emitted here, after the
+/// in-memory book update and the DB persistence attempt. A DB write failure
+/// (or a memory-only session with no DB at all) is logged and does not
+/// suppress the emission — the stream means "the daemon moved this trade",
+/// not "the DB commit succeeded", so listeners must tolerate a trade row
+/// that is missing or behind the book. Complements the 2s status polling in
+/// two ways: cancellations that polling cannot observe (a wiped
 /// never-active trade has no DB row left, and after a timeout republish the
 /// book shows `pending` again), and action requests the user must react to
 /// promptly (add-invoice / pay-invoice) no matter which screen is open.
