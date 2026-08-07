@@ -2417,8 +2417,12 @@ async fn status_sync_blocked_by_terminal(
         return false;
     };
     if is_hard_terminal(&local) {
-        log::debug!(
-            "[orders] skip replayed {action:?} for order={order_id}: trade already {local:?}"
+        crate::api::logging::blog_debug(
+            "orders",
+            format!(
+                "skip replayed {action:?} order={}: already {local:?}",
+                crate::api::logging::short_id(order_id),
+            ),
         );
         return true;
     }
