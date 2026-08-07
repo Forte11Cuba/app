@@ -7,6 +7,7 @@ import 'package:mostro/core/app_routes.dart';
 import 'package:mostro/core/app_theme.dart';
 import 'package:mostro/features/notifications/services/push_notification_service.dart';
 import 'package:mostro/features/settings/providers/settings_provider.dart';
+import 'package:mostro/shared/widgets/trade_action_listener.dart';
 
 /// Root application widget.
 ///
@@ -61,8 +62,9 @@ class _MostroAppState extends ConsumerState<MostroApp> {
         GlobalCupertinoLocalizations.delegate,
       ],
       supportedLocales: AppLocalizations.supportedLocales,
-      builder: (context, child) =>
-          NotificationListenerWidget(child: child ?? const SizedBox.shrink()),
+      builder: (context, child) => NotificationListenerWidget(
+        child: TradeActionListener(child: child ?? const SizedBox.shrink()),
+      ),
     );
   }
 }

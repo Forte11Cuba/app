@@ -132,12 +132,15 @@ class _MyOrderScreenState extends ConsumerState<MyOrderScreen> {
         'lastHandledStatus=$_lastHandledStatus orderStatus=${resolvedOrder.status}');
 
     if (liveStatus != null && liveStatus != OrderStatus.pending && liveStatus != _lastHandledStatus) {
-      // For sellers: skip intermediate WaitingBuyerInvoice but still track it
-      // so we don't re-process it. Navigate to the appropriate screen when
-      // status reaches WaitingPayment or beyond.
+      // Invoice requests are not navigated from here: the app-wide
+      // TradeActionListener pushes the add/pay-invoice screen for the
+      // actionable role no matter which screen is open — including this
+      // one. The counterparty's copy of those statuses is informational
+      // (e.g. waiting-seller-to-pay persists WaitingPayment on the buyer
+      // side) and must not navigate either. Track them so they are not
+      // re-processed, and navigate to the trade detail from Active on.
       final shouldNavigate = switch (liveStatus) {
-        OrderStatus.waitingBuyerInvoice when isSelling => false, // skip — intermediate state
-        OrderStatus.waitingPayment when !isSelling => false,    // skip — buyer doesn't see this
+        OrderStatus.waitingBuyerInvoice || OrderStatus.waitingPayment => false,
         _ => true,
       };
 
@@ -162,15 +165,7 @@ class _MyOrderScreenState extends ConsumerState<MyOrderScreen> {
             _lastHandledStatus = null;
             return;
           }
-          if (intendedStatus == OrderStatus.waitingPayment && isSelling) {
-            debugPrint('[MyOrderScreen] navigating to PayLightningInvoiceScreen');
-            context.go(AppRoute.payInvoicePath(widget.orderId));
-          } else if (intendedStatus == OrderStatus.waitingBuyerInvoice &&
-              !isSelling) {
-            context.go(AppRoute.addInvoicePath(widget.orderId));
-          } else {
-            context.go(AppRoute.tradeDetailPath(widget.orderId));
-          }
+          context.go(AppRoute.tradeDetailPath(widget.orderId));
         });
       } else {
         // Mark this status as handled so we don't re-process it on next build.

@@ -196,16 +196,27 @@ Emits whenever the order list changes (new orders, status updates,
 expirations). Used to keep the UI order list in sync.
 
 ### on_trade_updated() → Stream<TradeUpdate>
-Push channel for trade lifecycle changes the 2s status polling cannot
-observe: a never-active trade is **wiped** from the DB on the daemon's
-`Canceled` (no row left to poll), and after a taker-timeout republish
-the book reads `pending` again. Emitted by the `Canceled` gift-wrap
-handler and the stale-state sweep. Screens filter by `order_id`.
+Push channel for daemon-driven trade lifecycle changes. Every status a
+Kind 14 dispatch arm syncs is emitted here after the in-memory book
+update and the DB persistence **attempt** — a DB write failure (or a
+memory-only session, where `db()` is `None`) is logged and does not
+suppress the notification, so listeners must not assume the trade row
+already reflects the status. Also emitted by the stale-state sweep's
+maker resync. Two consumer needs:
+changes the 2s status polling cannot observe (a never-active trade is
+**wiped** from the DB on the daemon's `Canceled` — no row left to poll —
+and after a taker-timeout republish the book reads `pending` again), and
+action requests the user must react to promptly — `WaitingBuyerInvoice` /
+`WaitingPayment` drive the app-wide auto-navigation to the add-invoice /
+pay-invoice screens (`TradeActionListener`, which resolves the trade role
+so the counterparty's informational copy of those statuses never
+navigates). Take replies produce no emission: the take waiter consumes
+them before the dispatch arms run. Screens filter by `order_id`.
 
 ```text
 TradeUpdate {
   order_id: String
-  status: OrderStatus   # Canceled on wipe; Pending on maker resync
+  status: OrderStatus   # the status just persisted; Pending on maker resync
 }
 ```
 
@@ -252,7 +263,13 @@ what to listen to. Reference: <https://mostro.network/protocol/seller_pay_hold_i
 | `HoldInvoicePaymentSettled` / `Released` / `PurchaseCompleted` | (status sync)             | `status → SettledHoldInvoice`                                                    |
 | `CooperativeCancelAccepted`        | (status sync)                                       | `status → CooperativelyCanceled`                                                 |
 | `AdminSettled` / `AdminCanceled`   | (status sync)                                       | `status → SettledByAdmin` / `CanceledByAdmin`                                    |
-| `Canceled`                         | (none)                                              | Never-active trade (pending/waiting): row + in-memory session **deleted**; otherwise `status → Canceled` (history kept). Emits `TradeUpdate` either way. See below. |
+| `Canceled`                         | (none)                                              | Never-active trade (pending/waiting): row + in-memory session **deleted**; otherwise `status → Canceled` (history kept). See below. |
+
+Every arm above that syncs a status also emits a `TradeUpdate` (see
+`on_trade_updated`) after the in-memory book update and the DB
+persistence attempt — DB failures are logged, never suppress the
+emission, and leave the row behind the book. `Canceled` included, which
+emits whether it wiped the row or kept it as history.
 
 ### Daemon cancellation semantics
 

@@ -265,9 +265,12 @@ pub struct TradeInfo {
 }
 
 /// A trade lifecycle change pushed from Rust so the UI does not have to poll
-/// for it. Emitted on daemon-driven cancellation — including the wipe of a
-/// never-active trade, whose DB row no longer exists by the time this
-/// arrives, so polling could never observe the transition.
+/// for it. Emitted on every daemon-driven status sync — cancellations
+/// (including the wipe of a never-active trade, whose DB row no longer
+/// exists by the time this arrives, so polling could never observe the
+/// transition) as well as progression statuses like `WaitingBuyerInvoice`
+/// and `WaitingPayment`, which screens use to react to the daemon's
+/// add-invoice / pay-invoice requests.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TradeUpdate {
     pub order_id: String,
