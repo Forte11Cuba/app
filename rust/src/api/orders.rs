@@ -2002,7 +2002,7 @@ async fn dispatch_mostro_message(
                 order_book().update_order_status(&order_id, new_status.clone()).await;
                 if let Some(db) = crate::db::app_db::db() {
                     if let Err(e) = db
-                        .update_trade_fields(&order_id, Some(new_status), None, None)
+                        .update_trade_fields(&order_id, Some(new_status.clone()), None, None)
                         .await
                     {
                         log::warn!(
@@ -2010,6 +2010,7 @@ async fn dispatch_mostro_message(
                         );
                     }
                 }
+                emit_trade_update(&order_id, new_status);
             }
         }
         // Mostro asks the buyer for a Lightning invoice with AddInvoice. A
@@ -2052,7 +2053,7 @@ async fn dispatch_mostro_message(
             }
             if let Some(db) = crate::db::app_db::db() {
                 if let Err(e) = db
-                    .update_trade_fields(&order_id, Some(new_status), None, amount)
+                    .update_trade_fields(&order_id, Some(new_status.clone()), None, amount)
                     .await
                 {
                     log::warn!(
@@ -2060,6 +2061,10 @@ async fn dispatch_mostro_message(
                     );
                 }
             }
+            // After both stores are consistent, so a listener that reacts to
+            // the push (e.g. auto-opening the add-invoice screen) reads the
+            // synced status and amount.
+            emit_trade_update(&order_id, new_status);
         }
         // Mostro sends PayInvoice to the seller with the hold invoice bolt11
         // when a buyer takes a sell order (or a seller takes a buy order).
@@ -2126,6 +2131,7 @@ async fn dispatch_mostro_message(
                     );
                 }
             }
+            emit_trade_update(&order_id, crate::api::types::OrderStatus::WaitingPayment);
         }
         // Handle remaining status-update actions from the daemon by syncing
         // the trade status in the DB so My Trades reflects the current state.
@@ -2172,7 +2178,7 @@ async fn dispatch_mostro_message(
                 order_book().update_order_status(&order_id, status.clone()).await;
                 if let Some(db) = crate::db::app_db::db() {
                     if let Err(e) = db
-                        .update_trade_fields(&order_id, Some(status), None, None)
+                        .update_trade_fields(&order_id, Some(status.clone()), None, None)
                         .await
                     {
                         log::warn!(
@@ -2180,6 +2186,7 @@ async fn dispatch_mostro_message(
                         );
                     }
                 }
+                emit_trade_update(&order_id, status);
             } else {
                 log::debug!(
                     "[orders] gift-wrap {:?}: order={order_id} (no status change)",
@@ -3598,8 +3605,9 @@ async fn _run_order_subscription() {
     }
 }
 
-/// Buffered trade lifecycle updates; cancellations are rare, so a small
-/// buffer is ample.
+/// Buffered trade lifecycle updates. Every daemon-driven status sync emits
+/// one, but they are per-trade progression steps — a handful per trade over
+/// minutes — so a small buffer is still ample.
 const TRADE_UPDATES_CAPACITY: usize = 64;
 
 static TRADE_UPDATES: std::sync::OnceLock<
@@ -3618,12 +3626,14 @@ pub(crate) fn emit_trade_update(order_id: &str, status: crate::api::types::Order
     });
 }
 
-/// Stream of trade lifecycle changes (daemon-driven cancellations).
+/// Stream of trade lifecycle changes pushed by the daemon-message ingest.
 ///
-/// Complements the 2s status polling: after a never-active trade is wiped
-/// (see `cancellation_wipes_history`) there is no DB row left to poll, and
-/// after a timeout republish the book shows `pending` again — in both cases
-/// this push is the only signal the affected screens can react to.
+/// Every status a Kind 14 dispatch arm persists is emitted here, after both
+/// the order book and the trade DB are synced. Complements the 2s status
+/// polling in two ways: cancellations that polling cannot observe (a wiped
+/// never-active trade has no DB row left, and after a timeout republish the
+/// book shows `pending` again), and action requests the user must react to
+/// promptly (add-invoice / pay-invoice) no matter which screen is open.
 pub async fn on_trade_updated() -> Result<TradeUpdatesStream> {
     Ok(TradeUpdatesStream {
         rx: trade_updates_tx().subscribe(),
