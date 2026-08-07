@@ -58,6 +58,22 @@ void main() {
     expect(container.read(tradeRoleProvider), {'o1': false});
   });
 
+  testWidgets('buyer is sent to add-invoice on WaitingBuyerInvoice',
+      (tester) async {
+    final container = await pumpListener(
+      tester,
+      resolveRole: (_) async => TradeRole.buyer,
+    );
+
+    updates.add(const TradeUpdate(
+        orderId: 'o1', status: OrderStatus.waitingBuyerInvoice));
+    await tester.pump();
+    await tester.pump();
+
+    expect(navigated, [AppRoute.addInvoicePath('o1')]);
+    expect(container.read(tradeRoleProvider), {'o1': true});
+  });
+
   testWidgets('informational copy for the counterparty does not navigate',
       (tester) async {
     // waiting-seller-to-pay persists WaitingPayment on the buyer side too.
