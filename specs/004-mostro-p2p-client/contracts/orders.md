@@ -240,7 +240,7 @@ call — it arrives as a Kind 14 (NIP-44) message from mostrod. This
 section documents the full chain so Flutter providers and screens know
 what to listen to. Reference: <https://mostro.network/protocol/seller_pay_hold_invoice.html>.
 
-### Inbound gift-wrap actions consumed by `process_gift_wrap_rumor`
+### Inbound Kind 14 actions consumed by `dispatch_mostro_message`
 
 | Action                             | Payload variant                                     | Effect on the local trade row                                                    |
 |------------------------------------|-----------------------------------------------------|----------------------------------------------------------------------------------|

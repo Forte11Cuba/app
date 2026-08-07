@@ -4281,6 +4281,14 @@ mod tests {
             add_invoice_sync(&Some(Payload::Order(so))).expect("Order payload must sync");
         assert_eq!(amount, None);
 
+        // The daemon's follow-up Peer payload (counterparty reputation) must
+        // sync nothing — it would otherwise clobber the just-written status.
+        let peer = Payload::Peer(mostro_core::message::Peer {
+            pubkey: String::new(),
+            reputation: None,
+        });
+        assert!(add_invoice_sync(&Some(peer)).is_none());
+
         // No payload → nothing to sync.
         assert!(add_invoice_sync(&None).is_none());
     }
@@ -4293,6 +4301,21 @@ mod tests {
             status_for_action(&mostro_core::message::Action::AddInvoice),
             Some(crate::api::types::OrderStatus::WaitingBuyerInvoice)
         );
+
+        // The mapping also feeds classify_take_reply: a payload-less
+        // add-invoice take reply must carry the implied status instead of
+        // persisting the trade as Pending.
+        match classify_take_reply(&mostro_core::message::Action::AddInvoice, &None) {
+            DaemonReply::TakeAccepted { status, amount_sats, hold_invoice, .. } => {
+                assert_eq!(
+                    status,
+                    Some(crate::api::types::OrderStatus::WaitingBuyerInvoice)
+                );
+                assert!(amount_sats.is_none());
+                assert!(hold_invoice.is_none());
+            }
+            _ => panic!("expected TakeAccepted"),
+        }
     }
 
     /// Only the pending create's own local UUID may be rebound to an incoming
