@@ -1861,6 +1861,14 @@ async fn dispatch_mostro_message(
             log::info!("[orders] gift-wrap Canceled for trade={trade_pubkey_hex}");
             if let Some(order_id) = &kind.id {
                 let oid = order_id.to_string();
+                // A stale Canceled replayed over a finished trade — e.g. the
+                // taker-timeout cancel of an order that was later re-taken
+                // and completed — must not overwrite the terminal outcome.
+                // The wipe path below is unaffected: it starts from
+                // pending/waiting, which are not terminal.
+                if status_sync_blocked_by_terminal(&oid, &kind.action).await {
+                    return;
+                }
                 // Deliberately NOT removed from the order book. The book is
                 // fed only by the daemon's Kind 38383 events, and on a
                 // taker-responsible timeout mostrod republishes the order as
@@ -4534,6 +4542,59 @@ mod tests {
         assert!(
             !status_sync_blocked_by_terminal("no-such-order", &Action::AddInvoice).await
         );
+    }
+
+    /// A stale Canceled replayed over a finished trade (the taker-timeout
+    /// cancel of an order later re-taken and completed) must be skipped
+    /// entirely at the handler level: no status write, no TradeUpdate.
+    #[tokio::test]
+    async fn replayed_cancel_over_terminal_trade_is_skipped() {
+        use mostro_core::message::{Action, Message};
+
+        let order_uuid = uuid::Uuid::new_v4();
+        let order_id = order_uuid.to_string();
+        let mut done = dummy_order_info(&order_id);
+        done.status = crate::api::types::OrderStatus::Success;
+        order_book().upsert_order(done).await;
+
+        let mut rx = trade_updates_tx().subscribe();
+
+        let sender = nostr_sdk::PublicKey::from_hex(&active_mostro_pubkey())
+            .expect("valid mostro pubkey");
+        let unwrapped = mostro_core::nip59::UnwrappedMessage {
+            message: Message::new_order(
+                Some(order_uuid),
+                None,
+                None,
+                Action::Canceled,
+                None,
+            ),
+            signature: None,
+            sender,
+            identity: sender,
+            created_at: nostr_sdk::Timestamp::from(0u64),
+        };
+        dispatch_mostro_message(unwrapped, "test-cancel-replay", "ff00ff00", 1).await;
+
+        // The book entry keeps its terminal outcome...
+        let status = order_book()
+            .get_order(&order_id)
+            .await
+            .expect("order still cached")
+            .status;
+        assert_eq!(status, crate::api::types::OrderStatus::Success);
+
+        // ...and no TradeUpdate was emitted for this order. Drain the
+        // broadcast (parallel tests may emit for other orders) and filter
+        // by our id; the suppressed emission would already be buffered by
+        // the time dispatch returned.
+        let mut leaked = false;
+        while let Ok(update) = rx.try_recv() {
+            if update.order_id == order_id {
+                leaked = true;
+            }
+        }
+        assert!(!leaked, "stale Canceled must not emit a TradeUpdate");
     }
 
     /// #277 cause 3: the coverage seed must be a union that never evicts a

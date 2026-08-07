@@ -305,6 +305,10 @@ no book/DB write, no emission. Relays deliver the startup backlog
 newest-first, so such a message is an out-of-order replay, not a real
 transition; mostrod never reopens a finished trade. `SettledHoldInvoice`
 and `Dispute` still progress and are deliberately not in the set.
+`Canceled` applies the same guard — a stale timeout-cancel replayed over
+an order that was later re-taken and completed must not overwrite the
+outcome; its wipe path is unaffected, since it starts from non-terminal
+waiting states.
 
 Every arm above that syncs a status also emits a `TradeUpdate` (see
 `on_trade_updated`) after the in-memory book update and the DB
