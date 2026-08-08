@@ -3843,23 +3843,41 @@ pub async fn get_trade_role(order_id: String) -> Result<Option<crate::api::types
 fn recovered_max_trade_index(
     info: &mostro_core::message::RestoreSessionInfo,
 ) -> Option<u32> {
-    info.restore_orders
+    // A single adapter drops both negatives and any value >= u32::MAX — neither
+    // is a real trade index, and truncating one into a small u32 could corrupt
+    // the counter this exists to protect. u32::MAX itself is dropped: it is the
+    // reserved terminal index, and storing it as the counter would make the next
+    // derive_trade_key compute u32::MAX + 1 and overflow (panic in debug, wrap to
+    // 0 in release — reissuing index 0, the exact key-reuse this resync prevents).
+    // Collapsed into one filter_map so the two conditions can't drift apart.
+    let all: Vec<i64> = info
+        .restore_orders
         .iter()
         .map(|o| o.trade_index)
         .chain(info.restore_disputes.iter().map(|d| d.trade_index))
-        // `filter_map` with `try_from` drops both negatives and any value
-        // beyond `u32::MAX` — neither is a real trade index, and truncating
-        // one into a small `u32` could corrupt the counter this exists to
-        // protect. `u32::MAX` itself is also dropped: it is reserved as the
-        // terminal index, because storing it as the counter would make the
-        // next `derive_trade_key` compute `u32::MAX + 1` and overflow (panic
-        // in debug, wrap to 0 in release — reissuing index 0, the exact
-        // key-reuse this resync prevents). 4 billion trades is not reachable
-        // in practice, but the floor must never be a value the counter cannot
-        // advance past.
-        .filter_map(|i| u32::try_from(i).ok())
-        .filter(|&i| i < u32::MAX)
-        .max()
+        .collect();
+    let total = all.len();
+    let valid: Vec<u32> = all
+        .into_iter()
+        .filter_map(|i| u32::try_from(i).ok().filter(|&v| v < u32::MAX))
+        .collect();
+    // A dropped index is not just an odd value: it means the daemon sent
+    // something this client's model does not cover, and a silently-lowered
+    // floor produces a later CantDo(InvalidTradeIndex) with no breadcrumb. Warn
+    // so the drop is traceable — especially the degenerate all-invalid case,
+    // where this returns None, restore_session skips the resync, and the restore
+    // reports success with a log as the only evidence anything happened.
+    let dropped = total - valid.len();
+    if dropped > 0 {
+        crate::api::logging::blog_warn(
+            "restore",
+            format!(
+                "recovered_max_trade_index dropped {dropped} of {total} indexes \
+                 (negative or out-of-range); resync floor uses the valid remainder"
+            ),
+        );
+    }
+    valid.into_iter().max()
 }
 
 /// Send a `RestoreSession` to the active daemon and return the user's active
@@ -5131,5 +5149,23 @@ mod restore_e2e_tests {
             println!("[test]   order_id={} status={}", o.order_id, o.status);
         }
         assert!(!info.restore_orders.is_empty(), "restore should recover the created order");
+
+        // #217 (grunch review): assert the resync actually ran. restore_session
+        // must raise trade_key_index past every recovered trade, so the next
+        // derive_trade_key can't reuse a key a recovered trade already owns.
+        // This is the e2e assertion the PR body's coverage claim refers to; the
+        // unit-level no-op/raise/idempotent/rollback behaviour is pinned in
+        // identity.rs::load_derive_then_delete_identity_lifecycle.
+        if let Some(max_recovered) = recovered_max_trade_index(&info) {
+            let idx = crate::api::identity::get_identity()
+                .await
+                .expect("get_identity")
+                .expect("identity present after restore")
+                .trade_key_index;
+            assert!(
+                idx >= max_recovered,
+                "trade_key_index ({idx}) must be >= max recovered index ({max_recovered}) after resync",
+            );
+        }
     }
 }

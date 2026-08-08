@@ -427,7 +427,8 @@ pub(crate) async fn ensure_trade_key_index_at_least(floor: u32) -> Result<()> {
     #[cfg(target_arch = "wasm32")]
     if db.is_none() {
         log::warn!(
-            "[identity] no local store on web — the resynced trade-key counter              is durable only through the Flutter mirror"
+            "[identity] no local store on web — the resynced trade-key counter is \
+             durable only through the Flutter mirror"
         );
     }
     ensure_trade_key_index_at_least_with(db, trade_key_index_tx(), floor).await
@@ -675,6 +676,145 @@ mod tests {
         (tx, TradeKeyIndexStream { rx })
     }
 
+    /// A `Storage` whose `save_identity` always fails, for exercising the
+    /// resync rollback path with an injected failure. The seam under test only
+    /// calls `save_identity`, so every other method is `unimplemented!()` —
+    /// reaching one would be a test bug, not silent success.
+    struct FailingStore;
+
+    impl Storage for FailingStore {
+        async fn save_identity(&self, _identity: &IdentityInfo) -> Result<()> {
+            anyhow::bail!("injected save failure")
+        }
+        async fn save_order(&self, _order: &crate::api::types::OrderInfo) -> Result<()> {
+            unimplemented!()
+        }
+        async fn get_order(&self, _id: &str) -> Result<Option<crate::api::types::OrderInfo>> {
+            unimplemented!()
+        }
+        async fn delete_order(&self, _id: &str) -> Result<()> {
+            unimplemented!()
+        }
+        async fn list_orders(&self) -> Result<Vec<crate::api::types::OrderInfo>> {
+            unimplemented!()
+        }
+        async fn save_trade(&self, _trade: &crate::api::types::TradeInfo) -> Result<()> {
+            unimplemented!()
+        }
+        async fn get_trade(&self, _id: &str) -> Result<Option<crate::api::types::TradeInfo>> {
+            unimplemented!()
+        }
+        async fn list_trades(&self) -> Result<Vec<crate::api::types::TradeInfo>> {
+            unimplemented!()
+        }
+        async fn save_message(&self, _msg: &crate::api::types::ChatMessage) -> Result<()> {
+            unimplemented!()
+        }
+        async fn list_messages(
+            &self,
+            _trade_id: &str,
+        ) -> Result<Vec<crate::api::types::ChatMessage>> {
+            unimplemented!()
+        }
+        async fn mark_messages_read(&self, _trade_id: &str) -> Result<()> {
+            unimplemented!()
+        }
+        async fn message_exists(&self, _id: &str) -> Result<bool> {
+            unimplemented!()
+        }
+        async fn save_relay(&self, _relay: &crate::api::types::RelayInfo) -> Result<()> {
+            unimplemented!()
+        }
+        async fn delete_relay(&self, _url: &str) -> Result<()> {
+            unimplemented!()
+        }
+        async fn list_relays(&self) -> Result<Vec<crate::api::types::RelayInfo>> {
+            unimplemented!()
+        }
+        async fn get_identity(&self) -> Result<Option<IdentityInfo>> {
+            unimplemented!()
+        }
+        async fn delete_identity(&self) -> Result<()> {
+            unimplemented!()
+        }
+        async fn save_queued_message(
+            &self,
+            _msg: &crate::queue::outbox::QueuedMessage,
+        ) -> Result<()> {
+            unimplemented!()
+        }
+        async fn list_queued_messages(
+            &self,
+        ) -> Result<Vec<crate::queue::outbox::QueuedMessage>> {
+            unimplemented!()
+        }
+        async fn update_queued_message_status(
+            &self,
+            _id: &str,
+            _status: crate::api::types::QueuedMessageStatus,
+        ) -> Result<()> {
+            unimplemented!()
+        }
+        async fn delete_queued_message(&self, _id: &str) -> Result<()> {
+            unimplemented!()
+        }
+        async fn save_trade_key(&self, _order_id: &str, _key_index: u32) -> Result<()> {
+            unimplemented!()
+        }
+        async fn get_trade_key(&self, _order_id: &str) -> Result<Option<u32>> {
+            unimplemented!()
+        }
+        async fn get_order_id_by_trade_index(&self, _key_index: u32) -> Result<Option<String>> {
+            unimplemented!()
+        }
+        async fn delete_trade_key(&self, _order_id: &str) -> Result<()> {
+            unimplemented!()
+        }
+        async fn clear_trade_keys(&self) -> Result<()> {
+            unimplemented!()
+        }
+        async fn get_setting(&self, _key: &str) -> Result<Option<String>> {
+            unimplemented!()
+        }
+        async fn set_setting(&self, _key: &str, _value: &str) -> Result<()> {
+            unimplemented!()
+        }
+        async fn delete_setting(&self, _key: &str) -> Result<()> {
+            unimplemented!()
+        }
+        async fn save_active_mostro_pubkey(&self, _pubkey: &str) -> Result<()> {
+            unimplemented!()
+        }
+        async fn get_active_mostro_pubkey(&self) -> Result<Option<String>> {
+            unimplemented!()
+        }
+        async fn get_trade_by_order_id(
+            &self,
+            _order_id: &str,
+        ) -> Result<Option<crate::api::types::TradeInfo>> {
+            unimplemented!()
+        }
+        async fn delete_trade_by_order_id(&self, _order_id: &str) -> Result<()> {
+            unimplemented!()
+        }
+        async fn update_trade_order_id(
+            &self,
+            _old_order_id: &str,
+            _new_order_id: &str,
+        ) -> Result<()> {
+            unimplemented!()
+        }
+        async fn update_trade_fields(
+            &self,
+            _order_id: &str,
+            _status: Option<crate::api::types::OrderStatus>,
+            _hold_invoice: Option<String>,
+            _amount_sats: Option<u64>,
+        ) -> Result<()> {
+            unimplemented!()
+        }
+    }
+
     #[test]
     fn deriving_without_durable_storage_is_refused() {
         // Asserted as a pure decision, not through `derive_trade_key`: that
@@ -806,10 +946,41 @@ mod tests {
             published.rx.try_recv().is_err(),
             "an idempotent resync must not publish again",
         );
+        // #217 rollback (grunch review): a failed persist must NOT leave the
+        // counter advanced. Counter is 50 here. Ask for a higher floor (60)
+        // against a failing store: the call errors and the counter stays 50.
+        let (fx, _frx) = private_channel();
+        let rollback_err =
+            ensure_trade_key_index_at_least_with(Some(&FailingStore), &fx, 60)
+                .await
+                .unwrap_err()
+                .to_string();
+        assert!(
+            rollback_err.contains("StorageError:"),
+            "unexpected error: {rollback_err}"
+        );
+        assert_eq!(
+            get_identity().await.unwrap().unwrap().trade_key_index,
+            50,
+            "a failed persist must roll the counter back, not leave it advanced",
+        );
+        // Retry the same floor against the WORKING store: it now writes — the
+        // idempotency short-circuit was not poisoned by the half-applied bump.
+        ensure_trade_key_index_at_least_with(Some(&db), &tx, 60)
+            .await
+            .unwrap();
+        assert_eq!(
+            get_identity().await.unwrap().unwrap().trade_key_index,
+            60,
+            "retry against a working store must raise and persist",
+        );
+        assert_eq!(published.next().await.unwrap(), 60);
+        assert_eq!(db.get_identity().await.unwrap().unwrap().trade_key_index, 60);
+
         // Regression (the bug #217 fixes): the next derived key is FRESH —
-        // index 51, past every recovered trade — not a reused recovered index.
+        // index 61, past every recovered trade — not a reused recovered index.
         let after = derive_trade_key_with(Some(&db), &tx).await.unwrap();
-        assert_eq!(after.index, 51);
+        assert_eq!(after.index, 61);
 
         crate::api::logging::forward_log(log::Level::Info, "identity_probe", "before delete");
 
