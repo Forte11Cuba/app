@@ -78,9 +78,9 @@ class WalkthroughScreen extends ConsumerWidget {
       // The package's default controlsPadding has no bottom inset.
       controlsPadding: EdgeInsets.fromLTRB(
         16.0,
-        4.0,
         16.0,
-        4.0 + MediaQuery.of(context).viewPadding.bottom,
+        16.0,
+        16.0 + MediaQuery.of(context).viewPadding.bottom,
       ),
     );
   }
