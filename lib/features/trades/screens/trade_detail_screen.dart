@@ -517,7 +517,14 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen> {
         actions: [_buildOverflowMenu()],
       ),
       body: ListView(
-        padding: const EdgeInsets.all(AppSpacing.lg),
+        // #267: add the bottom system-bar inset so the last item isn't hidden
+        // behind the gesture / 3-button navigation bar.
+        padding: EdgeInsets.fromLTRB(
+          AppSpacing.lg,
+          AppSpacing.lg,
+          AppSpacing.lg,
+          AppSpacing.lg + MediaQuery.of(context).viewPadding.bottom,
+        ),
         children: [
           // Persistent chat chip — always-on access to the counterpart.
           if (inFlight) ...[
