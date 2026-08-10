@@ -121,7 +121,9 @@ class _MostroNodeSelectorState extends ConsumerState<MostroNodeSelector> {
         left: AppSpacing.lg,
         right: AppSpacing.lg,
         top: AppSpacing.lg,
-        bottom: MediaQuery.viewInsetsOf(context).bottom + AppSpacing.lg,
+        bottom: MediaQuery.viewInsetsOf(context).bottom +
+            MediaQuery.viewPaddingOf(context).bottom +
+            AppSpacing.lg,
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
