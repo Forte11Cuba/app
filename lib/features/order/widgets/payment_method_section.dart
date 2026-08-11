@@ -48,6 +48,9 @@ class _PaymentMethodSectionState extends ConsumerState<PaymentMethodSection> {
     // When the currency changes, drop any selected methods that are not valid
     // for the new currency (the custom free-text entry is left untouched).
     ref.listen<String>(selectedFiatCodeProvider, (_, next) {
+      // Don't prune while the asset is still loading: the provider returns an
+      // empty list during load, which would wipe every selection.
+      if (!ref.read(paymentMethodsDataProvider).hasValue) return;
       final valid = ref.read(paymentMethodsForCurrencyProvider(next)).toSet();
       final current = ref.read(selectedPaymentMethodsProvider);
       final pruned = current.where(valid.contains).toList();
