@@ -8,6 +8,7 @@ import 'package:mostro/core/app_theme.dart';
 import 'package:mostro/core/daemon_errors.dart';
 import 'package:mostro/features/order/widgets/currency_section.dart';
 import 'package:mostro/features/settings/providers/settings_provider.dart';
+import 'package:mostro/features/about/providers/mostro_node_provider.dart';
 import 'package:mostro/features/order/widgets/order_preset_selector.dart';
 import 'package:mostro/features/order/widgets/payment_method_section.dart';
 import 'package:mostro/features/order/widgets/price_section.dart';
@@ -62,6 +63,28 @@ class _AddOrderScreenState extends ConsumerState<AddOrderScreen> {
     _minController.dispose();
     _maxController.dispose();
     super.dispose();
+  }
+
+  /// Returns the node's accepted sats range when the entered fixed-sats amount
+  /// is out of bounds, otherwise null. Fixed-sats orders only; market-price
+  /// validation needs an exchange-rate provider and is out of scope here (#282).
+  /// Fails open: returns null when the amount is not yet a number, or when the
+  /// node advertises no min/max (so a valid order is never blocked just because
+  /// the limits could not be read).
+  ({int min, int max})? _satsOutOfRange(
+    String fixedSatsStr,
+    int? minOrder,
+    int? maxOrder,
+  ) {
+    final sats = int.tryParse(fixedSatsStr);
+    if (sats == null) return null;
+    if (minOrder != null && sats < minOrder) {
+      return (min: minOrder, max: maxOrder ?? minOrder);
+    }
+    if (maxOrder != null && sats > maxOrder) {
+      return (min: minOrder ?? 0, max: maxOrder);
+    }
+    return null;
   }
 
   bool _checkValid(
@@ -152,7 +175,18 @@ class _AddOrderScreenState extends ConsumerState<AddOrderScreen> {
     final customMethod = ref.read(customPaymentMethodProvider);
     final isMarket = ref.read(isMarketPriceProvider);
     final fixedSatsStr = ref.read(fixedSatsProvider);
-    if (_submitting || !_checkValid(selectedMethods, customMethod, isMarket, fixedSatsStr)) return;
+    // Defence in depth: the submit button is already disabled when invalid or
+    // out of the node's sats range, but re-check here so no code path submits
+    // an out-of-range fixed-sats order (#282).
+    final node = ref.read(mostroNodeProvider).valueOrNull;
+    final outOfRange = !isMarket && fixedSatsStr.isNotEmpty
+        ? _satsOutOfRange(fixedSatsStr, node?.minOrderAmount, node?.maxOrderAmount)
+        : null;
+    if (_submitting ||
+        !_checkValid(selectedMethods, customMethod, isMarket, fixedSatsStr) ||
+        outOfRange != null) {
+      return;
+    }
     setState(() => _submitting = true);
 
     try {
@@ -226,7 +260,13 @@ class _AddOrderScreenState extends ConsumerState<AddOrderScreen> {
     final fixedSatsStr = ref.watch(fixedSatsProvider);
     final fiatCode = ref.watch(selectedFiatCodeProvider);
     final premium = ref.watch(premiumValueProvider);
-    final isValid = _checkValid(selectedMethods, customMethod, isMarket, fixedSatsStr);
+    final node = ref.watch(mostroNodeProvider).valueOrNull;
+    final satsRangeError = (!isMarket && fixedSatsStr.isNotEmpty)
+        ? _satsOutOfRange(fixedSatsStr, node?.minOrderAmount, node?.maxOrderAmount)
+        : null;
+    final isValid =
+        _checkValid(selectedMethods, customMethod, isMarket, fixedSatsStr) &&
+            satsRangeError == null;
     final l10n = AppLocalizations.of(context);
 
     return Scaffold(
@@ -347,6 +387,25 @@ class _AddOrderScreenState extends ConsumerState<AddOrderScreen> {
             color: cardBg,
             child: const PriceSection(),
           ),
+          // Out-of-range warning for fixed-sats orders (#282): show the node's
+          // accepted range so the user can correct it before submitting,
+          // instead of the daemon rejecting the order after the fact.
+          if (satsRangeError != null) ...[
+            const SizedBox(height: AppSpacing.sm),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
+              child: Text(
+                l10n.orderAmountOutOfRange(
+                  satsRangeError.min,
+                  satsRangeError.max,
+                ),
+                style: TextStyle(
+                  color: colors?.destructiveRed ?? const Color(0xFFD84D4D),
+                  fontSize: 13,
+                ),
+              ),
+            ),
+          ],
           const SizedBox(height: AppSpacing.xxl),
         ],
       ),

@@ -599,6 +599,7 @@
   "orderExpiryNoReputationNote": "Cela n'affectera pas votre réputation.",
   "minHint": "Min",
   "maxHint": "Max",
+  "orderAmountOutOfRange": "Le montant doit être compris entre {min} et {max} sats pour ce nœud Mostro",
   "fiatAmountHint": "Montant fiat",
   "enterAmountForPreview": "Saisissez un montant pour voir un aperçu en direct.",
   "previewLabel": "APERÇU",
