@@ -30,6 +30,31 @@ class AddOrderScreen extends ConsumerStatefulWidget {
   ConsumerState<AddOrderScreen> createState() => _AddOrderScreenState();
 }
 
+/// Returns the node's accepted `(min, max)` sats range when the entered
+/// fixed-sats amount is outside the node's advertised limits, otherwise null.
+///
+/// Pure and testable. Fixed-sats orders only (#282). Uses [BigInt] to match
+/// `NewOrderParams.amountSats`, so amounts beyond the signed 64-bit range are
+/// still compared rather than silently failing open. Only enforces the range
+/// when the node advertises BOTH a min and a max (they are published together
+/// in practice); when either bound is absent, or the amount is not yet a
+/// number, returns null so a valid order is never blocked and the daemon
+/// remains the backstop.
+@visibleForTesting
+({int min, int max})? satsOutOfNodeRange(
+  String fixedSatsStr,
+  int? minOrder,
+  int? maxOrder,
+) {
+  if (minOrder == null || maxOrder == null) return null;
+  final sats = BigInt.tryParse(fixedSatsStr.trim());
+  if (sats == null) return null;
+  if (sats < BigInt.from(minOrder) || sats > BigInt.from(maxOrder)) {
+    return (min: minOrder, max: maxOrder);
+  }
+  return null;
+}
+
 class _AddOrderScreenState extends ConsumerState<AddOrderScreen> {
   final _amountController = TextEditingController();
   final _minController = TextEditingController();
@@ -63,28 +88,6 @@ class _AddOrderScreenState extends ConsumerState<AddOrderScreen> {
     _minController.dispose();
     _maxController.dispose();
     super.dispose();
-  }
-
-  /// Returns the node's accepted sats range when the entered fixed-sats amount
-  /// is out of bounds, otherwise null. Fixed-sats orders only; market-price
-  /// validation needs an exchange-rate provider and is out of scope here (#282).
-  /// Fails open: returns null when the amount is not yet a number, or when the
-  /// node advertises no min/max (so a valid order is never blocked just because
-  /// the limits could not be read).
-  ({int min, int max})? _satsOutOfRange(
-    String fixedSatsStr,
-    int? minOrder,
-    int? maxOrder,
-  ) {
-    final sats = int.tryParse(fixedSatsStr);
-    if (sats == null) return null;
-    if (minOrder != null && sats < minOrder) {
-      return (min: minOrder, max: maxOrder ?? minOrder);
-    }
-    if (maxOrder != null && sats > maxOrder) {
-      return (min: minOrder ?? 0, max: maxOrder);
-    }
-    return null;
   }
 
   bool _checkValid(
@@ -179,8 +182,9 @@ class _AddOrderScreenState extends ConsumerState<AddOrderScreen> {
     // out of the node's sats range, but re-check here so no code path submits
     // an out-of-range fixed-sats order (#282).
     final node = ref.read(mostroNodeProvider).valueOrNull;
-    final outOfRange = !isMarket && fixedSatsStr.isNotEmpty
-        ? _satsOutOfRange(fixedSatsStr, node?.minOrderAmount, node?.maxOrderAmount)
+    final outOfRange = !isMarket && !_isRange && fixedSatsStr.isNotEmpty
+        ? satsOutOfNodeRange(
+            fixedSatsStr, node?.minOrderAmount, node?.maxOrderAmount)
         : null;
     if (_submitting ||
         !_checkValid(selectedMethods, customMethod, isMarket, fixedSatsStr) ||
@@ -261,8 +265,9 @@ class _AddOrderScreenState extends ConsumerState<AddOrderScreen> {
     final fiatCode = ref.watch(selectedFiatCodeProvider);
     final premium = ref.watch(premiumValueProvider);
     final node = ref.watch(mostroNodeProvider).valueOrNull;
-    final satsRangeError = (!isMarket && fixedSatsStr.isNotEmpty)
-        ? _satsOutOfRange(fixedSatsStr, node?.minOrderAmount, node?.maxOrderAmount)
+    final satsRangeError = (!isMarket && !_isRange && fixedSatsStr.isNotEmpty)
+        ? satsOutOfNodeRange(
+            fixedSatsStr, node?.minOrderAmount, node?.maxOrderAmount)
         : null;
     final isValid =
         _checkValid(selectedMethods, customMethod, isMarket, fixedSatsStr) &&
