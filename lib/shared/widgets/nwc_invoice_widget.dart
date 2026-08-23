@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import 'package:mostro/core/app_theme.dart';
+import 'package:mostro/core/automation/automation_id.dart';
+import 'package:mostro/core/automation/automation_ids.dart';
 import 'package:mostro/l10n/app_localizations.dart';
 import 'package:mostro/src/rust/api/nwc.dart' as nwc_api;
 
@@ -28,6 +30,11 @@ class _NwcInvoiceWidgetState extends State<NwcInvoiceWidget> {
   bool _loading = true;
   bool _hasError = false;
 
+  /// The generated invoice, kept only so the `invoice.nwc.text` readout can
+  /// expose it. It is already on its way to the daemon by then; automation
+  /// reads it to correlate the payment it is about to observe.
+  String? _bolt11;
+
   @override
   void initState() {
     super.initState();
@@ -41,7 +48,10 @@ class _NwcInvoiceWidgetState extends State<NwcInvoiceWidget> {
         description: null,
       );
       if (!mounted) return;
-      setState(() => _loading = false);
+      setState(() {
+        _loading = false;
+        _bolt11 = bolt11;
+      });
       widget.onInvoiceConfirmed(bolt11);
     } catch (e) {
       debugPrint('NWC invoice generation failed: $e');
@@ -70,6 +80,16 @@ class _NwcInvoiceWidgetState extends State<NwcInvoiceWidget> {
             style: TextStyle(color: colors?.textSecondary),
           ),
         ],
+      );
+    }
+
+    final bolt11 = _bolt11;
+    if (bolt11 != null) {
+      // Nothing is drawn: the screen is already leaving. The node exists so a
+      // driver can read the invoice it just submitted.
+      return const SizedBox.shrink().withAutomationId(
+        AutomationIds.invoiceNwcText,
+        label: bolt11,
       );
     }
 
