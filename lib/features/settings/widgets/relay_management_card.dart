@@ -9,6 +9,15 @@ import 'package:mostro/core/test_environment.dart';
 import 'package:mostro/l10n/app_localizations.dart';
 import 'package:mostro/src/rust/api/nostr.dart' as nostr_api;
 
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+/// The one spelling of a relay URL the app compares and keys rows by.
+///
+/// `AutomationIds.settingsRelayItem` normalizes the same way, so a relay is
+/// one row with one identifier however its URL was typed.
+String canonicalRelayUrl(String url) =>
+    url.trim().replaceAll(RegExp(r'/+$'), '');
+
 // ── Model ─────────────────────────────────────────────────────────────────────
 
 class _RelayEntry {
@@ -148,7 +157,11 @@ class _RelayManagementCardState extends ConsumerState<RelayManagementCard> {
                 ).withAutomationId(AutomationIds.settingsRelaysAddCancel),
                 TextButton(
                   onPressed: () {
-                    final url = controller.text.trim();
+                    // Canonicalized before anything else looks at it: a relay
+                    // written with and without a trailing slash is the same
+                    // relay, and two rows for it would share one automation
+                    // identifier, which no driver could then tell apart.
+                    final url = canonicalRelayUrl(controller.text);
                     // A Mortsom run points the app at a local relay, which is
                     // plain ws:// on a private address. Outside the test
                     // environment the wss:// requirement is unchanged.
@@ -165,7 +178,7 @@ class _RelayManagementCardState extends ConsumerState<RelayManagementCard> {
                       setDialogState(() => errorText = l10n.relayErrorUrlTooShort);
                       return;
                     }
-                    if (_relays.any((r) => r.url == url)) {
+                    if (_relays.any((r) => canonicalRelayUrl(r.url) == url)) {
                       setDialogState(
                         () => errorText = l10n.relayErrorDuplicate,
                       );

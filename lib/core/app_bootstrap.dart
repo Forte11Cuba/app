@@ -11,6 +11,7 @@ import 'package:mostro/core/storage/app_data_dir.dart'
 import 'package:mostro/core/app.dart';
 import 'package:mostro/core/mostro_defaults.dart';
 import 'package:mostro/core/services/identity_service.dart';
+import 'package:mostro/core/test_environment.dart';
 import 'package:mostro/core/web/bridge_probe.dart';
 import 'package:mostro/features/settings/providers/settings_provider.dart';
 import 'package:mostro/features/settings/widgets/mostro_node_selector.dart';
@@ -96,6 +97,17 @@ Future<void> bootstrapAndRun({List<String> seedRelays = const []}) async {
   try {
     await settings_api.rehydrateActiveMostroNode();
     activeMostroPubkey = await settings_api.getMostroPubkey();
+    // A Mortsom build is pointed at a locally managed daemon through
+    // MOSTRO_PUB_KEY. Seed it only when nothing was ever selected, so a
+    // restart keeps whatever the run chose through the UI, and do it here so
+    // the very first subscription already targets the daemon under test
+    // rather than the compiled-in production node.
+    final seedPubkey = TestEnvironment.mostroPubkey;
+    if (seedPubkey != null && activeMostroPubkey == defaultMostroPubkey) {
+      await settings_api.setActiveMostroNode(pubkey: seedPubkey);
+      activeMostroPubkey = await settings_api.getMostroPubkey();
+      debugPrint('[main] Mortsom build: active Mostro node seeded from MOSTRO_PUB_KEY');
+    }
     // Load the escrow-mode overrides before the relay pool starts, so the first
     // capability fetch already resolves against them. Nothing can have written
     // them in a release build (docs/cashu/README.md §4.3).
@@ -196,7 +208,15 @@ void _mirrorTradeKeyIndex(identity_api.TradeKeyIndexStream stream) {
         break;
       }
       debugPrint('[identity] mirroring trade-key index $index to secure storage');
-      await IdentityService.saveTradeKeyIndex(index);
+      try {
+        await IdentityService.saveTradeKeyIndex(index);
+      } catch (e, st) {
+        // The database copy is still authoritative and the next index (or
+        // the load-time reconciliation) supersedes the one missed here. An
+        // escaping exception would end the microtask and silently drop every
+        // later index for the rest of the process.
+        debugPrint('[identity] mirror write failed for index $index: $e\n$st');
+      }
     }
   });
 }

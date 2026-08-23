@@ -13,6 +13,7 @@ import 'package:mostro/core/services/identity_service.dart';
 import 'package:mostro/features/account/providers/backup_reminder_provider.dart';
 import 'package:mostro/features/account/providers/privacy_mode_provider.dart';
 import 'package:mostro/features/account/widgets/backup_trigger_sheet.dart';
+import 'package:mostro/features/account/widgets/public_key_card.dart';
 import 'package:mostro/l10n/app_localizations.dart';
 import 'package:mostro/shared/providers/session_provider.dart';
 import 'package:mostro/src/rust/api/identity.dart' as identity_api;
@@ -272,35 +273,7 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
           const SizedBox(height: AppSpacing.lg),
 
           // ── Public key ─────────────────────────────────────────────────
-          // Identifies the active account without revealing anything secret.
-          _SectionCard(
-            color: cardBg,
-            child: Row(
-              children: [
-                SizedBox(
-                  width: 64,
-                  child: Text(
-                    l10n.pubkeyLabel,
-                    style: theme.textTheme.bodySmall!.copyWith(color: textSec),
-                  ),
-                ),
-                const SizedBox(width: AppSpacing.sm),
-                Expanded(
-                  child: Text(
-                    _publicKey ?? '—',
-                    style: theme.textTheme.bodySmall!.copyWith(
-                      fontFamily: 'monospace',
-                    ),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-              ],
-            ),
-            // The visible text ellipsizes; the readout carries the whole key.
-          ).withAutomationId(
-            AutomationIds.keysPublicKey,
-            label: _publicKey ?? '',
-          ),
+          PublicKeyCard(publicKey: _publicKey),
           const SizedBox(height: AppSpacing.lg),
 
           // ── Privacy Card ───────────────────────────────────────────────

@@ -98,7 +98,8 @@ What the test environment changes:
 |---|---|
 | Relays | `MORTSOM_RELAYS` **replaces** the relay defaults compiled into the Rust core, rather than extending them. A run whose local relay is unreachable must fail, never quietly succeed against a public relay. |
 | Relay scheme | The add-relay dialog accepts `ws://` as well as `wss://`; a local test relay is plain `ws://` on a private address. Outside the test environment the `wss://` requirement is unchanged. |
-| Marker | A red `TEST ENVIRONMENT · Mostro` banner is shown on every screen, carrying `env.marker`. The harness refuses to run against a build without it. |
+| Marker | A red `TEST ENVIRONMENT · Mortsom` banner is shown on every screen, carrying `env.marker`. The harness refuses to run against a build without it. |
+| Node | `MOSTRO_PUB_KEY` selects the daemon under test, applied before the relay pool starts and only when no node was ever chosen — so a restart keeps whatever the run picked through the UI. Without it the first subscriptions would target the production node, which cannot decrypt them, and the app would look silently idle. A malformed key is ignored rather than passed to the bridge. |
 | Startup | Missing `MORTSOM_RELAYS` fails at startup naming the define, instead of starting against the public relays and passing a test that never reached the daemon under test. |
 
 Both entry points go through `bootstrapAndRun` in `lib/core/app_bootstrap.dart`,

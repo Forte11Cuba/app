@@ -22,6 +22,8 @@ class TestEnvironment {
       bool.fromEnvironment('MORTSOM_TEST_ENV', defaultValue: false);
   static const String _relaysDefine =
       String.fromEnvironment('MORTSOM_RELAYS', defaultValue: '');
+  static const String _mostroPubkeyDefine =
+      String.fromEnvironment('MOSTRO_PUB_KEY', defaultValue: '');
 
   static bool _armed = false;
 
@@ -67,6 +69,27 @@ class TestEnvironment {
       .map((r) => r.trim())
       .where((r) => r.isNotEmpty)
       .toList(growable: false);
+
+  /// Public key of the daemon under test, from `MOSTRO_PUB_KEY`. Null when
+  /// the define is absent or malformed, and outside the test environment.
+  ///
+  /// A run points the app at a locally managed daemon whose key is not the
+  /// one compiled in. Without this the first subscriptions would target the
+  /// production node, which cannot decrypt them, and the app would look
+  /// silently idle until the harness reached settings.
+  static String? get mostroPubkey =>
+      enabled ? parsePubkey(_mostroPubkeyDefine) : null;
+
+  /// Accepts a 64-character hex key, lowercased; null for anything else.
+  ///
+  /// A malformed define is a build mistake, and a malformed key reaches the
+  /// Rust side as an error at a point where it reads as a bridge failure.
+  /// Rejecting it here leaves the compiled default in place instead.
+  @visibleForTesting
+  static String? parsePubkey(String value) {
+    final trimmed = value.trim().toLowerCase();
+    return RegExp(r'^[0-9a-f]{64}$').hasMatch(trimmed) ? trimmed : null;
+  }
 
   /// Local test relays are plain `ws://` on a private address (for example
   /// `ws://10.0.2.2:7000`), so the test environment accepts them where the

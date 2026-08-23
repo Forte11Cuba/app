@@ -16,11 +16,16 @@ class NwcInvoiceWidget extends StatefulWidget {
     required this.amountSats,
     required this.onInvoiceConfirmed,
     required this.onFallbackToManual,
+    this.generateInvoice,
   });
 
   final int amountSats;
   final ValueChanged<String> onInvoiceConfirmed;
   final VoidCallback onFallbackToManual;
+
+  /// Asks the connected wallet for an invoice. Defaults to NWC; injected by
+  /// tests, which have no bridge to call.
+  final Future<String> Function(int amountSats)? generateInvoice;
 
   @override
   State<NwcInvoiceWidget> createState() => _NwcInvoiceWidgetState();
@@ -43,10 +48,8 @@ class _NwcInvoiceWidgetState extends State<NwcInvoiceWidget> {
 
   Future<void> _generateInvoice() async {
     try {
-      final bolt11 = await nwc_api.makeInvoice(
-        amountSats: BigInt.from(widget.amountSats),
-        description: null,
-      );
+      final generate = widget.generateInvoice ?? _makeInvoiceOverNwc;
+      final bolt11 = await generate(widget.amountSats);
       if (!mounted) return;
       setState(() {
         _loading = false;
@@ -59,10 +62,20 @@ class _NwcInvoiceWidgetState extends State<NwcInvoiceWidget> {
       setState(() {
         _loading = false;
         _hasError = true;
+        // Submitting can throw after the invoice was generated. Nothing
+        // reached the daemon then, so there is nothing to read back — and a
+        // readout left behind would report a success that did not happen.
+        _bolt11 = null;
       });
       widget.onFallbackToManual();
     }
   }
+
+  static Future<String> _makeInvoiceOverNwc(int amountSats) =>
+      nwc_api.makeInvoice(
+        amountSats: BigInt.from(amountSats),
+        description: null,
+      );
 
   @override
   Widget build(BuildContext context) {
@@ -83,16 +96,9 @@ class _NwcInvoiceWidgetState extends State<NwcInvoiceWidget> {
       );
     }
 
-    final bolt11 = _bolt11;
-    if (bolt11 != null) {
-      // Nothing is drawn: the screen is already leaving. The node exists so a
-      // driver can read the invoice it just submitted.
-      return const SizedBox.shrink().withAutomationId(
-        AutomationIds.invoiceNwcText,
-        label: bolt11,
-      );
-    }
-
+    // Checked before the readout: an error is the state that must win, so a
+    // future path that forgets to clear the invoice still cannot render a
+    // success that did not happen.
     if (_hasError) {
       return Column(
         mainAxisSize: MainAxisSize.min,
@@ -104,6 +110,16 @@ class _NwcInvoiceWidgetState extends State<NwcInvoiceWidget> {
             style: TextStyle(color: colors?.textSecondary, fontSize: 12),
           ),
         ],
+      );
+    }
+
+    final bolt11 = _bolt11;
+    if (bolt11 != null) {
+      // Nothing is drawn: the screen is already leaving. The node exists so a
+      // driver can read the invoice it just submitted.
+      return const SizedBox.shrink().withAutomationId(
+        AutomationIds.invoiceNwcText,
+        label: bolt11,
       );
     }
 
