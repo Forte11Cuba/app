@@ -111,12 +111,14 @@ class _CurrencyPickerDialogState extends State<_CurrencyPickerDialog> {
             padding: const EdgeInsets.all(AppSpacing.md),
             child: TextField(
               autofocus: true,
+              autocorrect: false,
+              enableSuggestions: false,
               decoration: InputDecoration(
                 hintText: AppLocalizations.of(context).searchCurrenciesHint,
                 prefixIcon: const Icon(Icons.search),
               ),
               onChanged: (v) => setState(() => _query = v),
-            ),
+            ).withAutomationId(AutomationIds.orderCreateCurrencySearch),
           ),
           SizedBox(
             height: 300,

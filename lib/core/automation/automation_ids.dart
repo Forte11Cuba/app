@@ -104,6 +104,7 @@ class AutomationIds {
   static const String orderAddBuy = 'order.add.buy';
   static const String orderAddSell = 'order.add.sell';
   static const String orderCreateCurrency = 'order.create.currency';
+  static const String orderCreateCurrencySearch = 'order.create.currency.search';
   static const String orderCreateFiatAmount = 'order.create.fiat_amount';
   static const String orderCreatePaymentMethod = 'order.create.payment_method';
   static const String orderCreatePriceType = 'order.create.price_type';
@@ -116,6 +117,11 @@ class AutomationIds {
   static String orderBookItem(String orderId) => 'order.book.item.$orderId';
 
   /// Currency option in the create-order currency picker.
+  ///
+  /// The picker lists every supported currency, so only a handful are built
+  /// at a time: narrow the list through [orderCreateCurrencySearch] before
+  /// looking for one. `search` is not a currency code, so the two identifiers
+  /// cannot collide.
   static String orderCreateCurrencyOption(String code) =>
       'order.create.currency.$code';
 
