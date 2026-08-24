@@ -8,6 +8,8 @@ import 'package:url_launcher/url_launcher.dart';
 
 import 'package:mostro/core/app_routes.dart';
 import 'package:mostro/core/app_theme.dart';
+import 'package:mostro/core/automation/automation_id.dart';
+import 'package:mostro/core/automation/automation_ids.dart';
 import 'package:mostro/core/daemon_errors.dart';
 import 'package:mostro/features/order/providers/trade_state_provider.dart';
 import 'package:mostro/features/settings/providers/nwc_provider.dart';
@@ -69,7 +71,7 @@ class _PayLightningInvoiceScreenState
           FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
             child: Text(l10n.yesCancelButtonLabel),
-          ),
+          ).withAutomationId(AutomationIds.tradeCancelConfirm),
         ],
       ),
     );
@@ -268,12 +270,18 @@ class _PayLightningInvoiceScreenState
                         // Sats amount of the hold invoice (from the daemon's
                         // pay-invoice reply, stored in the trade record).
                         const SizedBox(height: AppSpacing.md),
+                        // The invoice itself is only rendered as a QR, so the
+                        // readout is what an automated driver can correlate
+                        // the settlement against.
                         Text(
                           l10n.payInvoiceAmount(amountSats.toString()),
                           style: theme.textTheme.titleMedium?.copyWith(
                             color: green,
                             fontWeight: FontWeight.bold,
                           ),
+                        ).withAutomationId(
+                          AutomationIds.payInvoiceText,
+                          label: invoice,
                         ),
                         const SizedBox(height: AppSpacing.lg),
 
@@ -437,7 +445,7 @@ class _PayLightningInvoiceScreenState
                         ),
                       ),
                       child: Text(l10n.cancel),
-                    ),
+                    ).withAutomationId(AutomationIds.payCancel),
                   ),
               ],
             ),

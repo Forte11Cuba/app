@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:mostro/core/app_theme.dart';
+import 'package:mostro/core/automation/automation_id.dart';
+import 'package:mostro/core/automation/automation_ids.dart';
 import 'package:mostro/l10n/app_localizations.dart';
 
 /// Whether Market or Fixed price mode is selected.
@@ -82,7 +84,7 @@ class _PriceSectionState extends ConsumerState<PriceSection> {
               activeThumbColor: green,
               onChanged: (v) =>
                   ref.read(isMarketPriceProvider.notifier).state = v,
-            ),
+            ).withAutomationId(AutomationIds.orderCreatePriceType),
             IconButton(
               onPressed: () => _showPriceInfo(context),
               icon: const Icon(Icons.info_outline, size: 18),
@@ -227,7 +229,7 @@ class _PriceSectionState extends ConsumerState<PriceSection> {
             style: theme.textTheme.bodyLarge,
             onChanged: (v) =>
                 ref.read(fixedSatsProvider.notifier).state = v,
-          ),
+          ).withAutomationId(AutomationIds.orderCreateSatsAmount),
         ],
       ],
     );

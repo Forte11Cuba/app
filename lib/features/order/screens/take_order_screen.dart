@@ -7,6 +7,8 @@ import 'package:go_router/go_router.dart';
 
 import 'package:mostro/core/app_routes.dart';
 import 'package:mostro/core/app_theme.dart';
+import 'package:mostro/core/automation/automation_id.dart';
+import 'package:mostro/core/automation/automation_ids.dart';
 import 'package:mostro/core/daemon_errors.dart';
 import 'package:mostro/l10n/app_localizations.dart';
 import 'package:mostro/features/account/providers/privacy_mode_provider.dart';
@@ -322,6 +324,9 @@ class _TakeOrderScreenState extends ConsumerState<TakeOrderScreen> {
                       fontFamily: 'monospace',
                     ),
                     overflow: TextOverflow.ellipsis,
+                  ).withAutomationId(
+                    AutomationIds.orderId,
+                    label: order.id,
                   ),
                 ),
                 IconButton(
@@ -496,7 +501,7 @@ class _TakeOrderScreenState extends ConsumerState<TakeOrderScreen> {
                     ),
                   ),
                   child: Text(l10n.closeRatingButton),
-                ),
+                ).withAutomationId(AutomationIds.orderTakeClose),
               ),
               const SizedBox(width: AppSpacing.md),
               Expanded(
@@ -518,7 +523,7 @@ class _TakeOrderScreenState extends ConsumerState<TakeOrderScreen> {
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
                       : Text(actionLabel),
-                ),
+                ).withAutomationId(AutomationIds.orderTakeConfirm),
               ),
             ],
           ),

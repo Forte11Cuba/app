@@ -3,6 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import 'package:mostro/core/app_theme.dart';
+import 'package:mostro/core/automation/automation_id.dart';
+import 'package:mostro/core/automation/automation_ids.dart';
 import 'package:mostro/core/daemon_errors.dart';
 import 'package:mostro/features/rate/widgets/star_rating.dart';
 import 'package:mostro/l10n/app_localizations.dart';
@@ -152,7 +154,7 @@ class _RateCounterpartScreenState
                         l10n.submitUppercaseButton,
                         style: const TextStyle(fontWeight: FontWeight.bold),
                       ),
-              ),
+              ).withAutomationId(AutomationIds.tradeRateSubmit),
 
               const SizedBox(height: AppSpacing.sm),
 
@@ -171,7 +173,7 @@ class _RateCounterpartScreenState
                   l10n.closeRatingButton,
                   style: const TextStyle(fontWeight: FontWeight.bold),
                 ),
-              ),
+              ).withAutomationId(AutomationIds.tradeRateClose),
 
               const SizedBox(height: AppSpacing.lg),
             ],

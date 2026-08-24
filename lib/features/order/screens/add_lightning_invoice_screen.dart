@@ -4,6 +4,8 @@ import 'package:go_router/go_router.dart';
 
 import 'package:mostro/core/app_routes.dart';
 import 'package:mostro/core/app_theme.dart';
+import 'package:mostro/core/automation/automation_id.dart';
+import 'package:mostro/core/automation/automation_ids.dart';
 import 'package:mostro/core/daemon_errors.dart';
 import 'package:mostro/l10n/app_localizations.dart';
 import 'package:mostro/features/order/providers/trade_state_provider.dart';
@@ -88,7 +90,7 @@ class _AddLightningInvoiceScreenState
           FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
             child: Text(l10n.yesCancelButtonLabel),
-          ),
+          ).withAutomationId(AutomationIds.tradeCancelConfirm),
         ],
       ),
     );
@@ -218,7 +220,7 @@ class _AddLightningInvoiceScreenState
               TextButton(
                 onPressed: () => setState(() => _manualMode = true),
                 child: Text(l10n.enterInvoiceManually),
-              ),
+              ).withAutomationId(AutomationIds.invoiceManual),
             ],
           ),
         ),
@@ -318,7 +320,7 @@ class _AddLightningInvoiceScreenState
                       fontFamily: 'monospace',
                     ),
                     onChanged: (_) => setState(() {}),
-                  ),
+                  ).withAutomationId(AutomationIds.invoiceText),
                 ],
               ),
             ),
@@ -335,7 +337,7 @@ class _AddLightningInvoiceScreenState
                       l10n.cancel,
                       style: TextStyle(color: colors?.textSecondary),
                     ),
-                  ),
+                  ).withAutomationId(AutomationIds.invoiceCancel),
                 ),
                 const SizedBox(width: AppSpacing.md),
                 Expanded(
@@ -359,7 +361,7 @@ class _AddLightningInvoiceScreenState
                             child: CircularProgressIndicator(strokeWidth: 2),
                           )
                         : Text(l10n.submitButton),
-                  ),
+                  ).withAutomationId(AutomationIds.invoiceSubmit),
                 ),
               ],
             ),
