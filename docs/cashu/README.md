@@ -342,7 +342,7 @@ Every phase, without exception, carries these standing requirements:
 *Stacked under: nothing. Parallel with C1, C2. Blocks C4, C5.*
 
 - Bump `rust/Cargo.toml` `mostro-core = "0.14"`; fix any compile breakage in
-  `rust/src/mostro/actions.rs`, `rust/src/api/orders.rs`, `rust/src/nostr/gift_wrap.rs`.
+  `rust/src/mostro/actions.rs`, `rust/src/api/orders.rs`, `rust/src/nostr/transport.rs`.
 - **Verify and document the exact serde wire form** of `Action::AddCashuEscrow`,
   `Payload::CashuLockProof`, `Payload::CashuSignatures`, and the new `CantDoReason`
   variants (update §2 of this doc if the JSON example differs).
@@ -520,7 +520,7 @@ actions and screens; C5 established all shared plumbing.
 - **Seller release:** on confirm (existing release UI), FRB `release_cashu(order_id)`:
   sign escrow proofs with `P_S` (C4 `sign_proofs`) → send `Payload::CashuSignatures`
   **directly to the buyer over the peer chat envelope** (`mostro_wrap`/`mostro_unwrap`
-  in `rust/src/nostr/gift_wrap.rs` — same channel as peer chat, *not* the Kind-14
+  in `rust/src/nostr/transport.rs` — same channel as peer chat, *not* the Kind-14
   daemon transport) → then send `Action::Release` to mostrod (state update only, per
   upstream Track B).
 

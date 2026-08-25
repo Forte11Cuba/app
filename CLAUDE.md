@@ -108,7 +108,10 @@ bridged by flutter_rust_bridge.
   ephemeral key"). The interop dual-path for gift-wrap-only solvers is gone too;
   until mostrix#102 ships, such a solver is not reachable from here.
 - **This client speaks protocol v2 only** — nothing reads or writes kind 1059.
-- All live in `rust/src/nostr/gift_wrap.rs` (rename to `transport.rs` pending).
+- All live in `rust/src/nostr/transport.rs`. Daemon traffic is subscribed by
+  `orders.rs::subscribe_daemon_messages` (per trade) and `handle_global_daemon_message`
+  (global). Nothing in the v2 paths is named "gift wrap" any more — where that term
+  still appears it refers to the superseded v1 transport on purpose.
 - Wire status strings are **kebab-case** (`waiting-buyer-invoice`, `fiat-sent`).
 
 ## Translations

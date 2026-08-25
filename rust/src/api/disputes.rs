@@ -1,7 +1,7 @@
 /// Disputes API — open, track, and resolve trade disputes.
 ///
-/// Dispute initiation sends a `Dispute` action to the Mostro daemon via NIP-59
-/// Gift Wrap.  Incoming admin actions (`adminTookDispute`, `adminSettled`,
+/// Dispute initiation sends a `Dispute` action to the Mostro daemon over
+/// transport v2 (NIP-44, signed kind 14).  Incoming admin actions (`adminTookDispute`, `adminSettled`,
 /// `adminCanceled`) update the local `Dispute` record and — for
 /// `adminTookDispute` — trigger ECDH admin shared key derivation via the
 /// session manager.
@@ -197,7 +197,7 @@ fn status_allows_dispute(status: &crate::api::types::OrderStatus) -> bool {
 
 /// Initiate a dispute on an active trade.
 ///
-/// Sends a `Dispute` action to the Mostro daemon via NIP-59 Gift Wrap and
+/// Sends a `Dispute` action to the Mostro daemon over transport v2 and
 /// creates a local `Dispute` record.
 ///
 /// **Preconditions**: Trade MUST be disputable (funds in escrow). No existing
