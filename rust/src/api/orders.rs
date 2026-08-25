@@ -3627,7 +3627,10 @@ async fn _run_order_subscription() {
                     // notification above (#277).
                     RelayMessage::Event { subscription_id, event } => {
                         let kind = event.kind.as_u16();
-                        if kind == 14 || kind == 1059 {
+                        // Kind 14 only: nothing subscribes to the superseded
+                        // gift wrap, so a 1059 frame here would be noise from
+                        // somebody else's subscription.
+                        if kind == 14 {
                             crate::api::logging::blog_debug(
                                 "relay",
                                 format!(
