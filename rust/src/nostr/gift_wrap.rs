@@ -310,8 +310,6 @@ pub fn mostro_unwrap(
     Ok(inner)
 }
 
-// ── NIP-59 gift wrap (dispute admin messages only) ───────────────────────────
-//
 #[cfg(test)]
 mod chat_envelope_tests {
     use super::*;
