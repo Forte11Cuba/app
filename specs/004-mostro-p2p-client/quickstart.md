@@ -89,7 +89,7 @@ Flutter UI (Dart)
     ▼  flutter_rust_bridge (FFI on native, WASM on web)
     │
 Rust Core
-    ├── nostr-sdk       — relay connections, NIP-44/NIP-59 transport, event parsing
+    ├── nostr-sdk       — relay connections, NIP-44 transport (kind 14), event parsing
     ├── mostro-core     — Mostro protocol types, FSM, message construction
     ├── sqlx (SQLite)   — native storage (iOS, Android, macOS, Windows, Linux)
     ├── indexed_db_futures — web storage (WASM only, feature-gated)
