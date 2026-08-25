@@ -5,6 +5,11 @@
 //! `OrderStatus`, and decide when an inbound status may overwrite what is
 //! already stored locally.
 //!
+//! Not to be confused with [`crate::mostro::fsm`]: that module answers
+//! "may this role take this action from this state"; this one answers
+//! "what does the daemon's wire vocabulary mean, and may it overwrite
+//! what we already have".
+//!
 //! Extracted from `api/orders.rs`, where they had no business living: nothing
 //! here is callable from Dart, and `api/` is the FRB bridge surface (#120).
 //! Being pure and dependency-free, they are also the cheapest part of the
@@ -12,7 +17,6 @@
 
 use crate::api::types::OrderStatus;
 
-/// Maps a `mostro_core::order::Status` to the local [`OrderStatus`] enum.
 /// Map a daemon action to the order status it implies, for messages that
 /// carry no explicit status payload (action-only progression replies).
 ///
@@ -52,6 +56,7 @@ pub(crate) fn status_for_action(action: &mostro_core::message::Action) -> Option
     }
 }
 
+/// Maps a `mostro_core::order::Status` to the local [`OrderStatus`] enum.
 pub(crate) fn map_core_status(s: mostro_core::order::Status) -> Option<OrderStatus> {
     use mostro_core::order::Status as S;
     Some(match s {
@@ -93,7 +98,7 @@ pub(crate) fn is_hard_terminal(status: &OrderStatus) -> bool {
     )
 }
 
-pub(crate) fn is_terminal_status(s: &OrderStatus) -> bool {
+fn is_terminal_status(s: &OrderStatus) -> bool {
     matches!(
         s,
         OrderStatus::Success
@@ -127,9 +132,7 @@ pub(crate) fn wire_status_applies(local: Option<&OrderStatus>, wire: &OrderStatu
 pub(crate) fn cancellation_wipes_history(status: &OrderStatus) -> bool {
     matches!(
         status,
-        OrderStatus::Pending
-            | OrderStatus::WaitingBuyerInvoice
-            | OrderStatus::WaitingPayment
+        OrderStatus::Pending | OrderStatus::WaitingBuyerInvoice | OrderStatus::WaitingPayment
     )
 }
 
@@ -162,30 +165,7 @@ pub(crate) fn add_invoice_sync(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// The precedence rule that keeps a public order-book status from
-    /// overwriting what this client knows about its own trade: once a trade
-    /// has moved past `Pending`, only a terminal wire status may apply.
-    #[test]
-    fn a_wire_status_may_not_walk_a_live_trade_backwards() {
-        // Nothing known locally, or still pending: the wire is all we have.
-        assert!(wire_status_applies(None, &OrderStatus::Active));
-        assert!(wire_status_applies(
-            Some(&OrderStatus::Pending),
-            &OrderStatus::Active
-        ));
-        // Live locally: a non-terminal wire status is the public book talking
-        // about an order we know more about than it does.
-        assert!(!wire_status_applies(
-            Some(&OrderStatus::FiatSent),
-            &OrderStatus::Active
-        ));
-        // Terminal always applies — the trade really is over.
-        assert!(wire_status_applies(
-            Some(&OrderStatus::FiatSent),
-            &OrderStatus::Canceled
-        ));
-    }
+    use crate::mostro::test_fixtures::small_order_with;
 
     /// `SettledHoldInvoice` is terminal for status-sync purposes but not
     /// "hard" terminal: the escrow is settled and the payout may still be in
@@ -197,17 +177,6 @@ mod tests {
         assert!(!is_hard_terminal(&OrderStatus::SettledHoldInvoice));
         assert!(is_hard_terminal(&OrderStatus::Success));
         assert!(is_hard_terminal(&OrderStatus::Canceled));
-    }
-
-    /// Only the pre-trade states may have their history wiped by a
-    /// cancellation: past that point the user has a trade worth keeping.
-    #[test]
-    fn only_pre_trade_cancellations_wipe_history() {
-        assert!(cancellation_wipes_history(&OrderStatus::Pending));
-        assert!(cancellation_wipes_history(&OrderStatus::WaitingBuyerInvoice));
-        assert!(cancellation_wipes_history(&OrderStatus::WaitingPayment));
-        assert!(!cancellation_wipes_history(&OrderStatus::Active));
-        assert!(!cancellation_wipes_history(&OrderStatus::FiatSent));
     }
 
     /// The bond statuses have no local mapping on purpose, and `map_core_status`
@@ -236,5 +205,145 @@ mod tests {
             status_for_action(&Action::FiatSentOk),
             Some(OrderStatus::FiatSent)
         );
+    }
+
+    /// Both sides learn the escrow is locked from these two actions — the
+    /// only signal that the trade reached Active, which is what the daemon
+    /// requires before it accepts a dispute or a fiat-sent (issue #203).
+    #[test]
+    fn escrow_locked_actions_imply_active() {
+        use mostro_core::message::Action;
+
+        assert_eq!(
+            status_for_action(&Action::BuyerTookOrder),
+            Some(OrderStatus::Active)
+        );
+        assert_eq!(
+            status_for_action(&Action::HoldInvoicePaymentAccepted),
+            Some(OrderStatus::Active)
+        );
+    }
+
+    /// The public event is NIP-69's coarse view and stops updating once the
+    /// trade turns private, so it may only fill an unknown or still-pending
+    /// status — or announce a terminal one (issue #203).
+    #[test]
+    fn the_public_status_never_replaces_a_finer_local_one() {
+        use OrderStatus as S;
+
+        assert!(wire_status_applies(None, &S::InProgress));
+        assert!(wire_status_applies(Some(&S::Pending), &S::InProgress));
+
+        for local in [
+            S::WaitingPayment,
+            S::WaitingBuyerInvoice,
+            S::Active,
+            S::FiatSent,
+            S::Dispute,
+        ] {
+            assert!(
+                !wire_status_applies(Some(&local), &S::InProgress),
+                "in-progress must not overwrite {local:?}"
+            );
+            assert!(
+                !wire_status_applies(Some(&local), &S::Pending),
+                "pending must not overwrite {local:?}"
+            );
+            assert!(
+                wire_status_applies(Some(&local), &S::Canceled),
+                "a terminal wire status must reach {local:?}"
+            );
+            assert!(wire_status_applies(Some(&local), &S::Success));
+        }
+    }
+
+    /// Inbound add-invoice (maker-buyer path): the Order payload carries the
+    /// status and calculated sats to persist; anything else — notably the
+    /// daemon's follow-up Peer payload with the counterparty's reputation —
+    /// syncs nothing.
+    #[test]
+    fn add_invoice_sync_maps_payloads() {
+        use mostro_core::message::Payload;
+        use mostro_core::order::Status;
+
+        // Real-world shape from the reproduction: status + calculated sats.
+        let so = small_order_with(Status::WaitingBuyerInvoice, 484);
+        match add_invoice_sync(&Some(Payload::Order(so))) {
+            Some((status, amount)) => {
+                assert_eq!(status, crate::api::types::OrderStatus::WaitingBuyerInvoice);
+                assert_eq!(amount, Some(484));
+            }
+            None => panic!("expected Order payload to sync"),
+        }
+
+        // Unpriced amount must not persist as Some(0).
+        let so = small_order_with(Status::WaitingBuyerInvoice, 0);
+        let (_, amount) =
+            add_invoice_sync(&Some(Payload::Order(so))).expect("Order payload must sync");
+        assert_eq!(amount, None);
+
+        // The daemon's follow-up Peer payload (counterparty reputation) must
+        // sync nothing — it would otherwise clobber the just-written status.
+        let peer = Payload::Peer(mostro_core::message::Peer {
+            pubkey: String::new(),
+            reputation: None,
+        });
+        assert!(add_invoice_sync(&Some(peer)).is_none());
+
+        // No payload → nothing to sync.
+        assert!(add_invoice_sync(&None).is_none());
+    }
+
+    /// The hard-terminal set must match protocol finality: statuses mostrod
+    /// never reopens block replayed syncs, while statuses that still
+    /// progress (settled → success, dispute → admin resolution) must not.
+    #[test]
+    fn hard_terminal_matches_protocol_finality() {
+        use crate::api::types::OrderStatus as S;
+        for s in [
+            S::Canceled,
+            S::CanceledByAdmin,
+            S::CooperativelyCanceled,
+            S::Expired,
+            S::Success,
+            S::SettledByAdmin,
+            S::CompletedByAdmin,
+        ] {
+            assert!(is_hard_terminal(&s), "{s:?} must be terminal");
+        }
+        for s in [
+            S::Pending,
+            S::WaitingBuyerInvoice,
+            S::WaitingPayment,
+            S::Active,
+            S::FiatSent,
+            S::SettledHoldInvoice,
+            S::Dispute,
+            S::InProgress,
+        ] {
+            assert!(!is_hard_terminal(&s), "{s:?} must not be terminal");
+        }
+    }
+
+    /// Only never-active trades are wiped on a daemon `canceled`; anything
+    /// that progressed (or is ambiguous, like InProgress) keeps its history row.
+    #[test]
+    fn cancellation_wipes_history_only_for_never_active_trades() {
+        use crate::api::types::OrderStatus as S;
+        for s in [S::Pending, S::WaitingBuyerInvoice, S::WaitingPayment] {
+            assert!(cancellation_wipes_history(&s), "{s:?} must be wiped");
+        }
+        for s in [
+            S::InProgress,
+            S::Active,
+            S::FiatSent,
+            S::Dispute,
+            S::Success,
+            S::Canceled,
+            S::CooperativelyCanceled,
+            S::CanceledByAdmin,
+        ] {
+            assert!(!cancellation_wipes_history(&s), "{s:?} must keep history");
+        }
     }
 }
