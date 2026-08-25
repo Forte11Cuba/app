@@ -344,7 +344,7 @@ pub(crate) async fn store_outgoing_admin_message(
 
 async fn publish_chat_payload(ctx: &ChatContext, payload: &str) -> Result<nostr_sdk::Event> {
     let (outer, inner) =
-        crate::nostr::gift_wrap::mostro_wrap(&ctx.trade_keys, &ctx.conv, &ctx.sign, payload)
+        crate::nostr::transport::mostro_wrap(&ctx.trade_keys, &ctx.conv, &ctx.sign, payload)
             .await?;
     let pool = crate::api::nostr::get_pool().map_err(|_| anyhow!("relay pool not ready"))?;
     let output = pool
@@ -399,7 +399,7 @@ pub async fn send_message(trade_id: String, content: String) -> Result<ChatMessa
     // payload this size can never fit under MAX_CONTENT_BYTES, so no
     // receiver would accept it. The exact boundary (padding + JSON
     // escaping) is enforced post-encryption in `mostro_wrap`.
-    if content.len() > crate::nostr::gift_wrap::MAX_CONTENT_BYTES {
+    if content.len() > crate::nostr::transport::MAX_CONTENT_BYTES {
         bail!(
             "MessageTooLarge: {} bytes exceeds the maximum message size",
             content.len()
@@ -1226,7 +1226,7 @@ async fn run_chat_subscription(
         filter = filter.since(nostr_sdk::Timestamp::from_secs(cursor as u64));
     }
 
-    // Obtain the receiver BEFORE subscribing — same pattern as subscribe_gift_wraps.
+    // Obtain the receiver BEFORE subscribing — same pattern as subscribe_daemon_messages.
     // This avoids a race where an event arrives between subscribe() and notifications()
     // and would otherwise be missed.
     let mut rx = client.notifications();
@@ -1313,7 +1313,7 @@ async fn handle_chat_event(
     }
 
     // Steps 2,3,4,7–11,13 — the crypto-side validation.
-    let inner = match crate::nostr::gift_wrap::mostro_unwrap(
+    let inner = match crate::nostr::transport::mostro_unwrap(
         conv,
         sign_pubkey,
         allowed_signers,

@@ -29,7 +29,7 @@ fn trade_key_map() -> &'static std::sync::RwLock<HashMap<String, u32>> {
 
 // ── Pending daemon-request bookkeeping ───────────────────────────────────────
 
-/// Result sent by the gift-wrap handler to the waiting request caller.
+/// Result sent by the daemon-message handler to the waiting request caller.
 enum DaemonReply {
     /// Daemon accepted the order and assigned a UUID (create flow).
     Confirmed { daemon_id: String },
@@ -112,7 +112,7 @@ struct PendingRequest {
 /// work because the previous record is consumed by its reply. For creates:
 /// the daemon assigns its own UUID to a new order and publishes it as a Kind
 /// 38383 event signed by the daemon (not the maker), so the real order ID is
-/// only learnable from the gift-wrapped acknowledgement; the record carries
+/// only learnable from the daemon acknowledgement; the record carries
 /// the correlation state needed to consume that acknowledgement safely.
 static PENDING_REQUESTS: OnceLock<std::sync::Mutex<HashMap<String, PendingRequest>>> = OnceLock::new();
 
@@ -149,7 +149,7 @@ fn take_matching_request(trade_pubkey_hex: &str, got: Option<u64>) -> Option<Pen
     match map.get(trade_pubkey_hex) {
         Some(p) if request_id_matches(p.request_id, got) => map.remove(trade_pubkey_hex),
         Some(_) => {
-            crate::api::logging::blog_debug("gift-wrap", format!(
+            crate::api::logging::blog_debug("daemon-msg", format!(
                 "request_id {got:?} does not match pending request for trade={} — \
                  leaving record for the genuine reply",
                 &trade_pubkey_hex[..8]
@@ -359,7 +359,7 @@ fn may_reconcile_stored_id(
 /// `"content:"` so it never collides with real UUIDs).  On cold start the
 /// relay subscription can compute the same key from an incoming Kind 38383
 /// event and look up the trade index, restoring `is_mine = true` without
-/// needing the daemon's gift-wrap acknowledgement.
+/// needing the daemon's acknowledgement.
 fn order_content_key(
     kind: &crate::api::types::OrderKind,
     fiat_code: &str,
@@ -589,15 +589,15 @@ impl OrderBook {
 
 use tokio::sync::OnceCell;
 
-// ── Gift-wrap deduplication ──────────────────────────────────────────────────
+// ── Daemon-message deduplication ─────────────────────────────────────────────
 
-/// Tracks recently processed gift-wrap event IDs to avoid duplicate processing
+/// Tracks recently processed daemon-message event IDs to avoid duplicate processing
 /// when both the per-trade and global subscriptions receive the same event.
 static PROCESSED_GW: OnceLock<std::sync::Mutex<std::collections::VecDeque<String>>> = OnceLock::new();
 
 /// Returns `true` if this event ID was already processed (duplicate).
 /// Otherwise records it and returns `false`.
-fn is_duplicate_gift_wrap(event_id: &str) -> bool {
+fn is_duplicate_daemon_message(event_id: &str) -> bool {
     // Sized for the global feed's history replay on reused keys: a mass
     // replay longer than this window would evict ids that a slower relay
     // may still redeliver within the same session.
@@ -795,10 +795,10 @@ pub async fn create_order(params: NewOrderParams) -> Result<OrderInfo> {
         );
     }
 
-    // Subscribe to gift-wrap responses AFTER registering the confirmation
+    // Subscribe to daemon responses AFTER registering the confirmation
     // channel so that any events (including stale ones replayed by relays)
     // find the entry and notify us instead of being silently discarded.
-    subscribe_gift_wraps(sender_keys.public_key(), trade_index).await;
+    subscribe_daemon_messages(sender_keys.public_key(), trade_index).await;
 
     if let Err(e) = publish_event_json(&event_json).await {
         // Rollback all in-memory bookkeeping on publish failure.
@@ -826,7 +826,7 @@ pub async fn create_order(params: NewOrderParams) -> Result<OrderInfo> {
     // reconcile the trade-key and id bindings, and only the echoed nonce can
     // consume what remains — a stale replay still cannot. The record's
     // lifetime is bounded by the per-trade subscription (see
-    // subscribe_gift_wraps), which removes it when the subscription ends.
+    // subscribe_daemon_messages), which removes it when the subscription ends.
     if !matches!(confirmation, Ok(Ok(_))) {
         detach_request_waiter(&trade_pk_hex, request_id);
     }
@@ -1023,10 +1023,10 @@ pub async fn take_order(
         );
     }
 
-    // Subscribe to gift-wrap responses addressed to this trade key so the
+    // Subscribe to daemon responses addressed to this trade key so the
     // daemon's reply (and later BuyerTookOrder / HoldInvoicePaymentAccepted)
     // reaches the dispatcher.
-    subscribe_gift_wraps(sender_keys.public_key(), trade_index).await;
+    subscribe_daemon_messages(sender_keys.public_key(), trade_index).await;
 
     if let Err(e) = publish_event_json(&event_json).await {
         remove_pending_request(&trade_pk_hex, request_id);
@@ -1359,7 +1359,7 @@ pub async fn cancel_order(order_id: String) -> Result<()> {
     publish_event_json(&event_json).await?;
 
     // Optimistic update: mark the trade as Canceled in the local DB immediately
-    // so the UI reflects the change without waiting for the daemon's gift-wrap
+    // so the UI reflects the change without waiting for the daemon's
     // response. Also remove the order from the in-memory order book.
     order_book().remove_order(&order_id).await;
     if let Some(db) = crate::db::app_db::db() {
@@ -1400,18 +1400,18 @@ pub async fn cancel_order(order_id: String) -> Result<()> {
 /// The relay subscription is established synchronously (awaited) before returning,
 /// then the event loop is spawned as a background task. This guarantees the
 /// subscription is active before the caller publishes the order event.
-pub(crate) async fn subscribe_gift_wraps(trade_pubkey: nostr_sdk::PublicKey, trade_index: u32) {
+pub(crate) async fn subscribe_daemon_messages(trade_pubkey: nostr_sdk::PublicKey, trade_index: u32) {
     // ── Synchronous setup: awaited by the caller ──
     let recipient_keys = match crate::api::identity::get_active_trade_keys(trade_index).await {
         Ok(k) => k,
         Err(e) => {
-            log::error!("[orders] subscribe_gift_wraps: no trade keys: {e}");
+            log::error!("[orders] subscribe_daemon_messages: no trade keys: {e}");
             return;
         }
     };
 
     let Ok(pool) = crate::api::nostr::get_pool() else {
-        log::warn!("[orders] subscribe_gift_wraps: relay pool not initialized");
+        log::warn!("[orders] subscribe_daemon_messages: relay pool not initialized");
         return;
     };
     let client = pool.client();
@@ -1420,7 +1420,7 @@ pub(crate) async fn subscribe_gift_wraps(trade_pubkey: nostr_sdk::PublicKey, tra
         match nostr_sdk::PublicKey::from_hex(&crate::config::active_mostro_pubkey()) {
             Ok(pk) => pk,
             Err(e) => {
-                log::error!("[orders] subscribe_gift_wraps: invalid mostro pubkey: {e}");
+                log::error!("[orders] subscribe_daemon_messages: invalid mostro pubkey: {e}");
                 return;
             }
         };
@@ -1452,13 +1452,13 @@ pub(crate) async fn subscribe_gift_wraps(trade_pubkey: nostr_sdk::PublicKey, tra
         .pubkey(trade_pubkey)
         .limit(0);
     if let Err(e) = client.subscribe(filter, None).await {
-        log::warn!("[orders] subscribe_gift_wraps subscribe failed: {e}");
+        log::warn!("[orders] subscribe_daemon_messages subscribe failed: {e}");
         return;
     }
 
     let trade_pubkey_hex = trade_pubkey.to_hex();
     crate::api::logging::blog_info("orders", format!(
-        "gift-wrap subscription active for trade={}",
+        "daemon-message subscription active for trade={}",
         &trade_pubkey_hex[..8]
     ));
 
@@ -1497,9 +1497,9 @@ pub(crate) async fn subscribe_gift_wraps(trade_pubkey: nostr_sdk::PublicKey, tra
                     }
 
                     let eid = event.id.to_hex();
-                    if is_duplicate_gift_wrap(&eid) {
+                    if is_duplicate_daemon_message(&eid) {
                         crate::api::logging::blog_debug(
-                            "gift-wrap",
+                            "daemon-msg",
                             format!(
                                 "drop ev={} reason=duplicate",
                                 crate::api::logging::short_id(&eid)
@@ -1507,13 +1507,13 @@ pub(crate) async fn subscribe_gift_wraps(trade_pubkey: nostr_sdk::PublicKey, tra
                         );
                         continue;
                     }
-                    crate::api::logging::blog_info("gift-wrap", format!(
+                    crate::api::logging::blog_info("daemon-msg", format!(
                         "Kind 14 received (per-trade) for trade={} from={} event_id={}",
                         &trade_pubkey_hex[..8],
                         &event.pubkey.to_hex()[..8],
                         &eid[..16],
                     ));
-                    match crate::nostr::gift_wrap::unwrap_mostro_message(&recipient_keys, &event).await {
+                    match crate::nostr::transport::unwrap_mostro_message(&recipient_keys, &event).await {
                         Ok(Some(unwrapped)) => {
                             dispatch_mostro_message(unwrapped, &eid, &trade_pubkey_hex, trade_index).await;
                             last_activity = crate::rt::time::Instant::now();
@@ -1523,18 +1523,18 @@ pub(crate) async fn subscribe_gift_wraps(trade_pubkey: nostr_sdk::PublicKey, tra
                             // only fires if a relay delivers a wrap whose outer NIP-44
                             // layer doesn't decrypt under our key — not actionable, and
                             // cheap for a hostile relay to spam. Keep it at debug.
-                            crate::api::logging::blog_debug("gift-wrap", format!(
+                            crate::api::logging::blog_debug("daemon-msg", format!(
                                 "decrypt returned None for trade={}", &trade_pubkey_hex[..8]
                             ));
                         }
-                        Err(e) => crate::api::logging::blog_warn("gift-wrap", format!(
+                        Err(e) => crate::api::logging::blog_warn("daemon-msg", format!(
                             "decrypt failed for trade={}: {e}", &trade_pubkey_hex[..8]
                         )),
                     }
                 }
                 Ok(Ok(RelayPoolNotification::Shutdown)) => break,
                 Ok(Err(broadcast::error::RecvError::Lagged(n))) => {
-                    log::warn!("[orders] gift-wrap lagged by {n} messages");
+                    log::warn!("[orders] daemon-msg lagged by {n} messages");
                     continue;
                 }
                 Ok(Err(broadcast::error::RecvError::Closed)) => break,
@@ -1554,7 +1554,7 @@ pub(crate) async fn subscribe_gift_wraps(trade_pubkey: nostr_sdk::PublicKey, tra
 /// Dispatch a Mostro `Message` recovered from a kind-14 NIP-44 reply.
 ///
 /// The caller recovers the `UnwrappedMessage` via
-/// `crate::nostr::gift_wrap::unwrap_mostro_message`, which verifies the kind-14
+/// `crate::nostr::transport::unwrap_mostro_message`, which verifies the kind-14
 /// event signature so the `sender` field (the event author) is cryptographically
 /// attributable. This function authenticates that `sender` against the active
 /// Mostro pubkey (defense-in-depth behind the receive handler's author pin),
@@ -1594,8 +1594,8 @@ async fn dispatch_mostro_message(
     match nostr_sdk::PublicKey::from_hex(&crate::config::active_mostro_pubkey()) {
         Ok(expected) if expected == sender => {}
         Ok(expected) => {
-            crate::api::logging::blog_warn("gift-wrap", format!(
-                "rejecting gift-wrap: sender={} != active mostro={} (trade={})",
+            crate::api::logging::blog_warn("daemon-msg", format!(
+                "rejecting daemon message: sender={} != active mostro={} (trade={})",
                 &sender.to_hex()[..8],
                 &expected.to_hex()[..8],
                 &trade_pubkey_hex[..8],
@@ -1603,8 +1603,8 @@ async fn dispatch_mostro_message(
             return;
         }
         Err(e) => {
-            crate::api::logging::blog_warn("gift-wrap", format!(
-                "active mostro pubkey is invalid: {e} — cannot authenticate gift-wrap"
+            crate::api::logging::blog_warn("daemon-msg", format!(
+                "active mostro pubkey is invalid: {e} — cannot authenticate the sender"
             ));
             return;
         }
@@ -1629,7 +1629,7 @@ async fn dispatch_mostro_message(
             // any waiting `create_order` confirmation.
         }
         Err(e) => {
-            crate::api::logging::blog_warn("gift-wrap", format!(
+            crate::api::logging::blog_warn("daemon-msg", format!(
                 "validate_response rejected message for trade={}: {e:?}",
                 &trade_pubkey_hex[..8]
             ));
@@ -1654,12 +1654,12 @@ async fn dispatch_mostro_message(
         Some(other) => format!("{other:?}"),
         None => "None".to_string(),
     };
-    crate::api::logging::blog_info("gift-wrap", format!(
+    crate::api::logging::blog_info("daemon-msg", format!(
         "action={:?} order_id={:?} trade_index={:?} trade_pubkey={} payload={}",
         kind.action, kind.id, kind.trade_index, &trade_pubkey_hex[..8], payload_desc
     ));
 
-    // Reconcile local UUID → daemon UUID if needed.  Gift wrap actions
+    // Reconcile local UUID → daemon UUID if needed.  Daemon actions
     // arrive with the daemon's order ID, but if the create's acknowledgement
     // was missed the trade-key bookkeeping still uses the local UUID.
     // Reconcile before any status update so that update_order_status /
@@ -1716,7 +1716,7 @@ async fn dispatch_mostro_message(
         if let Some(pending) = take_matching_take(trade_pubkey_hex, kind.request_id) {
             let reply = classify_take_reply(&kind.action, &kind.payload);
             if let Some(tx) = pending.tx {
-                crate::api::logging::blog_info("gift-wrap", format!(
+                crate::api::logging::blog_info("daemon-msg", format!(
                     "{:?}: notified waiting take_order for trade={}",
                     kind.action,
                     &trade_pubkey_hex[..8]
@@ -1726,7 +1726,7 @@ async fn dispatch_mostro_message(
                 // Genuine reply after the 10s timeout: the caller already
                 // returned NoDaemonResponse and persisted nothing, so there
                 // is nothing to reconcile for a take — just log it.
-                crate::api::logging::blog_info("gift-wrap", format!(
+                crate::api::logging::blog_info("daemon-msg", format!(
                     "{:?}: late reply for timed-out take on trade={} — ignoring",
                     kind.action,
                     &trade_pubkey_hex[..8]
@@ -1743,14 +1743,14 @@ async fn dispatch_mostro_message(
         // reply itself, an add-invoice's caller only needs success/failure.
         if let Some(pending) = take_matching_add_invoice(trade_pubkey_hex, kind.request_id) {
             if let Some(tx) = pending.tx {
-                crate::api::logging::blog_info("gift-wrap", format!(
+                crate::api::logging::blog_info("daemon-msg", format!(
                     "{:?}: acknowledged waiting send_invoice for trade={}",
                     kind.action,
                     &trade_pubkey_hex[..8]
                 ));
                 let _ = tx.send(DaemonReply::Acknowledged);
             } else {
-                crate::api::logging::blog_info("gift-wrap", format!(
+                crate::api::logging::blog_info("daemon-msg", format!(
                     "{:?}: late acknowledgement for timed-out add-invoice on trade={}",
                     kind.action,
                     &trade_pubkey_hex[..8]
@@ -1791,7 +1791,7 @@ async fn dispatch_mostro_message(
                         let _ = tx.send(DaemonReply::Confirmed {
                             daemon_id: daemon_id.clone(),
                         });
-                        crate::api::logging::blog_info("gift-wrap", format!(
+                        crate::api::logging::blog_info("daemon-msg", format!(
                             "NewOrder: notified waiting create_order daemon={daemon_id}"
                         ));
                     } else {
@@ -1800,7 +1800,7 @@ async fn dispatch_mostro_message(
                         // nothing, so there is no local order to rebind —
                         // the trade-key binding above plus the Kind 38383
                         // fingerprint path restore maker ownership.
-                        crate::api::logging::blog_info("gift-wrap", format!(
+                        crate::api::logging::blog_info("daemon-msg", format!(
                             "NewOrder: late confirmation for timed-out create \
                              local={local_uuid} daemon={daemon_id}"
                         ));
@@ -1810,13 +1810,13 @@ async fn dispatch_mostro_message(
                     // empty after a restart), or an uncorrelated event that
                     // must not consume anything. The Kind 38383 fingerprint
                     // path owns maker-order recovery in both cases.
-                    crate::api::logging::blog_info("gift-wrap", format!(
+                    crate::api::logging::blog_info("daemon-msg", format!(
                         "NewOrder: daemon order={daemon_id} with no matching \
                          pending create — leaving state untouched"
                     ));
                 }
             } else {
-                log::warn!("[orders] gift-wrap NewOrder has no order id");
+                log::warn!("[orders] daemon-msg NewOrder has no order id");
             }
         }
         Action::RestoreSession => {
@@ -1829,7 +1829,7 @@ async fn dispatch_mostro_message(
                     if let Some(pending) = take_matching_restore(trade_pubkey_hex) {
                         if let Some(tx) = pending.tx {
                             let _ = tx.send(DaemonReply::Restored(info.clone()));
-                            crate::api::logging::blog_info("gift-wrap", format!(
+                            crate::api::logging::blog_info("daemon-msg", format!(
                                 "RestoreData: notified waiting restore_session ({} orders, {} disputes)",
                                 info.restore_orders.len(),
                                 info.restore_disputes.len()
@@ -1838,13 +1838,13 @@ async fn dispatch_mostro_message(
                             // Post-timeout late reply: the caller already
                             // returned NoDaemonResponse and detached its waiter.
                             // Logged for parity with the NewOrder/take/add-invoice arms.
-                            crate::api::logging::blog_info("gift-wrap", format!(
+                            crate::api::logging::blog_info("daemon-msg", format!(
                                 "RestoreData: late reply for timed-out restore on trade={}",
                                 trade_pubkey_hex.get(..8).unwrap_or(trade_pubkey_hex)
                             ));
                         }
                     } else {
-                        crate::api::logging::blog_info("gift-wrap", format!(
+                        crate::api::logging::blog_info("daemon-msg", format!(
                             "RestoreData with no waiting caller for trade={}",
                             trade_pubkey_hex.get(..8).unwrap_or(trade_pubkey_hex)
                         ));
@@ -1858,7 +1858,7 @@ async fn dispatch_mostro_message(
             }
         }
         Action::Canceled => {
-            log::info!("[orders] gift-wrap Canceled for trade={trade_pubkey_hex}");
+            log::info!("[orders] daemon-msg Canceled for trade={trade_pubkey_hex}");
             if let Some(order_id) = &kind.id {
                 let oid = order_id.to_string();
                 // A stale Canceled replayed over a finished trade — e.g. the
@@ -1945,7 +1945,7 @@ async fn dispatch_mostro_message(
             let order_id = match &kind.id {
                 Some(id) => id.to_string(),
                 None => {
-                    log::warn!("[orders] gift-wrap {:?} has no order id", kind.action);
+                    log::warn!("[orders] daemon-msg {:?} has no order id", kind.action);
                     return;
                 }
             };
@@ -1961,7 +1961,7 @@ async fn dispatch_mostro_message(
                 Some(mostro_core::message::Payload::Order(o)) => o.clone(),
                 _ => {
                     log::warn!(
-                        "[orders] gift-wrap {:?} payload is not an Order",
+                        "[orders] daemon-msg {:?} payload is not an Order",
                         kind.action
                     );
                     return;
@@ -1984,14 +1984,14 @@ async fn dispatch_mostro_message(
                 Some(pk) if !pk.is_empty() => pk,
                 _ => {
                     log::warn!(
-                        "[orders] gift-wrap {:?}: missing peer pubkey in payload",
+                        "[orders] daemon-msg {:?}: missing peer pubkey in payload",
                         kind.action
                     );
                     return;
                 }
             };
             log::info!(
-                "[orders] gift-wrap {:?}: order={order_id} peer={peer_pubkey_hex}",
+                "[orders] daemon-msg {:?}: order={order_id} peer={peer_pubkey_hex}",
                 kind.action
             );
             // Derive the ECDH shared key and store in session so the chat API
@@ -2038,7 +2038,7 @@ async fn dispatch_mostro_message(
             let order_id = match &kind.id {
                 Some(id) => id.to_string(),
                 None => {
-                    log::warn!("[orders] gift-wrap AddInvoice has no order id");
+                    log::warn!("[orders] daemon-msg AddInvoice has no order id");
                     return;
                 }
             };
@@ -2046,7 +2046,7 @@ async fn dispatch_mostro_message(
                 // The daemon follows up with a second AddInvoice carrying a
                 // Peer payload (counterparty reputation) — ignored for now.
                 log::debug!(
-                    "[orders] gift-wrap AddInvoice for order={order_id}: no Order payload, ignoring"
+                    "[orders] daemon-msg AddInvoice for order={order_id}: no Order payload, ignoring"
                 );
                 return;
             };
@@ -2092,7 +2092,7 @@ async fn dispatch_mostro_message(
             let order_id = match &kind.id {
                 Some(id) => id.to_string(),
                 None => {
-                    log::warn!("[orders] gift-wrap PayInvoice has no order id");
+                    log::warn!("[orders] daemon-msg PayInvoice has no order id");
                     return;
                 }
             };
@@ -2101,7 +2101,7 @@ async fn dispatch_mostro_message(
                     let sats = amt.and_then(|a| {
                         u64::try_from(a).ok().or_else(|| {
                             log::warn!(
-                                "[orders] gift-wrap PayInvoice: negative amount {a}, ignoring"
+                                "[orders] daemon-msg PayInvoice: negative amount {a}, ignoring"
                             );
                             None
                         })
@@ -2117,13 +2117,13 @@ async fn dispatch_mostro_message(
                 }
                 _ => {
                     log::warn!(
-                        "[orders] gift-wrap PayInvoice payload is not a PaymentRequest"
+                        "[orders] daemon-msg PayInvoice payload is not a PaymentRequest"
                     );
                     return;
                 }
             };
             log::info!(
-                "[orders] gift-wrap PayInvoice: order={order_id} invoice_len={} amount={:?}",
+                "[orders] daemon-msg PayInvoice: order={order_id} invoice_len={} amount={:?}",
                 bolt11.len(),
                 amount
             );
@@ -2182,7 +2182,7 @@ async fn dispatch_mostro_message(
             let order_id = match &kind.id {
                 Some(id) => id.to_string(),
                 None => {
-                    log::debug!("[orders] gift-wrap {:?} has no order id", kind.action);
+                    log::debug!("[orders] daemon-msg {:?} has no order id", kind.action);
                     return;
                 }
             };
@@ -2215,7 +2215,7 @@ async fn dispatch_mostro_message(
                 emit_trade_update(&order_id, status);
             } else {
                 log::debug!(
-                    "[orders] gift-wrap {:?}: order={order_id} (no status change)",
+                    "[orders] daemon-msg {:?}: order={order_id} (no status change)",
                     kind.action
                 );
             }
@@ -2273,7 +2273,7 @@ async fn dispatch_mostro_message(
                 .or_else(|| take_matching_request(trade_pubkey_hex, kind.request_id));
             if let Some(pending) = matched {
                 if let Some(tx) = pending.tx {
-                    crate::api::logging::blog_warn("gift-wrap", format!(
+                    crate::api::logging::blog_warn("daemon-msg", format!(
                         "CantDo: reason={reason} — notifying waiting caller"
                     ));
                     let _ = tx.send(DaemonReply::Rejected { reason, message });
@@ -2281,12 +2281,12 @@ async fn dispatch_mostro_message(
                     // Genuine rejection after the 10s timeout: the caller
                     // already returned NoDaemonResponse and persisted nothing,
                     // so dropping the record is the only cleanup needed.
-                    crate::api::logging::blog_warn("gift-wrap", format!(
+                    crate::api::logging::blog_warn("daemon-msg", format!(
                         "CantDo: reason={reason} — late rejection for timed-out request"
                     ));
                 }
             } else {
-                crate::api::logging::blog_debug("gift-wrap", format!(
+                crate::api::logging::blog_debug("daemon-msg", format!(
                     "CantDo: reason={reason} — no matching pending request, ignoring event"
                 ));
             }
@@ -2295,14 +2295,14 @@ async fn dispatch_mostro_message(
             let order_id = match &kind.id {
                 Some(id) => id.to_string(),
                 None => {
-                    log::warn!("[orders] gift-wrap BondSlashed has no order id");
+                    log::warn!("[orders] daemon-msg BondSlashed has no order id");
                     return;
                 }
             };
             let small_order = match &kind.payload {
                 Some(mostro_core::message::Payload::Order(so)) => so,
                 _ => {
-                    log::warn!("[orders] gift-wrap BondSlashed payload is not an Order");
+                    log::warn!("[orders] daemon-msg BondSlashed payload is not an Order");
                     return;
                 }
             };
@@ -2315,7 +2315,7 @@ async fn dispatch_mostro_message(
                 Ok(v) => v,
                 Err(_) => {
                     log::warn!(
-                        "[orders] gift-wrap BondSlashed: invalid amount {} for order={order_id}, ignoring",
+                        "[orders] daemon-msg BondSlashed: invalid amount {} for order={order_id}, ignoring",
                         small_order.amount
                     );
                     return;
@@ -2332,7 +2332,7 @@ async fn dispatch_mostro_message(
             };
             let cause = crate::api::bond::infer_slash_cause(status.as_ref());
             log::info!(
-                "[orders] gift-wrap BondSlashed: order={order_id} amount={amount_sats} cause={cause:?}"
+                "[orders] daemon-msg BondSlashed: order={order_id} amount={amount_sats} cause={cause:?}"
             );
             crate::api::bond::emit_bond_slashed(crate::api::types::BondSlashedEvent {
                 event_id: event_id.to_string(),
@@ -2345,7 +2345,7 @@ async fn dispatch_mostro_message(
             });
         }
         action => {
-            log::debug!("[orders] gift-wrap unhandled action={action:?}");
+            log::debug!("[orders] daemon-msg unhandled action={action:?}");
         }
     }
 }
@@ -2875,7 +2875,7 @@ pub async fn subscribe_orders() {
         _run_order_subscription().await;
     });
 
-    // Reconciles state the gift-wrap channel missed (e.g. a waiting-state
+    // Reconciles state the daemon-message channel missed (e.g. a waiting-state
     // timeout that fired while the app was closed). Idempotent across
     // re-subscribes — at most one sweep loop per process.
     spawn_stale_sweep();
@@ -2905,7 +2905,7 @@ static SWEEP_ACTIVE: AtomicBool = AtomicBool::new(false);
 enum SweepAction {
     /// The trade never went active and the daemon moved on — republished as
     /// pending (taker side) or canceled outright: wipe row + session, same
-    /// as the live `Canceled` gift-wrap path.
+    /// as the live `Canceled` daemon-message path.
     Wipe,
     /// Own maker order republished as pending: the order is alive again,
     /// sync the row back so My Trades reflects it.
@@ -2952,7 +2952,7 @@ fn spawn_stale_sweep() {
 
 /// Reconcile trades stuck in waiting states with the daemon's public book.
 ///
-/// Covers cancellations whose gift wrap the app never received (closed or
+/// Covers cancellations whose daemon message the app never received (closed or
 /// offline when the daemon's waiting window expired). The clock only
 /// *triggers* the check — every decision needs a positive daemon signal
 /// (see [`sweep_action`]); the daemon stays the authority on order state.
@@ -3128,7 +3128,7 @@ async fn subscribe_node_filters(
     // Deliberately NO `since` here: this is the offline catch-up channel —
     // after any downtime it must replay the full stored history so status
     // changes and late reconciliations are never lost. Only the ephemeral
-    // per-trade subscription (subscribe_gift_wraps) carries a cutoff.
+    // per-trade subscription (subscribe_daemon_messages) carries a cutoff.
     if !trade_pubkeys.is_empty() {
         let p_count = trade_pubkeys.len();
         let dm_filter = nostr_sdk::Filter::new()
@@ -3208,7 +3208,7 @@ pub(crate) async fn refresh_subscriptions_for_active_node() {
 }
 
 /// Build a map of `trade_pubkey_hex → (Keys, trade_index)` for all derived
-/// trade keys so the global subscription can decrypt any gift-wrap.
+/// trade keys so the global subscription can decrypt any daemon message.
 /// Trade-key decryption coverage for the bulk Kind-14 subscription:
 /// pubkey hex → (keys, index). Refreshable on purpose (PR #253 review): the
 /// global subscription used to snapshot the map once at startup, so a key
@@ -3328,7 +3328,7 @@ async fn build_trade_key_map() -> HashMap<String, (nostr_sdk::Keys, u32)> {
 /// Finds which trade key the event is addressed to (via `p` tag), decrypts
 /// via `mostro_core::transport::unwrap_incoming`, and dispatches the recovered
 /// `Message` through `dispatch_mostro_message`.
-async fn handle_global_gift_wrap(
+async fn handle_global_daemon_message(
     event: &nostr_sdk::Event,
     trade_key_map: &HashMap<String, (nostr_sdk::Keys, u32)>,
 ) {
@@ -3353,7 +3353,7 @@ async fn handle_global_gift_wrap(
                 // that reaches here without a matching key is an anomaly
                 // (stale filter after regenerate? key map gap?) — worth a warn.
                 crate::api::logging::blog_warn(
-                    "gift-wrap",
+                    "daemon-msg",
                     format!(
                         "drop ev={} reason=no-matching-p-tag map={}",
                         crate::api::logging::short_id(&event.id.to_hex()),
@@ -3366,21 +3366,21 @@ async fn handle_global_gift_wrap(
     };
 
     let eid = event.id.to_hex();
-    if is_duplicate_gift_wrap(&eid) {
+    if is_duplicate_daemon_message(&eid) {
         crate::api::logging::blog_debug(
-            "gift-wrap",
+            "daemon-msg",
             format!("drop ev={} reason=duplicate", crate::api::logging::short_id(&eid)),
         );
         return;
     }
-    crate::api::logging::blog_info("gift-wrap", format!(
+    crate::api::logging::blog_info("daemon-msg", format!(
         "Kind 14 received (global) for trade={} from={} event_id={}",
         &recipient_hex[..8],
         &event.pubkey.to_hex()[..8],
         &eid[..16],
     ));
 
-    match crate::nostr::gift_wrap::unwrap_mostro_message(&recipient_keys, event).await {
+    match crate::nostr::transport::unwrap_mostro_message(&recipient_keys, event).await {
         Ok(Some(unwrapped)) => {
             dispatch_mostro_message(unwrapped, &eid, &recipient_hex, trade_idx).await;
         }
@@ -3390,7 +3390,7 @@ async fn handle_global_gift_wrap(
             // entries and the event is addressed to a different key; here
             // the p-tag already matched so it only happens on p-tag collisions.
         }
-        Err(e) => crate::api::logging::blog_warn("gift-wrap", format!(
+        Err(e) => crate::api::logging::blog_warn("daemon-msg", format!(
             "decrypt failed for trade={}: {e}", &recipient_hex[..8]
         )),
     }
@@ -3483,7 +3483,7 @@ async fn ingest_order_event(event: &nostr_sdk::Event) {
                 }
             }
             // Sync trade status in DB for own orders so My Trades
-            // reflects status changes even without gift-wrap delivery.
+            // reflects status changes even without daemon-message delivery.
             if info.status != crate::api::types::OrderStatus::Pending {
                 let local = local_trade_status(&info.id).await;
                 let applies = wire_status_applies(local.as_ref(), &info.status);
@@ -3563,7 +3563,7 @@ async fn _run_order_subscription() {
     // Unseeded, every previous session's trade is undecryptable and falls
     // off the filter on the session's first create or take.
     let trade_pubkeys = seed_global_dm_coverage().await;
-    crate::api::logging::blog_info("orders", format!("trade key map: {} keys derived for gift-wrap decryption", trade_pubkeys.len()));
+    crate::api::logging::blog_info("orders", format!("trade key map: {} keys derived for daemon-message decryption", trade_pubkeys.len()));
 
     // Get notifications receiver before subscribing to avoid missing
     // events that arrive between the subscribe call and receiver creation.
@@ -3601,7 +3601,7 @@ async fn _run_order_subscription() {
                         continue;
                     }
                     let keys = global_dm_keys().read().await.clone();
-                    handle_global_gift_wrap(&event, &keys).await;
+                    handle_global_daemon_message(&event, &keys).await;
                     continue;
                 }
 
@@ -3887,7 +3887,7 @@ pub async fn restore_session() -> Result<mostro_core::message::RestoreSessionInf
         );
     }
 
-    subscribe_gift_wraps(sender_keys.public_key(), trade_index).await;
+    subscribe_daemon_messages(sender_keys.public_key(), trade_index).await;
 
     if let Err(e) = publish_event_json(&event_json).await {
         remove_pending_request(&trade_pk_hex, 0);

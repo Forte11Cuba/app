@@ -74,7 +74,7 @@ flutter run -d linux
 | `rust/src/api/` | Public Rust API surface (what Flutter calls) |
 | `rust/src/mostro/` | Mostro protocol FSM and message actions |
 | `rust/src/crypto/` | BIP-39/BIP-32 key derivation, ECDH, file encryption |
-| `rust/src/nostr/` | Transport (NIP-44 Kind 14 + NIP-59 gift wrap Kind 1059), relay pool, Kind 38383 events |
+| `rust/src/nostr/` | Transport (NIP-44 Kind 14: daemon messages + chat envelope), relay pool, Kind 38383 events |
 | `assets/data/fiat.json` | Fiat currency and country flag data |
 | `assets/l10n/` | ARB localization files (EN, ES, IT, FR, DE) |
 
