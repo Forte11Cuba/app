@@ -216,6 +216,7 @@ way to fail it.
 ```json
 {
   "v": 1,
+  "severity": "critical",
   "locales": {
     "en": { "title": "…", "body": "…" },
     "es": { "title": "…", "body": "…" },
@@ -230,6 +231,7 @@ way to fail it.
 | Field | Required | Rule |
 |---|---|---|
 | `v` | yes | schema version, `1` today. An unknown `v` is **ignored**, never rendered best-effort |
+| `severity` | yes | one of `info`, `warning`, `critical` — see §3.4 |
 | `locales` | yes | must contain **exactly** `en`, `es`, `fr`, `de`, `it`. A missing one, or an unknown extra one, makes the announcement **invalid** |
 | `locales[x].title` | yes | ≤ 80 characters after trimming |
 | `locales[x].body` | yes | ≤ 500 characters after trimming |
@@ -262,6 +264,59 @@ workflow. That is inherent — the text is written after the build ships. The ch
 it (screen title, empty state, the settings toggle) is localized normally, and per
 CLAUDE.md the Rust side still translates nothing: it returns all five locales and Dart
 picks.
+
+### 3.4 Severity
+
+"2.1 is out, it has a nicer order book" and "2.0.3 fixes a bug that can leak your trade
+key — update now" are not the same message, and rendering them identically makes the
+second one look like the first. Every announcement therefore declares one of three levels:
+
+| `severity` | For | Rendered as |
+|---|---|---|
+| `info` | releases, new features, events | `blueAccent`, an info icon |
+| `warning` | outages, a relay being retired, anything with a deadline | `warningAmber`, the warning icon the system banner already uses |
+| `critical` | a security issue the user must act on now | `destructiveRed`, a shield icon, and the bell's dot turns red |
+
+Three levels, not five: the publisher has to be able to pick one without deliberating, and
+a level nobody can distinguish from its neighbour is a level that gets chosen at random.
+
+**The publisher declares a severity, never a colour.** The mapping above lives in the app,
+for three reasons: the palette differs between themes and the sender cannot know which one
+the reader is in; `destructiveRed` on `backgroundCard` is a contrast pair the design system
+has already checked and an arbitrary hex is not; and the sender is trusted with authorship,
+not with rendering — the same rule that makes §3.2 plain text only. A content field that
+carried a colour would hand an allowlisted key the ability to paint the app.
+
+**An unrecognised `severity` renders as `warning`, and the announcement is not dropped.**
+This is the one place where §3.2's "unknown means invalid" does not apply, and the
+asymmetry is the reason: `v` and the locale set decide whether the message is
+*intelligible*, while severity only decides how it is *painted*. Dropping a security notice
+because a future release added a fourth level is the worst outcome available. It maps to
+`warning` rather than `critical` because the app cannot know which direction an unknown
+token sits in — and because "any unknown string paints the app red" is exactly the
+escalation an allowlisted key with a typo, or a compromised one, would use.
+
+**Colour is never the only signal.** Each level also carries its own icon and a localized
+label (`Security update`, `Notice`, `Announcement`), so the distinction survives a reader
+with colour-vision deficiency and a screen in direct sunlight.
+
+Two consequences beyond colour:
+
+- **`critical` sorts above everything**, then by `created_at`. Everything else is by date.
+- **Dismissing a `critical` clears the badge but keeps it in the list** until it expires.
+  For the other two levels, dismiss removes it. A user who swipes away "your trade key can
+  leak" at a red light should still be able to find it.
+
+**No modal, at any level** — §6.3 still holds. A takeover on launch is the single surface a
+compromised publisher key would most want, and it blocks a user who opened the app to
+release sats on a trade that is already running. A red banner above everything else, with a
+red dot on the bell, already outranks every other thing on that screen. This is the
+decision in this section most worth arguing with.
+
+**And a policy, like §7's:** `critical` is for security. The moment it carries a release
+announcement, users learn that red means nothing, and the level is worthless on the day it
+is true. There is no technical enforcement of this and there cannot be — it is a rule for
+whoever holds the key.
 
 ---
 
@@ -485,7 +540,9 @@ generated `lib/src/rust/` is never hand-edited.
 
 Each announcement becomes a `NotificationModel`:
 
-- `type: NotificationType.system` — which already routes to `SystemNotificationBanner`
+- `type: NotificationType.system` — which already routes to `SystemNotificationBanner`,
+  whose amber is today hardcoded; it grows a severity parameter so the three levels of
+  §3.4 map onto `blueAccent` / `warningAmber` / `destructiveRed` with their icons
 - `id`: the address string, so the model's identity is the announcement's identity and the
   existing Sembast `processed_events` tombstone ledger works unchanged
 - `title` / `message`: the locale block matching `Localizations.localeOf(context)`; there
@@ -563,8 +620,9 @@ What the sender owes:
    announcement, not a fix.
 2. An `expiration` that is actually in the future.
 3. All five locales, and no others. No partial publish, no fallback (§3.2).
-4. A `url` that is `https`, if any.
-5. Version bounds, if any, that parse: no build metadata, and `max_version` is the version
+4. A `severity` that is one of the three, and honestly chosen — §3.4's last paragraph.
+5. A `url` that is `https`, if any.
+6. Version bounds, if any, that parse: no build metadata, and `max_version` is the version
    the announcement is *about*, exclusive.
 
 A validator is worth writing at the same time as the reader, because the reader's failure
@@ -605,6 +663,7 @@ Rust unless stated otherwise. The pure-function layer needs no relay and no data
 | Offline ageing | cached fresh, restored past the 30-day window → not rendered **and** gone from the DB; same for one that passes its `expiration` while offline; a still-valid neighbour in the same cache survives both sweeps |
 | Re-announcement | a newer revision at a read address clears read state and the correction appears unread |
 | Content | unknown `v` ignored; a missing locale ignored; an unknown sixth locale ignored; over-length title or body ignored; non-`https` `url` dropped **while the announcement still renders**; bounds in range, out of range, exactly at the exclusive `max_version`, with build metadata, and unparseable |
+| Severity | each level renders its own colour, icon and label; a missing `severity` is invalid; an unrecognised value renders as `warning` **and still renders**; a `critical` sorts above a newer non-critical; dismissing a `critical` clears the badge and keeps the row, dismissing the other two removes it |
 | Version source | the version the bounds compare against is the shipped release version, and drift between `rust/Cargo.toml` and `pubspec.yaml` fails the suite — **already covered** by `app_version_matches_pubspec` and `app_version_carries_no_build_number` (§4.3) |
 | Consent | off ⇒ no subscription opened; switching off closes it at the tap and an event arriving immediately after is not processed; switching back on resumes delivery |
 | Publisher tool | every §8 obligation rejected with a message naming the fix; the emitted event clears the app's own parser; a hand-built bad event does not, so the check has teeth |
