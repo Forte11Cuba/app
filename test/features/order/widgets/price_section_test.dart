@@ -84,6 +84,32 @@ void main() {
     );
 
     testWidgets(
+      'accepts a value typed with an explicit plus sign',
+      (tester) async {
+        final container = await _pump(tester, premium: 0.0);
+        await tester.enterText(find.byType(TextField), '+20');
+        await tester.testTextInput.receiveAction(TextInputAction.done);
+        await tester.pumpAndSettle();
+        expect(container.read(premiumValueProvider), 20.0);
+      },
+    );
+
+    testWidgets(
+      'restores the field and keeps the premium on invalid submission',
+      (tester) async {
+        final container = await _pump(tester, premium: 3.0);
+        // A lone sign does not parse: the premium must stay put and the field
+        // must snap back to it instead of keeping the invalid text.
+        await tester.enterText(find.byType(TextField), '-');
+        await tester.testTextInput.receiveAction(TextInputAction.done);
+        await tester.pumpAndSettle();
+        expect(container.read(premiumValueProvider), 3.0);
+        final field = tester.widget<TextField>(find.byType(TextField));
+        expect(field.controller?.text, '3');
+      },
+    );
+
+    testWidgets(
       'keeps expanded bounds stable while dragging 20 toward 0',
       (tester) async {
         final container = await _pump(tester, premium: 20.0);

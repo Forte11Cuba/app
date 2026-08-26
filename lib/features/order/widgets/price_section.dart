@@ -157,7 +157,7 @@ class _PriceSectionState extends ConsumerState<PriceSection> {
                               TextInputFormatter.withFunction(
                                 (oldValue, newValue) {
                                   if (newValue.text.isEmpty) return newValue;
-                                  return RegExp(r'^-?\d{0,3}$')
+                                  return RegExp(r'^[+-]?\d{0,3}$')
                                           .hasMatch(newValue.text)
                                       ? newValue
                                       : oldValue;
@@ -196,6 +196,13 @@ class _PriceSectionState extends ConsumerState<PriceSection> {
                                           kPremiumMaxMagnitude.toInt(),
                                         )
                                         .toDouble();
+                              } else {
+                                // Empty or lone sign ('-'/'+'): keep the current
+                                // premium and restore the field text from it.
+                                _syncControllerFromProvider(
+                                  null,
+                                  ref.read(premiumValueProvider),
+                                );
                               }
                             },
                             onTapOutside: (_) {
