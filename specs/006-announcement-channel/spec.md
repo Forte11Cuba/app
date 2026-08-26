@@ -85,7 +85,7 @@ Worth reading before §4, because it is where a straight port would go wrong:
 | A new bell, a new screen, a new `shared_preferences` cache | **reuses `NotificationType.system`, `SystemNotificationBanner`, `NotificationBell` and the Sembast store** | They already exist and already render exactly this shape |
 | 4 locales (`en`, `es`, `ja`, `pt`) | **5 locales** (`en`, `es`, `fr`, `de`, `it`) | `lib/l10n/app_{en,es,fr,de,it}.arb` |
 | `tool/announce.dart` could not call the app's parser (plain Dart VM vs `dart:ui`), so constants were duplicated and pinned by a test | **the publisher tool is a Rust binary in the same crate and calls the real parser directly** | No duplication to drift; the tool literally cannot accept what the app would drop |
-| Version from `package_info_plus` | `get_app_version()` in `rust/src/api/mod.rs` | already bridged — but see the blocker in §4.3 |
+| Version from `package_info_plus` | `get_app_version()` in `rust/src/api/mod.rs` | already bridged, and fixed in this PR — §4.3 |
 
 ---
 
@@ -137,20 +137,35 @@ reader (§5), and nothing else in this document may contradict it.
 
 | Part | Value |
 |---|---|
-| Kind | `38386` — addressable, adjacent to Mostro's `38383` (order book) and `38385` (node metadata) |
+| Kind | `31417` — addressable, generic range, **outside** the Mostro protocol's `3838x` block |
 | Author | one of the keys in §4.1, and nothing else |
 | `d` tag | announcement id: stable, opaque, unique per announcement |
 | `expiration` tag | NIP-40, **required** — see §5.5 |
 | `content` | the JSON of §3.2 |
 
-**On the kind.** `38386` is chosen to sit beside the kinds this app already reads, so a
-protocol reader can see it belongs to the same family. It is **not** assigned by NIP-69
-and is not part of the Mostro protocol — it is a client-level kind, and the choice must be
-raised with the protocol maintainers before the first publish, in case `38386` is wanted
-for something else. If it is, `31417` in the generic addressable range is the fallback and
-nothing else in this spec changes. Addressable (30000–39999) is not negotiable, though: it
-is what makes correcting a typo in a live announcement a republish under the same `d`
-rather than a second announcement.
+**On the kind, and why it is not `3838x`.** The obvious choice is the next number beside
+the kinds this app already reads — and it is wrong. That block is the Mostro protocol's,
+allocated sequentially and fully occupied:
+
+| Kind | Event | `z` tag |
+|---|---|---|
+| `38383` | Orders | `order` |
+| `38384` | Ratings | `rating` |
+| `38385` | Info | `info` |
+| `38386` | Disputes | `dispute` |
+
+(`../protocol/src/order_event.md`, NIP-69.) Taking `38387` would not collide with anything
+today, but it would squat on the next slot the protocol allocates — a client reserving a
+protocol number for itself, decided unilaterally in this repo. **This is a client-level
+kind and it belongs in client-level space**, so `31417` in the generic addressable range,
+which no NIP claims and the protocol does not touch.
+
+Addressable (30000–39999) *is* the part that matters: it is what makes correcting a typo in
+a live announcement a republish under the same `d` rather than a second announcement.
+
+If the protocol ever gains an announcement event of its own, this channel should move to it
+and delete §3 — a project-signed broadcast and a node-signed one are the same shape, and
+§11 says why they must not share an allowlist.
 
 ### 3.1 Tags
 
@@ -281,21 +296,23 @@ failed to verify" is itself a message from an untrusted source.
 
 ### 4.3 The app version the bounds compare against
 
-`get_app_version()` (`rust/src/api/mod.rs:14`) returns `env!("CARGO_PKG_VERSION")` — the
-**Rust crate's** version, currently `0.1.0`, while `pubspec.yaml` says `2.0.0+1`. The
-About screen shows the crate version today.
+`get_app_version()` (`rust/src/api/mod.rs`) returns `env!("CARGO_PKG_VERSION")` — the
+**Rust crate's** version. Until this PR that was `0.1.0` while `pubspec.yaml` said
+`2.0.0+1`, so version-targeted announcements would have compared every bound against a
+number no released build has ever carried, and the About screen showed `0.1.0` to users.
 
-Version-targeted announcements are unusable until that is fixed, and fixing it is a
-prerequisite of §10, not a follow-up. Two options, in order of preference:
+**Fixed here**, since the spec is worthless while it is true: `rust/Cargo.toml` now
+carries the pubspec version, and `app_version_matches_pubspec` in `rust/src/api/mod.rs`
+fails the suite when the two drift. One source of truth, and the About screen is repaired
+as a side effect.
 
-1. **Sync `rust/Cargo.toml`'s version to the pubspec version**, with a test that fails
-   when they diverge. One source of truth, and it repairs the About screen at the same
-   time.
-2. Pass the pubspec version from Dart into Rust at init and have the announcement code use
-   that. Cheaper, but leaves two versions in the app and the About screen still wrong.
+The alternative — passing the pubspec version from Dart into Rust at init — was rejected:
+it leaves two versions in the app and does nothing for the About screen.
 
-Either way, the version compared against is the **release version without the build
-number** — `2.0.0`, never `2.0.0+1`.
+The version compared against is the **release version without the build number** —
+`2.0.0`, never `2.0.0+1`. Semver excludes build metadata from precedence, so a bound
+carrying one would silently compare equal to one without; `app_version_carries_no_build_number`
+pins that end too.
 
 ### 4.4 Privacy
 
@@ -319,7 +336,7 @@ While the app is running and the setting of §7 is on:
 
 ```rust
 Filter::new()
-    .kind(Kind::from(38386u16))
+    .kind(Kind::from(31417u16))
     .authors(<decoded §4.1 keys>)
     .since(now - 30 days)
     .limit(20)
@@ -573,7 +590,7 @@ Rust unless stated otherwise. The pure-function layer needs no relay and no data
 | Offline ageing | cached fresh, restored past the 30-day window → not rendered **and** gone from the DB; same for one that passes its `expiration` while offline; a still-valid neighbour in the same cache survives both sweeps |
 | Re-announcement | a newer revision at a read address clears read state and the correction appears unread |
 | Content | unknown `v` ignored; a missing locale ignored; an unknown sixth locale ignored; over-length title or body ignored; non-`https` `url` dropped **while the announcement still renders**; bounds in range, out of range, exactly at the exclusive `max_version`, with build metadata, and unparseable |
-| Version source | the version the bounds compare against is the shipped release version, and drift between `rust/Cargo.toml` and `pubspec.yaml` fails the suite (§4.3) |
+| Version source | the version the bounds compare against is the shipped release version, and drift between `rust/Cargo.toml` and `pubspec.yaml` fails the suite — **already covered** by `app_version_matches_pubspec` and `app_version_carries_no_build_number` (§4.3) |
 | Consent | off ⇒ no subscription opened; switching off closes it at the tap and an event arriving immediately after is not processed; switching back on resumes delivery |
 | Publisher tool | every §8 obligation rejected with a message naming the fix; the emitted event clears the app's own parser; a hand-built bad event does not, so the check has teeth |
 | Dart widget | each of the five locales renders its own copy; the system banner shows title, body and the link button; read and dismiss persist across a restart; the dot appears only when something is unread |
@@ -590,7 +607,7 @@ PR per step, per the workflow in CLAUDE.md.
 
 | # | Step | Why here |
 |---|---|---|
-| 0 | Fix the app-version source (§4.3) | Version targeting is unusable until the version is the shipped one, and it is a two-line change |
+| 0 | ~~Fix the app-version source (§4.3)~~ — **done in this PR** | Version targeting is unusable while the version is not the shipped one, so it could not be left as a follow-up |
 | 1 | §3 parsing and validation + the §4.1 allowlist, as pure Rust functions — no relay, no DB, no UI | Everything rests on it, and it is the cheapest thing to get wrong quietly. Ships with the allowlist **empty**, which is inert by construction |
 | 2 | Fetch, verify, freshness, expiry, the `announcements` table and the schema bump (§4.2, §5) | Testable without a screen |
 | 3 | The bridge surface + the Announcements toggle (§6.1, §7), then `./scripts/frb-generate.sh` | The off switch before the surface |
