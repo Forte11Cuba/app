@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:mostro/core/app_theme.dart';
@@ -9,8 +10,9 @@ import 'package:mostro/l10n/app_localizations.dart';
 /// Whether Market or Fixed price mode is selected.
 final isMarketPriceProvider = StateProvider<bool>((_) => true);
 
-/// Premium slider value. Default slider range is [-10%, +10%], but the input
-/// accepts (and the slider expands to fit) values up to [-999%, +999%].
+/// Premium slider value. Whole percent only (Mostro rounds the premium to an
+/// integer). Default slider range is [-10%, +10%], but the input accepts (and
+/// the slider expands to fit) values up to [-999%, +999%].
 final premiumValueProvider = StateProvider<double>((_) => 0.0);
 
 /// Default premium slider bound. The slider grows past this to fit a typed value.
@@ -34,11 +36,17 @@ class _PriceSectionState extends ConsumerState<PriceSection> {
   late final TextEditingController _premiumController;
   bool _editingPremium = false;
 
+  // Slider bounds captured when a drag starts and held until it ends, so the
+  // scale does not shrink under the user's finger while dragging a value that
+  // sits outside the default ±10% range back toward zero. Null when idle.
+  double? _dragMin;
+  double? _dragMax;
+
   @override
   void initState() {
     super.initState();
     _premiumController = TextEditingController(
-      text: ref.read(premiumValueProvider).toStringAsFixed(1),
+      text: ref.read(premiumValueProvider).round().toString(),
     );
   }
 
@@ -50,7 +58,7 @@ class _PriceSectionState extends ConsumerState<PriceSection> {
 
   void _syncControllerFromProvider(double? prev, double next) {
     if (_editingPremium) return;
-    final newText = next.toStringAsFixed(1);
+    final newText = next.round().toString();
     if (_premiumController.text != newText) {
       _premiumController.text = newText;
     }
@@ -68,13 +76,14 @@ class _PriceSectionState extends ConsumerState<PriceSection> {
     final l10n = AppLocalizations.of(context);
 
     // Slider bounds default to ±10% but expand to fit a manually entered value.
-    final sliderMin =
-        premium < -kPremiumSliderDefault ? premium : -kPremiumSliderDefault;
-    final sliderMax =
-        premium > kPremiumSliderDefault ? premium : kPremiumSliderDefault;
-    // Keep the 0.5% granularity of the default range.
+    // While a drag is active the frozen bounds win, so the scale stays stable.
+    final sliderMin = _dragMin ??
+        (premium < -kPremiumSliderDefault ? premium : -kPremiumSliderDefault);
+    final sliderMax = _dragMax ??
+        (premium > kPremiumSliderDefault ? premium : kPremiumSliderDefault);
+    // Whole-percent steps (Mostro rounds the premium to an integer).
     final sliderDivisions =
-        ((sliderMax - sliderMin) * 2).round().clamp(1, 4000);
+        (sliderMax - sliderMin).round().clamp(1, 2000);
 
     // Sync controller from provider via listener (not in build body).
     ref.listen<double>(premiumValueProvider, _syncControllerFromProvider);
@@ -141,8 +150,20 @@ class _PriceSectionState extends ConsumerState<PriceSection> {
                             controller: _premiumController,
                             keyboardType: const TextInputType.numberWithOptions(
                               signed: true,
-                              decimal: true,
                             ),
+                            // Whole percent only: optional sign + up to 3
+                            // digits. Blocks '.' / ',' so no decimals slip in.
+                            inputFormatters: [
+                              TextInputFormatter.withFunction(
+                                (oldValue, newValue) {
+                                  if (newValue.text.isEmpty) return newValue;
+                                  return RegExp(r'^-?\d{0,3}$')
+                                          .hasMatch(newValue.text)
+                                      ? newValue
+                                      : oldValue;
+                                },
+                              ),
+                            ],
                             textAlign: TextAlign.center,
                             style: TextStyle(
                               color: purple,
@@ -166,13 +187,15 @@ class _PriceSectionState extends ConsumerState<PriceSection> {
                                 setState(() => _editingPremium = true),
                             onSubmitted: (v) {
                               setState(() => _editingPremium = false);
-                              final parsed = double.tryParse(v);
+                              final parsed = int.tryParse(v);
                               if (parsed != null) {
                                 ref.read(premiumValueProvider.notifier).state =
-                                    parsed.clamp(
-                                  -kPremiumMaxMagnitude,
-                                  kPremiumMaxMagnitude,
-                                );
+                                    parsed
+                                        .clamp(
+                                          -kPremiumMaxMagnitude.toInt(),
+                                          kPremiumMaxMagnitude.toInt(),
+                                        )
+                                        .toDouble();
                               }
                             },
                             onTapOutside: (_) {
@@ -205,9 +228,18 @@ class _PriceSectionState extends ConsumerState<PriceSection> {
                   max: sliderMax,
                   divisions: sliderDivisions,
                   activeColor: purple,
-                  label: '${premium >= 0 ? '+' : ''}${premium.toStringAsFixed(1)}%',
-                  onChanged: (v) =>
-                      ref.read(premiumValueProvider.notifier).state = v,
+                  label: '${premium >= 0 ? '+' : ''}${premium.round()}%',
+                  onChangeStart: (_) => setState(() {
+                    _dragMin = sliderMin;
+                    _dragMax = sliderMax;
+                  }),
+                  onChanged: (v) => ref
+                      .read(premiumValueProvider.notifier)
+                      .state = v.roundToDouble(),
+                  onChangeEnd: (_) => setState(() {
+                    _dragMin = null;
+                    _dragMax = null;
+                  }),
                 ),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
