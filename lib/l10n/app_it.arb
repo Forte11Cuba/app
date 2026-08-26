@@ -614,6 +614,7 @@
   "priceTypeInfoTooltip": "Info sul tipo di prezzo",
   "premiumSectionLabel": "Premio",
   "amountInSatsHint": "Importo in sats",
+  "fixedPriceRangeNotAvailable": "Il prezzo fisso non è disponibile per gli ordini a intervallo. Disattiva l'intervallo per usare un prezzo fisso.",
   "priceTypesDialogTitle": "Tipi di prezzo",
   "priceTypesDialogContent": "Prezzo di mercato: il prezzo del tuo ordine segue il tasso di mercato con una percentuale di premio/sconto applicata.\n\nPrezzo fisso: imposti un prezzo esatto in satoshi.",
   "startFromPreset": "INIZIA DA UN PRESET",

@@ -15,6 +15,12 @@ final premiumValueProvider = StateProvider<double>((_) => 0.0);
 /// Fixed sats amount (only used in Fixed price mode).
 final fixedSatsProvider = StateProvider<String>((_) => '');
 
+/// Whether the order being created is a range order (min/max fiat amount).
+/// Range orders are incompatible with a fixed sats price — Mostro prices them
+/// at market with a premium — so PriceSection locks the toggle to Market and
+/// disables Fixed while this is true.
+final isRangeOrderProvider = StateProvider<bool>((_) => false);
+
 /// Price type toggle + premium/fixed sats input.
 class PriceSection extends ConsumerStatefulWidget {
   const PriceSection({super.key});
@@ -57,6 +63,7 @@ class _PriceSectionState extends ConsumerState<PriceSection> {
     final purple = colors?.purpleButton ?? const Color(0xFF8359C2);
     final inputBg = colors?.backgroundInput ?? const Color(0xFF252A3A);
     final isMarket = ref.watch(isMarketPriceProvider);
+    final isRange = ref.watch(isRangeOrderProvider);
     final premium = ref.watch(premiumValueProvider);
     final l10n = AppLocalizations.of(context);
 
@@ -82,8 +89,11 @@ class _PriceSectionState extends ConsumerState<PriceSection> {
             Switch(
               value: isMarket,
               activeThumbColor: green,
-              onChanged: (v) =>
-                  ref.read(isMarketPriceProvider.notifier).state = v,
+              // Range orders must use market price (Mostro applies a premium to
+              // the variable amount), so Fixed is locked out while in range.
+              onChanged: isRange
+                  ? null
+                  : (v) => ref.read(isMarketPriceProvider.notifier).state = v,
             ).withAutomationId(AutomationIds.orderCreatePriceType),
             IconButton(
               onPressed: () => _showPriceInfo(context),
@@ -95,6 +105,27 @@ class _PriceSectionState extends ConsumerState<PriceSection> {
           ],
         ),
         const SizedBox(height: AppSpacing.sm),
+
+        // Range orders can't use a fixed price — explain why Fixed is disabled.
+        if (isRange) ...[
+          Padding(
+            padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(Icons.info_outline,
+                    size: 14, color: colors?.textSubtle),
+                const SizedBox(width: AppSpacing.xs),
+                Expanded(
+                  child: Text(
+                    l10n.fixedPriceRangeNotAvailable,
+                    style: TextStyle(fontSize: 12, color: colors?.textSubtle),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
 
         if (isMarket) ...[
           // Premium slider with editable field
