@@ -227,13 +227,32 @@ class _PayLightningInvoiceScreenState
             appBar: AppBar(title: Text(l10n.payLightningInvoiceTitle)),
             body: Padding(
               padding: const EdgeInsets.all(AppSpacing.lg),
-              child: Center(
-                child: NwcPaymentWidget(
-                  bolt11: invoice,
-                  amountSats: amountSats,
-                  onPaymentSuccess: _onPaymentDetected,
-                  onFallbackToManual: () => setState(() => _manualMode = true),
-                ),
+              child: Column(
+                children: [
+                  // The seller must see who took their order even when NWC
+                  // auto-pays the hold invoice — the app can settle without a
+                  // manual step, so this is where the decision matters (#305).
+                  if (peerTrade?.peerRating != null) ...[
+                    PeerReputationCard(
+                      rating: peerTrade!.peerRating!,
+                      reviews: peerTrade.peerReviews ?? 0,
+                      days: peerTrade.peerDays ?? 0,
+                      counterpartIsBuyer: true,
+                    ),
+                    const SizedBox(height: AppSpacing.lg),
+                  ],
+                  Expanded(
+                    child: Center(
+                      child: NwcPaymentWidget(
+                        bolt11: invoice,
+                        amountSats: amountSats,
+                        onPaymentSuccess: _onPaymentDetected,
+                        onFallbackToManual: () =>
+                            setState(() => _manualMode = true),
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
           );

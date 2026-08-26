@@ -26,11 +26,17 @@ class AddLightningInvoiceScreen extends ConsumerStatefulWidget {
     super.key,
     required this.orderId,
     this.amountSats,
+    this.generateInvoice,
   });
 
   final String orderId;
   /// Sats amount for the invoice. `null` until the trade provider resolves it.
   final int? amountSats;
+
+  /// Test seam forwarded to [NwcInvoiceWidget]; production leaves it null so
+  /// the widget generates the invoice over NWC. See [NwcInvoiceWidget].
+  @visibleForTesting
+  final Future<String> Function(int amountSats)? generateInvoice;
 
   @override
   ConsumerState<AddLightningInvoiceScreen> createState() =>
@@ -240,15 +246,35 @@ class _AddLightningInvoiceScreenState
         appBar: AppBar(title: Text(l10n.addInvoiceTitle)),
         body: Padding(
           padding: const EdgeInsets.all(AppSpacing.lg),
-          child: Center(
-            child: NwcInvoiceWidget(
-              amountSats: sats.toInt(),
-              onInvoiceConfirmed: (invoice) {
-                _invoiceController.text = invoice;
-                _submit(ref);
-              },
-              onFallbackToManual: () => setState(() => _manualMode = true),
-            ),
+          child: Column(
+            children: [
+              // The maker must see who took their order even when NWC
+              // auto-generates the invoice and the flow can proceed on its
+              // own — that is exactly where the decision matters most (#305).
+              if (trade?.peerRating != null) ...[
+                PeerReputationCard(
+                  rating: trade!.peerRating!,
+                  reviews: trade.peerReviews ?? 0,
+                  days: trade.peerDays ?? 0,
+                  counterpartIsBuyer: false,
+                ),
+                const SizedBox(height: AppSpacing.lg),
+              ],
+              Expanded(
+                child: Center(
+                  child: NwcInvoiceWidget(
+                    amountSats: sats.toInt(),
+                    generateInvoice: widget.generateInvoice,
+                    onInvoiceConfirmed: (invoice) {
+                      _invoiceController.text = invoice;
+                      _submit(ref);
+                    },
+                    onFallbackToManual: () =>
+                        setState(() => _manualMode = true),
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
       );
