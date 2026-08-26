@@ -14,7 +14,7 @@ use crate::db::Storage;
 use crate::mostro::actions;
 use crate::mostro::status::{
     add_invoice_sync, cancellation_wipes_history, is_hard_terminal, map_core_status,
-    status_for_action, wire_status_applies,
+    peer_reputation, status_for_action, wire_status_applies,
 };
 use crate::mostro::pending::{
     classify_take_reply, detach_request_waiter, may_reconcile_stored_id, order_content_key,
@@ -546,6 +546,9 @@ pub async fn create_order(params: NewOrderParams) -> Result<OrderInfo> {
         started_at: now,
         completed_at: None,
         outcome: None,
+        peer_rating: None,
+        peer_reviews: None,
+        peer_days: None,
     };
     if let Some(db) = crate::db::app_db::db() {
         if let Err(e) = db.save_trade(&trade).await {
@@ -772,6 +775,9 @@ pub async fn take_order(
         started_at: now,
         completed_at: None,
         outcome: None,
+        peer_rating: None,
+        peer_reviews: None,
+        peer_days: None,
     };
 
     store_trade_key_index(&order_id, trade_index).await;
@@ -1702,10 +1708,16 @@ async fn dispatch_mostro_message(
             };
             let Some((new_status, amount)) = add_invoice_sync(&kind.payload) else {
                 // The daemon follows up with a second AddInvoice carrying a
-                // Peer payload (counterparty reputation) — ignored for now.
-                log::debug!(
-                    "[orders] daemon-msg AddInvoice for order={order_id}: no Order payload, ignoring"
-                );
+                // Peer payload: the counterparty's (taker's) reputation
+                // snapshot (issue #305). Persist it so the add-invoice screen
+                // and trade detail can show who took the order.
+                if let Some((rating, reviews, days)) = peer_reputation(&kind.payload) {
+                    persist_peer_reputation(&order_id, rating, reviews, days).await;
+                } else {
+                    log::debug!(
+                        "[orders] daemon-msg AddInvoice for order={order_id}: no Order or Peer payload, ignoring"
+                    );
+                }
                 return;
             };
             if status_sync_blocked_by_terminal(&order_id, &kind.action).await {
@@ -1774,9 +1786,17 @@ async fn dispatch_mostro_message(
                     (pr.clone(), sats)
                 }
                 _ => {
-                    log::warn!(
-                        "[orders] daemon-msg PayInvoice payload is not a PaymentRequest"
-                    );
+                    // Like AddInvoice, the daemon follows up with a Peer
+                    // payload carrying the counterparty's (taker's) reputation
+                    // (issue #305). Persist it for the pay-invoice screen and
+                    // trade detail rather than discarding the whole message.
+                    if let Some((rating, reviews, days)) = peer_reputation(&kind.payload) {
+                        persist_peer_reputation(&order_id, rating, reviews, days).await;
+                    } else {
+                        log::warn!(
+                            "[orders] daemon-msg PayInvoice payload is not a PaymentRequest"
+                        );
+                    }
                     return;
                 }
             };
@@ -3223,6 +3243,37 @@ static TRADE_UPDATES: std::sync::OnceLock<
 
 fn trade_updates_tx() -> &'static broadcast::Sender<crate::api::types::TradeUpdate> {
     TRADE_UPDATES.get_or_init(|| broadcast::channel(TRADE_UPDATES_CAPACITY).0)
+}
+
+/// Persists the counterparty (taker) reputation snapshot from the daemon's
+/// follow-up Peer DM and nudges any open screen to re-read the trade so it
+/// surfaces who took the order (issue #305).
+///
+/// The Peer DM carries no status of its own — it rides the same
+/// PayInvoice / AddInvoice action as the flow message that already ran — so
+/// this re-emits the trade's *current* status (read from the book) purely to
+/// wake `tradeInfoStreamProvider`; it never changes state. When the book has
+/// no row for the order yet, the persisted snapshot is still read the next
+/// time the trade loads, so a missing emission only delays the live update.
+async fn persist_peer_reputation(order_id: &str, rating: f64, reviews: u32, days: u32) {
+    crate::api::logging::blog_info(
+        "orders",
+        format!(
+            "peer-reputation order={} rating={rating} reviews={reviews} days={days}",
+            crate::api::logging::short_id(order_id),
+        ),
+    );
+    if let Some(db) = crate::db::app_db::db() {
+        if let Err(e) = db
+            .update_trade_peer_reputation(order_id, rating, reviews, days)
+            .await
+        {
+            log::warn!("[orders] failed to persist peer reputation for order={order_id}: {e}");
+        }
+    }
+    if let Some(info) = order_book().get_order(order_id).await {
+        emit_trade_update(order_id, info.status);
+    }
 }
 
 /// Broadcasts a trade lifecycle change to any active [`TradeUpdatesStream`].
