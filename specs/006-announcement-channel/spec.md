@@ -159,11 +159,12 @@ maintained by the same project, so this is an allocation rather than a client sq
 a number it does not own. It is reserved for the announcement event and nothing else, and
 a `z` tag of `announcement` keeps it self-describing alongside its neighbours.
 
-That has a consequence this spec cannot discharge on its own: **the allocation must be
-recorded in the protocol repository's kind table in the same release that ships the
-reader.** A number reserved only in this document is not reserved. Nothing in the app
-depends on the protocol document existing first, but the table is what stops the next
-Mostro client from picking `38387` for something else.
+That consequence is discharged in **MostroP2P/protocol#56**, which registers the row above
+and describes the event in `src/announcement_event.md`. A number reserved only in this
+document would not be reserved — the registry is what stops the next Mostro client from
+picking `38387` for something else. Where the two documents overlap, the protocol one is
+the wire contract and this one is how this app implements it; §3.2's five-locale rule is
+this app's policy, which the protocol document explicitly leaves to each project.
 
 Being addressable (30000–39999) is the part that matters functionally: it is what makes
 correcting a typo in a live announcement a republish under the same `d` rather than a
@@ -182,6 +183,13 @@ one.
 | `expiration` | yes | unix seconds, NIP-40 |
 | `min_version` | no | show only to app versions ≥ this — **inclusive** lower bound |
 | `max_version` | no | show only to app versions < this — **exclusive** upper bound |
+| `z` | yes | `announcement` — the block's convention, so the event is self-describing next to `order` / `dispute` / `info` |
+| `y` | no | platform identifier, optionally with the publishing project's name |
+
+`z` and `y` are required of the **publisher** (§8) for registry consistency. The reader
+does not filter on them: it filters on kind and author, and an allowlisted key that omits
+`z` is still the project talking. Validating a tag that carries no trust adds a way for a
+correct announcement to be dropped and buys nothing.
 
 The bounds exist for the announcement that is *about* the app. "2.1 is out, it fixes X"
 must not reach someone already on 2.1 — which is why the upper bound is exclusive: the
@@ -621,7 +629,7 @@ PR per step, per the workflow in CLAUDE.md.
 | 4 | Rendering into the existing notification surface, five locales of chrome (§6.2) | Last, when there is something to show |
 | 5 | `rust/src/bin/announce.rs` + the publishing doc (§8) | With or just after step 1, sharing its validator |
 | 6 | **Add the real npubs** — one line, its own PR, npubs checked against a source outside this repo | The only commit that makes the channel live |
-| 7 | **Record `38387` in the protocol repository's kind table** (§3) | A number reserved only in this repo is not reserved; ships alongside the reader, not after it |
+| 7 | **Land MostroP2P/protocol#56** — the `38387` registration (§3) | A number reserved only in this repo is not reserved; it should land before the reader ships, and it depends on nothing here |
 
 Steps 1–5 can all merge without the channel existing in production. That is the point.
 
