@@ -268,7 +268,7 @@ Make sure the following tools are installed on your system:
 | wasm-pack | latest | `cargo install wasm-pack` |
 | Rust nightly + `rust-src` (web only) | — | `rustup toolchain install nightly && rustup component add rust-src --toolchain nightly` |
 | flutter_rust_bridge CLI | 2.11.1 | `cargo install flutter_rust_bridge_codegen --version 2.11.1 --locked` |
-| Linux desktop toolchain (Linux only) | — | `sudo apt-get install clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev libstdc++-12-dev lld` |
+| Linux desktop toolchain (Debian/Ubuntu) | — | `sudo apt-get install clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev libstdc++-dev lld` |
 | Xcode (macOS / iOS only) | 15+ | Mac App Store |
 | Android Studio / NDK (Android only) | latest | [developer.android.com](https://developer.android.com/studio) |
 
