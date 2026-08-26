@@ -9,8 +9,15 @@ import 'package:mostro/l10n/app_localizations.dart';
 /// Whether Market or Fixed price mode is selected.
 final isMarketPriceProvider = StateProvider<bool>((_) => true);
 
-/// Premium slider value (-10% to +10%).
+/// Premium slider value. Default slider range is [-10%, +10%], but the input
+/// accepts (and the slider expands to fit) values up to [-999%, +999%].
 final premiumValueProvider = StateProvider<double>((_) => 0.0);
+
+/// Default premium slider bound. The slider grows past this to fit a typed value.
+const double kPremiumSliderDefault = 10.0;
+
+/// Hard limit for a manually entered premium magnitude.
+const double kPremiumMaxMagnitude = 999.0;
 
 /// Fixed sats amount (only used in Fixed price mode).
 final fixedSatsProvider = StateProvider<String>((_) => '');
@@ -59,6 +66,15 @@ class _PriceSectionState extends ConsumerState<PriceSection> {
     final isMarket = ref.watch(isMarketPriceProvider);
     final premium = ref.watch(premiumValueProvider);
     final l10n = AppLocalizations.of(context);
+
+    // Slider bounds default to ±10% but expand to fit a manually entered value.
+    final sliderMin =
+        premium < -kPremiumSliderDefault ? premium : -kPremiumSliderDefault;
+    final sliderMax =
+        premium > kPremiumSliderDefault ? premium : kPremiumSliderDefault;
+    // Keep the 0.5% granularity of the default range.
+    final sliderDivisions =
+        ((sliderMax - sliderMin) * 2).round().clamp(1, 4000);
 
     // Sync controller from provider via listener (not in build body).
     ref.listen<double>(premiumValueProvider, _syncControllerFromProvider);
@@ -153,7 +169,10 @@ class _PriceSectionState extends ConsumerState<PriceSection> {
                               final parsed = double.tryParse(v);
                               if (parsed != null) {
                                 ref.read(premiumValueProvider.notifier).state =
-                                    parsed.clamp(-10.0, 10.0);
+                                    parsed.clamp(
+                                  -kPremiumMaxMagnitude,
+                                  kPremiumMaxMagnitude,
+                                );
                               }
                             },
                             onTapOutside: (_) {
@@ -181,10 +200,10 @@ class _PriceSectionState extends ConsumerState<PriceSection> {
                   ],
                 ),
                 Slider(
-                  value: premium,
-                  min: -10,
-                  max: 10,
-                  divisions: 40,
+                  value: premium.clamp(sliderMin, sliderMax),
+                  min: sliderMin,
+                  max: sliderMax,
+                  divisions: sliderDivisions,
                   activeColor: purple,
                   label: '${premium >= 0 ? '+' : ''}${premium.toStringAsFixed(1)}%',
                   onChanged: (v) =>
@@ -194,14 +213,14 @@ class _PriceSectionState extends ConsumerState<PriceSection> {
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     Text(
-                      '-10%',
+                      '${sliderMin.round()}%',
                       style: TextStyle(
                         color: colors?.textSubtle,
                         fontSize: 11,
                       ),
                     ),
                     Text(
-                      '+10%',
+                      '+${sliderMax.round()}%',
                       style: TextStyle(
                         color: colors?.textSubtle,
                         fontSize: 11,

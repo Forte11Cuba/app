@@ -123,8 +123,11 @@ class _AddOrderScreenState extends ConsumerState<AddOrderScreen> {
           ref.read(selectedPaymentMethodsProvider.notifier).state = methods;
         }
         ref.read(isMarketPriceProvider.notifier).state = true;
-        ref.read(premiumValueProvider.notifier).state =
-            source.premium.clamp(-10.0, 10.0);
+        // Reuse the source order's premium as-is; it already passed validation.
+        ref.read(premiumValueProvider.notifier).state = source.premium.clamp(
+          -kPremiumMaxMagnitude,
+          kPremiumMaxMagnitude,
+        );
         ref.read(fixedSatsProvider.notifier).state = '';
       case OrderPreset.conservative:
         ref.read(isMarketPriceProvider.notifier).state = true;
