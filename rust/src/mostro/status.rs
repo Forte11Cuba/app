@@ -175,10 +175,14 @@ pub(crate) fn peer_reputation(
 ) -> Option<(f64, u32, u32)> {
     match payload {
         Some(mostro_core::message::Payload::Peer(peer)) => peer.reputation.as_ref().map(|u| {
+            // Saturate rather than wrap or zero out: reviews is an unconstrained
+            // i64, so clamp negatives to 0 and anything past u32::MAX to u32::MAX
+            // (defaulting overflow to 0 would turn a huge count into "no reviews").
+            // operating_days is u64, so it only needs the upper bound.
             (
                 u.rating,
-                u32::try_from(u.reviews).unwrap_or(0),
-                u32::try_from(u.operating_days).unwrap_or(u32::MAX),
+                u.reviews.clamp(0, u32::MAX as i64) as u32,
+                u.operating_days.min(u32::MAX as u64) as u32,
             )
         }),
         _ => None,
@@ -358,6 +362,43 @@ mod tests {
         let so = small_order_with(mostro_core::order::Status::WaitingBuyerInvoice, 484);
         assert_eq!(peer_reputation(&Some(Payload::Order(so))), None);
         assert_eq!(peer_reputation(&None), None);
+    }
+
+    /// `reviews` is an unconstrained i64 and `operating_days` a u64, so
+    /// out-of-range values must saturate into u32, not wrap or collapse to 0 —
+    /// a huge count reading as "no reviews" would be worse than clamping.
+    #[test]
+    fn peer_reputation_saturates_out_of_range_counts() {
+        use mostro_core::message::{Payload, Peer};
+        use mostro_core::user::UserInfo;
+
+        let peer = |reviews: i64, operating_days: u64| {
+            Payload::Peer(Peer {
+                pubkey: String::new(),
+                reputation: Some(UserInfo {
+                    rating: 5.0,
+                    reviews,
+                    operating_days,
+                }),
+            })
+        };
+
+        // Above u32::MAX saturates to u32::MAX, not 0 / wraparound.
+        assert_eq!(
+            peer_reputation(&Some(peer(i64::MAX, u64::MAX))),
+            Some((5.0, u32::MAX, u32::MAX))
+        );
+        // Exact boundary is preserved; one past it saturates.
+        assert_eq!(
+            peer_reputation(&Some(peer(u32::MAX as i64, u32::MAX as u64))),
+            Some((5.0, u32::MAX, u32::MAX))
+        );
+        assert_eq!(
+            peer_reputation(&Some(peer(u32::MAX as i64 + 1, u32::MAX as u64 + 1))),
+            Some((5.0, u32::MAX, u32::MAX))
+        );
+        // A negative review count clamps to 0.
+        assert_eq!(peer_reputation(&Some(peer(-7, 0))), Some((5.0, 0, 0)));
     }
 
     /// The hard-terminal set must match protocol finality: statuses mostrod
