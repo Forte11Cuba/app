@@ -137,15 +137,14 @@ reader (§5), and nothing else in this document may contradict it.
 
 | Part | Value |
 |---|---|
-| Kind | `31417` — addressable, generic range, **outside** the Mostro protocol's `3838x` block |
+| Kind | `38387` — addressable, **reserved in the Mostro protocol's `3838x` block for this and nothing else** |
 | Author | one of the keys in §4.1, and nothing else |
 | `d` tag | announcement id: stable, opaque, unique per announcement |
 | `expiration` tag | NIP-40, **required** — see §5.5 |
 | `content` | the JSON of §3.2 |
 
-**On the kind, and why it is not `3838x`.** The obvious choice is the next number beside
-the kinds this app already reads — and it is wrong. That block is the Mostro protocol's,
-allocated sequentially and fully occupied:
+**On the kind.** The Mostro protocol allocates the `3838x` block sequentially
+(`../protocol/src/order_event.md`, NIP-69), and it is currently full:
 
 | Kind | Event | `z` tag |
 |---|---|---|
@@ -153,19 +152,27 @@ allocated sequentially and fully occupied:
 | `38384` | Ratings | `rating` |
 | `38385` | Info | `info` |
 | `38386` | Disputes | `dispute` |
+| **`38387`** | **Announcements** | **`announcement`** |
 
-(`../protocol/src/order_event.md`, NIP-69.) Taking `38387` would not collide with anything
-today, but it would squat on the next slot the protocol allocates — a client reserving a
-protocol number for itself, decided unilaterally in this repo. **This is a client-level
-kind and it belongs in client-level space**, so `31417` in the generic addressable range,
-which no NIP claims and the protocol does not touch.
+`38387` is the next slot, and this feature **takes it deliberately**: the protocol is
+maintained by the same project, so this is an allocation rather than a client squatting on
+a number it does not own. It is reserved for the announcement event and nothing else, and
+a `z` tag of `announcement` keeps it self-describing alongside its neighbours.
 
-Addressable (30000–39999) *is* the part that matters: it is what makes correcting a typo in
-a live announcement a republish under the same `d` rather than a second announcement.
+That has a consequence this spec cannot discharge on its own: **the allocation must be
+recorded in the protocol repository's kind table in the same release that ships the
+reader.** A number reserved only in this document is not reserved. Nothing in the app
+depends on the protocol document existing first, but the table is what stops the next
+Mostro client from picking `38387` for something else.
 
-If the protocol ever gains an announcement event of its own, this channel should move to it
-and delete §3 — a project-signed broadcast and a node-signed one are the same shape, and
-§11 says why they must not share an allowlist.
+Being addressable (30000–39999) is the part that matters functionally: it is what makes
+correcting a typo in a live announcement a republish under the same `d` rather than a
+second announcement.
+
+The event stays a **client-level** event in every other respect. It is authored by the
+project keys of §4.1, not by a node; no daemon publishes it, no daemon reads it, and §11
+says why a node-authored announcement would need a different allowlist rather than this
+one.
 
 ### 3.1 Tags
 
@@ -336,7 +343,7 @@ While the app is running and the setting of §7 is on:
 
 ```rust
 Filter::new()
-    .kind(Kind::from(31417u16))
+    .kind(Kind::from(38387u16))
     .authors(<decoded §4.1 keys>)
     .since(now - 30 days)
     .limit(20)
@@ -614,6 +621,7 @@ PR per step, per the workflow in CLAUDE.md.
 | 4 | Rendering into the existing notification surface, five locales of chrome (§6.2) | Last, when there is something to show |
 | 5 | `rust/src/bin/announce.rs` + the publishing doc (§8) | With or just after step 1, sharing its validator |
 | 6 | **Add the real npubs** — one line, its own PR, npubs checked against a source outside this repo | The only commit that makes the channel live |
+| 7 | **Record `38387` in the protocol repository's kind table** (§3) | A number reserved only in this repo is not reserved; ships alongside the reader, not after it |
 
 Steps 1–5 can all merge without the channel existing in production. That is the point.
 
