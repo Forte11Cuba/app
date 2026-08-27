@@ -5,6 +5,8 @@ import 'package:go_router/go_router.dart';
 import 'package:mostro/core/app_routes.dart';
 import 'package:mostro/l10n/app_localizations.dart';
 import 'package:mostro/core/app_theme.dart';
+import 'package:mostro/core/automation/automation_id.dart';
+import 'package:mostro/core/automation/automation_ids.dart';
 import 'package:mostro/core/daemon_errors.dart';
 import 'package:mostro/features/order/widgets/currency_section.dart';
 import 'package:mostro/features/settings/providers/settings_provider.dart';
@@ -325,7 +327,7 @@ class _AddOrderScreenState extends ConsumerState<AddOrderScreen> {
                       ),
                     ),
                     onChanged: (_) => setState(() {}),
-                  ),
+                  ).withAutomationId(AutomationIds.orderCreateFiatAmount),
                 const SizedBox(height: AppSpacing.md),
 
                 // Currency selector
@@ -386,7 +388,7 @@ class _AddOrderScreenState extends ConsumerState<AddOrderScreen> {
                     ),
                   ),
                   child: Text(l10n.cancel),
-                ),
+                ).withAutomationId(AutomationIds.orderCreateCancel),
               ),
               const SizedBox(width: AppSpacing.md),
               Expanded(
@@ -409,7 +411,7 @@ class _AddOrderScreenState extends ConsumerState<AddOrderScreen> {
                               CircularProgressIndicator(strokeWidth: 2),
                         )
                       : Text(l10n.submitButton),
-                ),
+                ).withAutomationId(AutomationIds.orderCreateSubmit),
               ),
                 ],
               ),

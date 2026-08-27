@@ -600,7 +600,7 @@ fn reconcile_and_publish_to(
 
 use crate::rt::unix_now;
 
-/// Expose the in-memory `Keys` for other Rust modules (relay pool, gift wrap).
+/// Expose the in-memory `Keys` for other Rust modules (relay pool, transport).
 /// Returns `Err("NoIdentity")` if no identity is loaded.
 pub(crate) async fn get_active_keys() -> Result<Keys> {
     let guard = identity_lock().read().await;

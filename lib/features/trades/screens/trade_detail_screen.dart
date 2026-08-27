@@ -8,6 +8,8 @@ import 'package:go_router/go_router.dart';
 
 import 'package:mostro/core/app_routes.dart';
 import 'package:mostro/core/app_theme.dart';
+import 'package:mostro/core/automation/automation_id.dart';
+import 'package:mostro/core/automation/automation_ids.dart';
 import 'package:mostro/core/daemon_errors.dart';
 import 'package:mostro/src/rust/api/disputes.dart' as disputes_api;
 import 'package:mostro/src/rust/api/orders.dart' as orders_api;
@@ -72,6 +74,25 @@ enum TradeStatus {
   const TradeStatus(this.label);
   final String label;
 }
+
+/// Stable, locale-independent name of a trade status.
+///
+/// This is what the `order.status` readout exposes, and it is a product
+/// contract: automation maps these names to protocol states and cannot use
+/// the localized pill copy. See `docs/automation-contract.md`.
+extension TradeStatusMachineName on TradeStatus {
+  /// `TradeStatus.waitingInvoice` → `waiting-invoice`.
+  String get machineName => name
+      .replaceAllMapped(RegExp(r'[A-Z]'), (m) => '-${m[0]!.toLowerCase()}');
+}
+
+/// Maps a protocol order status to the status this screen displays.
+///
+/// Public so [MyOrderScreen] exposes the same vocabulary from its own status
+/// card: a pending order the user created is opened there, not here, and the
+/// two must not disagree about what state it is in.
+TradeStatus tradeStatusFromOrderStatus(OrderStatus s) =>
+    _TradeDetailScreenState._mapOrderStatus(s);
 
 /// Localized display label for the trade status pill.
 extension TradeStatusL10n on TradeStatus {
@@ -188,7 +209,7 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen> {
           FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
             child: Text(l10n.yesCancelButtonLabel),
-          ),
+          ).withAutomationId(AutomationIds.tradeCancelConfirm),
         ],
       ),
     );
@@ -513,7 +534,7 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen> {
           icon: const Icon(Icons.arrow_back),
           onPressed: () =>
               context.canPop() ? context.pop() : context.go(AppRoute.home),
-        ),
+        ).withAutomationId(AutomationIds.appBarBack),
         actions: [_buildOverflowMenu()],
       ),
       body: ListView(
@@ -558,6 +579,8 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen> {
             child: Row(
               children: [
                 Flexible(
+                  // The visible label is shortened for width; the readout
+                  // carries the whole order id.
                   child: Text(
                     l10n.tradeIdShortLabel(_shortId(widget.orderId)),
                     style: TextStyle(
@@ -566,6 +589,9 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen> {
                       fontFamily: 'monospace',
                     ),
                     overflow: TextOverflow.ellipsis,
+                  ).withAutomationId(
+                    AutomationIds.orderId,
+                    label: widget.orderId,
                   ),
                 ),
                 const SizedBox(width: AppSpacing.xs),
@@ -658,6 +684,7 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen> {
     final l10n = AppLocalizations.of(context);
 
     Widget destructiveButton({
+      required String automationId,
       required String label,
       required Future<void> Function() onPressed,
     }) =>
@@ -667,22 +694,25 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen> {
             label: label,
             variant: MostroButtonVariant.destructive,
             onPressed: onPressed,
-          ),
+          ).withAutomationId(automationId),
         );
 
     final buttons = [
       if (canRelease)
         destructiveButton(
+          automationId: AutomationIds.tradeRelease,
           label: l10n.releaseSatsButton,
           onPressed: _releaseOrder,
         ),
       if (canCancel)
         destructiveButton(
+          automationId: AutomationIds.tradeCancel,
           label: l10n.cancelTradeButton,
           onPressed: _cancelOrder,
         ),
       if (canDispute)
         destructiveButton(
+          automationId: AutomationIds.tradeDispute,
           label: l10n.openDisputeButton,
           onPressed: _openDispute,
         ),
@@ -741,10 +771,15 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen> {
                   foreground: textSec,
                 ),
               if (currentStep >= 0) const SizedBox(width: AppSpacing.sm),
+              // The pill's copy is localized; the readout carries the machine
+              // name, which is the state automation asserts on.
               _Pill(
                 label: status.localizedLabel(l10n),
                 background: pillBg,
                 foreground: pillFg,
+              ).withAutomationId(
+                AutomationIds.orderStatus,
+                label: status.machineName,
               ),
             ],
           ),
@@ -887,7 +922,7 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen> {
             icon: Icons.receipt_long_outlined,
             onPressed: () =>
                 context.push(AppRoute.addInvoicePath(widget.orderId)),
-          ),
+          ).withAutomationId(AutomationIds.tradeAddInvoice),
         ];
       case (TradeStatus.waitingPayment, false):
         return [
@@ -896,7 +931,7 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen> {
             icon: Icons.bolt,
             onPressed: () =>
                 context.push(AppRoute.payInvoicePath(widget.orderId)),
-          ),
+          ).withAutomationId(AutomationIds.tradePayInvoice),
         ];
       case (TradeStatus.active, true):
         return [
@@ -904,7 +939,7 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen> {
             label: l10n.markFiatSentButton,
             icon: Icons.check,
             onPressed: _markFiatSent,
-          ),
+          ).withAutomationId(AutomationIds.tradeFiatSent),
         ];
       case (TradeStatus.fiatSent, false):
         return [
@@ -912,7 +947,7 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen> {
             label: l10n.confirmReleaseSatsButton,
             icon: Icons.lock_open,
             onPressed: _releaseOrder,
-          ),
+          ).withAutomationId(AutomationIds.tradeRelease),
         ];
       case (TradeStatus.disputed, _):
         return [
@@ -951,7 +986,7 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen> {
                 context.push(AppRoute.rateUserPath(widget.orderId));
               }
             },
-          ),
+          ).withAutomationId(AutomationIds.tradeRate),
         ];
       case (TradeStatus.rated, _) || (TradeStatus.cancelled, _):
         return [
