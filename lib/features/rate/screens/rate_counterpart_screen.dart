@@ -6,6 +6,7 @@ import 'package:mostro/core/app_theme.dart';
 import 'package:mostro/core/automation/automation_id.dart';
 import 'package:mostro/core/automation/automation_ids.dart';
 import 'package:mostro/core/daemon_errors.dart';
+import 'package:mostro/features/rate/providers/rating_providers.dart';
 import 'package:mostro/features/rate/widgets/star_rating.dart';
 import 'package:mostro/l10n/app_localizations.dart';
 import 'package:mostro/src/rust/api/reputation.dart' as reputation_api;
@@ -46,6 +47,9 @@ class _RateCounterpartScreenState
         tradeId: widget.orderId,
         score: _rating,
       );
+      // The screen underneath buckets a settled trade as "rate me" until a
+      // local rating exists, so refresh it before popping back (#327).
+      ref.invalidate(myTradeRatingProvider(widget.orderId));
       if (mounted) context.pop();
     } catch (e) {
       if (!mounted) return;

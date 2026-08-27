@@ -18,6 +18,7 @@ import 'package:mostro/features/chat/providers/chat_providers.dart';
 import 'package:mostro/features/disputes/providers/disputes_providers.dart';
 import 'package:mostro/features/home/providers/home_order_providers.dart';
 import 'package:mostro/features/order/providers/trade_state_provider.dart';
+import 'package:mostro/features/rate/providers/rating_providers.dart';
 import 'package:mostro/features/trades/providers/trades_providers.dart';
 import 'package:mostro/features/trades/widgets/dispute_confirmation_dialog.dart';
 import 'package:mostro/features/trades/widgets/release_confirmation_dialog.dart';
@@ -511,9 +512,18 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen> {
     // Use TradeStatus.loading while the provider hasn't resolved so the UI
     // doesn't flash the pending CTA before the real status is known.
     final tradeStatusAsync = ref.watch(tradeStatusProvider(widget.orderId));
-    final status = tradeStatusAsync.hasValue
+    final orderStatus = tradeStatusAsync.hasValue
         ? _mapOrderStatus(tradeStatusAsync.value!)
         : TradeStatus.loading;
+
+    // The protocol has no "rated" order status — a settled trade stays
+    // settled once the rating is sent — so `rated` is only reachable by
+    // overlaying the local rating on top of the mapping above (#327).
+    final ratedByMe =
+        ref.watch(myTradeRatingProvider(widget.orderId)).valueOrNull != null;
+    final status = orderStatus == TradeStatus.pendingRating && ratedByMe
+        ? TradeStatus.rated
+        : orderStatus;
 
     // Look up order details from the live order book.
     final allOrders = ref.watch(orderBookProvider).valueOrNull ?? [];
