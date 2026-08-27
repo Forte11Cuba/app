@@ -24,6 +24,7 @@ import 'package:mostro/features/trades/widgets/release_confirmation_dialog.dart'
 import 'package:mostro/shared/utils/platform_int64.dart';
 import 'package:mostro/shared/widgets/mostro_reactive_button.dart';
 import 'package:mostro/shared/widgets/nym_avatar.dart';
+import 'package:mostro/shared/widgets/peer_reputation_card.dart';
 
 /// Trade detail screen — Route `/trade_detail/:orderId`.
 ///
@@ -518,6 +519,13 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen> {
     final allOrders = ref.watch(orderBookProvider).valueOrNull ?? [];
     final order = allOrders.where((o) => o.id == widget.orderId).firstOrNull;
 
+    // Counterpart (taker) reputation snapshot persisted from the daemon's
+    // follow-up Peer DM (#305). Read via tradeInfoProvider (not the polling
+    // stream): it refreshes on the TradeUpdate the Rust side emits after
+    // persisting the snapshot. Present only once someone took the order, and
+    // the taker's role is the opposite of the user's own.
+    final trade = ref.watch(tradeInfoProvider(widget.orderId)).valueOrNull;
+
     final inFlight = const {
       TradeStatus.waitingInvoice,
       TradeStatus.waitingPayment,
@@ -557,6 +565,17 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen> {
           // + contextual timer.
           _buildStateStrip(theme, colors, isBuyer, status, order),
           const SizedBox(height: AppSpacing.lg),
+
+          // Counterpart (taker) reputation — who took the order (#305).
+          if (trade?.peerRating != null) ...[
+            PeerReputationCard(
+              rating: trade!.peerRating!,
+              reviews: trade.peerReviews ?? 0,
+              days: trade.peerDays ?? 0,
+              counterpartIsBuyer: !isBuyer,
+            ),
+            const SizedBox(height: AppSpacing.lg),
+          ],
 
           // Single primary CTA for the current state.
           ..._buildPrimaryAction(status, isBuyer, green, colors),

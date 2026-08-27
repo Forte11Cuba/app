@@ -591,6 +591,8 @@
   "takeOrderAtMarketPrice": " al prezzo di mercato",
   "premiumLabel": "Premio: {premium}%",
   "creatorReputation": "Reputazione del creatore",
+  "buyerReputation": "Reputazione dell'acquirente",
+  "sellerReputation": "Reputazione del venditore",
   "ratingStatLabel": "valutazione",
   "tradesStatLabel": "operazioni",
   "daysActiveStatLabel": "giorni attivo",
