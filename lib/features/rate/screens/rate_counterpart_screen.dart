@@ -49,7 +49,7 @@ class _RateCounterpartScreenState
       );
       // The screen underneath buckets a settled trade as "rate me" until a
       // local rating exists, so refresh it before popping back (#327).
-      ref.invalidate(myTradeRatingProvider(widget.orderId));
+      ref.invalidate(tradeRatingProvider(widget.orderId));
       if (mounted) context.pop();
     } catch (e) {
       if (!mounted) return;

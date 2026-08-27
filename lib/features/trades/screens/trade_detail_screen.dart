@@ -519,8 +519,7 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen> {
     // The protocol has no "rated" order status — a settled trade stays
     // settled once the rating is sent — so `rated` is only reachable by
     // overlaying the local rating on top of the mapping above (#327).
-    final ratedByMe =
-        ref.watch(myTradeRatingProvider(widget.orderId)).valueOrNull != null;
+    final ratedByMe = ref.watch(ratedByMeProvider(widget.orderId));
     final status = orderStatus == TradeStatus.pendingRating && ratedByMe
         ? TradeStatus.rated
         : orderStatus;
