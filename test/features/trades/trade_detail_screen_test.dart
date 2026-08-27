@@ -5,9 +5,12 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mostro/core/app_theme.dart';
 import 'package:mostro/features/home/providers/home_order_providers.dart';
 import 'package:mostro/features/order/providers/trade_state_provider.dart';
+import 'package:mostro/features/rate/providers/rating_providers.dart';
 import 'package:mostro/features/trades/screens/trade_detail_screen.dart';
 import 'package:mostro/l10n/app_localizations.dart';
 import 'package:mostro/l10n/app_localizations_en.dart';
+import 'package:mostro/shared/utils/platform_int64.dart';
+import 'package:mostro/src/rust/api/types.dart';
 
 import '../../support/provider_harness.dart';
 
@@ -24,12 +27,14 @@ Future<void> _pumpTradeDetail(
   required String orderId,
   required bool isBuyer,
   required OrderStatus status,
+  RatingInfo? rating,
   Locale locale = const Locale('en'),
 }) async {
   final container = createContainer(overrides: [
     tradeRoleProvider.overrideWith((ref) => {orderId: isBuyer}),
     tradeStatusProvider(orderId).overrideWith((ref) => Stream.value(status)),
     orderBookProvider.overrideWith((ref) => Stream.value(const [])),
+    tradeRatingProvider(orderId).overrideWith((ref) async => rating),
   ]);
 
   await tester.pumpWidget(
@@ -60,10 +65,31 @@ Future<void> _pumpTradeDetail(
   await tester.pump();
 }
 
+/// Builds the rating the Rust store would hand back for a trade.
+///
+/// [isMine] is the field under test: `true` is the local user rating their
+/// counterpart, `false` the counterpart rating them.
+RatingInfo _rating({required bool isMine, int score = 5}) => RatingInfo(
+      tradeId: 'trade',
+      score: score,
+      isMine: isMine,
+      createdAt: intToPlatformInt64(1000),
+    );
+
 /// Matches an outlined secondary-row button by its visible label text.
 Finder _outlinedButtonWithText(String label) => find.ancestor(
       of: find.text(label),
       matching: find.byType(OutlinedButton),
+    );
+
+/// Matches the primary CTA by its visible label text.
+///
+/// The label alone is ambiguous: the timeline repeats it as the step name.
+/// Matched by predicate, not `byType`: `FilledButton.icon` builds a private
+/// subclass, which `find.byType(FilledButton)` does not accept.
+Finder _filledButtonWithText(String label) => find.ancestor(
+      of: find.text(label),
+      matching: find.byWidgetPredicate((widget) => widget is FilledButton),
     );
 
 /// Matches any `PopupMenuButton`, regardless of its generic type argument.
@@ -354,6 +380,59 @@ void main() {
       // Flush the button's own 4s error cooldown timer so it does not
       // outlive this test.
       await tester.pump(const Duration(seconds: 4));
+    });
+  });
+
+  /// #327: the daemon never reports a "rated" order status — a settled trade
+  /// stays settled once the rating is sent — so the screen resolves the rate
+  /// prompt by overlaying the locally held rating.
+  group('TradeDetailScreen rated state', () {
+    testWidgets('settled + not rated yet: the rate prompt is shown',
+        (tester) async {
+      await _pumpTradeDetail(
+        tester,
+        orderId: 'order-rate-1',
+        isBuyer: false,
+        status: OrderStatus.settledHoldInvoice,
+        rating: null,
+      );
+
+      expect(find.text('Rate'), findsOneWidget);
+      expect(_filledButtonWithText('Rate your counterpart'), findsOneWidget);
+      expect(find.text('Rated'), findsNothing);
+    });
+
+    testWidgets('settled + rated by me: the prompt is replaced by Close',
+        (tester) async {
+      await _pumpTradeDetail(
+        tester,
+        orderId: 'order-rate-2',
+        isBuyer: true,
+        status: OrderStatus.success,
+        rating: _rating(isMine: true),
+      );
+
+      expect(find.text('Rated'), findsOneWidget);
+      expect(find.text('Thank you for your rating!'), findsOneWidget);
+      expect(_filledButtonWithText('Rate your counterpart'), findsNothing);
+      expect(_outlinedButtonWithText('CLOSE'), findsOneWidget);
+    });
+
+    /// The store falls back to the counterpart's rating when the local user
+    /// has not submitted one, so a rating alone must not resolve the prompt —
+    /// being rated is not the same as having rated.
+    testWidgets('settled + rated by the counterpart only: prompt stays',
+        (tester) async {
+      await _pumpTradeDetail(
+        tester,
+        orderId: 'order-rate-3',
+        isBuyer: false,
+        status: OrderStatus.settledHoldInvoice,
+        rating: _rating(isMine: false),
+      );
+
+      expect(_filledButtonWithText('Rate your counterpart'), findsOneWidget);
+      expect(find.text('Rated'), findsNothing);
     });
   });
 
