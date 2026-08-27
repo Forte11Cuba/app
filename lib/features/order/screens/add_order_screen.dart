@@ -51,6 +51,7 @@ class _AddOrderScreenState extends ConsumerState<AddOrderScreen> {
           ref.read(settingsProvider).defaultFiatCode ?? 'USD';
       ref.read(selectedFiatCodeProvider.notifier).state = defaultFiat;
       ref.read(isMarketPriceProvider.notifier).state = true;
+      ref.read(isRangeOrderProvider.notifier).state = false;
       ref.read(premiumValueProvider.notifier).state = 0.0;
       ref.read(fixedSatsProvider.notifier).state = '';
       ref.read(selectedOrderPresetProvider.notifier).state =
@@ -64,6 +65,19 @@ class _AddOrderScreenState extends ConsumerState<AddOrderScreen> {
     _minController.dispose();
     _maxController.dispose();
     super.dispose();
+  }
+
+  /// Toggles range mode. A range order can't carry a fixed sats price (Mostro
+  /// prices it at market with a premium), so entering range mode forces Market
+  /// and clears any fixed sats the user had typed. PriceSection watches
+  /// [isRangeOrderProvider] to lock its toggle to Market while range is on.
+  void _onRangeChanged(bool isRange) {
+    setState(() => _isRange = isRange);
+    ref.read(isRangeOrderProvider.notifier).state = isRange;
+    if (isRange) {
+      ref.read(isMarketPriceProvider.notifier).state = true;
+      ref.read(fixedSatsProvider.notifier).state = '';
+    }
   }
 
   bool _checkValid(
@@ -99,6 +113,7 @@ class _AddOrderScreenState extends ConsumerState<AddOrderScreen> {
         if (source == null) return;
         final isRange =
             source.fiatAmountMin != null && source.fiatAmountMax != null;
+        ref.read(isRangeOrderProvider.notifier).state = isRange;
         setState(() {
           _isRange = isRange;
           if (isRange) {
@@ -269,7 +284,7 @@ class _AddOrderScreenState extends ConsumerState<AddOrderScreen> {
                     Switch(
                       value: _isRange,
                       activeThumbColor: green,
-                      onChanged: (v) => setState(() => _isRange = v),
+                      onChanged: _onRangeChanged,
                     ),
                   ],
                 ),

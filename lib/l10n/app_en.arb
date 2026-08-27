@@ -1328,6 +1328,8 @@
   "@premiumSectionLabel": {"description": "Label of the premium slider section"},
   "amountInSatsHint": "Amount in sats",
   "@amountInSatsHint": {"description": "Hint for the fixed sats amount input"},
+  "fixedPriceRangeNotAvailable": "Fixed price isn't available for range orders. Turn off the range to use a fixed price.",
+  "@fixedPriceRangeNotAvailable": {"description": "Explains why the fixed-price toggle is disabled while a range order is being created"},
   "priceTypesDialogTitle": "Price Types",
   "@priceTypesDialogTitle": {"description": "Title of the price types info dialog"},
   "priceTypesDialogContent": "Market Price: Your order price follows the market rate with a premium/discount percentage applied.\n\nFixed Price: You set an exact price in satoshis.",

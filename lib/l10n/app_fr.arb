@@ -616,6 +616,7 @@
   "priceTypeInfoTooltip": "Infos sur le type de prix",
   "premiumSectionLabel": "Prime",
   "amountInSatsHint": "Montant en sats",
+  "fixedPriceRangeNotAvailable": "Le prix fixe n'est pas disponible pour les ordres à fourchette. Désactivez la fourchette pour utiliser un prix fixe.",
   "priceTypesDialogTitle": "Types de prix",
   "priceTypesDialogContent": "Prix du marché : le prix de votre ordre suit le taux du marché avec un pourcentage de prime/remise appliqué.\n\nPrix fixe : vous définissez un prix exact en satoshis.",
   "startFromPreset": "PARTIR D'UN PRÉRÉGLAGE",

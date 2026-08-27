@@ -616,6 +616,7 @@
   "priceTypeInfoTooltip": "Info zum Preistyp",
   "premiumSectionLabel": "Aufschlag",
   "amountInSatsHint": "Betrag in Sats",
+  "fixedPriceRangeNotAvailable": "Festpreis ist für Bereichsangebote nicht verfügbar. Deaktiviere den Bereich, um einen Festpreis zu verwenden.",
   "priceTypesDialogTitle": "Preistypen",
   "priceTypesDialogContent": "Marktpreis: Der Preis deiner Order folgt dem Marktkurs mit einem angewendeten Aufschlag/Abschlag-Prozentsatz.\n\nFestpreis: Du legst einen genauen Preis in Satoshis fest.",
   "startFromPreset": "MIT EINER VORLAGE STARTEN",
