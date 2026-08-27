@@ -123,8 +123,11 @@ class _AddOrderScreenState extends ConsumerState<AddOrderScreen> {
           ref.read(selectedPaymentMethodsProvider.notifier).state = methods;
         }
         ref.read(isMarketPriceProvider.notifier).state = true;
-        ref.read(premiumValueProvider.notifier).state =
-            source.premium.clamp(-10.0, 10.0);
+        // Reuse the source order's premium as-is; it already passed validation.
+        // Kept a whole percent to match the integer premium Mostro expects.
+        ref.read(premiumValueProvider.notifier).state = source.premium
+            .clamp(-kPremiumMaxMagnitude, kPremiumMaxMagnitude)
+            .roundToDouble();
         ref.read(fixedSatsProvider.notifier).state = '';
       case OrderPreset.conservative:
         ref.read(isMarketPriceProvider.notifier).state = true;
