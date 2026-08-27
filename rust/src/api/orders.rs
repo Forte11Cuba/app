@@ -3398,6 +3398,53 @@ pub async fn get_trade_role(order_id: String) -> Result<Option<crate::api::types
     }
 }
 
+/// Highest trade-key index across all recovered orders and disputes (#217).
+///
+/// The counter must be raised to this so the next `derive_trade_key()` cannot
+/// hand out an index a recovered trade already owns. Returns `None` when the
+/// restore carried no trades (nothing to resync to). Indexes are `i64` on the
+/// wire; a value that is negative or beyond `u32::MAX` is not a real trade
+/// index, so it is dropped rather than truncated into the counter.
+fn recovered_max_trade_index(
+    info: &mostro_core::message::RestoreSessionInfo,
+) -> Option<u32> {
+    // A single adapter drops both negatives and any value >= u32::MAX — neither
+    // is a real trade index, and truncating one into a small u32 could corrupt
+    // the counter this exists to protect. u32::MAX itself is dropped: it is the
+    // reserved terminal index, and storing it as the counter would make the next
+    // derive_trade_key compute u32::MAX + 1 and overflow (panic in debug, wrap to
+    // 0 in release — reissuing index 0, the exact key-reuse this resync prevents).
+    // Collapsed into one filter_map so the two conditions can't drift apart.
+    let all: Vec<i64> = info
+        .restore_orders
+        .iter()
+        .map(|o| o.trade_index)
+        .chain(info.restore_disputes.iter().map(|d| d.trade_index))
+        .collect();
+    let total = all.len();
+    let valid: Vec<u32> = all
+        .into_iter()
+        .filter_map(|i| u32::try_from(i).ok().filter(|&v| v < u32::MAX))
+        .collect();
+    // A dropped index is not just an odd value: it means the daemon sent
+    // something this client's model does not cover, and a silently-lowered
+    // floor produces a later CantDo(InvalidTradeIndex) with no breadcrumb. Warn
+    // so the drop is traceable — especially the degenerate all-invalid case,
+    // where this returns None, restore_session skips the resync, and the restore
+    // reports success with a log as the only evidence anything happened.
+    let dropped = total - valid.len();
+    if dropped > 0 {
+        crate::api::logging::blog_warn(
+            "restore",
+            format!(
+                "recovered_max_trade_index dropped {dropped} of {total} indexes \
+                 (negative or out-of-range); resync floor uses the valid remainder"
+            ),
+        );
+    }
+    valid.into_iter().max()
+}
+
 /// Send a `RestoreSession` to the active daemon and return the user's active
 /// trades/disputes. Mirrors create_order's send/await, minus the order payload.
 ///
@@ -3470,7 +3517,18 @@ pub async fn restore_session() -> Result<mostro_core::message::RestoreSessionInf
     }
 
     match confirmation {
-        Ok(Ok(DaemonReply::Restored(info))) => Ok(info),
+        Ok(Ok(DaemonReply::Restored(info))) => {
+            // #217: raise trade_key_index past every recovered trade before
+            // returning, so the next derive_trade_key() can't reuse a key a
+            // recovered trade already owns. Monotonic and idempotent. A persist
+            // failure fails the restore: an un-resynced counter reopens the
+            // key-reuse bug this closes, so silent success would be worse than
+            // a surfaced error the caller can retry.
+            if let Some(floor) = recovered_max_trade_index(&info) {
+                crate::api::identity::ensure_trade_key_index_at_least(floor).await?;
+            }
+            Ok(info)
+        }
         Ok(Ok(DaemonReply::Rejected { reason, message })) => {
             crate::api::logging::blog_warn("orders", format!(
                 "restore_session rejected: {reason} — {message}"
@@ -3504,6 +3562,55 @@ mod tests {
         );
     }
 
+    // ── #217 recovered_max_trade_index ────────────────────────────────────────
+    fn restored_order(trade_index: i64) -> mostro_core::message::RestoredOrdersInfo {
+        mostro_core::message::RestoredOrdersInfo {
+            order_id: uuid::Uuid::new_v4(),
+            trade_index,
+            status: "active".to_string(),
+        }
+    }
+
+    fn restored_dispute(trade_index: i64) -> mostro_core::message::RestoredDisputesInfo {
+        mostro_core::message::RestoredDisputesInfo {
+            dispute_id: uuid::Uuid::new_v4(),
+            order_id: uuid::Uuid::new_v4(),
+            trade_index,
+            status: "initiated".to_string(),
+            initiator: None,
+            solver_pubkey: None,
+        }
+    }
+
+    fn restore_info(
+        orders: Vec<i64>,
+        disputes: Vec<i64>,
+    ) -> mostro_core::message::RestoreSessionInfo {
+        mostro_core::message::RestoreSessionInfo {
+            restore_orders: orders.into_iter().map(restored_order).collect(),
+            restore_disputes: disputes.into_iter().map(restored_dispute).collect(),
+        }
+    }
+
+    #[test]
+    fn recovered_max_is_none_when_nothing_was_restored() {
+        assert_eq!(recovered_max_trade_index(&restore_info(vec![], vec![])), None);
+    }
+
+    #[test]
+    fn recovered_max_spans_orders_and_disputes() {
+        // Max lives in disputes here — the fn must consider both collections.
+        assert_eq!(
+            recovered_max_trade_index(&restore_info(vec![3, 7], vec![12, 5])),
+            Some(12)
+        );
+        // ...and the other way round.
+        assert_eq!(
+            recovered_max_trade_index(&restore_info(vec![40, 9], vec![2])),
+            Some(40)
+        );
+    }
+
     #[test]
     fn a_dispute_message_without_a_peer_payload_yields_no_solver() {
         use mostro_core::message::Payload;
@@ -3513,6 +3620,542 @@ mod tests {
         // the wrong party.
         assert_eq!(admin_pubkey_from_payload(None), None);
         assert_eq!(admin_pubkey_from_payload(Some(&Payload::Amount(42))), None);
+    }
+
+    #[test]
+    fn recovered_max_drops_negative_and_out_of_range_indexes() {
+        // A negative index is not a real trade index — dropped, not counted.
+        assert_eq!(
+            recovered_max_trade_index(&restore_info(vec![-1, 8], vec![-99])),
+            Some(8)
+        );
+        // Beyond u32::MAX: dropped rather than truncated into a small counter.
+        let huge = i64::from(u32::MAX) + 1;
+        assert_eq!(
+            recovered_max_trade_index(&restore_info(vec![huge, 4], vec![])),
+            Some(4)
+        );
+        // u32::MAX itself is dropped — reserved as the terminal index, since
+        // storing it would make the next derive_trade_key overflow on +1.
+        let terminal = i64::from(u32::MAX);
+        assert_eq!(
+            recovered_max_trade_index(&restore_info(vec![terminal, 4], vec![])),
+            Some(4)
+        );
+        // Only u32::MAX present -> None (no safe floor to resync to).
+        assert_eq!(
+            recovered_max_trade_index(&restore_info(vec![terminal], vec![])),
+            None
+        );
+        // All invalid -> None (nothing safe to resync to).
+        assert_eq!(
+            recovered_max_trade_index(&restore_info(vec![-1], vec![huge])),
+            None
+        );
+    }
+
+    fn insert_pending_create(key: &str, request_id: u64) -> tokio::sync::oneshot::Receiver<DaemonReply> {
+        let (tx, rx) = tokio::sync::oneshot::channel::<DaemonReply>();
+        pending_requests().lock().unwrap().insert(
+            key.to_string(),
+            PendingRequest {
+                request_id,
+                trade_index: 3,
+                kind: PendingRequestKind::Create {
+                    local_uuid: format!("local-{key}"),
+                    content_key: format!("content:{key}"),
+                },
+                tx: Some(tx),
+            },
+        );
+        rx
+    }
+
+    fn local_uuid_of(pending: &PendingRequest) -> &str {
+        match &pending.kind {
+            PendingRequestKind::Create { local_uuid, .. } => local_uuid,
+            _ => panic!("expected a Create record"),
+        }
+    }
+
+    fn insert_pending_take(key: &str, request_id: u64) -> tokio::sync::oneshot::Receiver<DaemonReply> {
+        let (tx, rx) = tokio::sync::oneshot::channel::<DaemonReply>();
+        pending_requests().lock().unwrap().insert(
+            key.to_string(),
+            PendingRequest {
+                request_id,
+                trade_index: 4,
+                kind: PendingRequestKind::Take,
+                tx: Some(tx),
+            },
+        );
+        rx
+    }
+
+    /// #215: a restore is nonce-less, so `take_matching_restore` must match its
+    /// pending record by trade pubkey alone — that is what lets a `CantDo`
+    /// rejecting a restore reach the waiter instead of timing out. It must NOT
+    /// match a non-restore record, so order requests keep their nonce gate.
+    #[tokio::test]
+    async fn take_matching_restore_matches_restore_records_only() {
+        let restore_key = "test-restore-pubkey";
+        let order_key = "test-order-pubkey";
+
+        // A pending Restore record (request_id 0, nonce-less).
+        let (rtx, _rrx) = tokio::sync::oneshot::channel::<DaemonReply>();
+        pending_requests().lock().unwrap().insert(
+            restore_key.to_string(),
+            PendingRequest {
+                request_id: 0,
+                trade_index: 4,
+                kind: PendingRequestKind::Restore,
+                tx: Some(rtx),
+            },
+        );
+        // A pending non-restore (Create) record on a different pubkey.
+        let _orx = insert_pending_create(order_key, 7);
+
+        // take_matching_restore ignores the order record (wrong kind)...
+        assert!(take_matching_restore(order_key).is_none());
+        assert!(pending_requests().lock().unwrap().contains_key(order_key));
+        // ...and matches the restore record with no request_id involved.
+        let taken = take_matching_restore(restore_key).expect("restore must match");
+        assert!(matches!(taken.kind, PendingRequestKind::Restore));
+        // Consumed on take (the CantDo path removes it exactly once).
+        assert!(take_matching_restore(restore_key).is_none());
+
+        // Cleanup the order record so global state does not leak to other tests.
+        let _ = take_matching_request(order_key, Some(7));
+    }
+
+    /// A reply with a foreign or missing request_id must leave the record in
+    /// place so the genuine reply can still resolve it; only the echoed nonce
+    /// consumes it.
+    #[tokio::test]
+    async fn take_matching_request_ignores_stale_events() {
+        let key = "test-take-matching-request-pubkey";
+        let mut rx = insert_pending_create(key, 7);
+
+        // Stale replay (no request_id) and foreign reply: record untouched.
+        assert!(take_matching_request(key, None).is_none());
+        assert!(take_matching_request(key, Some(99)).is_none());
+        assert!(pending_requests().lock().unwrap().contains_key(key));
+        assert!(rx.try_recv().is_err()); // nothing sent
+
+        // Genuine reply: record consumed exactly once, waiter still attached.
+        let pending = take_matching_request(key, Some(7)).expect("must match");
+        let tx = pending.tx.expect("waiter must still be attached");
+        let _ = tx.send(DaemonReply::Confirmed {
+            daemon_id: "d".to_string(),
+        });
+        assert!(!pending_requests().lock().unwrap().contains_key(key));
+        assert!(take_matching_request(key, Some(7)).is_none());
+    }
+
+    /// After the 10s timeout only the waiter channel is detached; the record
+    /// survives so the genuine late reply still matches — and stale events
+    /// still cannot consume it.
+    #[tokio::test]
+    async fn late_genuine_reply_matches_after_timeout() {
+        let key = "test-late-reply-pubkey";
+        let _rx = insert_pending_create(key, 11);
+
+        detach_request_waiter(key, 11);
+        assert!(pending_requests().lock().unwrap().contains_key(key));
+
+        // Stale events still bounce off the detached record.
+        assert!(take_matching_request(key, None).is_none());
+        assert!(take_matching_request(key, Some(99)).is_none());
+
+        // The genuine late reply consumes it: no waiter, but the bridging
+        // state (trade index, local uuid) is intact for reconciliation.
+        let pending = take_matching_request(key, Some(11)).expect("must match");
+        assert!(pending.tx.is_none());
+        assert_eq!(pending.trade_index, 3);
+        assert_eq!(local_uuid_of(&pending), format!("local-{key}"));
+        assert!(!pending_requests().lock().unwrap().contains_key(key));
+    }
+
+    /// Concurrent requests each own their record: a reply correlated to one
+    /// attempt must never consume state belonging to another.
+    #[tokio::test]
+    async fn concurrent_requests_do_not_cross_consume() {
+        let key_a = "test-concurrent-a-pubkey";
+        let key_b = "test-concurrent-b-pubkey";
+        let _rx_a = insert_pending_create(key_a, 21);
+        let _rx_b = insert_pending_create(key_b, 22);
+
+        // A's nonce only ever matches A's record, under either key.
+        assert!(take_matching_request(key_b, Some(21)).is_none());
+        let pending = take_matching_request(key_a, Some(21)).expect("must match A");
+        assert_eq!(local_uuid_of(&pending), format!("local-{key_a}"));
+
+        // B is untouched and still consumable by its own nonce.
+        let pending = take_matching_request(key_b, Some(22)).expect("must match B");
+        assert_eq!(local_uuid_of(&pending), format!("local-{key_b}"));
+    }
+
+    /// `take_matching_take` must only consume Take records — a matching nonce
+    /// on a Create record belongs to the NewOrder arm, and a foreign or
+    /// missing nonce consumes nothing at all.
+    #[tokio::test]
+    async fn take_matching_take_only_consumes_take_records() {
+        let create_key = "test-take-kind-create-pubkey";
+        let take_key = "test-take-kind-take-pubkey";
+        let _rx_c = insert_pending_create(create_key, 41);
+        let _rx_t = insert_pending_take(take_key, 42);
+
+        // A Create record is never consumed here, even with its exact nonce.
+        assert!(take_matching_take(create_key, Some(41)).is_none());
+        assert!(pending_requests().lock().unwrap().contains_key(create_key));
+
+        // A Take record follows the same nonce rules as any request.
+        assert!(take_matching_take(take_key, None).is_none());
+        assert!(take_matching_take(take_key, Some(99)).is_none());
+        assert!(pending_requests().lock().unwrap().contains_key(take_key));
+        let pending = take_matching_take(take_key, Some(42)).expect("must match");
+        assert!(matches!(pending.kind, PendingRequestKind::Take));
+        assert!(!pending_requests().lock().unwrap().contains_key(take_key));
+
+        pending_requests().lock().unwrap().remove(create_key);
+    }
+
+    /// `take_matching_add_invoice` mirrors the take rules for its own kind:
+    /// only AddInvoice records, only with the exact nonce.
+    #[tokio::test]
+    async fn take_matching_add_invoice_only_consumes_add_invoice_records() {
+        let take_key = "test-ai-take-pubkey";
+        let ai_key = "test-ai-addinvoice-pubkey";
+        let _rx_t = insert_pending_take(take_key, 51);
+
+        let (tx, _rx) = tokio::sync::oneshot::channel::<DaemonReply>();
+        pending_requests().lock().unwrap().insert(
+            ai_key.to_string(),
+            PendingRequest {
+                request_id: 52,
+                trade_index: 4,
+                kind: PendingRequestKind::AddInvoice,
+                tx: Some(tx),
+            },
+        );
+
+        // A Take record is never consumed here, even with its exact nonce.
+        assert!(take_matching_add_invoice(take_key, Some(51)).is_none());
+        assert!(pending_requests().lock().unwrap().contains_key(take_key));
+
+        // The AddInvoice record follows the same nonce rules as any request.
+        assert!(take_matching_add_invoice(ai_key, None).is_none());
+        assert!(take_matching_add_invoice(ai_key, Some(99)).is_none());
+        let pending = take_matching_add_invoice(ai_key, Some(52)).expect("must match");
+        assert!(matches!(pending.kind, PendingRequestKind::AddInvoice));
+        assert!(!pending_requests().lock().unwrap().contains_key(ai_key));
+
+        pending_requests().lock().unwrap().remove(take_key);
+    }
+
+    /// Same-key overlap (send_invoice reuses the take's trade key): a newer
+    /// attempt overwrites the record, and the older attempt's timeout /
+    /// rollback cleanup must not touch the newer attempt's live waiter.
+    #[tokio::test]
+    async fn overlapping_same_key_attempts_do_not_cross_detach() {
+        let key = "test-same-key-overlap-pubkey";
+
+        // Attempt A registers, then attempt B overwrites the record.
+        let _rx_a = insert_pending_take(key, 61);
+        let _rx_b = insert_pending_take(key, 62);
+
+        // A's timeout fires: it must not detach B's live waiter…
+        detach_request_waiter(key, 61);
+        assert!(pending_requests()
+            .lock()
+            .unwrap()
+            .get(key)
+            .unwrap()
+            .tx
+            .is_some());
+
+        // …and A's publish-failure rollback must not delete B's record.
+        remove_pending_request(key, 61);
+        assert!(pending_requests().lock().unwrap().contains_key(key));
+
+        // B's own cleanup still works.
+        detach_request_waiter(key, 62);
+        assert!(pending_requests()
+            .lock()
+            .unwrap()
+            .get(key)
+            .unwrap()
+            .tx
+            .is_none());
+        remove_pending_request(key, 62);
+        assert!(!pending_requests().lock().unwrap().contains_key(key));
+    }
+
+    /// Action-only progression replies must still carry the status the
+    /// action implies — the take interception consumes the message before
+    /// the status-sync arms run, so an empty status would persist the trade
+    /// as Pending even though the daemon already advanced it.
+    #[test]
+    fn classify_take_reply_derives_status_from_action_only_replies() {
+        use mostro_core::message::Action;
+
+        // take-sell with a pre-attached LN address: daemon skips add-invoice
+        // and replies waiting-seller-to-pay with no payload.
+        match classify_take_reply(&Action::WaitingSellerToPay, &None) {
+            DaemonReply::TakeAccepted { status, .. } => {
+                assert_eq!(status, Some(crate::api::types::OrderStatus::WaitingPayment));
+            }
+            _ => panic!("expected TakeAccepted"),
+        }
+        match classify_take_reply(&Action::WaitingBuyerInvoice, &None) {
+            DaemonReply::TakeAccepted { status, .. } => {
+                assert_eq!(
+                    status,
+                    Some(crate::api::types::OrderStatus::WaitingBuyerInvoice)
+                );
+            }
+            _ => panic!("expected TakeAccepted"),
+        }
+    }
+
+    /// Both sides learn the escrow is locked from these two actions — the
+    /// only signal that the trade reached Active, which is what the daemon
+    /// requires before it accepts a dispute or a fiat-sent (issue #203).
+    #[test]
+    fn escrow_locked_actions_imply_active() {
+        use mostro_core::message::Action;
+
+        assert_eq!(
+            status_for_action(&Action::BuyerTookOrder),
+            Some(OrderStatus::Active)
+        );
+        assert_eq!(
+            status_for_action(&Action::HoldInvoicePaymentAccepted),
+            Some(OrderStatus::Active)
+        );
+    }
+
+    /// The public event is NIP-69's coarse view and stops updating once the
+    /// trade turns private, so it may only fill an unknown or still-pending
+    /// status — or announce a terminal one (issue #203).
+    #[test]
+    fn the_public_status_never_replaces_a_finer_local_one() {
+        use OrderStatus as S;
+
+        assert!(wire_status_applies(None, &S::InProgress));
+        assert!(wire_status_applies(Some(&S::Pending), &S::InProgress));
+
+        for local in [S::WaitingPayment, S::WaitingBuyerInvoice, S::Active, S::FiatSent, S::Dispute]
+        {
+            assert!(
+                !wire_status_applies(Some(&local), &S::InProgress),
+                "in-progress must not overwrite {local:?}"
+            );
+            assert!(
+                !wire_status_applies(Some(&local), &S::Pending),
+                "pending must not overwrite {local:?}"
+            );
+            assert!(
+                wire_status_applies(Some(&local), &S::Canceled),
+                "a terminal wire status must reach {local:?}"
+            );
+            assert!(wire_status_applies(Some(&local), &S::Success));
+        }
+    }
+
+    fn small_order_with(
+        status: mostro_core::order::Status,
+        amount: i64,
+    ) -> mostro_core::order::SmallOrder {
+        mostro_core::order::SmallOrder::new(
+            None,
+            Some(mostro_core::order::Kind::Sell),
+            Some(status),
+            amount,
+            "USD".to_string(),
+            None,
+            None,
+            100,
+            "bank".to_string(),
+            0,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+    }
+
+    /// `classify_take_reply` goes by payload shape: `PaymentRequest` carries
+    /// the hold invoice (seller flow), `Order` carries the calculated sats
+    /// (buyer flow), `pay-bond-invoice` maps to a stable BondRequired
+    /// rejection, and action-only replies are still acceptances.
+    #[test]
+    fn classify_take_reply_maps_payload_shapes() {
+        use mostro_core::message::{Action, Payload};
+        use mostro_core::order::Status;
+
+        // Seller taking a buy order: pay-invoice with the hold invoice.
+        let so = small_order_with(Status::WaitingPayment, 7851);
+        match classify_take_reply(
+            &Action::PayInvoice,
+            &Some(Payload::PaymentRequest(Some(so), "lnbc1invoice".into(), Some(7851))),
+        ) {
+            DaemonReply::TakeAccepted { status, amount_sats, hold_invoice, .. } => {
+                assert_eq!(status, Some(crate::api::types::OrderStatus::WaitingPayment));
+                assert_eq!(amount_sats, Some(7851));
+                assert_eq!(hold_invoice.as_deref(), Some("lnbc1invoice"));
+            }
+            _ => panic!("expected TakeAccepted"),
+        }
+
+        // Amount falls back to the embedded order when the third field is None.
+        let so = small_order_with(Status::WaitingPayment, 500);
+        match classify_take_reply(
+            &Action::PayInvoice,
+            &Some(Payload::PaymentRequest(Some(so), "lnbc1invoice".into(), None)),
+        ) {
+            DaemonReply::TakeAccepted { amount_sats, .. } => {
+                assert_eq!(amount_sats, Some(500));
+            }
+            _ => panic!("expected TakeAccepted"),
+        }
+
+        // Buyer taking a sell order: add-invoice with the calculated sats.
+        let so = small_order_with(Status::WaitingBuyerInvoice, 9526);
+        match classify_take_reply(&Action::AddInvoice, &Some(Payload::Order(so))) {
+            DaemonReply::TakeAccepted { status, amount_sats, hold_invoice, .. } => {
+                assert_eq!(
+                    status,
+                    Some(crate::api::types::OrderStatus::WaitingBuyerInvoice)
+                );
+                assert_eq!(amount_sats, Some(9526));
+                assert!(hold_invoice.is_none());
+            }
+            _ => panic!("expected TakeAccepted"),
+        }
+
+        // Anti-abuse bond: not supported — stable rejection marker.
+        match classify_take_reply(&Action::PayBondInvoice, &None) {
+            DaemonReply::Rejected { reason, message } => {
+                assert_eq!(reason, "BondRequired");
+                assert_eq!(message, "BondRequired");
+            }
+            _ => panic!("expected Rejected"),
+        }
+
+        // Action-only progression reply: still a genuine acceptance, with
+        // the status derived from the action (see
+        // classify_take_reply_derives_status_from_action_only_replies).
+        match classify_take_reply(&Action::WaitingSellerToPay, &None) {
+            DaemonReply::TakeAccepted { status, amount_sats, hold_invoice, .. } => {
+                assert_eq!(status, Some(crate::api::types::OrderStatus::WaitingPayment));
+                assert!(amount_sats.is_none());
+                assert!(hold_invoice.is_none());
+            }
+            _ => panic!("expected TakeAccepted"),
+        }
+    }
+
+    /// Inbound add-invoice (maker-buyer path): the Order payload carries the
+    /// status and calculated sats to persist; anything else — notably the
+    /// daemon's follow-up Peer payload with the counterparty's reputation —
+    /// syncs nothing.
+    #[test]
+    fn add_invoice_sync_maps_payloads() {
+        use mostro_core::message::Payload;
+        use mostro_core::order::Status;
+
+        // Real-world shape from the reproduction: status + calculated sats.
+        let so = small_order_with(Status::WaitingBuyerInvoice, 484);
+        match add_invoice_sync(&Some(Payload::Order(so))) {
+            Some((status, amount)) => {
+                assert_eq!(status, crate::api::types::OrderStatus::WaitingBuyerInvoice);
+                assert_eq!(amount, Some(484));
+            }
+            None => panic!("expected Order payload to sync"),
+        }
+
+        // Unpriced amount must not persist as Some(0).
+        let so = small_order_with(Status::WaitingBuyerInvoice, 0);
+        let (_, amount) =
+            add_invoice_sync(&Some(Payload::Order(so))).expect("Order payload must sync");
+        assert_eq!(amount, None);
+
+        // The daemon's follow-up Peer payload (counterparty reputation) must
+        // sync nothing — it would otherwise clobber the just-written status.
+        let peer = Payload::Peer(mostro_core::message::Peer {
+            pubkey: String::new(),
+            reputation: None,
+        });
+        assert!(add_invoice_sync(&Some(peer)).is_none());
+
+        // No payload → nothing to sync.
+        assert!(add_invoice_sync(&None).is_none());
+    }
+
+    /// A payload-less add-invoice must still imply WaitingBuyerInvoice, both
+    /// for the ingest fallback and for action-only take replies.
+    #[test]
+    fn status_for_action_maps_add_invoice() {
+        assert_eq!(
+            status_for_action(&mostro_core::message::Action::AddInvoice),
+            Some(crate::api::types::OrderStatus::WaitingBuyerInvoice)
+        );
+
+        // The mapping also feeds classify_take_reply: a payload-less
+        // add-invoice take reply must carry the implied status instead of
+        // persisting the trade as Pending.
+        match classify_take_reply(&mostro_core::message::Action::AddInvoice, &None) {
+            DaemonReply::TakeAccepted { status, amount_sats, hold_invoice, .. } => {
+                assert_eq!(
+                    status,
+                    Some(crate::api::types::OrderStatus::WaitingBuyerInvoice)
+                );
+                assert!(amount_sats.is_none());
+                assert!(hold_invoice.is_none());
+            }
+            _ => panic!("expected TakeAccepted"),
+        }
+    }
+
+    /// Only the pending create's own local UUID may be rebound to an incoming
+    /// event's order id; a stored id that is already a daemon's (or belongs to
+    /// an earlier life of a reused trade key) must never be rebound.
+    #[test]
+    fn stored_id_reconciles_only_when_owned_by_the_pending_create() {
+        // The legitimate case: the stored id is this create's local UUID.
+        assert!(may_reconcile_stored_id("local-1", "daemon-1", Some("local-1")));
+        // Already the incoming id: nothing to rebind.
+        assert!(!may_reconcile_stored_id("daemon-1", "daemon-1", Some("local-1")));
+        // Stored id is a confirmed daemon id — a stale replay carrying an old
+        // order id for the same (reused) trade index must not rebind it.
+        assert!(!may_reconcile_stored_id("daemon-1", "old-daemon-9", Some("local-1")));
+        // No pending create for this trade key (cold start / uncorrelated
+        // event): never rebind here.
+        assert!(!may_reconcile_stored_id("local-1", "daemon-1", None));
+    }
+
+    /// The Kind 38383 path matches by content fingerprint, but must leave
+    /// records with a live waiter alone — the in-flight create_order call owns
+    /// that reconciliation.
+    #[tokio::test]
+    async fn content_key_lookup_skips_live_waiters() {
+        let key = "test-content-key-pubkey";
+        let ck = format!("content:{key}");
+        let _rx = insert_pending_create(key, 31);
+
+        // Live waiter attached: the 38383 path must not consume the record.
+        assert!(take_pending_create_by_content_key(&ck).is_none());
+
+        // After the timeout detaches the waiter, the fingerprint match takes it.
+        detach_request_waiter(key, 31);
+        let pending = take_pending_create_by_content_key(&ck).expect("must match");
+        assert_eq!(local_uuid_of(&pending), format!("local-{key}"));
+        assert!(!pending_requests().lock().unwrap().contains_key(key));
+
+        // Unknown fingerprints never match anything.
+        assert!(take_pending_create_by_content_key("content:unknown").is_none());
     }
 
     /// PR #253 review round 2 (ermeme): a key derived after the global
@@ -3958,5 +4601,23 @@ mod restore_e2e_tests {
             println!("[test]   order_id={} status={}", o.order_id, o.status);
         }
         assert!(!info.restore_orders.is_empty(), "restore should recover the created order");
+
+        // #217 (grunch review): assert the resync actually ran. restore_session
+        // must raise trade_key_index past every recovered trade, so the next
+        // derive_trade_key can't reuse a key a recovered trade already owns.
+        // This is the e2e assertion the PR body's coverage claim refers to; the
+        // unit-level no-op/raise/idempotent/rollback behaviour is pinned in
+        // identity.rs::load_derive_then_delete_identity_lifecycle.
+        if let Some(max_recovered) = recovered_max_trade_index(&info) {
+            let idx = crate::api::identity::get_identity()
+                .await
+                .expect("get_identity")
+                .expect("identity present after restore")
+                .trade_key_index;
+            assert!(
+                idx >= max_recovered,
+                "trade_key_index ({idx}) must be >= max recovered index ({max_recovered}) after resync",
+            );
+        }
     }
 }
