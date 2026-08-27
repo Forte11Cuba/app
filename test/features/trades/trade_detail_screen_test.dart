@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -28,13 +30,18 @@ Future<void> _pumpTradeDetail(
   required bool isBuyer,
   required OrderStatus status,
   RatingInfo? rating,
+  bool ratingUnresolved = false,
   Locale locale = const Locale('en'),
 }) async {
   final container = createContainer(overrides: [
     tradeRoleProvider.overrideWith((ref) => {orderId: isBuyer}),
     tradeStatusProvider(orderId).overrideWith((ref) => Stream.value(status)),
     orderBookProvider.overrideWith((ref) => Stream.value(const [])),
-    tradeRatingProvider(orderId).overrideWith((ref) async => rating),
+    // A pending Completer future keeps the rating lookup in its first
+    // loading state, pinning the no-CTA-flash guard.
+    tradeRatingProvider(orderId).overrideWith((ref) => ratingUnresolved
+        ? Completer<RatingInfo?>().future
+        : Future.value(rating)),
   ]);
 
   await tester.pumpWidget(
@@ -432,6 +439,23 @@ void main() {
       );
 
       expect(_filledButtonWithText('Rate your counterpart'), findsOneWidget);
+      expect(find.text('Rated'), findsNothing);
+    });
+
+    /// The screen holds `loading` while the first rating lookup is in
+    /// flight, for the same reason it does while the order status is
+    /// unresolved: never flash a CTA that may change on the next frame.
+    testWidgets('settled + rating lookup unresolved: neither CTA is shown',
+        (tester) async {
+      await _pumpTradeDetail(
+        tester,
+        orderId: 'order-rate-4',
+        isBuyer: false,
+        status: OrderStatus.settledHoldInvoice,
+        ratingUnresolved: true,
+      );
+
+      expect(_filledButtonWithText('Rate your counterpart'), findsNothing);
       expect(find.text('Rated'), findsNothing);
     });
   });

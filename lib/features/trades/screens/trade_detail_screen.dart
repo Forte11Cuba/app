@@ -518,11 +518,25 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen> {
 
     // The protocol has no "rated" order status — a settled trade stays
     // settled once the rating is sent — so `rated` is only reachable by
-    // overlaying the local rating on top of the mapping above (#327).
-    final ratedByMe = ref.watch(ratedByMeProvider(widget.orderId));
-    final status = orderStatus == TradeStatus.pendingRating && ratedByMe
-        ? TradeStatus.rated
-        : orderStatus;
+    // overlaying the local rating on top of the mapping above (#327). The
+    // lookup only matters (and is only watched) once the trade settles, and
+    // while its first fetch is unresolved the screen holds `loading` for
+    // the same reason as above — never flash a CTA that may change on the
+    // next frame. A refresh keeps the previous value, so resolving a fresh
+    // rating does not bounce through the spinner.
+    final TradeStatus status;
+    if (orderStatus != TradeStatus.pendingRating) {
+      status = orderStatus;
+    } else {
+      final ratingAsync = ref.watch(tradeRatingProvider(widget.orderId));
+      if (ratingAsync.isLoading && !ratingAsync.hasValue) {
+        status = TradeStatus.loading;
+      } else if (ref.watch(ratedByMeProvider(widget.orderId))) {
+        status = TradeStatus.rated;
+      } else {
+        status = TradeStatus.pendingRating;
+      }
+    }
 
     // Look up order details from the live order book.
     final allOrders = ref.watch(orderBookProvider).valueOrNull ?? [];

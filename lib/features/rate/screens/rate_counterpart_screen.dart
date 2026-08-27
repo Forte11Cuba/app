@@ -47,10 +47,14 @@ class _RateCounterpartScreenState
         tradeId: widget.orderId,
         score: _rating,
       );
+      // submitRating awaits a real relay publish, so the screen may have
+      // been disposed by now — and ref, like context, must not be touched
+      // after that.
+      if (!mounted) return;
       // The screen underneath buckets a settled trade as "rate me" until a
       // local rating exists, so refresh it before popping back (#327).
       ref.invalidate(tradeRatingProvider(widget.orderId));
-      if (mounted) context.pop();
+      context.pop();
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
