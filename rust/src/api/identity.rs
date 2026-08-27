@@ -737,6 +737,15 @@ mod tests {
         async fn delete_identity(&self) -> Result<()> {
             unimplemented!()
         }
+        async fn update_trade_peer_reputation(
+            &self,
+            _order_id: &str,
+            _rating: f64,
+            _reviews: u32,
+            _days: u32,
+        ) -> Result<()> {
+            unimplemented!()
+        }
         async fn save_queued_message(
             &self,
             _msg: &crate::queue::outbox::QueuedMessage,
