@@ -84,6 +84,20 @@ void main() {
     );
 
     testWidgets(
+      'applies a typed value after the debounce without pressing enter',
+      (tester) async {
+        final container = await _pump(tester, premium: 0.0);
+        await tester.enterText(find.byType(TextField), '50');
+        // No submit action: the value must land on its own once the debounce
+        // window elapses, and the slider expands to fit it.
+        expect(container.read(premiumValueProvider), 0.0);
+        await tester.pump(const Duration(seconds: 2));
+        expect(container.read(premiumValueProvider), 50.0);
+        expect(sliderMax(tester), 50.0);
+      },
+    );
+
+    testWidgets(
       'accepts a value typed with an explicit plus sign',
       (tester) async {
         final container = await _pump(tester, premium: 0.0);

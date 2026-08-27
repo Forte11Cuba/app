@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -42,6 +44,11 @@ class _PriceSectionState extends ConsumerState<PriceSection> {
   double? _dragMin;
   double? _dragMax;
 
+  // Applies a typed premium a short while after the user stops typing, so the
+  // slider tracks the field live without needing Enter (matches v1 behaviour).
+  Timer? _premiumDebounce;
+  static const Duration _premiumDebounceDelay = Duration(seconds: 2);
+
   @override
   void initState() {
     super.initState();
@@ -52,6 +59,7 @@ class _PriceSectionState extends ConsumerState<PriceSection> {
 
   @override
   void dispose() {
+    _premiumDebounce?.cancel();
     _premiumController.dispose();
     super.dispose();
   }
@@ -61,6 +69,32 @@ class _PriceSectionState extends ConsumerState<PriceSection> {
     final newText = next.round().toString();
     if (_premiumController.text != newText) {
       _premiumController.text = newText;
+    }
+  }
+
+  /// Parse [v] and push it (clamped to ±[kPremiumMaxMagnitude]) to the premium
+  /// provider. Returns false when [v] is empty or a lone sign so callers can
+  /// decide whether to restore the field. Does not touch the controller text,
+  /// so it is safe to call mid-typing.
+  bool _applyPremiumText(String v) {
+    final parsed = int.tryParse(v);
+    if (parsed == null) return false;
+    ref.read(premiumValueProvider.notifier).state = parsed
+        .clamp(
+          -kPremiumMaxMagnitude.toInt(),
+          kPremiumMaxMagnitude.toInt(),
+        )
+        .toDouble();
+    return true;
+  }
+
+  /// Finish editing the field: commit [v], or restore the text from the current
+  /// premium when [v] does not parse. Cancels any pending live update.
+  void _endPremiumEditing(String v) {
+    _premiumDebounce?.cancel();
+    setState(() => _editingPremium = false);
+    if (!_applyPremiumText(v)) {
+      _syncControllerFromProvider(null, ref.read(premiumValueProvider));
     }
   }
 
@@ -185,34 +219,21 @@ class _PriceSectionState extends ConsumerState<PriceSection> {
                             ),
                             onTap: () =>
                                 setState(() => _editingPremium = true),
-                            onSubmitted: (v) {
-                              setState(() => _editingPremium = false);
-                              final parsed = int.tryParse(v);
-                              if (parsed != null) {
-                                ref.read(premiumValueProvider.notifier).state =
-                                    parsed
-                                        .clamp(
-                                          -kPremiumMaxMagnitude.toInt(),
-                                          kPremiumMaxMagnitude.toInt(),
-                                        )
-                                        .toDouble();
-                              } else {
-                                // Empty or lone sign ('-'/'+'): keep the current
-                                // premium and restore the field text from it.
-                                _syncControllerFromProvider(
-                                  null,
-                                  ref.read(premiumValueProvider),
-                                );
-                              }
-                            },
-                            onTapOutside: (_) {
-                              setState(() => _editingPremium = false);
-                              // Sync controller to current provider value.
-                              _syncControllerFromProvider(
-                                null,
-                                ref.read(premiumValueProvider),
+                            onChanged: (v) {
+                              // Live update like v1: apply the typed value a
+                              // couple of seconds after the user stops typing,
+                              // so the slider follows without needing Enter.
+                              // The controller is left untouched here, so the
+                              // cursor and in-progress text are never disturbed.
+                              _premiumDebounce?.cancel();
+                              _premiumDebounce = Timer(
+                                _premiumDebounceDelay,
+                                () => _applyPremiumText(v),
                               );
                             },
+                            onSubmitted: _endPremiumEditing,
+                            onTapOutside: (_) =>
+                                _endPremiumEditing(_premiumController.text),
                           ),
                         ),
                         const SizedBox(width: 4),
