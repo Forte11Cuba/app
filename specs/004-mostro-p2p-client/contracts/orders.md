@@ -348,6 +348,19 @@ Invariants:
 - **The registry tracks live work, not history**: entries no handler holds
   any more are dropped on the next acquisition, so it does not grow with
   every order ever dispatched.
+- **A generation gate backs the lock**, read under it so it cannot
+  interleave with a retake's rebind: a message addressed to a trade key
+  *older* than the one currently bound to its order (`trade_keys` binding)
+  belongs to a superseded attempt and is dropped whole — the lock
+  serializes concurrent handlers, the gate rejects the late ones.
+  Strictly-older only: a retake's first reply arrives on the NEW key while
+  the binding still holds the old index (`take_order` rebinds only after
+  that reply resolves its waiter), and the identity counter only grows, so
+  newer-than-bound is always legitimate. No binding fails open (a create's
+  confirmation precedes any binding for the daemon id). `BondSlashed` is
+  exempt: it never writes order state, and a trailing slash notice
+  addressed to the slashed (superseded) generation is by-design delivery
+  (#197).
 
 ### Daemon cancellation semantics
 

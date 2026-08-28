@@ -65,6 +65,18 @@ async fn store_trade_key_index(order_id: &str, index: u32) {
 /// Callers must treat `None` as an error rather than silently using index 0,
 /// which would cause signature verification failures on the daemon side.
 async fn get_trade_key_index(order_id: &str) -> Option<u32> {
+    let found = lookup_trade_key_index(order_id).await;
+    if found.is_none() {
+        log::warn!("[orders] trade key not found for order={order_id}");
+    }
+    found
+}
+
+/// `get_trade_key_index` without the not-found warning, for callers where a
+/// missing binding is an expected state rather than an error (the dispatch
+/// generation gate: a create's confirmation arrives before any binding
+/// exists for the daemon id).
+async fn lookup_trade_key_index(order_id: &str) -> Option<u32> {
     // Fast path: in-memory cache.
     if let Some(idx) = trade_key_map()
         .read()
@@ -86,7 +98,6 @@ async fn get_trade_key_index(order_id: &str) -> Option<u32> {
             Err(e) => log::warn!("[orders] DB trade key lookup failed for order={order_id}: {e}"),
         }
     }
-    log::warn!("[orders] trade key not found for order={order_id}");
     None
 }
 
@@ -1397,6 +1408,38 @@ async fn dispatch_mostro_message(
         Some(order_id) => Some(lock_order(&order_id.to_string()).await),
         None => None,
     };
+
+    // Generation gate, read UNDER the lock so it cannot interleave with a
+    // retake's rebind: a message addressed to a trade key OLDER than the one
+    // currently bound to this order belongs to a superseded attempt — e.g.
+    // the trailing Canceled of a take that was replaced — and its writes are
+    // stale by definition, lock or no lock. Strictly-older only: a retake's
+    // first reply arrives on the NEW key while the binding still holds the
+    // old index (`take_order` rebinds after this very reply resolves its
+    // waiter), and the identity counter only grows, so a later attempt
+    // always carries a higher index. No binding fails open — a create's
+    // confirmation precedes any binding for the daemon id, and the nonce
+    // gates below own correlation. BondSlashed is exempt: it never writes
+    // order state, and a trailing slash notice addressed to the slashed
+    // (superseded) generation is by-design delivery (#197).
+    if kind.action != Action::BondSlashed {
+        if let Some(order_id) = &kind.id {
+            let oid = order_id.to_string();
+            if let Some(bound) = lookup_trade_key_index(&oid).await {
+                if trade_index < bound {
+                    crate::api::logging::blog_info("daemon-msg", format!(
+                        "drop {:?} order={}: addressed to superseded trade key \
+                         (idx {} < bound {})",
+                        kind.action,
+                        crate::api::logging::short_id(&oid),
+                        trade_index,
+                        bound,
+                    ));
+                    return;
+                }
+            }
+        }
+    }
 
     // Reconcile local UUID → daemon UUID if needed.  Daemon actions
     // arrive with the daemon's order ID, but if the create's acknowledgement
@@ -4721,6 +4764,89 @@ mod tests {
             }
         }
         assert_eq!(seen, vec![OrderStatus::Active, OrderStatus::Canceled]);
+    }
+
+    /// Builds the `UnwrappedMessage` for a daemon `Canceled` of `order_uuid`,
+    /// signed-by-sender semantics included, for driving the real dispatcher.
+    fn canceled_message(order_uuid: uuid::Uuid) -> mostro_core::nip59::UnwrappedMessage {
+        use mostro_core::message::{Action, Message};
+        let sender =
+            nostr_sdk::PublicKey::from_hex(&active_mostro_pubkey()).expect("valid mostro pubkey");
+        mostro_core::nip59::UnwrappedMessage {
+            message: Message::new_order(Some(order_uuid), None, None, Action::Canceled, None),
+            signature: None,
+            sender,
+            identity: sender,
+            created_at: nostr_sdk::Timestamp::from(0u64),
+        }
+    }
+
+    /// A message addressed to a superseded trade-key generation is dropped
+    /// whole: after a retake rebinds the order to a newer key, the trailing
+    /// `Canceled` of the replaced attempt arrives on the OLD key and must not
+    /// touch the retaken trade — even with no concurrent handler to collide
+    /// with (the case the lock alone cannot catch).
+    #[tokio::test]
+    async fn a_late_cancel_for_a_superseded_generation_is_dropped() {
+        use crate::api::types::OrderStatus;
+
+        let order_uuid = uuid::Uuid::new_v4();
+        let order_id = order_uuid.to_string();
+        // The retaken trade: bound to generation 7, active, not terminal —
+        // so a drop is attributable to the generation gate alone.
+        let mut info = dummy_order_info(&order_id);
+        info.status = OrderStatus::Active;
+        order_book().upsert_order(info).await;
+        store_trade_key_index(&order_id, 7).await;
+
+        let mut rx = trade_updates_tx().subscribe();
+
+        // The replaced attempt's Canceled, addressed to generation 3.
+        dispatch_mostro_message(canceled_message(order_uuid), "test-gen-stale", "ff00ff03", 3)
+            .await;
+
+        let status = order_book()
+            .get_order(&order_id)
+            .await
+            .expect("order still cached")
+            .status;
+        assert_eq!(status, OrderStatus::Active);
+
+        let mut leaked = false;
+        while let Ok(update) = rx.try_recv() {
+            if update.order_id == order_id {
+                leaked = true;
+            }
+        }
+        assert!(!leaked, "superseded-generation Canceled must emit nothing");
+    }
+
+    /// Strictly-older only: a message on a key NEWER than the bound one must
+    /// pass. That is a retake's first reply racing its own rebind — dropping
+    /// it would time out every legitimate retake.
+    #[tokio::test]
+    async fn a_message_for_a_newer_generation_passes_the_gate() {
+        use crate::api::types::OrderStatus;
+
+        let order_uuid = uuid::Uuid::new_v4();
+        let order_id = order_uuid.to_string();
+        // Pending: the stale binding of the previous attempt (generation 7)
+        // is still in place; the new attempt's messages arrive on 9.
+        order_book().upsert_order(dummy_order_info(&order_id)).await;
+        store_trade_key_index(&order_id, 7).await;
+
+        let mut rx = trade_updates_tx().subscribe();
+
+        dispatch_mostro_message(canceled_message(order_uuid), "test-gen-newer", "ff00ff04", 9)
+            .await;
+
+        let mut seen = Vec::new();
+        while let Ok(update) = rx.try_recv() {
+            if update.order_id == order_id {
+                seen.push(update.status);
+            }
+        }
+        assert_eq!(seen, vec![OrderStatus::Canceled]);
     }
 
 }
