@@ -13,7 +13,7 @@
 /// arguments — see `api::identity::get_transport_identity_keys`, which
 /// applies the runtime privacy toggle.
 use anyhow::Result;
-use mostro_core::message::{Action, Message, Payload};
+use mostro_core::message::{Action, Message, MessageKind, Payload};
 use nostr_sdk::prelude::*;
 use uuid::Uuid;
 
@@ -417,6 +417,27 @@ pub async fn restore_session(
     // (-> event.sender, the key the daemon replies to). Mirrors new_order.
     let msg = Message::new_restore(None);
     wrap_message_first_contact(identity_keys, trade_keys, mostro_pubkey, &msg).await
+}
+
+/// Build and wrap a `LastTradeIndex` request (#328).
+///
+/// Account-scoped: `identity_keys` sign BOTH the Seal and the rumor, so the
+/// daemon resolves the account by sender pubkey and NO trade key is derived.
+/// The reply carries the counter in `MessageKind::trade_index`. Payload must be
+/// `None` (enforced by mostro-core). Mirrors `mostro-cli`'s
+/// `execute_last_trade_index`, which signs with `identity_keys` for both.
+pub async fn last_trade_index(
+    identity_keys: &Keys,
+    mostro_pubkey: &PublicKey,
+) -> Result<String> {
+    let msg = Message::Restore(MessageKind::new(
+        None,
+        None,
+        None,
+        Action::LastTradeIndex,
+        None,
+    ));
+    wrap_message_first_contact(identity_keys, identity_keys, mostro_pubkey, &msg).await
 }
 
 #[cfg(test)]
