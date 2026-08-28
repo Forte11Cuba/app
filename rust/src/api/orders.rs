@@ -100,6 +100,56 @@ pub(crate) async fn publish_event(event_json: &str) -> Result<()> {
     publish_event_json(event_json).await
 }
 
+// ── Per-order dispatch serialization ─────────────────────────────────────────
+
+/// One mutex per `order_id`, guarding the validate-then-mutate sequences that
+/// daemon-message dispatch and `take_order` run over the order book, the trade
+/// row and the session.
+///
+/// Those sequences check first (terminal-status gate, local-status lookup) and
+/// mutate several `await`s later. Without serialization a delivery that passed
+/// the check can be overtaken by a retake of the same order id while it is
+/// suspended: the retake persists its own book / DB / session state, then the
+/// suspended handler resumes and writes the previous generation's outcome over
+/// it (#259).
+///
+/// The registry is a *synchronous* mutex holding `Arc`s of asynchronous ones,
+/// and is never held across an `await`. What callers hold across awaits is the
+/// per-order guard, which is a `tokio::sync::Mutex` for exactly that reason.
+static ORDER_LOCKS: OnceLock<std::sync::Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>> =
+    OnceLock::new();
+
+fn order_locks() -> &'static std::sync::Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>> {
+    ORDER_LOCKS.get_or_init(|| std::sync::Mutex::new(HashMap::new()))
+}
+
+/// Acquire the per-order lock for `order_id`, waiting for any in-flight
+/// handler of the same order to finish.
+///
+/// Entries the registry is the last owner of are dropped while the map is
+/// held, so the map tracks orders with live work rather than every order ever
+/// dispatched. A poisoned registry falls back to a private lock: losing
+/// serialization for one message beats panicking the dispatch task.
+///
+/// Callers must not hold this guard while waiting on a daemon reply — the
+/// reply is delivered by `dispatch_mostro_message`, which takes the same lock.
+async fn lock_order(order_id: &str) -> tokio::sync::OwnedMutexGuard<()> {
+    let lock = {
+        let Ok(mut map) = order_locks().lock() else {
+            log::warn!(
+                "[orders] order-lock registry poisoned — order={order_id} runs unserialized"
+            );
+            return Arc::new(tokio::sync::Mutex::new(())).lock_owned().await;
+        };
+        map.retain(|_, lock| Arc::strong_count(lock) > 1);
+        Arc::clone(
+            map.entry(order_id.to_string())
+                .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(()))),
+        )
+    };
+    lock.lock_owned().await
+}
+
 /// Filter parameters for the order list.
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct OrderFilters {
@@ -1322,6 +1372,21 @@ async fn dispatch_mostro_message(
         "action={:?} order_id={:?} trade_index={:?} trade_pubkey={} payload={}",
         kind.action, kind.id, kind.trade_index, &trade_pubkey_hex[..8], payload_desc
     ));
+
+    // Everything below is serialized against other handlers of this order id:
+    // the reconcile block, the waiter interception and the per-action arms all
+    // check local state first and mutate it several `await`s later, so without
+    // the guard a retake of the same order can be accepted in between and have
+    // the suspended handler write the previous generation's outcome over its
+    // book entry, trade row and session (#259).
+    //
+    // Held until this function returns, and taken here rather than at the top
+    // because the order id only exists once the message kind is parsed.
+    // Messages with no order id own no order state, so they take no lock.
+    let _order_guard = match &kind.id {
+        Some(order_id) => Some(lock_order(&order_id.to_string()).await),
+        None => None,
+    };
 
     // Reconcile local UUID → daemon UUID if needed.  Daemon actions
     // arrive with the daemon's order ID, but if the create's acknowledgement
@@ -4519,6 +4584,70 @@ mod tests {
         )
         .await;
         // If we reach here without panicking the test passes.
+    }
+
+    // ── #259 per-order dispatch serialization ─────────────────────────────────
+
+    /// Handlers of the same order never overlap, so a validate-then-mutate
+    /// sequence cannot be interleaved by another handler of that order id.
+    #[tokio::test]
+    async fn handlers_of_the_same_order_run_one_at_a_time() {
+        use std::sync::atomic::AtomicUsize;
+
+        let order_id = uuid::Uuid::new_v4().to_string();
+        let inside = Arc::new(AtomicUsize::new(0));
+        let overlaps = Arc::new(AtomicUsize::new(0));
+
+        let mut handles = Vec::new();
+        for _ in 0..8 {
+            let order_id = order_id.clone();
+            let inside = Arc::clone(&inside);
+            let overlaps = Arc::clone(&overlaps);
+            handles.push(tokio::spawn(async move {
+                let _guard = lock_order(&order_id).await;
+                if inside.fetch_add(1, Ordering::SeqCst) != 0 {
+                    overlaps.fetch_add(1, Ordering::SeqCst);
+                }
+                // Yield while holding the guard: this is the suspension point
+                // a competing handler used to slip through.
+                tokio::task::yield_now().await;
+                inside.fetch_sub(1, Ordering::SeqCst);
+            }));
+        }
+        for handle in handles {
+            handle.await.expect("task joined");
+        }
+
+        assert_eq!(overlaps.load(Ordering::SeqCst), 0);
+    }
+
+    /// Serialization is per order, not global: one stalled handler must not
+    /// stop every other trade. This deadlocks if the lock is ever made global.
+    #[tokio::test]
+    async fn distinct_orders_do_not_block_each_other() {
+        let first = uuid::Uuid::new_v4().to_string();
+        let second = uuid::Uuid::new_v4().to_string();
+
+        let held = lock_order(&first).await;
+        let _other = lock_order(&second).await;
+        drop(held);
+    }
+
+    /// The registry tracks live work, not every order ever dispatched: entries
+    /// no handler holds any more are dropped on the next acquisition.
+    #[tokio::test]
+    async fn the_registry_drops_locks_no_handler_holds() {
+        let stale: Vec<String> = (0..16).map(|_| uuid::Uuid::new_v4().to_string()).collect();
+        for order_id in &stale {
+            drop(lock_order(order_id).await);
+        }
+
+        let live = uuid::Uuid::new_v4().to_string();
+        let _guard = lock_order(&live).await;
+
+        let map = order_locks().lock().expect("registry");
+        assert!(stale.iter().all(|order_id| !map.contains_key(order_id)));
+        assert!(map.contains_key(&live));
     }
 
 }
