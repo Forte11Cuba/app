@@ -3452,20 +3452,31 @@ fn recovered_max_trade_index(
     valid.into_iter().max()
 }
 
-/// Pick the resync floor from the authoritative daemon counter, falling back to
-/// the restore-payload maximum (#328).
+/// Pick the resync floor as the highest of the daemon counter and the
+/// restore-payload maximum (#328).
 ///
-/// The daemon's `LastTradeIndex` answer (`daemon_counter`) wins whenever it is
-/// present — it is the real high-water mark, including finalized trades. The
-/// payload maximum is only a lower bound (the restore lists non-finalized
-/// orders only) and is used solely when the daemon did not answer. Raising is
-/// monotonic downstream (`ensure_trade_key_index_at_least`), so a low daemon
-/// answer can never lower the counter.
+/// The daemon's `LastTradeIndex` answer (`daemon_counter`) is authoritative and
+/// is the real high-water mark, including finalized trades. The payload maximum
+/// is a proven lower bound — every recovered order carries its own index.
+///
+/// Against a consistent daemon the counter is always `>=` the payload maximum:
+/// the daemon raises `last_trade_index` to every index it accepts
+/// (`update_user_trade_index`) and rejects any index it has already seen, so an
+/// order it still returns in the restore payload was necessarily seen at or
+/// below the counter. Taking the max is therefore a no-op in practice — kept as
+/// cheap defense-in-depth so the floor stays correct independent of that
+/// invariant: a stale/partial reply or a daemon bug can never make us resync
+/// below a recovered trade's own index and reuse its key. Returns `None` only
+/// when neither source has a usable index.
 fn resync_floor(
     daemon_counter: Option<u32>,
     info: &mostro_core::message::RestoreSessionInfo,
 ) -> Option<u32> {
-    daemon_counter.or_else(|| recovered_max_trade_index(info))
+    let payload_max = recovered_max_trade_index(info);
+    match (daemon_counter, payload_max) {
+        (Some(daemon), Some(payload)) => Some(daemon.max(payload)),
+        (daemon, payload) => daemon.or(payload),
+    }
 }
 
 /// Ask the daemon for its authoritative last-known trade index (#328).
@@ -3824,18 +3835,18 @@ mod tests {
     }
 
     #[test]
-    fn resync_floor_prefers_the_daemon_counter_over_the_payload_max() {
+    fn resync_floor_takes_the_higher_of_daemon_counter_and_payload_max() {
         // The #328 scenario: order X open at index 1 (the only non-finalized
         // trade the restore returns), order Y canceled at index 2. The payload
         // max is 1, but the daemon's LastTradeIndex counter is 2 — the real
         // high-water mark — and must win, or the first new order collides.
-        let info = restore_info(vec![1], vec![]);
-        assert_eq!(resync_floor(Some(2), &info), Some(2));
-        // The daemon answer wins even when it is lower than the payload max —
-        // monotonic raising downstream (ensure_trade_key_index_at_least) makes
-        // this safe, and the daemon is authoritative.
-        assert_eq!(resync_floor(Some(1), &restore_info(vec![5], vec![])), Some(1));
-        // ...and even when the payload carried nothing at all.
+        assert_eq!(resync_floor(Some(2), &restore_info(vec![1], vec![])), Some(2));
+        // Defense-in-depth: never resync below a recovered trade's own index.
+        // A consistent daemon cannot answer below an index it still tracks (it
+        // raised last_trade_index when it accepted that order), so this only
+        // guards a stale/partial reply — the payload lower bound then wins.
+        assert_eq!(resync_floor(Some(1), &restore_info(vec![5], vec![])), Some(5));
+        // Daemon present, payload empty -> the daemon value.
         assert_eq!(resync_floor(Some(7), &restore_info(vec![], vec![])), Some(7));
     }
 
