@@ -345,6 +345,17 @@ Invariants:
   `take_order` acquires it only *after* its wait resolves — around the
   persistence block alone. Holding it across the wait deadlocks the take
   until its 10 s timeout.
+- **The take reply hands the guard off.** The dispatcher that resolves a
+  waiting `take_order` sends its own guard through the waiter channel
+  (`Wake.order_guard`), so consumed-reply → persistence is one critical
+  section: released instead, a second daemon message already queued on the
+  FIFO mutex would beat the woken task and run its arm against a trade row
+  and session that do not exist yet. The guard rides *inside* the channel
+  value, so every losing path releases it by dropping — a timed-out
+  waiter's failed send, a receiver dropped with the reply unread. Only the
+  take reply carries a guard: an add-invoice's effects are persisted by
+  the dispatch arms themselves (still holding it), and a create's gap is
+  owned by the reconcile block and the Kind 38383 fingerprint path.
 - **The registry tracks live work, not history**: entries no handler holds
   any more are dropped on the next acquisition, so it does not grow with
   every order ever dispatched.
