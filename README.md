@@ -145,6 +145,19 @@ Both parties rate each other (optional)
 - NIP-44 Encrypted Payloads: [github.com/nostr-protocol/nips/blob/master/44.md](https://github.com/nostr-protocol/nips/blob/master/44.md)
 - Order Kind 38383: [mostro.network/protocol/list_orders.html](https://mostro.network/protocol/list_orders.html)
 
+#### Supported NIPs & BUDs
+
+| Spec | Used for |
+|------|----------|
+| [NIP-06](https://github.com/nostr-protocol/nips/blob/master/06.md) | Key derivation from a BIP-39 mnemonic (`rust/src/crypto/keys.rs`) |
+| [NIP-13](https://github.com/nostr-protocol/nips/blob/master/13.md) | Proof-of-work mining on outgoing events, to the daemon's required difficulty (`rust/src/mostro/pow.rs`) |
+| [NIP-44](https://github.com/nostr-protocol/nips/blob/master/44.md) | Encrypted payloads — daemon messages and the peer/dispute chat envelope (`rust/src/crypto/ecdh.rs`, `rust/src/nostr/transport.rs`) |
+| [NIP-47](https://github.com/nostr-protocol/nips/blob/master/47.md) | Nostr Wallet Connect, for paying invoices from a connected wallet (`rust/src/nwc/client.rs`) |
+| [NIP-69](https://github.com/nostr-protocol/nips/blob/master/69.md) | Public order-book status (`s` tag on Kind 38383) |
+| [BUD-01 / BUD-02](https://github.com/hzrd149/blossom) | Encrypted file attachment upload/auth to Blossom servers (`rust/src/nostr/blossom.rs`) |
+
+**Not used:** NIP-59 (gift wrap) was dropped from peer and dispute chat in #246/#254 — this client neither reads nor writes Kind 1059. Chat instead rides a custom Kind-14 envelope (see "P2P Chat" above), which is *not* NIP-17 despite sharing its kind number.
+
 ---
 
 ## Architecture & Fundamentals
