@@ -1283,6 +1283,14 @@
   "@minHint": {"description": "Hint for the minimum amount input"},
   "maxHint": "Max",
   "@maxHint": {"description": "Hint for the maximum amount input"},
+  "orderAmountOutOfRange": "Amount must be between {min} and {max} sats for this Mostro node",
+  "@orderAmountOutOfRange": {
+    "description": "Shown when a fixed-sats order amount is outside the node min/max order amount",
+    "placeholders": {
+      "min": {"type": "int"},
+      "max": {"type": "int"}
+    }
+  },
   "fiatAmountHint": "Fiat amount",
   "@fiatAmountHint": {"description": "Hint for the fiat amount input"},
   "enterAmountForPreview": "Enter an amount to see a live preview.",
