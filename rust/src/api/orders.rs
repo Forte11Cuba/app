@@ -4660,6 +4660,69 @@ mod tests {
         assert!(map.contains_key(&live));
     }
 
+    /// The #259 race, driven through the real dispatcher: a `Canceled` for a
+    /// generation that is being replaced must not land in the middle of the
+    /// retake persisting its own state.
+    ///
+    /// The retake side is represented by the lock `take_order` holds around its
+    /// persistence block, because `take_order` itself needs a relay pool and a
+    /// live daemon. The dispatcher is the code under test and runs unmodified,
+    /// against a real `UnwrappedMessage`.
+    ///
+    /// The assertion is on the *order* of the two effects rather than on a
+    /// timeout: unserialized, the dispatcher reaches `emit_trade_update` during
+    /// the sleep below and its Canceled is observed before the retake's write.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_cancel_cannot_land_inside_a_concurrent_retake() {
+        use crate::api::types::OrderStatus;
+        use crate::rt::time::{sleep, Duration};
+        use mostro_core::message::{Action, Message};
+
+        let order_uuid = uuid::Uuid::new_v4();
+        let order_id = order_uuid.to_string();
+        // Pending, so the terminal-status gate lets the Canceled through and
+        // the arm runs its full sequence.
+        order_book().upsert_order(dummy_order_info(&order_id)).await;
+
+        let mut rx = trade_updates_tx().subscribe();
+
+        let sender =
+            nostr_sdk::PublicKey::from_hex(&active_mostro_pubkey()).expect("valid mostro pubkey");
+        let unwrapped = mostro_core::nip59::UnwrappedMessage {
+            message: Message::new_order(Some(order_uuid), None, None, Action::Canceled, None),
+            signature: None,
+            sender,
+            identity: sender,
+            created_at: nostr_sdk::Timestamp::from(0u64),
+        };
+
+        // The retake enters its persistence block...
+        let retake = lock_order(&order_id).await;
+
+        // ...and the Canceled for the previous generation arrives while it runs.
+        let dispatching = tokio::spawn(async move {
+            dispatch_mostro_message(unwrapped, "test-cancel-retake", "ff00ff02", 1).await;
+        });
+
+        // Give the dispatcher every chance to run to completion.
+        sleep(Duration::from_millis(100)).await;
+
+        // The retake completes its own sequence and releases.
+        emit_trade_update(&order_id, OrderStatus::Active);
+        drop(retake);
+        dispatching.await.expect("dispatch joined");
+
+        // Effects for this order, in order: the retake's write, then the
+        // Canceled. Reversed is exactly the corruption #259 is about.
+        let mut seen = Vec::new();
+        while let Ok(update) = rx.try_recv() {
+            if update.order_id == order_id {
+                seen.push(update.status);
+            }
+        }
+        assert_eq!(seen, vec![OrderStatus::Active, OrderStatus::Canceled]);
+    }
+
 }
 
 #[cfg(test)]
