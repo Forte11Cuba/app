@@ -3512,6 +3512,12 @@ async fn last_trade_index() -> Result<Option<u32>> {
     // arrive in the gap between subscribe and the first recv.
     let mut rx = client.notifications();
 
+    // This query, unlike the restore itself, has a fallback (the payload
+    // maximum), so a shorter wait halves the worst-case restore latency
+    // against a silent daemon. Shared by the relay-side auto-close and the
+    // outer wait loop so the two can't drift.
+    const REPLY_TIMEOUT: Duration = Duration::from_secs(5);
+
     // limit(0): live-only, same rationale as subscribe_daemon_messages — the
     // reply is published after we subscribe, and we never want a replayed
     // historical LastTradeIndex to resolve this request.
@@ -3520,7 +3526,17 @@ async fn last_trade_index() -> Result<Option<u32>> {
         .author(mostro_pubkey)
         .pubkey(identity_pk)
         .limit(0);
-    if let Err(e) = client.subscribe(filter, None).await {
+    // Auto-close the relay-side subscription — this is a one-shot request/reply
+    // (mostro-cli's wait_for_dm shape), not a long-lived watcher, so the library
+    // issues the CLOSE on every path: after the reply (WaitForEventsAfterEOSE(1))
+    // and, if the daemon never answers, on the timeout. Leaving it to manual
+    // bookkeeping is the leak class #182/#255 address. Auto-close subs are
+    // deliberately excluded from reconnect re-subscription (correct here: if the
+    // socket drops mid-request we fall back to the payload maximum by design).
+    let close_opts = nostr_sdk::prelude::SubscribeAutoCloseOptions::default()
+        .exit_policy(nostr_sdk::prelude::ReqExitPolicy::WaitForEventsAfterEOSE(1))
+        .timeout(Some(REPLY_TIMEOUT));
+    if let Err(e) = client.subscribe(filter, Some(close_opts)).await {
         log::warn!("[orders] last_trade_index subscribe failed: {e}");
         return Ok(None);
     }
@@ -3532,8 +3548,9 @@ async fn last_trade_index() -> Result<Option<u32>> {
         "LastTradeIndex published — waiting for daemon".to_string(),
     );
 
-    // Wait for the reply. 10s matches restore_session's timeout.
-    let deadline = Duration::from_secs(10);
+    // Wait for the reply. Bounded by REPLY_TIMEOUT — the same budget the
+    // relay-side auto-close uses, so both give up together.
+    let deadline = REPLY_TIMEOUT;
     let start = crate::rt::time::Instant::now();
     loop {
         let remaining = deadline.saturating_sub(start.elapsed());
