@@ -3082,6 +3082,24 @@ fn admin_pubkey_from_payload(
     }
 }
 
+/// Bind the daemon UUID to the trade-key index recovered from the content
+/// fingerprint on cold start — but ONLY when no authoritative mapping exists
+/// yet.
+///
+/// The request_id-correlated create/confirm path (see the `NewOrder` handler)
+/// is the source of truth for `daemon_id → index`. The content fingerprint is
+/// ambiguous — a taken range order is re-published on the wire as a plain
+/// fixed-amount order, and two identical open orders share one fingerprint
+/// slot — so it must never overwrite an existing binding, or a subsequent
+/// release/cancel/rate gets signed with the wrong trade key and the daemon
+/// rejects it (`InvalidPeer`, #326). This mirrors the v1 client, which keys the
+/// trade index by daemon UUID and never by order content.
+async fn bridge_fingerprint_trade_index(order_id: &str, trade_idx: u32) {
+    if get_trade_key_index(order_id).await.is_none() {
+        store_trade_key_index(order_id, trade_idx).await;
+    }
+}
+
 /// Parse a Kind 38383 event and upsert it into the order book, applying
 /// maker-order reconciliation (is_mine detection, local→daemon id bridging,
 /// trade-status sync).
@@ -3118,7 +3136,7 @@ async fn ingest_order_event(event: &nostr_sdk::Event) {
                     info.is_mine = true;
                     // Bridge content fingerprint → daemon UUID so subsequent
                     // actions (cancel) can look up the trade key by real order ID.
-                    store_trade_key_index(&info.id, trade_idx).await;
+                    bridge_fingerprint_trade_index(&info.id, trade_idx).await;
                     // The maker order is no longer inserted into the
                     // book optimistically (see `create_order`), so there
                     // is nothing to remove here — just bridge the local
@@ -4404,6 +4422,45 @@ mod tests {
             }
         }
         assert!(!leaked, "stale Canceled must not emit a TradeUpdate");
+    }
+
+    /// #326: the fingerprint-restore path must NOT overwrite the authoritative
+    /// `daemon_id → index` mapping written at create/confirm time. A taken range
+    /// order is re-published on the wire as a plain fixed-amount order, so its
+    /// fingerprint can collide with an unrelated fixed order and yield the wrong
+    /// index (here 21 instead of 16). Before the guard, that clobbered the trade
+    /// key and release/cancel/rate were signed with the wrong key (`InvalidPeer`).
+    #[tokio::test]
+    async fn fingerprint_never_overwrites_authoritative_trade_index() {
+        let daemon_id = uuid::Uuid::new_v4().to_string();
+
+        // Authoritative binding from the request_id-correlated NewOrder reply.
+        store_trade_key_index(&daemon_id, 16).await;
+
+        // Fingerprint restore recovers a colliding index from another order.
+        bridge_fingerprint_trade_index(&daemon_id, 21).await;
+
+        assert_eq!(
+            get_trade_key_index(&daemon_id).await,
+            Some(16),
+            "fingerprint restore must not overwrite the create-time trade index",
+        );
+    }
+
+    /// The flip side of #326: with no prior mapping (genuine cold start, where
+    /// the create/confirm binding was never persisted), the fingerprint path is
+    /// still allowed to ESTABLISH the mapping so the maker keeps ownership.
+    #[tokio::test]
+    async fn fingerprint_establishes_trade_index_on_cold_start() {
+        let daemon_id = uuid::Uuid::new_v4().to_string();
+
+        bridge_fingerprint_trade_index(&daemon_id, 21).await;
+
+        assert_eq!(
+            get_trade_key_index(&daemon_id).await,
+            Some(21),
+            "fingerprint restore must establish a mapping when none exists yet",
+        );
     }
 
     /// A stale BuyerTookOrder replayed over a finished trade must be skipped
