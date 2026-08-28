@@ -24,24 +24,30 @@ import '../../support/provider_harness.dart';
 /// `_loadExpiresAt`/Rust-bridge calls fail silently without `RustLib.init()`
 /// (the same as `test/widget_test.dart`'s smoke test), which is fine since
 /// none of the assertions here depend on live order details.
-Future<void> _pumpTradeDetail(
+///
+/// Returns the container so a test can drive a provider after the first
+/// frame — what [ratingFetch] is for: it is re-read on every refresh, so a
+/// test can change what the rating lookup answers and invalidate it.
+Future<ProviderContainer> _pumpTradeDetail(
   WidgetTester tester, {
   required String orderId,
   required bool isBuyer,
   required OrderStatus status,
   RatingInfo? rating,
   bool ratingUnresolved = false,
+  Future<RatingInfo?> Function()? ratingFetch,
   Locale locale = const Locale('en'),
 }) async {
   final container = createContainer(overrides: [
     tradeRoleProvider.overrideWith((ref) => {orderId: isBuyer}),
     tradeStatusProvider(orderId).overrideWith((ref) => Stream.value(status)),
     orderBookProvider.overrideWith((ref) => Stream.value(const [])),
-    // A pending Completer future keeps the rating lookup in its first
-    // loading state, pinning the no-CTA-flash guard.
-    tradeRatingProvider(orderId).overrideWith((ref) => ratingUnresolved
-        ? Completer<RatingInfo?>().future
-        : Future.value(rating)),
+    tradeRatingProvider(orderId).overrideWith((ref) {
+      // A pending Completer future keeps the rating lookup in its first
+      // loading state, pinning the no-CTA-flash guard.
+      if (ratingUnresolved) return Completer<RatingInfo?>().future;
+      return ratingFetch != null ? ratingFetch() : Future.value(rating);
+    }),
   ]);
 
   await tester.pumpWidget(
@@ -70,6 +76,8 @@ Future<void> _pumpTradeDetail(
   // `pumpAndSettle()` time out.
   await tester.pump();
   await tester.pump();
+
+  return container;
 }
 
 /// Builds the rating the Rust store would hand back for a trade.
@@ -457,6 +465,63 @@ void main() {
 
       expect(_filledButtonWithText('Rate your counterpart'), findsNothing);
       expect(find.text('Rated'), findsNothing);
+    });
+
+    /// The post-submission link: RateCounterpartScreen invalidates
+    /// `tradeRatingProvider` after a successful `submitRating`, and the
+    /// detail screen underneath — still mounted, since the rate screen is
+    /// pushed on top of it — must re-read and resolve the prompt without
+    /// being rebuilt from scratch.
+    ///
+    /// The invalidation is driven directly rather than by tapping SUBMIT on
+    /// the real screen: `submitRating` calls the bridge with no injectable
+    /// seam, and this harness runs without `RustLib.init()`, so its success
+    /// path is unreachable from a widget test.
+    testWidgets('a rating submitted while mounted resolves the prompt',
+        (tester) async {
+      const orderId = 'order-rate-5';
+      // The refetch the invalidation triggers, held open so the refreshing
+      // frames are observable instead of racing to the result.
+      final refresh = Completer<RatingInfo?>();
+      var first = true;
+
+      final container = await _pumpTradeDetail(
+        tester,
+        orderId: orderId,
+        isBuyer: false,
+        status: OrderStatus.settledHoldInvoice,
+        ratingFetch: () {
+          if (first) {
+            first = false;
+            return Future<RatingInfo?>.value(null);
+          }
+          return refresh.future;
+        },
+      );
+
+      expect(_filledButtonWithText('Rate your counterpart'), findsOneWidget);
+      expect(find.text('Rated'), findsNothing);
+
+      // What _submit does once the daemon accepts the rating.
+      container.invalidate(tradeRatingProvider(orderId));
+      // Riverpod recomputes lazily, so read once to enter the refreshing
+      // state before the frame — otherwise the pump below just re-renders
+      // the pre-invalidation frame and asserts nothing.
+      container.read(tradeRatingProvider(orderId));
+      await tester.pump();
+
+      // Mid-refresh the previous answer still stands, so the prompt holds
+      // its ground: only the *first* lookup may show the spinner, or every
+      // rating would bounce the screen through `loading`.
+      expect(_filledButtonWithText('Rate your counterpart'), findsOneWidget);
+
+      refresh.complete(_rating(isMine: true));
+      await tester.pump();
+      await tester.pump();
+
+      expect(find.text('Rated'), findsOneWidget);
+      expect(find.text('Thank you for your rating!'), findsOneWidget);
+      expect(_filledButtonWithText('Rate your counterpart'), findsNothing);
     });
   });
 
