@@ -830,6 +830,16 @@ pub async fn take_order(
         peer_days: None,
     };
 
+    // The other side of the race guarded in `dispatch_mostro_message`: this
+    // block is the "retake is accepted and persists its state" step. Taking the
+    // same per-order lock keeps it from landing between a daemon handler's
+    // check and its write, and keeps that handler from landing between ours
+    // (#259).
+    //
+    // Acquired here, *after* the daemon reply above, and never around the wait
+    // itself: that reply is delivered by `dispatch_mostro_message`, which takes
+    // this very lock — holding it while waiting would deadlock the take.
+    let _order_guard = lock_order(&order_id).await;
     store_trade_key_index(&order_id, trade_index).await;
     if status.is_some() || amount_sats.is_some() {
         // Keep the public order book in sync with the reply so the order
