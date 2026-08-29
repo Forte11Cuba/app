@@ -602,6 +602,7 @@
   "minHint": "Mín",
   "maxHint": "Máx",
   "orderAmountOutOfRange": "El monto debe estar entre {min} y {max} sats para este nodo Mostro",
+  "orderAmountOutOfRangeFiat": "El monto debe estar entre {min} y {max} {currency} para este nodo Mostro",
   "fiatAmountHint": "Monto fiat",
   "enterAmountForPreview": "Ingresa un monto para ver una vista previa en vivo.",
   "previewLabel": "VISTA PREVIA",
