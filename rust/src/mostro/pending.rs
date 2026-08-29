@@ -41,6 +41,11 @@ pub(crate) enum DaemonReply {
     /// update processed by the per-action arms; the caller only needs the
     /// unblock, so no data travels with it.
     Acknowledged,
+    /// Daemon accepted the dispute and assigned it a UUID. That id — not a
+    /// locally minted one — is what the solver and the daemon's Kind 38386
+    /// dispute event refer to, so it travels with the reply. `None` when the
+    /// acceptance carried no dispute payload.
+    DisputeAccepted { dispute_id: Option<String> },
     /// Daemon rejected the request with a CantDo reason.
     Rejected { reason: String, message: String },
     /// Daemon replied to a RestoreSession with the user's active trades and
@@ -96,6 +101,8 @@ pub(crate) enum PendingRequestKind {
     /// by trade pubkey, not request_id (the RestoreSession message carries
     /// no request_id — see mostro-core Message::new_restore).
     Restore,
+    /// An open-dispute awaiting the daemon's `DisputeInitiatedByYou`.
+    Dispute,
 }
 
 /// Everything one outgoing daemon request needs tracked until its reply is
@@ -297,6 +304,53 @@ pub(crate) fn take_matching_add_invoice(
         }
         _ => None,
     }
+}
+
+/// Remove and return the pending request for `trade_pubkey_hex` only when it
+/// is a `Dispute` and `got` echoes its nonce. Like an add-invoice, the
+/// consumed message is also a status update, so it still flows through the
+/// per-action arms (see `dispatch_mostro_message`).
+pub(crate) fn take_matching_dispute(
+    trade_pubkey_hex: &str,
+    got: Option<u64>,
+) -> Option<PendingRequest> {
+    let mut map = pending_requests().lock().ok()?;
+    match map.get(trade_pubkey_hex) {
+        Some(p)
+            if request_id_matches(p.request_id, got)
+                && matches!(p.kind, PendingRequestKind::Dispute) =>
+        {
+            map.remove(trade_pubkey_hex)
+        }
+        _ => None,
+    }
+}
+
+/// Register an open-dispute as the pending request for `trade_pubkey_hex` and
+/// return the channel its reply arrives on.
+///
+/// Lives here because the pending map and its nonce gate are this module's;
+/// `disputes::open_dispute` drives the publish and the wait, and cleans up
+/// through [`remove_pending_request`] (publish failed) or
+/// [`detach_request_waiter`] (timed out).
+pub(crate) fn register_dispute_request(
+    trade_pubkey_hex: String,
+    request_id: u64,
+    trade_index: u32,
+) -> tokio::sync::oneshot::Receiver<Wake> {
+    let (tx, rx) = tokio::sync::oneshot::channel::<Wake>();
+    if let Ok(mut map) = pending_requests().lock() {
+        map.insert(
+            trade_pubkey_hex,
+            PendingRequest {
+                request_id,
+                trade_index,
+                kind: PendingRequestKind::Dispute,
+                tx: Some(tx),
+            },
+        );
+    }
+    rx
 }
 
 /// Classify the daemon's first reply to a take into a [`DaemonReply`].
