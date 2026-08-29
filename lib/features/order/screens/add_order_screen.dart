@@ -10,6 +10,7 @@ import 'package:mostro/core/automation/automation_ids.dart';
 import 'package:mostro/core/daemon_errors.dart';
 import 'package:mostro/features/order/widgets/currency_section.dart';
 import 'package:mostro/features/settings/providers/settings_provider.dart';
+import 'package:mostro/features/about/providers/mostro_node_provider.dart';
 import 'package:mostro/features/order/widgets/order_preset_selector.dart';
 import 'package:mostro/features/order/widgets/payment_method_section.dart';
 import 'package:mostro/features/order/widgets/price_section.dart';
@@ -29,6 +30,31 @@ class AddOrderScreen extends ConsumerStatefulWidget {
 
   @override
   ConsumerState<AddOrderScreen> createState() => _AddOrderScreenState();
+}
+
+/// Returns the node's accepted `(min, max)` sats range when the entered
+/// fixed-sats amount is outside the node's advertised limits, otherwise null.
+///
+/// Pure and testable. Fixed-sats orders only (#282). Uses [BigInt] to match
+/// `NewOrderParams.amountSats`, so amounts beyond the signed 64-bit range are
+/// still compared rather than silently failing open. Only enforces the range
+/// when the node advertises BOTH a min and a max (they are published together
+/// in practice); when either bound is absent, or the amount is not yet a
+/// number, returns null so a valid order is never blocked and the daemon
+/// remains the backstop.
+@visibleForTesting
+({int min, int max})? satsOutOfNodeRange(
+  String fixedSatsStr,
+  int? minOrder,
+  int? maxOrder,
+) {
+  if (minOrder == null || maxOrder == null) return null;
+  final sats = BigInt.tryParse(fixedSatsStr.trim());
+  if (sats == null) return null;
+  if (sats < BigInt.from(minOrder) || sats > BigInt.from(maxOrder)) {
+    return (min: minOrder, max: maxOrder);
+  }
+  return null;
 }
 
 class _AddOrderScreenState extends ConsumerState<AddOrderScreen> {
@@ -172,7 +198,19 @@ class _AddOrderScreenState extends ConsumerState<AddOrderScreen> {
     final customMethod = ref.read(customPaymentMethodProvider);
     final isMarket = ref.read(isMarketPriceProvider);
     final fixedSatsStr = ref.read(fixedSatsProvider);
-    if (_submitting || !_checkValid(selectedMethods, customMethod, isMarket, fixedSatsStr)) return;
+    // Defence in depth: the submit button is already disabled when invalid or
+    // out of the node's sats range, but re-check here so no code path submits
+    // an out-of-range fixed-sats order (#282).
+    final node = ref.read(mostroNodeProvider).valueOrNull;
+    final outOfRange = !isMarket && !_isRange && fixedSatsStr.isNotEmpty
+        ? satsOutOfNodeRange(
+            fixedSatsStr, node?.minOrderAmount, node?.maxOrderAmount)
+        : null;
+    if (_submitting ||
+        !_checkValid(selectedMethods, customMethod, isMarket, fixedSatsStr) ||
+        outOfRange != null) {
+      return;
+    }
     setState(() => _submitting = true);
 
     try {
@@ -246,7 +284,14 @@ class _AddOrderScreenState extends ConsumerState<AddOrderScreen> {
     final fixedSatsStr = ref.watch(fixedSatsProvider);
     final fiatCode = ref.watch(selectedFiatCodeProvider);
     final premium = ref.watch(premiumValueProvider);
-    final isValid = _checkValid(selectedMethods, customMethod, isMarket, fixedSatsStr);
+    final node = ref.watch(mostroNodeProvider).valueOrNull;
+    final satsRangeError = (!isMarket && !_isRange && fixedSatsStr.isNotEmpty)
+        ? satsOutOfNodeRange(
+            fixedSatsStr, node?.minOrderAmount, node?.maxOrderAmount)
+        : null;
+    final isValid =
+        _checkValid(selectedMethods, customMethod, isMarket, fixedSatsStr) &&
+            satsRangeError == null;
     final l10n = AppLocalizations.of(context);
 
     return Scaffold(
@@ -367,6 +412,25 @@ class _AddOrderScreenState extends ConsumerState<AddOrderScreen> {
             color: cardBg,
             child: const PriceSection(),
           ),
+          // Out-of-range warning for fixed-sats orders (#282): show the node's
+          // accepted range so the user can correct it before submitting,
+          // instead of the daemon rejecting the order after the fact.
+          if (satsRangeError != null) ...[
+            const SizedBox(height: AppSpacing.sm),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
+              child: Text(
+                l10n.orderAmountOutOfRange(
+                  satsRangeError.min,
+                  satsRangeError.max,
+                ),
+                style: TextStyle(
+                  color: colors?.destructiveRed ?? const Color(0xFFD84D4D),
+                  fontSize: 13,
+                ),
+              ),
+            ),
+          ],
           const SizedBox(height: AppSpacing.xxl),
         ],
       ),

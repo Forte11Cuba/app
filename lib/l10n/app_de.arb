@@ -601,6 +601,7 @@
   "orderExpiryNoReputationNote": "Es wirkt sich nicht auf deine Reputation aus.",
   "minHint": "Min",
   "maxHint": "Max",
+  "orderAmountOutOfRange": "Der Betrag muss für diesen Mostro-Knoten zwischen {min} und {max} Sats liegen",
   "fiatAmountHint": "Fiat-Betrag",
   "enterAmountForPreview": "Gib einen Betrag ein, um eine Live-Vorschau zu sehen.",
   "previewLabel": "VORSCHAU",

@@ -601,6 +601,7 @@
   "orderExpiryNoReputationNote": "Non influirà sulla tua reputazione.",
   "minHint": "Min",
   "maxHint": "Max",
+  "orderAmountOutOfRange": "L'importo deve essere compreso tra {min} e {max} sats per questo nodo Mostro",
   "fiatAmountHint": "Importo fiat",
   "enterAmountForPreview": "Inserisci un importo per vedere un'anteprima in tempo reale.",
   "previewLabel": "ANTEPRIMA",
