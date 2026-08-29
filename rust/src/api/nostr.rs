@@ -220,6 +220,102 @@ pub async fn fetch_mostro_instance_tags(
     }
 }
 
+/// Price of one BTC in `fiat_code`, as published by `mostro_pubkey_hex` in its
+/// Kind 30078 (`d` = `mostro-rates`) event.
+///
+/// Lets the client tell, before submitting, whether a market-price order will
+/// land inside the node's sats limits (#337): the daemon prices such an order
+/// as `fiat_amount / price * 1E8` from this same aggregate, so this is the
+/// number its `OutOfRangeSatsAmount` check will use.
+///
+/// Returns `None` — never an error — for every "no usable rate" case: the node
+/// publishes no rates event (publishing is optional), the one on the relay has
+/// expired, its payload is unusable, or it quotes no such currency. Callers
+/// must then submit unchecked and let the daemon decide, which is the
+/// fail-open behaviour PR #302 chose for fixed-sats amounts. `Err` is reserved
+/// for a client that is not initialised, a malformed pubkey, or a relay query
+/// that failed outright.
+///
+/// Answers from a per-node cache bounded by the event's own NIP-40 expiration,
+/// so the three amount fields of a range order cost one relay query, not three.
+pub async fn fetch_exchange_rate(
+    mostro_pubkey_hex: String,
+    fiat_code: String,
+) -> Result<Option<f64>> {
+    use crate::mostro::rates;
+    use nostr_sdk::prelude::*;
+    use std::time::Duration;
+
+    let now = crate::rt::unix_now();
+    if let Some(rate) = rates::cached_rate(&mostro_pubkey_hex, &fiat_code, now) {
+        return Ok(Some(rate));
+    }
+
+    let client = pool()?.client();
+
+    let pubkey = nostr_sdk::PublicKey::from_hex(&mostro_pubkey_hex)
+        .map_err(|e| anyhow::anyhow!("invalid pubkey hex: {e}"))?;
+
+    let filter = Filter::new()
+        .kind(Kind::from(rates::RATES_KIND))
+        .author(pubkey)
+        .custom_tag(SingleLetterTag::lowercase(Alphabet::D), rates::RATES_D_TAG)
+        .limit(1);
+
+    let events = client
+        .fetch_events(filter, Duration::from_secs(10))
+        .await
+        .map_err(|e| anyhow::anyhow!("fetch_events failed: {e}"))?;
+
+    // Defence in depth, as v1 does: a relay is free to answer with events the
+    // filter never asked for, and pricing an order off another kind, another
+    // d-tag or another author's event would be worse than not checking at all.
+    let event = events
+        .into_iter()
+        .filter(|e| {
+            e.kind == Kind::from(rates::RATES_KIND)
+                && e.pubkey == pubkey
+                && tag_value(e, "d").as_deref() == Some(rates::RATES_D_TAG)
+        })
+        .max_by_key(|e| e.created_at);
+
+    let Some(event) = event else {
+        log::warn!("[rates] node {mostro_pubkey_hex} published no usable kind 30078 event");
+        rates::clear();
+        return Ok(None);
+    };
+
+    let expires_at = rates::expires_at(
+        event.created_at.as_secs() as i64,
+        tag_value(&event, "expiration").and_then(|v| v.parse::<i64>().ok()),
+    );
+    if now >= expires_at {
+        // A relay that ignores NIP-40 must not let a zombie price through.
+        log::warn!("[rates] discarding expired kind 30078 event from {mostro_pubkey_hex}");
+        rates::clear();
+        return Ok(None);
+    }
+
+    let Some(parsed) = rates::parse_rates_content(&event.content) else {
+        log::warn!("[rates] unusable kind 30078 payload from {mostro_pubkey_hex}");
+        rates::clear();
+        return Ok(None);
+    };
+
+    rates::store(&mostro_pubkey_hex, parsed, expires_at);
+    Ok(rates::cached_rate(&mostro_pubkey_hex, &fiat_code, now))
+}
+
+/// First value of the single-letter or named tag `name` on `event`.
+fn tag_value(event: &nostr_sdk::Event, name: &str) -> Option<String> {
+    event
+        .tags
+        .iter()
+        .map(|t| t.as_slice())
+        .find(|t| t.first().map(String::as_str) == Some(name))
+        .and_then(|t| t.get(1).cloned())
+}
+
 /// Fetch everything the active Mostro node advertises about itself from its
 /// Kind 38385 event and store it globally: the PoW requirement, and (phase C1)
 /// the escrow mode plus its Cashu parameters.
