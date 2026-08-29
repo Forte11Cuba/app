@@ -426,13 +426,18 @@ pub async fn restore_session(
 /// The reply carries the counter in `MessageKind::trade_index`. Payload must be
 /// `None` (enforced by mostro-core). Mirrors `mostro-cli`'s
 /// `execute_last_trade_index`, which signs with `identity_keys` for both.
+///
+/// `request_id` is the correlation nonce the daemon echoes in its reply
+/// (`mostro/src/app/last_trade_index.rs`) — the caller uses it to reject
+/// replayed replies from earlier requests.
 pub async fn last_trade_index(
     identity_keys: &Keys,
     mostro_pubkey: &PublicKey,
+    request_id: u64,
 ) -> Result<String> {
     let msg = Message::Restore(MessageKind::new(
         None,
-        None,
+        Some(request_id),
         None,
         Action::LastTradeIndex,
         None,

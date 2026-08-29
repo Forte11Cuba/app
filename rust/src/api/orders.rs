@@ -3638,6 +3638,23 @@ fn resync_floor(
     }
 }
 
+/// True only for the reply to THIS `LastTradeIndex` request: the action
+/// matches and the daemon echoed our correlation nonce
+/// (`mostro/src/app/last_trade_index.rs` copies `request_id` into the reply).
+///
+/// A replayed reply from an earlier request carries a different nonce — or
+/// none, since this client's own pre-hardening requests sent no id — so
+/// accepting `None` would readmit exactly the replays this guards against.
+/// Strict matching means a daemon that does not echo falls back to the
+/// restore-payload maximum, the same designed path as a silent daemon.
+fn is_matching_last_trade_index_reply(
+    kind: &mostro_core::message::MessageKind,
+    request_id: u64,
+) -> bool {
+    kind.action == mostro_core::message::Action::LastTradeIndex
+        && kind.request_id == Some(request_id)
+}
+
 /// Ask the daemon for its authoritative last-known trade index (#328).
 ///
 /// `Action::LastTradeIndex` is account-scoped: the request is signed with the
@@ -3700,7 +3717,18 @@ async fn last_trade_index() -> Result<Option<u32>> {
         return Ok(None);
     }
 
-    let event_json = actions::last_trade_index(&identity_keys, &mostro_pubkey).await?;
+    // Correlation nonce, echoed by the daemon in its reply. Without it any
+    // authenticated LastTradeIndex reply resolves this request, so a malicious
+    // relay could replay an old one. Monotonicity caps the damage (the max in
+    // resync_floor means a stale counter degrades to the payload fallback, the
+    // same as a silent daemon) — but the daemon echoes request_id, so binding
+    // the reply to this request costs nothing.
+    let request_id: u64 = {
+        use rand::RngCore;
+        rand::rngs::OsRng.next_u64().max(1) // 0 is indistinguishable from "unset"
+    };
+    let event_json =
+        actions::last_trade_index(&identity_keys, &mostro_pubkey, request_id).await?;
     publish_event_json(&event_json).await?;
     crate::api::logging::blog_info(
         "restore",
@@ -3738,7 +3766,7 @@ async fn last_trade_index() -> Result<Option<u32>> {
                             continue;
                         }
                         let kind = unwrapped.message.get_inner_message_kind();
-                        if kind.action != mostro_core::message::Action::LastTradeIndex {
+                        if !is_matching_last_trade_index_reply(kind, request_id) {
                             continue;
                         }
                         let idx = kind.trade_index.and_then(sanitize_trade_index);
@@ -4024,6 +4052,26 @@ mod tests {
         assert_eq!(resync_floor(Some(1), &restore_info(vec![5], vec![])), Some(5));
         // Daemon present, payload empty -> the daemon value.
         assert_eq!(resync_floor(Some(7), &restore_info(vec![], vec![])), Some(7));
+    }
+
+    #[test]
+    fn a_replayed_last_trade_index_reply_is_rejected() {
+        use mostro_core::message::{Action, MessageKind};
+
+        let reply = |request_id: Option<u64>| {
+            MessageKind::new(None, request_id, Some(7), Action::LastTradeIndex, None)
+        };
+        // The genuine reply echoes our nonce.
+        assert!(is_matching_last_trade_index_reply(&reply(Some(42)), 42));
+        // A replay of an earlier request's reply carries a different nonce...
+        assert!(!is_matching_last_trade_index_reply(&reply(Some(41)), 42));
+        // ...or none at all — this client's own earlier requests sent no id,
+        // so their stored replies are exactly the replay material to reject.
+        assert!(!is_matching_last_trade_index_reply(&reply(None), 42));
+        // A different action never matches, even with the right nonce.
+        let other =
+            MessageKind::new(None, Some(42), Some(7), Action::RestoreSession, None);
+        assert!(!is_matching_last_trade_index_reply(&other, 42));
     }
 
     #[test]
