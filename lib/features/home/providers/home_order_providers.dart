@@ -166,7 +166,12 @@ final orderBookProvider = StreamProvider.autoDispose<List<OrderItem>>((ref) asyn
 ///
 /// Unwraps the `AsyncValue` from [orderBookProvider]; returns `[]` while
 /// loading or on error so that filter/tab logic is always well-typed.
-final filteredOrdersProvider = Provider<List<OrderItem>>((ref) {
+///
+/// `autoDispose` is load-bearing, not hygiene: [orderBookProvider] is itself
+/// autoDispose, so a non-disposing watcher here would keep it — and this
+/// filter and sort over the whole book — running on every relay event for the
+/// rest of the session, including while the user is in Chat or Settings.
+final filteredOrdersProvider = Provider.autoDispose<List<OrderItem>>((ref) {
   final allOrders = ref.watch(orderBookProvider).valueOrNull ?? [];
   final orderType = ref.watch(homeOrderTypeProvider);
   final selectedCurrencies = ref.watch(currencyFilterProvider);
