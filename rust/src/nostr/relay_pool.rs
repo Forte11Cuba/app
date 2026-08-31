@@ -162,6 +162,10 @@ impl RelayPool {
         let relay_tx = self.relay_tx.clone();
 
         crate::rt::spawn(async move {
+            // Last state actually broadcast, so a poll that changes a relay
+            // without changing the aggregate stays silent.
+            let mut last_state: Option<ConnectionState> = None;
+
             loop {
                 crate::rt::time::sleep(Duration::from_secs(STATUS_POLL_INTERVAL_SECS)).await;
 
@@ -210,7 +214,9 @@ impl RelayPool {
 
                 if any_changed {
                     let state = derive_connection_state(&relays.read().await);
-                    let _ = conn_tx.send(state);
+                    if let Some(state) = next_broadcast(&mut last_state, state) {
+                        let _ = conn_tx.send(state);
+                    }
                 }
             }
         });
@@ -218,6 +224,24 @@ impl RelayPool {
 }
 
 // ── Pure helpers ──────────────────────────────────────────────────────────────
+
+/// The state to broadcast, or `None` when it has not actually changed.
+///
+/// The monitor polls every relay, so one flapping relay ticks `any_changed`
+/// on every poll while the derived state stays put. Every `Online` reaching
+/// the subscriber in `api/nostr.rs` costs a capability fetch, an outbox flush
+/// and a full resubscribe of orders and chats — so rebroadcasting an unchanged
+/// state turns one bad relay into a permanent background storm.
+fn next_broadcast(
+    last: &mut Option<ConnectionState>,
+    current: ConnectionState,
+) -> Option<ConnectionState> {
+    if last.as_ref() == Some(&current) {
+        return None;
+    }
+    *last = Some(current.clone());
+    Some(current)
+}
 
 fn derive_connection_state(relays: &[RelayInfo]) -> ConnectionState {
     let any_connected = relays
@@ -250,3 +274,49 @@ fn map_sdk_status(s: SdkRelayStatus) -> RelayStatus {
 }
 
 use crate::rt::unix_now;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// One relay flapping while another stays connected changes a relay's
+    /// status on every poll without changing the derived state. Broadcasting
+    /// that re-ran a capability fetch, an outbox flush and a full resubscribe
+    /// of orders and chats every two seconds, indefinitely.
+    #[test]
+    fn an_unchanged_state_is_not_rebroadcast() {
+        let mut last = None;
+
+        assert_eq!(
+            next_broadcast(&mut last, ConnectionState::Online),
+            Some(ConnectionState::Online),
+            "the first observation is always a transition"
+        );
+        assert_eq!(
+            next_broadcast(&mut last, ConnectionState::Online),
+            None,
+            "a flapping relay that leaves the pool online must stay silent"
+        );
+        assert_eq!(next_broadcast(&mut last, ConnectionState::Online), None);
+    }
+
+    /// Real transitions must still get through, in both directions.
+    #[test]
+    fn a_real_transition_is_broadcast() {
+        let mut last = Some(ConnectionState::Online);
+
+        assert_eq!(
+            next_broadcast(&mut last, ConnectionState::Offline),
+            Some(ConnectionState::Offline)
+        );
+        assert_eq!(
+            next_broadcast(&mut last, ConnectionState::Reconnecting),
+            Some(ConnectionState::Reconnecting)
+        );
+        assert_eq!(
+            next_broadcast(&mut last, ConnectionState::Online),
+            Some(ConnectionState::Online),
+            "coming back online must re-arm the subscriber's recovery work"
+        );
+    }
+}
