@@ -123,6 +123,14 @@ served by the relay has expired per its NIP-40 `expiration` tag, its payload is
 unusable, or it quotes no such currency. Callers MUST treat `null` as "not
 checkable" — see `create_order` in `orders.md`.
 
+**Authenticity**: An event is only used once its Schnorr signature verifies
+against the node's pubkey, and only the newest event that does is considered.
+The kind, author and `d` tag checks say nothing on their own — a relay is free
+to answer with events the filter never asked for, and `nostr-sdk` does not
+guarantee that a fetched event was verified before it reaches the caller
+(GHSA-f96q-5f6p-v7cj) — so an unverified event would let a relay set the price
+the whole range check is measured against.
+
 **Caching**: The rate table is cached per node — never served back to a
 different one — and bounded by the event's own expiration, clamped to one hour.
 The amount fields of a range order therefore cost a single relay query.
