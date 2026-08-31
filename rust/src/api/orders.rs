@@ -892,15 +892,21 @@ pub async fn take_order(
     // success / canceled at the end); the fine-grained states only ever arrive
     // as daemon messages.
     subscribe_single_order(&order_id).await;
-    // Create a session so the chat API can look up keys immediately.
-    let _ = crate::mostro::session::session_manager()
+    // Create a session so the chat API can look up keys immediately. A
+    // SessionAlreadyExists here is benign only if the reveal's upsert won a
+    // race this per-order lock is supposed to make impossible — log it so a
+    // future lock-scope regression is visible instead of silent.
+    if let Err(e) = crate::mostro::session::session_manager()
         .create_session(
             order_id.clone(),
             trade.role.clone(),
             trade_index,
             trade.order.clone(),
         )
-        .await;
+        .await
+    {
+        log::debug!("[orders] take_order: create_session skipped: {e}");
+    }
 
     Ok(trade)
 }
@@ -2325,11 +2331,29 @@ async fn on_peer_pubkey_received(order_id: &str, peer_pubkey_hex: &str) {
             log::warn!("[orders] on_peer_pubkey_received: session update failed: {e}");
         }
     } else {
-        // Session may not exist if we received the event after a restart but
-        // before create_session ran (rare race). Create it now best-effort.
-        log::warn!(
-            "[orders] on_peer_pubkey_received: session not found for order={order_id}, skipping session update — incoming subscription still spawned"
-        );
+        // Not a rare race: the maker never passes through `take_order`'s
+        // create_session, so its first reveal always lands here. Without a
+        // session, `send_message` silently stores local-only and the
+        // attachment paths bail with SessionNotFound (ermeme review,
+        // PR #347) — rebuild it from the trade row persisted above.
+        let trade = match crate::db::app_db::db() {
+            Some(db) => db.get_trade_by_order_id(order_id).await.unwrap_or_else(|e| {
+                log::warn!(
+                    "[orders] on_peer_pubkey_received: trade lookup failed for order={order_id}: {e}"
+                );
+                None
+            }),
+            None => None,
+        };
+        match trade {
+            Some(trade) => {
+                mgr.upsert_peer_session(&trade, peer_pubkey_hex, shared_key_bytes)
+                    .await;
+            }
+            None => log::warn!(
+                "[orders] on_peer_pubkey_received: no session and no persisted trade for order={order_id} — outgoing chat stays local-only; incoming subscription still spawned"
+            ),
+        }
     }
     // Derive the chat conversation keys (K_conv / K_sign — HKDF split of the
     // trade-key ECDH secret, protocol chat spec) and spawn the incoming-chat
@@ -4715,6 +4739,86 @@ mod tests {
 
         assert!(session.peer_pubkey.is_none());
         assert!(session.shared_key.is_none());
+    }
+
+    fn dummy_trade_info(
+        order_id: &str,
+        role: TradeRole,
+        trade_key_index: u32,
+    ) -> crate::api::types::TradeInfo {
+        crate::api::types::TradeInfo {
+            id: uuid::Uuid::new_v4().to_string(),
+            order: dummy_order_info(order_id),
+            role,
+            counterparty_pubkey: String::new(),
+            current_step: crate::api::types::TradeStep::Seller(
+                crate::api::types::SellerStep::TakerFound,
+            ),
+            hold_invoice: None,
+            buyer_invoice: None,
+            trade_key_index,
+            cooperative_cancel_state: None,
+            timeout_at: None,
+            started_at: 0,
+            completed_at: None,
+            outcome: None,
+            peer_rating: None,
+            peer_reviews: None,
+            peer_days: None,
+            rated_at: None,
+        }
+    }
+
+    /// ermeme review, PR #347: the maker never passes through `take_order`'s
+    /// create_session, so when the peer reveal arrives there is no session to
+    /// update. The reveal handler (and startup chat recovery) must be able to
+    /// materialize one from the persisted trade row, or `send_message` stays
+    /// on its silent local-only path and the peer never receives anything.
+    #[tokio::test]
+    async fn maker_reveal_without_a_session_builds_one_from_the_trade_row() {
+        let order_id = uuid::Uuid::new_v4().to_string();
+        let trade = dummy_trade_info(&order_id, TradeRole::Seller, 42);
+        let peer_hex = "00000000000000000000000000000000000000000000000000000000000000aa";
+
+        let mgr = session_manager();
+        assert!(mgr.get_session(&order_id).await.is_none());
+
+        mgr.upsert_peer_session(&trade, peer_hex, [7u8; 32]).await;
+
+        let session = mgr
+            .get_session(&order_id)
+            .await
+            .expect("session materialized from the trade row");
+        assert_eq!(session.peer_pubkey.as_deref(), Some(peer_hex));
+        assert_eq!(session.shared_key, Some([7u8; 32]));
+        assert_eq!(session.trade_key_index, 42);
+        assert!(matches!(session.role, TradeRole::Seller));
+        assert_eq!(session.order.id, order_id);
+    }
+
+    /// A live session (taker path, or a daemon replay) must survive the
+    /// upsert untouched except for the peer material — and unlike
+    /// create_session, the upsert must not fail on the existing entry.
+    #[tokio::test]
+    async fn upsert_peer_session_only_touches_peer_material_on_an_existing_session() {
+        let order_id = uuid::Uuid::new_v4().to_string();
+        let order = dummy_order_info(&order_id);
+
+        let mgr = session_manager();
+        mgr.create_session(order_id.clone(), TradeRole::Buyer, 7, order)
+            .await
+            .expect("live session");
+
+        // The trade row disagrees on role and index: the live values must win.
+        let trade = dummy_trade_info(&order_id, TradeRole::Seller, 99);
+        let peer_hex = "00000000000000000000000000000000000000000000000000000000000000bb";
+        mgr.upsert_peer_session(&trade, peer_hex, [9u8; 32]).await;
+
+        let session = mgr.get_session(&order_id).await.expect("still one session");
+        assert_eq!(session.peer_pubkey.as_deref(), Some(peer_hex));
+        assert_eq!(session.shared_key, Some([9u8; 32]));
+        assert_eq!(session.trade_key_index, 7);
+        assert!(matches!(session.role, TradeRole::Buyer));
     }
 
     // ── Peer-pubkey resolution ────────────────────────────────────────────────

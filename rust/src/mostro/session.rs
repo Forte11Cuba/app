@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-use crate::api::types::{OrderInfo, TradeRole};
+use crate::api::types::{OrderInfo, TradeInfo, TradeRole};
 
 /// Per-trade session state.
 #[derive(Clone)]
@@ -27,6 +27,24 @@ pub struct Session {
     pub order: OrderInfo,
     /// Unix timestamp when the session was created.
     pub created_at: i64,
+}
+
+impl Session {
+    /// A just-created session: no peer material yet. The single source of the
+    /// field defaults — `create_session` and `upsert_peer_session` both build
+    /// through here so a new field cannot silently diverge between them.
+    fn fresh(order_id: String, role: TradeRole, trade_key_index: u32, order: OrderInfo) -> Self {
+        Self {
+            order_id,
+            role,
+            trade_key_index,
+            shared_key: None,
+            admin_shared_key: None,
+            peer_pubkey: None,
+            order,
+            created_at: crate::rt::unix_now(),
+        }
+    }
 }
 
 impl std::fmt::Debug for Session {
@@ -77,18 +95,7 @@ impl SessionManager {
             ));
         }
 
-        let now = crate::rt::unix_now();
-
-        let session = Session {
-            order_id: order_id.clone(),
-            role,
-            trade_key_index,
-            shared_key: None,
-            admin_shared_key: None,
-            peer_pubkey: None,
-            order,
-            created_at: now,
-        };
+        let session = Session::fresh(order_id.clone(), role, trade_key_index, order);
 
         let mut sessions = self.sessions.write().await;
         if sessions.contains_key(&order_id) {
@@ -105,6 +112,48 @@ impl SessionManager {
         );
         sessions.insert(order_id, session.clone());
         Ok(session)
+    }
+
+    /// Ensure a session exists for `trade` and set its peer pubkey and shared
+    /// key, in one write-lock pass.
+    ///
+    /// `create_session` only runs inside `take_order`, so a maker has no
+    /// session when the daemon reveals the peer, and *nobody* has one after a
+    /// process restart (the store is memory-only). Both the reveal handler and
+    /// startup chat recovery rebuild the session from the persisted trade row
+    /// through here; without it, `send_message` silently degrades to a
+    /// local-only store and the attachment paths bail with `SessionNotFound`
+    /// (ermeme review, PR #347).
+    ///
+    /// When a session already exists only the peer material is touched — role,
+    /// key index, and order snapshot keep their live values.
+    pub async fn upsert_peer_session(
+        &self,
+        trade: &TradeInfo,
+        peer_pubkey_hex: &str,
+        shared_key: [u8; 32],
+    ) {
+        let order_id = trade.order.id.clone();
+        let mut sessions = self.sessions.write().await;
+        let session = sessions.entry(order_id.clone()).or_insert_with(|| {
+            crate::api::logging::blog_info(
+                "session",
+                format!(
+                    "created order={} idx={} role={:?} (rebuilt from trade row)",
+                    crate::api::logging::short_id(&order_id),
+                    trade.trade_key_index,
+                    trade.role,
+                ),
+            );
+            Session::fresh(
+                order_id.clone(),
+                trade.role.clone(),
+                trade.trade_key_index,
+                trade.order.clone(),
+            )
+        });
+        session.peer_pubkey = Some(peer_pubkey_hex.to_string());
+        session.shared_key = Some(shared_key);
     }
 
     /// Update an existing session.
