@@ -314,6 +314,17 @@ impl Storage for IndexedDbStorage {
         log::warn!("mark_trade_rated: IndexedDB backend not implemented — rated marker will not persist");
         Ok(())
     }
+
+    async fn update_trade_counterparty(
+        &self,
+        _order_id: &str,
+        _counterparty_pubkey: &str,
+    ) -> Result<()> {
+        // No trades store on web yet (#233): chat identity survives only via
+        // the in-memory session created at reveal time.
+        log::warn!("update_trade_counterparty: IndexedDB backend not implemented — counterparty will not persist");
+        Ok(())
+    }
 }
 
 /// The active-node settings key (shared with the SQLite backend).

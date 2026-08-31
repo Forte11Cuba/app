@@ -1436,10 +1436,18 @@ pub(crate) async fn resubscribe_active_chats() {
 
 /// A persisted trade still needs a live chat listener: it has a known peer
 /// and has not reached a terminal outcome.
+///
+/// The daemon-pubkey check is an invariant guard (#334): a row whose
+/// "counterparty" is the Mostro node itself (rows written before the fix
+/// seeded `creator_pubkey` = the 38383 event author) would derive garbage
+/// chat keys AND claim the single-owner subscription guard with them,
+/// silently blocking the correct subscription when a replayed reveal
+/// arrives.
 fn chat_still_relevant(trade: &crate::api::types::TradeInfo) -> bool {
     use crate::api::types::OrderStatus::*;
     trade.outcome.is_none()
         && !trade.counterparty_pubkey.is_empty()
+        && trade.counterparty_pubkey != crate::config::active_mostro_pubkey()
         && matches!(
             trade.order.status,
             Pending
@@ -1929,6 +1937,13 @@ mod tests {
         let mut no_peer = base.clone();
         no_peer.counterparty_pubkey = String::new();
         assert!(!chat_still_relevant(&no_peer));
+
+        // A pre-#334 row seeded with `creator_pubkey` holds the Mostro node
+        // itself as "counterparty" — deriving chat keys from it would claim
+        // the subscription guard with garbage and block the real reveal.
+        let mut daemon_peer = base.clone();
+        daemon_peer.counterparty_pubkey = crate::config::active_mostro_pubkey();
+        assert!(!chat_still_relevant(&daemon_peer));
 
         let mut canceled = base;
         canceled.order.status = OrderStatus::Canceled;

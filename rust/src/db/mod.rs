@@ -208,4 +208,16 @@ pub trait Storage: Send + Sync {
     /// duplicate-rating guard survive a restart. No-op when no matching trade
     /// exists.
     async fn mark_trade_rated(&self, order_id: &str, rated_at: i64) -> Result<()>;
+
+    /// Persist the counterparty's trade pubkey on the trade identified by
+    /// `order.id` (issue #334). Written when a daemon message reveals it, for
+    /// both roles — the trade row is the durable peer record; the in-memory
+    /// session is only a cache. Callers must pass a non-empty pubkey: this
+    /// method never clears an already-known counterparty. No-op when no
+    /// matching trade exists.
+    async fn update_trade_counterparty(
+        &self,
+        order_id: &str,
+        counterparty_pubkey: &str,
+    ) -> Result<()>;
 }
