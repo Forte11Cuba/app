@@ -310,28 +310,41 @@ use tokio::sync::OnceCell;
 
 // ── Daemon-message deduplication ─────────────────────────────────────────────
 
-/// Tracks recently processed daemon-message event IDs to avoid duplicate processing
-/// when both the per-trade and global subscriptions receive the same event.
-static PROCESSED_GW: OnceLock<std::sync::Mutex<std::collections::VecDeque<String>>> = OnceLock::new();
+/// Sized for the global feed's history replay on reused keys: a mass replay
+/// longer than this window would evict ids that a slower relay may still
+/// redeliver within the same session.
+const DEDUP_MAX_ENTRIES: usize = 512;
+
+/// Recently processed daemon-message event IDs, so an event delivered by both
+/// the per-trade and the global subscription is only handled once.
+///
+/// `seen` answers the membership question; `order` exists only to know which
+/// id to drop when the window is full. The two must be mutated together or the
+/// set grows without bound.
+#[derive(Default)]
+struct DedupWindow {
+    seen: std::collections::HashSet<String>,
+    order: std::collections::VecDeque<String>,
+}
+
+static PROCESSED_GW: OnceLock<std::sync::Mutex<DedupWindow>> = OnceLock::new();
 
 /// Returns `true` if this event ID was already processed (duplicate).
 /// Otherwise records it and returns `false`.
 fn is_duplicate_daemon_message(event_id: &str) -> bool {
-    // Sized for the global feed's history replay on reused keys: a mass
-    // replay longer than this window would evict ids that a slower relay
-    // may still redeliver within the same session.
-    const MAX_ENTRIES: usize = 512;
-    let deque = PROCESSED_GW.get_or_init(|| std::sync::Mutex::new(std::collections::VecDeque::new()));
-    let mut guard = match deque.lock() {
+    let window = PROCESSED_GW.get_or_init(|| std::sync::Mutex::new(DedupWindow::default()));
+    let mut guard = match window.lock() {
         Ok(g) => g,
         Err(_) => return false,
     };
-    if guard.iter().any(|id| id == event_id) {
+    if !guard.seen.insert(event_id.to_string()) {
         return true;
     }
-    guard.push_back(event_id.to_string());
-    if guard.len() > MAX_ENTRIES {
-        guard.pop_front();
+    guard.order.push_back(event_id.to_string());
+    if guard.order.len() > DEDUP_MAX_ENTRIES {
+        if let Some(evicted) = guard.order.pop_front() {
+            guard.seen.remove(&evicted);
+        }
     }
     false
 }
@@ -3706,6 +3719,28 @@ mod tests {
     use super::*;
     use crate::api::types::TradeRole;
     use crate::mostro::session::session_manager;
+
+    /// The window must recognize a repeat, and must forget an id once
+    /// `DEDUP_MAX_ENTRIES` newer ones have arrived — otherwise it would grow
+    /// without bound.
+    #[test]
+    fn daemon_message_dedup_recognizes_repeats_and_evicts_oldest() {
+        // Prefixed so this test cannot collide with the shared global window.
+        let id = |n: usize| format!("dedup-test-{n:06}");
+
+        assert!(!is_duplicate_daemon_message(&id(0)));
+        assert!(is_duplicate_daemon_message(&id(0)));
+
+        // One more than capacity, so id(0) is pushed out of the window.
+        for n in 1..=DEDUP_MAX_ENTRIES {
+            is_duplicate_daemon_message(&id(n));
+        }
+
+        assert!(
+            !is_duplicate_daemon_message(&id(0)),
+            "the oldest id should have been evicted once the window filled"
+        );
+    }
 
     #[test]
     fn the_solver_pubkey_is_read_from_a_peer_payload() {
