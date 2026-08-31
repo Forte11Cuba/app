@@ -60,6 +60,15 @@ CREATE TABLE IF NOT EXISTS trades (
     completed_at    INTEGER
 );
 
+-- `trades.id` is a fresh UUID for takers, so every lookup by order id has to
+-- reach inside the JSON blob. The expression here must stay byte-identical to
+-- the one in the six `WHERE json_extract(data, '$.order.id') = ?` queries in
+-- sqlite.rs, or SQLite silently falls back to a full scan that re-parses every
+-- row — on the ingest path that runs once per non-pending order event.
+CREATE INDEX IF NOT EXISTS idx_trades_order_id
+    ON trades(json_extract(data, '$.order.id'));
+CREATE INDEX IF NOT EXISTS idx_trades_status ON trades(status);
+
 -- Chat history + durable replay dedup (issue #246). `trade_id` here is the
 -- **order id** — the identity chat keys are derived from — which for taken
 -- orders differs from the `trades.id` UUID, so deliberately NO foreign key
