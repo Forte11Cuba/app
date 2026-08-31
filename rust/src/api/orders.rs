@@ -3097,7 +3097,9 @@ fn admin_pubkey_from_payload(
 /// rejects it (`InvalidPeer`, #326). This mirrors the v1 client, which keys the
 /// trade index by daemon UUID and never by order content.
 async fn bridge_fingerprint_trade_index(order_id: &str, trade_idx: u32) {
-    if get_trade_key_index(order_id).await.is_none() {
+    // "No binding yet" is the case this function exists to handle, so the
+    // warning variant would fire on the normal path.
+    if lookup_trade_key_index(order_id).await.is_none() {
         store_trade_key_index(order_id, trade_idx).await;
     }
 }
@@ -3116,7 +3118,7 @@ async fn ingest_order_event(event: &nostr_sdk::Event) {
     );
     match parse_order_event(event, None) {
         Some(mut info) => {
-            log::info!(
+            log::debug!(
                 "[orders] parsed order id={} kind={:?} status={:?}",
                 info.id,
                 info.kind,
@@ -3134,7 +3136,10 @@ async fn ingest_order_event(event: &nostr_sdk::Event) {
                     &info.payment_method,
                 );
                 log::debug!("[orders] fingerprint check order={} ck={ck}", info.id);
-                if let Some(trade_idx) = get_trade_key_index(&ck).await {
+                // A miss is the expected case here: every order from another
+                // user fails this lookup, so the warning variant would fire
+                // once per ingested event.
+                if let Some(trade_idx) = lookup_trade_key_index(&ck).await {
                     info.is_mine = true;
                     // Bridge content fingerprint → daemon UUID so subsequent
                     // actions (cancel) can look up the trade key by real order ID.
