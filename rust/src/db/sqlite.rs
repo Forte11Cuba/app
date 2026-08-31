@@ -1,6 +1,9 @@
 /// SQLite storage backend — native platforms only.
 use anyhow::Result;
-use sqlx::{sqlite::SqlitePoolOptions, SqlitePool};
+use sqlx::{
+    sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous},
+    SqlitePool,
+};
 
 use crate::api::types::{
     ChatMessage, IdentityInfo, OrderInfo, QueuedMessageStatus, RelayInfo, TradeInfo,
@@ -8,15 +11,33 @@ use crate::api::types::{
 use crate::db::{schema::SQLITE_INIT_SQL, settings_keys, Storage};
 use crate::queue::outbox::QueuedMessage;
 
+/// Size of the connection pool.
+const MAX_CONNECTIONS: u32 = 4;
+
 pub struct SqliteStorage {
     pool: SqlitePool,
 }
 
 impl SqliteStorage {
     pub async fn open(path: &str) -> Result<Self> {
+        // Every pragma here is applied per connection as the pool opens it.
+        // `foreign_keys` in particular is connection-scoped, so setting it
+        // through a query on the pool only configures whichever single
+        // connection served that query.
+        //
+        // `synchronous = NORMAL` is the documented companion to WAL: durable
+        // across process crashes, and it drops the fsync that every write
+        // otherwise pays on mobile flash.
+        let options = SqliteConnectOptions::new()
+            .filename(path)
+            .create_if_missing(true)
+            .journal_mode(SqliteJournalMode::Wal)
+            .synchronous(SqliteSynchronous::Normal)
+            .foreign_keys(true);
+
         let pool = SqlitePoolOptions::new()
-            .max_connections(4)
-            .connect(&format!("sqlite://{}?mode=rwc", path))
+            .max_connections(MAX_CONNECTIONS)
+            .connect_with(options)
             .await?;
         Self::migrate(&pool).await?;
         sqlx::query(SQLITE_INIT_SQL).execute(&pool).await?;
@@ -650,6 +671,45 @@ mod tests {
         static COUNTER: AtomicU32 = AtomicU32::new(0);
         let n = COUNTER.fetch_add(1, Ordering::Relaxed);
         std::env::temp_dir().join(format!("mostro_test_{}_{n}.db", std::process::id()))
+    }
+
+    /// `foreign_keys` is a per-connection pragma, so running it once through
+    /// the pool leaves the other connections with enforcement off — whichever
+    /// one a given write lands on decides whether constraints apply.
+    #[tokio::test]
+    async fn every_pooled_connection_gets_the_pragmas() {
+        let path = temp_db_path();
+        let storage = SqliteStorage::open(path.to_str().unwrap()).await.unwrap();
+
+        // Hold every connection at once so the pool must hand out distinct ones.
+        let mut conns = Vec::new();
+        for _ in 0..MAX_CONNECTIONS {
+            conns.push(storage.pool.acquire().await.unwrap());
+        }
+
+        for (i, conn) in conns.iter_mut().enumerate() {
+            let fk: i64 = sqlx::query_scalar("PRAGMA foreign_keys")
+                .fetch_one(&mut **conn)
+                .await
+                .unwrap();
+            assert_eq!(fk, 1, "foreign_keys off on connection {i}");
+
+            let sync: i64 = sqlx::query_scalar("PRAGMA synchronous")
+                .fetch_one(&mut **conn)
+                .await
+                .unwrap();
+            assert_eq!(sync, 1, "synchronous should be NORMAL(1) on connection {i}");
+
+            let journal: String = sqlx::query_scalar("PRAGMA journal_mode")
+                .fetch_one(&mut **conn)
+                .await
+                .unwrap();
+            assert_eq!(journal, "wal", "journal_mode not WAL on connection {i}");
+        }
+
+        drop(conns);
+        drop(storage);
+        let _ = std::fs::remove_file(&path);
     }
 
     #[tokio::test]
