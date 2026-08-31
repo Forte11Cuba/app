@@ -63,8 +63,13 @@ reply. Without that, the daemon could accept the first attempt while the client
 had already discarded every way to recognize the answer — the trade would move
 to `Disputed` with no dispute record, the split state this whole change set
 exists to remove. A retry whose publish fails rolls back only itself and
-restores the attempt it replaced. The list of superseded nonces is bounded, so
-a retry loop cannot grow the record without end.
+restores the attempt it replaced.
+
+No retry count changes this: **every** superseded nonce is retained, because
+every one of them is still answerable and dropping one turns its acceptance
+back into that same bare status update. The list only grows through retries the
+user drives, each gated by the 10 s timeout, and the whole record is purged when
+the trade's subscription ends.
 
 The local status check and the reply correlation are two layers of the same
 concern: the check keeps most rejections off the wire, and the correlation

@@ -30,8 +30,8 @@ a stale replay:
   went with the timed-out call). So a `NoDaemonResponse` from `open_dispute` is
   **not** proof that no dispute can appear for that trade later. Retrying after
   the timeout does not break this: the retry takes the trade key over but
-  carries the superseded attempt's nonce forward, so a reply to either one is
-  still correlated. See [disputes.md](disputes.md) for the full behavior.
+  carries every superseded attempt's nonce forward, so a reply to any of them
+  is still correlated. See [disputes.md](disputes.md) for the full behavior.
 
 ## Functions
 

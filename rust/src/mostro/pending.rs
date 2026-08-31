@@ -108,14 +108,18 @@ pub(crate) enum PendingRequestKind {
         /// purpose so a genuine late acceptance still reconciles, and a retry
         /// must not undo that: a reply echoing one of these is still ours,
         /// even though this record now owns the key (PR #275 review).
+        ///
+        /// The list is not capped. Every entry is still answerable — the
+        /// daemon may accept any attempt it received — and dropping one turns
+        /// its acceptance back into a bare status update, the disputed trade
+        /// with no dispute record this whole change set exists to remove. The
+        /// list only grows through user-driven retries, each gated by a 10 s
+        /// timeout, and the whole record is purged when the trade's
+        /// subscription ends, so eight bytes per retry is not worth trading
+        /// that correctness for.
         superseded: Vec<u64>,
     },
 }
-
-/// How many superseded open-dispute nonces one trade key keeps. Every entry is
-/// a retry the user drove after a 10 s timeout, so the bound is generous; it
-/// exists only so a pathological retry loop cannot grow the record without end.
-const MAX_SUPERSEDED_DISPUTE_NONCES: usize = 8;
 
 /// What a `DisputeInitiatedByYou` turned out to be for this trade key.
 pub(crate) enum DisputeMatch {
@@ -386,10 +390,6 @@ pub(crate) fn register_dispute_request(
                 ..
             }) => {
                 superseded.push(replaced);
-                let overflow = superseded
-                    .len()
-                    .saturating_sub(MAX_SUPERSEDED_DISPUTE_NONCES);
-                superseded.drain(..overflow);
                 superseded
             }
             _ => Vec::new(),
@@ -1158,12 +1158,16 @@ mod tests {
         assert!(!pending_requests().lock().unwrap().contains_key(key));
     }
 
-    /// The superseded list is bounded: a retry loop cannot grow one record
-    /// without end, and the oldest nonces are the ones dropped.
+    /// No retry count makes an attempt uncorrelatable. A capped list would
+    /// drop the oldest nonce, and the daemon's acceptance for that attempt
+    /// would then match nothing and fall through as a bare status update —
+    /// exactly the disputed-trade-without-a-dispute-record split state this
+    /// change set removes (PR #275 review). So every superseded nonce is
+    /// retained, and the oldest one still reconciles.
     #[tokio::test]
-    async fn superseded_dispute_nonces_are_bounded() {
-        let key = "test-dispute-supersede-bound-pubkey";
-        let total = MAX_SUPERSEDED_DISPUTE_NONCES as u64 + 3;
+    async fn every_superseded_dispute_nonce_stays_answerable() {
+        let key = "test-dispute-supersede-retention-pubkey";
+        let total = 12u64;
         for nonce in 1..=total {
             let _rx = register_dispute_request(key.to_string(), nonce, 1);
             detach_request_waiter(key, nonce);
@@ -1174,12 +1178,22 @@ mod tests {
             let PendingRequestKind::Dispute { superseded } = &map.get(key).unwrap().kind else {
                 panic!("must be a dispute record");
             };
-            assert_eq!(superseded.len(), MAX_SUPERSEDED_DISPUTE_NONCES);
-            assert_eq!(
-                superseded.first(),
-                Some(&(total - MAX_SUPERSEDED_DISPUTE_NONCES as u64))
-            );
+            assert_eq!(superseded.len() as u64, total - 1);
+            assert_eq!(superseded.first(), Some(&1));
             assert_eq!(superseded.last(), Some(&(total - 1)));
+        }
+
+        // The very first attempt, superseded eleven times over, is still ours.
+        assert!(matches!(
+            take_matching_dispute(key, Some(1)),
+            Some(DisputeMatch::Late)
+        ));
+        // The live record survives it, waiter attached, as for any other
+        // superseded match.
+        {
+            let map = pending_requests().lock().unwrap();
+            let entry = map.get(key).expect("the live record must survive");
+            assert_eq!(entry.request_id, total);
         }
 
         purge_pending_request(key);
