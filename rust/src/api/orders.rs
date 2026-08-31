@@ -2306,6 +2306,16 @@ async fn on_peer_pubkey_received(order_id: &str, peer_pubkey_hex: &str) {
         "[orders] on_peer_pubkey_received: order={order_id}          peer={peer_pubkey_hex} shared_pubkey={}",
         shared_pubkey.to_hex()
     );
+    // Persist the peer pubkey on the trade row. The session below is
+    // in-memory only, so without this write the maker's trade keeps the
+    // empty counterparty_pubkey it was created with — the chat UI can never
+    // resolve the peer's nym and `resubscribe_active_chats` skips the trade
+    // after a restart. Idempotent on daemon replays.
+    if let Some(db) = crate::db::app_db::db() {
+        if let Err(e) = db.update_trade_counterparty(order_id, peer_pubkey_hex).await {
+            log::warn!("[orders] on_peer_pubkey_received: counterparty persist failed for order={order_id}: {e}");
+        }
+    }
     // Update or create the session with peer + shared key.
     let mgr = crate::mostro::session::session_manager();
     if let Some(mut session) = mgr.get_session(order_id).await {

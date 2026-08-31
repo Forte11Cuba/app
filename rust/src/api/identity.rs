@@ -737,6 +737,13 @@ mod tests {
         async fn delete_identity(&self) -> Result<()> {
             unimplemented!()
         }
+        async fn update_trade_counterparty(
+            &self,
+            _order_id: &str,
+            _counterparty_pubkey: &str,
+        ) -> Result<()> {
+            unimplemented!()
+        }
         async fn update_trade_peer_reputation(
             &self,
             _order_id: &str,

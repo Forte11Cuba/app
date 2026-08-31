@@ -9,6 +9,8 @@ import 'package:mostro/features/chat/widgets/info_panels.dart';
 import 'package:mostro/features/chat/widgets/message_bubble.dart';
 import 'package:mostro/features/chat/widgets/message_input.dart';
 import 'package:mostro/features/chat/widgets/trade_state_header.dart';
+import 'package:mostro/features/order/providers/trade_state_provider.dart';
+import 'package:mostro/features/trades/providers/trades_providers.dart';
 import 'package:mostro/l10n/app_localizations.dart';
 import 'package:mostro/shared/widgets/bottom_nav_bar.dart';
 import 'package:mostro/shared/widgets/nym_avatar.dart';
@@ -55,6 +57,7 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
   @override
   void initState() {
     super.initState();
+    _hydrateRoom();
     _loadHistory();
     _markRead();
   }
@@ -103,6 +106,28 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
       ref.read(chatRoomsNotifierProvider.notifier).markRead(widget.orderId);
     } catch (e) {
       debugPrint('[chat] markAsRead failed: $e');
+    }
+  }
+
+  /// Ensures this trade's room exists in [chatRoomsNotifierProvider] with a
+  /// resolved peer identity.
+  ///
+  /// The chat-list screen is the only other place that hydrates the notifier,
+  /// so reaching this screen directly (trade-detail chat chip, deep link)
+  /// would otherwise leave [_resolveRoom] on its empty-handle placeholder and
+  /// the header stuck on the localized "Unknown" fallback.
+  Future<void> _hydrateRoom() async {
+    final rooms = ref.read(chatRoomsNotifierProvider);
+    final index = rooms.indexWhere((r) => r.orderId == widget.orderId);
+    if (index >= 0 && rooms[index].peerPubkey.isNotEmpty) return;
+    try {
+      final trade = await ref.read(tradeInfoProvider(widget.orderId).future);
+      if (trade == null || !mounted) return;
+      final room = await tradeInfoToChatRoom(trade);
+      if (room == null || !mounted) return;
+      ref.read(chatRoomsNotifierProvider.notifier).upsertRoom(room);
+    } catch (e) {
+      debugPrint('[chat] hydrateRoom failed: $e');
     }
   }
 
@@ -207,6 +232,12 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
     required List<ChatRoomState> rooms,
   }) {
     final room = _resolveRoom(rooms);
+    if (room.peerPubkey.isEmpty) {
+      // A message beat the initial hydration: without this retry the
+      // empty-pubkey placeholder gets upserted into the room list and its
+      // entry stays on the "Unknown" fallback until the chat list re-syncs.
+      unawaited(_hydrateRoom());
+    }
     // Use the bridge-provided isRead / isMine flags rather than recomputing
     // from local _messages, which may not yet reflect the latest markAsRead
     // call (the bridge call is async and may still be in flight).
@@ -241,6 +272,20 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
     ref.listen<AsyncValue<rust_types.ChatMessage>>(
       incomingMessageProvider(widget.orderId),
       (_, next) => next.whenData(_onIncomingMessage),
+    );
+
+    // Re-hydrate when this trade changes: the daemon message that carries the
+    // peer pubkey (BuyerTookOrder / HoldInvoicePaymentAccepted) can land while
+    // this screen is already open, after initState's hydration found no
+    // counterparty. The explicit refresh makes the subsequent trade fetch
+    // bypass the pre-update cache regardless of listener ordering.
+    ref.listen<AsyncValue<rust_types.TradeUpdate>>(
+      tradeUpdatesProvider,
+      (_, next) => next.whenData((update) {
+        if (update.orderId != widget.orderId) return;
+        refreshTrades(ref);
+        unawaited(_hydrateRoom());
+      }),
     );
 
     final l10n = AppLocalizations.of(context);
