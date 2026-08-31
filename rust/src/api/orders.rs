@@ -2377,6 +2377,19 @@ async fn on_peer_pubkey_received(
             return;
         }
     };
+    apply_peer_reveal(order_id, peer_pubkey_hex, &trade_keys, trade_index, role).await;
+}
+
+/// Everything after the identity load, split out so tests can exercise the
+/// session logic with generated keys instead of mutating the process-global
+/// identity (shared with every other test in the binary).
+async fn apply_peer_reveal(
+    order_id: &str,
+    peer_pubkey_hex: &str,
+    trade_keys: &nostr_sdk::Keys,
+    trade_index: u32,
+    role: Option<TradeRole>,
+) {
     let peer_pubkey = match nostr_sdk::PublicKey::from_hex(peer_pubkey_hex) {
         Ok(pk) => pk,
         Err(e) => {
@@ -2386,7 +2399,7 @@ async fn on_peer_pubkey_received(
     };
     // Derive the 32-byte ECDH shared secret.
     let shared_key_bytes =
-        match crate::crypto::ecdh::derive_nip04_shared_key(&trade_keys, &peer_pubkey) {
+        match crate::crypto::ecdh::derive_nip04_shared_key(trade_keys, &peer_pubkey) {
             Ok(k) => k,
             Err(e) => {
                 log::error!("[orders] on_peer_pubkey_received: ECDH failed: {e}");
@@ -2468,7 +2481,7 @@ async fn on_peer_pubkey_received(
     // Derive the chat conversation keys (K_conv / K_sign — HKDF split of the
     // trade-key ECDH secret, protocol chat spec) and spawn the incoming-chat
     // subscription pinned to their author key.
-    let (conv, sign) = match crate::crypto::chat_keys::derive_chat_keys(&trade_keys, &peer_pubkey)
+    let (conv, sign) = match crate::crypto::chat_keys::derive_chat_keys(trade_keys, &peer_pubkey)
     {
         Ok(pair) => pair,
         Err(e) => {
@@ -2477,6 +2490,7 @@ async fn on_peer_pubkey_received(
         }
     };
     let order_id_owned = order_id.to_string();
+    let trade_keys = trade_keys.clone();
     crate::rt::spawn(async move {
         crate::api::messages::subscribe_incoming_chat(
             crate::api::messages::ChatChannel::Peer,
@@ -4885,6 +4899,36 @@ mod tests {
         )
         .await;
         // If we reach here without panicking the test passes.
+    }
+
+    /// The maker path of #334: a reveal with no existing session creates one
+    /// carrying the peer pubkey and the ECDH shared key, sourcing order info
+    /// from the public book (the maker's trade row may not exist yet, and on
+    /// web never does). Exercised through `apply_peer_reveal` with generated
+    /// keys — loading a real identity would mutate process-global state
+    /// shared with every other test in the binary.
+    #[tokio::test]
+    async fn peer_reveal_creates_missing_maker_session() {
+        let order_id = uuid::Uuid::new_v4().to_string();
+        let trade_keys = nostr_sdk::Keys::generate();
+        let peer_keys = nostr_sdk::Keys::generate();
+        let peer_hex = peer_keys.public_key().to_hex();
+
+        order_book().upsert_order(dummy_order_info(&order_id)).await;
+
+        apply_peer_reveal(&order_id, &peer_hex, &trade_keys, 7, Some(TradeRole::Seller)).await;
+
+        let session = session_manager()
+            .get_session(&order_id)
+            .await
+            .expect("reveal must create the maker's missing session");
+        assert!(matches!(session.role, TradeRole::Seller));
+        assert_eq!(session.trade_key_index, 7);
+        assert_eq!(session.peer_pubkey.as_deref(), Some(peer_hex.as_str()));
+        let expected =
+            crate::crypto::ecdh::derive_nip04_shared_key(&trade_keys, &peer_keys.public_key())
+                .expect("ECDH derivation");
+        assert_eq!(session.shared_key, Some(expected));
     }
 
     // ── #259 per-order dispatch serialization ─────────────────────────────────
