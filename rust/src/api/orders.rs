@@ -3002,42 +3002,44 @@ async fn build_trade_key_map() -> HashMap<String, (nostr_sdk::Keys, u32)> {
 /// Finds which trade key the event is addressed to (via `p` tag), decrypts
 /// via `mostro_core::transport::unwrap_incoming`, and dispatches the recovered
 /// `Message` through `dispatch_mostro_message`.
-async fn handle_global_daemon_message(
+/// Find which of our trade keys this kind-14 is addressed to, reading the key
+/// map only for the lookup itself.
+///
+/// The read guard must not be held past this point: handling a message can end
+/// up in `ensure_global_dm_coverage`, which takes the same lock for writing.
+async fn resolve_dm_recipient(
     event: &nostr_sdk::Event,
-    trade_key_map: &HashMap<String, (nostr_sdk::Keys, u32)>,
-) {
-    // Find the p-tag that matches one of our trade keys.
-    let (recipient_hex, recipient_keys, trade_idx) = {
-        let mut found = None;
-        for tag in event.tags.iter() {
-            let s = tag.as_slice();
-            if s.first().map(|v| v.as_str()) == Some("p") {
-                if let Some(pk_hex) = s.get(1).map(|v| v.as_str()) {
-                    if let Some((keys, idx)) = trade_key_map.get(pk_hex) {
-                        found = Some((pk_hex.to_string(), keys.clone(), *idx));
-                        break;
-                    }
+) -> Option<(String, nostr_sdk::Keys, u32)> {
+    let map = global_dm_keys().read().await;
+    for tag in event.tags.iter() {
+        let s = tag.as_slice();
+        if s.first().map(|v| v.as_str()) == Some("p") {
+            if let Some(pk_hex) = s.get(1).map(|v| v.as_str()) {
+                if let Some((keys, idx)) = map.get(pk_hex) {
+                    return Some((pk_hex.to_string(), keys.clone(), *idx));
                 }
             }
         }
-        match found {
-            Some(f) => f,
-            None => {
-                // The bulk filter pins author + our own p-tags, so a kind-14
-                // that reaches here without a matching key is an anomaly
-                // (stale filter after regenerate? key map gap?) — worth a warn.
-                crate::api::logging::blog_warn(
-                    "daemon-msg",
-                    format!(
-                        "drop ev={} reason=no-matching-p-tag map={}",
-                        crate::api::logging::short_id(&event.id.to_hex()),
-                        trade_key_map.len(),
-                    ),
-                );
-                return;
-            }
-        }
-    };
+    }
+    // The bulk filter pins author + our own p-tags, so a kind-14 that reaches
+    // here without a matching key is an anomaly (stale filter after
+    // regenerate? key map gap?) — worth a warn.
+    crate::api::logging::blog_warn(
+        "daemon-msg",
+        format!(
+            "drop ev={} reason=no-matching-p-tag map={}",
+            crate::api::logging::short_id(&event.id.to_hex()),
+            map.len(),
+        ),
+    );
+    None
+}
+
+async fn handle_global_daemon_message(
+    event: &nostr_sdk::Event,
+    recipient: (String, nostr_sdk::Keys, u32),
+) {
+    let (recipient_hex, recipient_keys, trade_idx) = recipient;
 
     let eid = event.id.to_hex();
     if is_duplicate_daemon_message(&eid) {
@@ -3292,8 +3294,9 @@ async fn _run_order_subscription() {
                     if event.pubkey != active_mostro {
                         continue;
                     }
-                    let keys = global_dm_keys().read().await.clone();
-                    handle_global_daemon_message(&event, &keys).await;
+                    if let Some(recipient) = resolve_dm_recipient(&event).await {
+                        handle_global_daemon_message(&event, recipient).await;
+                    }
                     continue;
                 }
 
@@ -3706,6 +3709,35 @@ mod tests {
     use super::*;
     use crate::api::types::TradeRole;
     use crate::mostro::session::session_manager;
+
+    #[tokio::test]
+    async fn dm_recipient_is_resolved_from_the_p_tag() {
+        use nostr_sdk::{EventBuilder, Kind, Tag};
+
+        let mine = nostr_sdk::Keys::generate();
+        let mine_hex = mine.public_key().to_hex();
+        let stranger = nostr_sdk::Keys::generate();
+        global_dm_keys()
+            .write()
+            .await
+            .insert(mine_hex.clone(), (mine.clone(), 7));
+
+        let addressed_to_us = EventBuilder::new(Kind::PrivateDirectMessage, "")
+            .tags([Tag::parse(["p", &mine_hex]).unwrap()])
+            .sign_with_keys(&nostr_sdk::Keys::generate())
+            .unwrap();
+        let resolved = resolve_dm_recipient(&addressed_to_us).await;
+        assert!(
+            matches!(resolved, Some((ref hex, _, 7)) if *hex == mine_hex),
+            "p-tag matching one of our trade keys must resolve to it"
+        );
+
+        let addressed_elsewhere = EventBuilder::new(Kind::PrivateDirectMessage, "")
+            .tags([Tag::parse(["p", &stranger.public_key().to_hex()]).unwrap()])
+            .sign_with_keys(&nostr_sdk::Keys::generate())
+            .unwrap();
+        assert!(resolve_dm_recipient(&addressed_elsewhere).await.is_none());
+    }
 
     #[test]
     fn the_solver_pubkey_is_read_from_a_peer_payload() {
