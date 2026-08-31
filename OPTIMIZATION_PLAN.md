@@ -131,6 +131,10 @@ Independent one-to-few-line fixes. Land in any order.
   stale — and value equality (added in PR 2.7) then actively suppresses the rebuild that would
   have refreshed them. It must stay derived from the current time at render, or move into a
   timer-driven leaf.
+- **Known limitation this surfaced (pre-existing, not introduced here):** the card's age text
+  only refreshes when the list rebuilds, i.e. on a book emission. On a quiet book the ages
+  drift — "5 minutes ago" can sit there considerably longer. True before any of this work and
+  unchanged by it; the fix is the timer-driven leaf above, worth its own small PR.
 - **Value equality moved to PR 2.7**, where `orderByIdProvider`'s `select` is the caller that
   makes it do something. On its own it saves nothing: Flutter rebuilds a `StatelessWidget`
   whenever its parent does, regardless of field equality.
