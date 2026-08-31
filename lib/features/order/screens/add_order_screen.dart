@@ -60,6 +60,19 @@ class AddOrderScreen extends ConsumerStatefulWidget {
   return null;
 }
 
+/// The amount [text] holds, or null when it is not one the form can submit.
+///
+/// `Infinity`, `-Infinity` and `NaN` all parse as doubles and would pass a
+/// bare positivity check, only to throw in the sats conversion further down —
+/// while the screen is building. Nothing filters the amount fields' input, so
+/// a pasted value can be any of them.
+@visibleForTesting
+double? enteredAmount(String text) {
+  final value = double.tryParse(text.trim());
+  if (value == null || !value.isFinite || value <= 0) return null;
+  return value;
+}
+
 /// Returns the node's accepted `(min, max)` sats range, and that range in
 /// fiat, when a market-price order's amount prices outside it, otherwise null.
 ///
@@ -193,12 +206,11 @@ class _AddOrderScreenState extends ConsumerState<AddOrderScreen> {
     }
 
     if (_isRange) {
-      final min = double.tryParse(_minController.text);
-      final max = double.tryParse(_maxController.text);
-      return min != null && max != null && min > 0 && min < max;
+      final min = enteredAmount(_minController.text);
+      final max = enteredAmount(_maxController.text);
+      return min != null && max != null && min < max;
     } else {
-      final amount = double.tryParse(_amountController.text);
-      return amount != null && amount > 0;
+      return enteredAmount(_amountController.text) != null;
     }
   }
 
@@ -615,14 +627,14 @@ class _AddOrderScreenState extends ConsumerState<AddOrderScreen> {
     // Fiat side, mirroring _checkValid's rules.
     String? amountStr;
     if (_isRange) {
-      final min = double.tryParse(_minController.text);
-      final max = double.tryParse(_maxController.text);
-      if (min != null && max != null && min > 0 && min < max) {
+      final min = enteredAmount(_minController.text);
+      final max = enteredAmount(_maxController.text);
+      if (min != null && max != null && min < max) {
         amountStr = '${_formatNum(min)}–${_formatNum(max)} $fiatCode';
       }
     } else {
-      final amount = double.tryParse(_amountController.text);
-      if (amount != null && amount > 0) {
+      final amount = enteredAmount(_amountController.text);
+      if (amount != null) {
         amountStr = '${_formatNum(amount)} $fiatCode';
       }
     }

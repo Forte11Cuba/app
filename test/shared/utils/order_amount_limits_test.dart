@@ -12,6 +12,28 @@ void main() {
       // 1 / 30000 * 1e8 = 3333.33…; the daemon casts to i64, so 3333.
       expect(satsFromFiat(1, 30000), 3333);
     });
+
+    test('saturates instead of overflowing on an absurd amount', () {
+      // 1e300 / 50000 * 1e8 overflows to infinity, which truncate() cannot
+      // convert; the capped result still reads as out of any node's range.
+      expect(satsFromFiat(1e300, 50000), greaterThan(0));
+      expect(satsFromFiat(double.infinity, 50000), greaterThan(0));
+    });
+
+    test('reports a conversion that is not a number as 0 sats', () {
+      expect(satsFromFiat(double.nan, 50000), 0);
+    });
+  });
+
+  group('wireFiatAmount (#337)', () {
+    /// `new_order` casts the fiat amount to `i64`, so the daemon prices the
+    /// whole unit, never the decimal the user typed.
+    test('truncates to the whole unit the wire carries', () {
+      expect(wireFiatAmount(1.1), 1);
+      expect(wireFiatAmount(100.9), 100);
+      expect(wireFiatAmount(100), 100);
+      expect(wireFiatAmount(0.9), 0);
+    });
   });
 
   group('fiatAmountLimits (#337)', () {
@@ -44,6 +66,17 @@ void main() {
         fiatAmountLimits(minSats: 100, maxSats: 500000, rate: 0).isDisplayable,
         isFalse,
       );
+    });
+
+    test('is not displayable for a non-finite rate', () {
+      for (final rate in [double.infinity, double.negativeInfinity, double.nan]) {
+        expect(
+          fiatAmountLimits(minSats: 200000, maxSats: 500000, rate: rate)
+              .isDisplayable,
+          isFalse,
+          reason: 'rate $rate must not reach ceil()/floor()',
+        );
+      }
     });
 
     /// The acceptance criterion of #337: a bound shown to the user must never
@@ -143,6 +176,30 @@ void main() {
     test('accepts a decimal amount, as the field does', () {
       expect(fiatOutOfNodeRange('100.5', 200000, 500000, 50000), isNull);
       expect(fiatOutOfNodeRange('0.5', 200000, 500000, 50000), isNotNull);
+    });
+
+    /// The decimal never reaches the daemon: `new_order` casts the fiat amount
+    /// to `i64`. Judging the untruncated value would accept 1.1 as 3666 sats
+    /// and let the daemon reject the 1 it actually receives, priced at 3333.
+    test('judges the truncated amount the wire carries, not the decimal', () {
+      expect(fiatOutOfNodeRange('1.1', 3334, 500000, 30000), isNotNull);
+      expect(fiatOutOfNodeRange('2.9', 3334, 500000, 30000), isNull);
+    });
+
+    test('returns null for a non-finite amount, which the form rejects', () {
+      for (final amount in ['Infinity', '-Infinity', 'NaN', '1e309']) {
+        expect(
+          fiatOutOfNodeRange(amount, 200000, 500000, 50000),
+          isNull,
+          reason: '$amount must not reach truncate()',
+        );
+      }
+    });
+
+    test('returns null for a non-finite rate', () {
+      for (final rate in [double.infinity, double.negativeInfinity, double.nan]) {
+        expect(fiatOutOfNodeRange('100', 200000, 500000, rate), isNull);
+      }
     });
   });
 }

@@ -67,5 +67,39 @@ void main() {
     test('fails open when the node advertises no bounds', () {
       expect(marketAmountsOutOfNodeRange(['500'], null, null, rate), isNull);
     });
+
+    test('fails open on a non-finite amount, which the form rejects', () {
+      for (final amount in ['Infinity', '-Infinity', 'NaN']) {
+        expect(
+          marketAmountsOutOfNodeRange([amount], minSats, maxSats, rate),
+          isNull,
+          reason: '$amount must not reach truncate()',
+        );
+      }
+    });
+  });
+
+  group('enteredAmount (#337)', () {
+    test('returns the amount for a submittable value', () {
+      expect(enteredAmount('150'), 150);
+      expect(enteredAmount(' 150.5 '), 150.5);
+    });
+
+    test('rejects a non-numeric or non-positive value', () {
+      expect(enteredAmount(''), isNull);
+      expect(enteredAmount('abc'), isNull);
+      expect(enteredAmount('0'), isNull);
+      expect(enteredAmount('-10'), isNull);
+    });
+
+    /// Nothing filters the amount fields' input, so these can be pasted in.
+    /// They parse as doubles and pass a bare positivity check, then throw in
+    /// the sats conversion while the screen is building.
+    test('rejects a non-finite value', () {
+      expect(enteredAmount('Infinity'), isNull);
+      expect(enteredAmount('-Infinity'), isNull);
+      expect(enteredAmount('NaN'), isNull);
+      expect(enteredAmount('1e309'), isNull);
+    });
   });
 }
