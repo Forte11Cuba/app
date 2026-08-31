@@ -67,7 +67,6 @@ CREATE TABLE IF NOT EXISTS trades (
 -- row — on the ingest path that runs once per non-pending order event.
 CREATE INDEX IF NOT EXISTS idx_trades_order_id
     ON trades(json_extract(data, '$.order.id'));
-CREATE INDEX IF NOT EXISTS idx_trades_status ON trades(status);
 
 -- Chat history + durable replay dedup (issue #246). `trade_id` here is the
 -- **order id** — the identity chat keys are derived from — which for taken

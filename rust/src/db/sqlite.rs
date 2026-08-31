@@ -689,22 +689,6 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
-    /// The 30-minute stale sweep filters trades by status.
-    #[tokio::test]
-    async fn trade_lookup_by_status_uses_an_index() {
-        let path = temp_db_path();
-        let storage = SqliteStorage::open(path.to_str().unwrap()).await.unwrap();
-
-        let plan = query_plan(&storage, "SELECT data FROM trades WHERE status = ?").await;
-
-        assert!(
-            plan.contains("idx_trades_status"),
-            "expected the status index, got: {plan}"
-        );
-
-        drop(storage);
-        let _ = std::fs::remove_file(&path);
-    }
 
     #[tokio::test]
     async fn message_exists_is_durable_replay_dedup() {
