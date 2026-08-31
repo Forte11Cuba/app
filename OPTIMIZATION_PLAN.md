@@ -28,6 +28,12 @@ regression protection.
 
 Independent one-to-few-line fixes. Land in any order.
 
+> **Status: implemented.** PRs #349, #350, #351, #352, #353, #354, #355, #356, #357, #358.
+> Two items were withdrawn after measurement rather than implemented — PR 1.10 entirely, and
+> parts of 1.5 and 1.11. Each says why, in place. A plan item that turns out to be wrong is
+> worth recording as loudly as one that ships, so nobody re-proposes it from the same static
+> reading that produced it.
+
 ### PR 1.1 — Demote hot-path logging `fix(perf)`
 - **Evidence:** `log::info!` per parsed 38383 event (`rust/src/api/orders.rs:3119-3124`, also
   `:3250`, `:2751`); `log::warn!` per trade-key cache miss (`orders.rs:71`) — misses happen for
@@ -69,9 +75,14 @@ Independent one-to-few-line fixes. Land in any order.
 - **Evidence:** (a) whole `global_dm_keys` `HashMap<String,(Keys,u32)>` cloned per kind-14
   event (`orders.rs:3295`); (b) `lock_order` runs O(n) `retain` over the lock registry on
   every acquisition (`orders.rs:155`).
-- **Fix:** (a) hold the read guard / extract the single matching key under the lock;
-  (b) prune every Nth call or on release.
+- **Fix:** (a) resolve the matching key under a short-lived read guard and pass only that
+  key on. The guard must **not** be held across the handler: handling a message can reach
+  `ensure_global_dm_coverage`, which takes the same lock for writing.
 - **Verify:** `cargo test`; no behavior change.
+- **(b) withdrawn.** The `retain` is self-limiting: sweeping eagerly is what keeps the
+  registry at roughly the number of concurrently-dispatched orders (a handful), so the scan
+  runs over a map its own eagerness keeps tiny. Making it periodic trades a tested invariant
+  (`the_registry_drops_locks_no_handler_holds`) for no measurable saving, and fails it.
 
 ### PR 1.6 — Bound the order-book relay filter `fix(nostr)`
 - **Evidence:** `all_orders_filter` is kind + author only — no `limit`, no `since`
@@ -111,21 +122,33 @@ Independent one-to-few-line fixes. Land in any order.
   add value equality and `key: ValueKey(order.id)`.
 - **Verify:** `flutter test`; DevTools rebuild counter shows unchanged rows skipped.
 
-### PR 1.10 — Fixed item extent on hot lists `perf(ui)`
-- **Evidence:** no `itemExtent`/`prototypeItem` anywhere; order cards are fixed-height by
-  design (skeleton hard-codes 172 px, `lib/shared/widgets/order_list_skeleton.dart:39`).
-  Lists: `home_screen.dart:83` and `:98`, `trades_screen.dart:95`, `chat_room_screen.dart:334`.
-- **Fix:** `prototypeItem:` (or `itemExtent:`) on the order list and trades list.
-- **Verify:** golden/widget tests unchanged; scroll of a 3k-item fixture stays at 60 fps.
+### PR 1.10 — Fixed item extent on hot lists `perf(ui)` — **WITHDRAWN, do not implement**
+- **Original premise:** order cards are fixed-height by design, so `prototypeItem`/`itemExtent`
+  would remove per-scroll layout of unknown-height children. That premise came from the
+  skeleton's hard-coded 172 px (`lib/shared/widgets/order_list_skeleton.dart:39`).
+- **Measured, and it is false.** Rendering real cards inside a `ListView` at the narrowest
+  supported width (320 px) gives **181.1 px** for a plain card but **214.1 px** for an own
+  order carrying a reason badge: the pill `Wrap` in `order_list_item.dart:129` drops to a
+  second run, exactly as its own comment says it should (shrinking the pills instead
+  ellipsized labels on small phones). A fixed extent would clip that card.
+- **Outcome:** no change made. The trades list is the other candidate, but it holds a user's
+  own trades — tens of rows, not thousands — so no hot list is left to apply this to.
+  Revisit only if the card is ever made genuinely uniform, which is a design decision.
 
 ### PR 1.11 — Trivial Dart hygiene `chore(ui)`
-- **Evidence:** themes rebuilt on every `MostroApp.build` (`lib/core/app.dart:53-54`);
-  `escrowModeProvider` infinite loop without null/close guard, non-autoDispose
-  (`lib/features/settings/providers/escrow_mode_provider.dart:16-24`); three un-stored
-  `.listen()` subscriptions in `push_notification_service.dart:79-93`.
-- **Fix:** hoist themes to `static final`; add the null-break guard (mirror
-  `home_order_providers.dart:159-162`); store and guard the listeners.
+- **Evidence:** themes rebuilt on every `MostroApp.build` (`lib/core/app.dart:53-54`); three
+  un-stored `.listen()` subscriptions in `push_notification_service.dart:79-93` with nothing
+  stopping a second `initialize()` from attaching them again.
+- **Fix:** memoize both themes in `app_theme.dart` (`ThemeData` is immutable, so every caller
+  including the golden harness benefits); guard `initialize()` with its **own** flag —
+  `_initialized` cannot be reused, it gates `deleteToken()` and must stay false on the paths
+  that bail out early.
 - **Verify:** `flutter analyze && flutter test`.
+- **`escrowModeProvider` item withdrawn.** Unlike the orders stream, `EscrowModeStream::next`
+  returns `Result` and bails on a closed channel (`rust/src/api/escrow.rs:172-182`), so Dart
+  sees a thrown error and the loop unwinds — there is no null to check and no hot loop. Its
+  non-`autoDispose` lifetime is deliberate: an app-wide capability gate fed by a rare
+  wake-up, not a per-screen subscription.
 
 ---
 
