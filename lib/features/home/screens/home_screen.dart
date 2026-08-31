@@ -87,6 +87,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           itemBuilder: (context, index) {
             final order = filteredOrders[index];
             return OrderListItem(
+              // Keyed by order id so a re-sort moves elements instead of
+              // rewriting every row in place — the list re-sorts by creation
+              // time each time a new order arrives.
+              key: ValueKey(order.id),
               order: order,
               currencyFlags: flags,
               reason: orderReasons[order.id],
@@ -107,6 +111,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         itemBuilder: (context, index) {
           final order = filteredOrders[index];
           return OrderListItem(
+            // Keyed by order id so a re-sort moves elements instead of
+            // rewriting every row in place — the list re-sorts by creation
+            // time each time a new order arrives.
+            key: ValueKey(order.id),
             order: order,
             currencyFlags: flags,
             reason: orderReasons[order.id],

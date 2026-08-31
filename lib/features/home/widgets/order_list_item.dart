@@ -9,6 +9,35 @@ import 'package:mostro/features/home/providers/home_order_providers.dart';
 import 'package:mostro/features/home/providers/order_reason_provider.dart';
 import 'package:mostro/l10n/app_localizations.dart';
 
+/// The number formatters an order card needs, built once per locale.
+///
+/// Constructing a `NumberFormat` parses its pattern and loads locale data. The
+/// card uses four of them, so building them inline meant that work ran once
+/// per visible row on every rebuild — and the order book rebuilds on every
+/// relay event.
+class OrderCardFormats {
+  OrderCardFormats._(String locale)
+      : premium = NumberFormat('+0.0;-0.0', locale),
+        rating = NumberFormat('0.##', locale),
+        decimal = NumberFormat.decimalPattern(locale);
+
+  /// Premium pill, always signed: `+2.5` / `-2.5`.
+  final NumberFormat premium;
+
+  /// Raw ratings (4.9, 4.95): up to 2 decimals, no trailing zeros.
+  final NumberFormat rating;
+
+  /// Grouped integers for the reputation strip (trade count, days active).
+  final NumberFormat decimal;
+
+  static final Map<String, OrderCardFormats> _byLocale = {};
+
+  /// Formatters for [locale]. The app ships a handful of locales, so the
+  /// cache needs no eviction.
+  static OrderCardFormats of(String locale) =>
+      _byLocale.putIfAbsent(locale, () => OrderCardFormats._(locale));
+}
+
 /// Order list item card — pixel-exact port of the "Mostro UX Redesign" mock
 /// (screen #3 · Order book with reasons to pick).
 ///
@@ -49,6 +78,7 @@ class OrderListItem extends StatelessWidget {
     final pal = OrderBookPalette.of(context);
     final l10n = AppLocalizations.of(context);
     final locale = Localizations.localeOf(context).toString();
+    final formats = OrderCardFormats.of(locale);
     final flag = currencyFlags[order.fiatCode] ?? '';
 
     // Premium pill: green < 2 (incl. negative), amber 2–5, red > 5.
@@ -58,8 +88,7 @@ class OrderListItem extends StatelessWidget {
             : order.premium > 5
             ? pal.red
             : pal.amber;
-    final premiumText =
-        '${NumberFormat('+0.0;-0.0', locale).format(order.premium)}%';
+    final premiumText = '${formats.premium.format(order.premium)}%';
 
     final (reasonLabel, reasonColor, reasonBg) = switch (reason) {
       OrderReason.bestPremium => (
@@ -221,7 +250,7 @@ class OrderListItem extends StatelessWidget {
                       Icon(Icons.star, size: 16, color: pal.gold),
                       const SizedBox(width: 4),
                       Text(
-                        _formatRating(order.rating, locale),
+                        formats.rating.format(order.rating),
                         style: TextStyle(
                           color: pal.textPrimary,
                           fontSize: 13,
@@ -235,9 +264,7 @@ class OrderListItem extends StatelessWidget {
                       ),
                       const SizedBox(width: 14),
                       _StatText(
-                        value: NumberFormat.decimalPattern(
-                          locale,
-                        ).format(order.tradeCount),
+                        value: formats.decimal.format(order.tradeCount),
                         label: l10n.reputationTradesLabel(order.tradeCount),
                         palette: pal,
                       ),
@@ -249,9 +276,7 @@ class OrderListItem extends StatelessWidget {
                       const SizedBox(width: 14),
                       Flexible(
                         child: _StatText(
-                          value: NumberFormat.decimalPattern(
-                            locale,
-                          ).format(order.daysActive),
+                          value: formats.decimal.format(order.daysActive),
                           label: l10n.reputationDaysLabel(order.daysActive),
                           palette: pal,
                         ),
@@ -273,12 +298,6 @@ class OrderListItem extends StatelessWidget {
         ),
       ),
     ).withAutomationId(AutomationIds.orderBookItem(order.id));
-  }
-
-  /// Mock renders raw ratings (4.9, 4.95): up to 2 decimals, no trailing
-  /// zeros, localized decimal separator.
-  String _formatRating(double rating, String locale) {
-    return NumberFormat('0.##', locale).format(rating);
   }
 
   String _relativeTime(DateTime dt, AppLocalizations l10n) {
