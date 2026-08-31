@@ -28,7 +28,9 @@ regression protection.
 
 Independent one-to-few-line fixes. Land in any order.
 
-> **Status: implemented.** PRs #349, #350, #351, #352, #353, #354, #355, #356, #357, #358.
+> **Status: implemented.** PRs #349, #350, #351, #352, #353, #355, #356, #357, #358.
+> **#354 (PR 1.6) was opened and then closed** after review showed the bound it added could
+> silently truncate the order book while protecting against nothing — see the entry below.
 > Two items were withdrawn after measurement rather than implemented — PR 1.10 entirely, and
 > parts of 1.5 and 1.11. Each says why, in place. A plan item that turns out to be wrong is
 > worth recording as loudly as one that ships, so nobody re-proposes it from the same static
@@ -84,15 +86,20 @@ Independent one-to-few-line fixes. Land in any order.
   runs over a map its own eagerness keeps tiny. Making it periodic trades a tested invariant
   (`the_registry_drops_locks_no_handler_holds`) for no measurable saving, and fails it.
 
-### PR 1.6 — Bound the order-book relay filter `fix(nostr)`
-- **Evidence:** `all_orders_filter` is kind + author only — no `limit`, no `since`
-  (`rust/src/nostr/order_events.rs:217-221`); used by the live subscription (`orders.rs:2785`)
-  and full refetch (`orders.rs:2744`). Unbounded replay grows with node age and is uncapped
-  against a misbehaving relay.
-- **Fix:** add `.limit(N)` (e.g. 2000) to both; `.since(now − retention_window)` on the
-  refetch path.
-- **Verify:** subscription still yields the full pending book against the live node; unit
-  test on filter construction.
+### PR 1.6 — Bound the order-book relay filter `fix(nostr)` — **WITHDRAWN, do not implement**
+- **Was implemented as #354, then closed** after review (Codex P1, CodeRabbit Major).
+- **The protection was illusory.** `.limit(N)` is a request hint a relay applies to *stored*
+  events before EOSE. It bounds nothing after EOSE, and a misbehaving relay — the threat it
+  was named for — is not bound by a hint it can ignore.
+- **The cost was real.** Both the live subscription and the refetch go through this filter, so
+  a relay honouring the limit by returning the newest N truncates the rest: once a node carries
+  more than the cap, some pending orders never enter the book and the user sees an incomplete
+  market, silently. That is the exact failure this whole effort exists to prevent. A larger N
+  only moves the cliff somewhere less tested.
+- **`.since()` was never safe either:** order lifetime comes from the daemon's `expiration`
+  tag, with no client-side retention policy to derive a cutoff from.
+- **If the unbounded replay is to be bounded, it needs pagination or a status-scoped protocol
+  query** — and a test with more than N active orders proving completeness.
 
 ### PR 1.7 — Surface stream lag instead of swallowing it `fix(observability)`
 - **Evidence:** `OrdersStream::next` silently swallows `broadcast::error::RecvError::Lagged`
@@ -118,8 +125,15 @@ Independent one-to-few-line fixes. Land in any order.
   `_relativeTime` recomputed per build (`:284`); `OrderItem` has no `==`/`hashCode`
   (`home_order_providers.dart:19`) and rows get no `ValueKey`
   (`lib/features/home/screens/home_screen.dart:83-96`) → Flutter can never skip a subtree.
-- **Fix:** static per-locale `NumberFormat` cache; precompute derived strings in `OrderItem`;
-  add value equality and `key: ValueKey(order.id)`.
+- **Fix:** static per-locale `NumberFormat` cache; add `key: ValueKey(order.id)`.
+- **Do NOT precompute `_relativeTime` into `OrderItem`.** It changes as the clock moves even
+  when the order does not, so freezing it into immutable item data makes displayed ages go
+  stale — and value equality (added in PR 2.7) then actively suppresses the rebuild that would
+  have refreshed them. It must stay derived from the current time at render, or move into a
+  timer-driven leaf.
+- **Value equality moved to PR 2.7**, where `orderByIdProvider`'s `select` is the caller that
+  makes it do something. On its own it saves nothing: Flutter rebuilds a `StatelessWidget`
+  whenever its parent does, regardless of field equality.
 - **Verify:** `flutter test`; DevTools rebuild counter shows unchanged rows skipped.
 
 ### PR 1.10 — Fixed item extent on hot lists `perf(ui)` — **WITHDRAWN, do not implement**
@@ -293,7 +307,15 @@ Ordered; 3.2 depends on 3.1, 3.3 on 3.2. Requires PR 1.7 (lag visibility) first.
   `enum OrderBookDelta { Upserted(OrderInfo), Removed(String), Snapshot }`. Internal only —
   the existing FRB stream keeps emitting snapshots (built from deltas) so nothing downstream
   changes yet. **Lagged now means "resync via `get_orders`"** — handle it explicitly.
-- **Verify:** Rust unit tests for upsert/remove/lag-resync semantics.
+- **A resync needs a boundary, not just a refetch.** `get_orders()` reads the book at some
+  instant; a mutation landing between that read and the subscriber resuming is either lost or
+  applied out of order. Carry a monotonic revision on the book: the snapshot states the
+  revision it was taken at, each delta carries its own, and a subscriber applies only deltas
+  newer than its snapshot. Without that, lag recovery silently diverges from the book —
+  which is worse than today, where dropping a snapshot is harmless because the next one is
+  complete.
+- **Verify:** Rust unit tests for upsert/remove, and for a lag→resync that interleaves a
+  mutation with the snapshot read.
 
 ### PR 3.2 — `feat(bridge): delta stream over FRB`
 - **Fix:** new `on_order_deltas()` stream in `rust/src/api/orders.rs` emitting the delta enum;
@@ -323,7 +345,18 @@ Ordered; 3.2 depends on 3.1, 3.3 on 3.2. Requires PR 1.7 (lag visibility) first.
 - **Fix:** derive `tradeStatusProvider`, the nav badge, and the invoice providers from
   `tradeUpdatesProvider`; keep one lazy `getOrder()` for initial value. Delete the polling
   loops.
-- **Verify:** widget tests; bridge-call count during idle on Trades screen drops to ~0.
+- **Two blockers to clear first — polling is currently masking both.**
+  1. **The stream is lossy and non-replaying.** `TradeUpdatesStream::next` discards `Lagged`
+     (`orders.rs:3460-3484`), and a `tokio::broadcast` holds nothing for a subscriber that
+     was not listening yet, so updates emitted while no provider is mounted are simply gone.
+     A one-shot `getOrder()` closes only the *initial* gap. Make the stream stateful, or
+     resync from the book/DB after lag, resume and resubscribe, **before** deleting the polls.
+  2. **The payload is too thin for the pay-invoice screen.** `TradeUpdate` carries
+     `{order_id, status}`, but `PayLightningInvoiceScreen` needs `TradeInfo.hold_invoice` and
+     `TradeInfo.order.amount_sats`. Removing `listTrades()` without widening the payload (or
+     adding a reliable `TradeInfo` cache) leaves that screen with no invoice and no amount.
+- **Verify:** widget tests; idle bridge-call count on Trades drops to ~0; **plus** a test that
+  a status change emitted while the provider is unmounted is still reflected when it remounts.
 
 ### PR 3.5 — `feat(core): chat room summaries in one call`
 - **Evidence:** rooms hydration does 2 bridge calls per trade in an unbounded `Future.wait`,
@@ -337,9 +370,17 @@ Ordered; 3.2 depends on 3.1, 3.3 on 3.2. Requires PR 1.7 (lag visibility) first.
 - **Evidence:** kind-14 `#p` filter carries one pubkey per lifetime trade and the whole REQ is
   re-sent to all relays on every newly derived key (`orders.rs:2934-2947`, `:2912-2922`);
   `build_trade_key_map` derives keys sequentially, awaiting each (`orders.rs:2981-2997`).
-- **Fix:** cap coverage to keys of non-terminal trades (+ last K); debounce resubscribes;
-  derive keys concurrently.
-- **Verify:** Rust test: filter size bounded with 500 historical trades.
+- **Fix (revised after review):** debounce the resubscribes and derive keys concurrently.
+  **Do not cap coverage by local trade status.** `specs/004-mostro-p2p-client/contracts/orders.md:267-284`
+  requires deriving every known key and rebuilding the filter from the full map, and for good
+  reason: after a restore, a database loss, or an incomplete rehydration the client cannot know
+  which older keys still belong to live trades until it receives and decrypts their messages.
+  Pruning locally makes an older active trade permanently deaf to its status and invoice
+  messages — unrecoverably, since nothing later re-adds the key.
+- **A real bound needs server-assisted discovery or a resync design**, not local status
+  pruning. Until then the filter's size is the cost of correctness.
+- **Verify:** Rust test: resubscribes are coalesced under a burst of new keys; coverage still
+  includes every known key.
 
 ### PR 3.7 — `feat(ui): two-phase startup`
 - **Evidence:** `runApp` is blocked by sequential awaits including relay-pool network init
@@ -362,7 +403,12 @@ Ordered; 3.2 depends on 3.1, 3.3 on 3.2. Requires PR 1.7 (lag visibility) first.
   intentionally revisits the "order book is sourced only from daemon events" rule — the relay
   stays the source of truth; disk is a cache. Needs a short design proposal before code
   (repo working agreement).
-- **Verify:** cold start with 3k cached orders renders instantly offline; reconcile test.
+- **The cache must be keyed by node identity.** `OrderBook::clear()` exists precisely because
+  a node switch has to drop the previous node's orders. Rendering a persisted cache before
+  reconciliation completes would put them straight back — mixing two nodes' markets in one
+  list. The active daemon pubkey belongs in the cache key.
+- **Verify:** cold start with 3k cached orders renders instantly offline; reconcile test; and
+  a node switch *before* the refetch completes shows none of the previous node's orders.
 
 ### PR 4.2 — `feat(web): real IndexedDB backend` (issue #233)
 - **Evidence:** `rust/src/db/indexeddb.rs` opens the DB per operation (`:55-72`), stubs
