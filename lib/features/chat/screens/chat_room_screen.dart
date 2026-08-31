@@ -28,6 +28,23 @@ import 'package:mostro/src/rust/api/types.dart' as rust_types;
 /// - [incomingMessageProvider] delivers real-time incoming messages from the
 ///   Rust `subscribe_incoming_chat` background task.
 /// - [messages_api.markAsRead] resets unread count when the room is entered.
+/// How close to the end of the list still counts as "following along".
+///
+/// Roughly one message bubble, so a reader who has scrolled up by even one
+/// message is left where they are.
+const double kFollowThresholdPixels = 80;
+
+/// Whether an arriving message should scroll the list.
+///
+/// Pinning is the reason this is a decision at all: auto-scrolling
+/// unconditionally yanks a reader away from older messages every time the
+/// counterparty types, and a history burst starts one animation per message.
+bool isPinnedToBottom({
+  required double offset,
+  required double maxScrollExtent,
+}) =>
+    maxScrollExtent - offset <= kFollowThresholdPixels;
+
 class ChatRoomScreen extends ConsumerStatefulWidget {
   const ChatRoomScreen({
     super.key,
@@ -48,6 +65,15 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
 
   /// Message list seeded from bridge history, then appended via stream.
   final List<rust_types.ChatMessage> _messages = [];
+
+  /// Ids already in [_messages]. A replayed envelope is common, and scanning
+  /// the list for every incoming message made dedup O(history) per message.
+  final Set<String> _seenIds = {};
+
+  /// Coalesces mark-read across a burst. A history replay would otherwise
+  /// fire one bridge call per message.
+  Timer? _markReadDebounce;
+
   bool _historyLoaded = false;
 
   final ScrollController _scrollController = ScrollController();
@@ -61,6 +87,7 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
 
   @override
   void dispose() {
+    _markReadDebounce?.cancel();
     _scrollController.dispose();
     super.dispose();
   }
@@ -83,7 +110,7 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
           // must never surface here — replying would go to the counterparty,
           // not the solver (PR #254 review).
           if (msg.messageType != rust_types.MessageType.peer) continue;
-          if (!_messages.any((m) => m.id == msg.id)) {
+          if (_seenIds.add(msg.id)) {
             _messages.add(msg);
           }
         }
@@ -150,10 +177,15 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
     // Dispute-channel traffic never belongs in the peer room (see
     // _loadHistory).
     if (msg.messageType != rust_types.MessageType.peer) return;
-    if (_messages.any((m) => m.id == msg.id)) return; // deduplicate
+    if (!_seenIds.add(msg.id)) return; // deduplicate
+    // Read the scroll position before the new message changes the extent.
+    final wasAtBottom = _isPinnedToBottom();
     setState(() => _messages.add(msg));
-    _scrollToBottom();
-    _markRead();
+    // Only follow the conversation if the user was already at the bottom;
+    // otherwise an arriving message yanks them away from what they were
+    // reading, and a burst starts one animation per message.
+    if (wasAtBottom) _scrollToBottom();
+    _scheduleMarkRead();
     ref.read(chatRoomsNotifierProvider.notifier).upsertRoom(
           _buildRoomPreview(
             lastMsg: msg,
@@ -163,6 +195,24 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
   }
 
   // ── Helpers ───────────────────────────────────────────────────────────────
+
+  /// Whether the list is close enough to the end to keep following it.
+  bool _isPinnedToBottom() {
+    if (!_scrollController.hasClients) return true;
+    final position = _scrollController.position;
+    return isPinnedToBottom(
+      offset: position.pixels,
+      maxScrollExtent: position.maxScrollExtent,
+    );
+  }
+
+  /// Mark the room read once the burst settles, instead of once per message.
+  void _scheduleMarkRead() {
+    _markReadDebounce?.cancel();
+    _markReadDebounce = Timer(const Duration(milliseconds: 400), () {
+      if (mounted) _markRead();
+    });
+  }
 
   void _scrollToBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
