@@ -602,6 +602,7 @@
   "minHint": "Min",
   "maxHint": "Max",
   "orderAmountOutOfRange": "Der Betrag muss für diesen Mostro-Knoten zwischen {min} und {max} Sats liegen",
+  "orderAmountOutOfRangeFiat": "Der Betrag muss für diesen Mostro-Knoten zwischen {min} und {max} {currency} liegen",
   "fiatAmountHint": "Fiat-Betrag",
   "enterAmountForPreview": "Gib einen Betrag ein, um eine Live-Vorschau zu sehen.",
   "previewLabel": "VORSCHAU",
