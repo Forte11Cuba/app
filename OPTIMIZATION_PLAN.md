@@ -156,6 +156,14 @@ Independent one-to-few-line fixes. Land in any order.
 
 Each PR stands alone; none requires Phase 3's redesign.
 
+> **Status: implemented.** PRs #360–#369. All independent of each other except
+> **PR 2.2 (#361), which is stacked on PR 2.1 (#360)** — it builds on the deferred-upsert
+> primitive introduced there, so the "fully independent" claim below is not quite true for
+> that pair. Two sub-items were withdrawn after inspection (2.3's `local_trade_status`
+> memoization, 2.10's history cap) and two plan premises turned out to be wrong (2.8's
+> `_CountdownChip`, and the assumption in 2.9 that keying could reuse the same store). Each
+> is recorded in place.
+
 ### PR 2.1 — Batch bulk ingest: one broadcast per refetch `fix(perf)`
 - **Evidence:** `refetch_active_node_orders` loops `ingest_order_event` per event
   (`orders.rs:2745-2758`); each upsert clones + broadcasts the whole book → **O(N²)** on cold
@@ -180,9 +188,13 @@ Each PR stands alone; none requires Phase 3's redesign.
   one SQLite/IndexedDB round trip per relay event (`lookup_trade_key_index`,
   `orders.rs:79-100`); `local_trade_status` (`orders.rs:2246`) adds a second read for
   non-pending events.
-- **Fix:** cache negative results for content keys (bounded set, invalidated when a new trade
-  key is derived); memoize `local_trade_status` per (order, status) within an ingest pass.
-- **Verify:** Rust test: second ingest of the same stranger's order does zero DB reads.
+- **Fix:** cache negative results for content keys (bounded set, invalidated by
+  `store_trade_key_index` — the only absent→present path). Never cache on a read *error*: an
+  error is not evidence of absence, and a false negative strands the order as "not ours".
+- **Verify:** Rust test: storing a key clears its recorded miss; the miss set stays bounded.
+- **`local_trade_status` memoization withdrawn.** That lookup goes through
+  `get_trade_by_order_id`, which PR 1.2 gives a real index — a keyed read, not a full scan.
+  Re-measure after #350 rather than adding pass-scoped state on spec.
 
 ### PR 2.4 — Prune terminal orders; bound the book `fix(memory)`
 - **Evidence:** nothing evicts canceled/expired/success orders from the `Vec`
@@ -228,28 +240,44 @@ Each PR stands alone; none requires Phase 3's redesign.
   (`trade_detail_screen.dart:161`) and on `take_order_screen.dart:92`; `_CountdownChip` never
   stops for non-expiring orders (`trade_state_header.dart:262-276`). Both screens also use
   eager `ListView(children:)` (`:571`, `:235`).
-- **Fix:** move the ticking value into the existing leaf `CountdownTimer` widget /
-  `ValueListenableBuilder`; cancel timers for non-expiring orders; keep the eager lists (they
-  are short) but stop rebuilding them every second.
-- **Verify:** DevTools: only the countdown leaf repaints per second.
+- **Fix:** move the remaining duration into a `ValueNotifier` and the countdown block into a
+  `ValueListenableBuilder`. In Trade Detail the `showTimer` condition must stop reading the
+  ticking value (move the zero check inside the builder), or the screen keeps rebuilding.
+- **Verify:** capture the `AppBar` widget instance, pump two ticks, assert it is *identical* —
+  Flutter allocates fresh widget objects per build, so a surviving instance proves the screen
+  did not rebuild.
+- **`_CountdownChip` item withdrawn.** It does not "never stop": it cancels its timer once
+  `expiresAt` has passed (`trade_state_header.dart:271-273`). A chip counting down to a future
+  deadline ticking once a second is the feature.
 
 ### PR 2.9 — Notifications store: keyed records + single transaction `fix(storage)`
 - **Evidence:** Sembast `intMapStoreFactory` with lookup-by-`Finder(Filter.equals('id',…))`
   per write (`lib/features/notifications/providers/notifications_provider.dart:80-89`, `:110`)
   → full-store scan per write; `markAllAsRead()` fires N independent saves → O(N²), N
   transactions, un-awaited (`:242-250`); state list grows forever (`:161`).
-- **Fix:** `StoreRef<String, Map>` keyed by notification id; wrap `markAllAsRead` in one
-  `db.transaction`; cap the retained list (mirror the log provider's 1000 cap,
-  `log_provider.dart:9`).
-- **Verify:** unit tests for upsert/markAll; time markAll on a 1k fixture.
+- **Fix:** key records by notification id under a **new store name**, plus a one-time
+  migration; wrap `markAllAsRead` in one `db.transaction`.
+- **The migration is the hard part**, and two obvious shortcuts are both wrong: reading an
+  int-keyed record through a `StoreRef<String, …>` throws (so an upgrade loses history or
+  crashes on open), and pointing both `StoreRef`s at the *same* store name makes the
+  migration's cleanup delete the records it just wrote.
+- **Verify:** a test that writes through the old int-keyed store and asserts the records
+  survive — this is the difference between a perf fix and silent data loss.
 
 ### PR 2.10 — Chat-screen hot-path hygiene `perf(chat)`
 - **Evidence:** `_messages.any(...)` O(N) dedupe per incoming message
   (`chat_room_screen.dart:145`), full sort at `:87`, `_markRead()` bridge call per message
   (`:148`), autoscroll animation per message (`:161`), unbounded `_messages` (`:48`).
-- **Fix:** `Set<String>` of seen ids; debounce `_markRead`; autoscroll only when pinned to
-  bottom; cap/paginate history.
-- **Verify:** widget test replaying a 500-message burst stays responsive.
+- **Fix:** `Set<String>` of seen ids; debounce `_markRead`; autoscroll only when the reader
+  was already pinned to the bottom — and read that position **before** `setState` adds the
+  message, or the new message has already extended `maxScrollExtent` and the check always
+  says "not at bottom".
+- **Verify:** the follow decision extracted as a pure function and tested at its boundaries.
+  `ChatRoomScreen` needs `RustLib.init()` and has no harness, so the dedupe and debounce are
+  verified by reading — building that harness deserves its own PR.
+- **History cap withdrawn.** Chat history is bounded by one trade's lifetime — tens of
+  messages. Silently dropping a counterparty's messages from a screen someone may need as a
+  record of a trade is a worse failure than the memory it saves. Do it as real pagination.
 
 ---
 
