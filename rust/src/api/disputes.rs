@@ -314,7 +314,9 @@ pub async fn open_dispute(trade_id: String, reason: Option<String>) -> Result<Di
     );
 
     if let Err(e) = crate::api::orders::publish_event(&event_json).await {
-        crate::mostro::pending::remove_pending_request(&trade_pk_hex, request_id);
+        // Roll back only this attempt: if it is a retry, the timed-out attempt
+        // it took the key from is still answerable and must stay so.
+        crate::mostro::pending::roll_back_dispute_request(&trade_pk_hex, request_id);
         return Err(anyhow!("ProtocolError: publish failed: {e}"));
     }
 

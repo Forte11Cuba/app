@@ -102,7 +102,31 @@ pub(crate) enum PendingRequestKind {
     /// no request_id — see mostro-core Message::new_restore).
     Restore,
     /// An open-dispute awaiting the daemon's `DisputeInitiatedByYou`.
-    Dispute,
+    Dispute {
+        /// Nonces of earlier open attempts on this same trade key that timed
+        /// out and were then replaced by this one. Their records were kept on
+        /// purpose so a genuine late acceptance still reconciles, and a retry
+        /// must not undo that: a reply echoing one of these is still ours,
+        /// even though this record now owns the key (PR #275 review).
+        superseded: Vec<u64>,
+    },
+}
+
+/// How many superseded open-dispute nonces one trade key keeps. Every entry is
+/// a retry the user drove after a 10 s timeout, so the bound is generous; it
+/// exists only so a pathological retry loop cannot grow the record without end.
+const MAX_SUPERSEDED_DISPUTE_NONCES: usize = 8;
+
+/// What a `DisputeInitiatedByYou` turned out to be for this trade key.
+pub(crate) enum DisputeMatch {
+    /// The reply resolves the live attempt and its caller is still waiting.
+    /// The record is consumed; the acceptance goes down this channel.
+    Waiting(tokio::sync::oneshot::Sender<Wake>),
+    /// The reply is genuinely ours but nobody is listening — the attempt timed
+    /// out. Either the live record, now consumed, or an earlier attempt a retry
+    /// superseded, in which case the retry's record stays registered for its
+    /// own reply. Reconcile it as a late acceptance.
+    Late,
 }
 
 /// Everything one outgoing daemon request needs tracked until its reply is
@@ -313,16 +337,24 @@ pub(crate) fn take_matching_add_invoice(
 pub(crate) fn take_matching_dispute(
     trade_pubkey_hex: &str,
     got: Option<u64>,
-) -> Option<PendingRequest> {
+) -> Option<DisputeMatch> {
     let mut map = pending_requests().lock().ok()?;
-    match map.get(trade_pubkey_hex) {
-        Some(p)
-            if request_id_matches(p.request_id, got)
-                && matches!(p.kind, PendingRequestKind::Dispute) =>
-        {
-            map.remove(trade_pubkey_hex)
-        }
-        _ => None,
+    let entry = map.get(trade_pubkey_hex)?;
+    let PendingRequestKind::Dispute { superseded } = &entry.kind else {
+        return None;
+    };
+    // An attempt this key's current record replaced: its caller stopped
+    // waiting long ago, but the acceptance is real and still ours. Leave the
+    // live record in place — its own reply may yet arrive.
+    if got.is_some_and(|id| superseded.contains(&id)) {
+        return Some(DisputeMatch::Late);
+    }
+    if !request_id_matches(entry.request_id, got) {
+        return None;
+    }
+    match map.remove(trade_pubkey_hex)?.tx {
+        Some(tx) => Some(DisputeMatch::Waiting(tx)),
+        None => Some(DisputeMatch::Late),
     }
 }
 
@@ -331,8 +363,15 @@ pub(crate) fn take_matching_dispute(
 ///
 /// Lives here because the pending map and its nonce gate are this module's;
 /// `disputes::open_dispute` drives the publish and the wait, and cleans up
-/// through [`remove_pending_request`] (publish failed) or
+/// through [`roll_back_dispute_request`] (publish failed) or
 /// [`detach_request_waiter`] (timed out).
+///
+/// A retry after a timeout takes the key over from the attempt it replaces,
+/// but must not erase it: that record was deliberately kept so a genuine late
+/// acceptance still reconciles instead of falling through as a bare status
+/// update (PR #275 review). Its nonce — and whatever it had already inherited —
+/// travels into the new record's `superseded` list, so both attempts stay
+/// answerable while only the newest owns the waiter.
 pub(crate) fn register_dispute_request(
     trade_pubkey_hex: String,
     request_id: u64,
@@ -340,17 +379,62 @@ pub(crate) fn register_dispute_request(
 ) -> tokio::sync::oneshot::Receiver<Wake> {
     let (tx, rx) = tokio::sync::oneshot::channel::<Wake>();
     if let Ok(mut map) = pending_requests().lock() {
+        let superseded = match map.remove(&trade_pubkey_hex) {
+            Some(PendingRequest {
+                request_id: replaced,
+                kind: PendingRequestKind::Dispute { mut superseded },
+                ..
+            }) => {
+                superseded.push(replaced);
+                let overflow = superseded
+                    .len()
+                    .saturating_sub(MAX_SUPERSEDED_DISPUTE_NONCES);
+                superseded.drain(..overflow);
+                superseded
+            }
+            _ => Vec::new(),
+        };
         map.insert(
             trade_pubkey_hex,
             PendingRequest {
                 request_id,
                 trade_index,
-                kind: PendingRequestKind::Dispute,
+                kind: PendingRequestKind::Dispute { superseded },
                 tx: Some(tx),
             },
         );
     }
     rx
+}
+
+/// Undo an open-dispute registration whose publish failed — the daemon never
+/// saw the attempt, so nothing can answer it.
+///
+/// Unlike [`remove_pending_request`], the record survives when it still carries
+/// superseded nonces: an earlier timed-out attempt on this key is still
+/// answerable, and a retry that never reached the wire must not take it down
+/// with it. The most recent superseded nonce becomes the record's own again,
+/// waiterless, exactly as its own timeout had left it.
+pub(crate) fn roll_back_dispute_request(trade_pubkey_hex: &str, request_id: u64) {
+    let Ok(mut map) = pending_requests().lock() else {
+        return;
+    };
+    let Some(entry) = map.get_mut(trade_pubkey_hex) else {
+        return;
+    };
+    if entry.request_id != request_id {
+        return;
+    }
+    let restored = match &mut entry.kind {
+        PendingRequestKind::Dispute { superseded } => superseded.pop(),
+        _ => None,
+    };
+    if let Some(previous) = restored {
+        entry.request_id = previous;
+        entry.tx = None;
+        return;
+    }
+    map.remove(trade_pubkey_hex);
 }
 
 /// Classify the daemon's first reply to a take into a [`DaemonReply`].
@@ -998,5 +1082,106 @@ mod tests {
 
         // Clean up the leftover non-restore record so we don't leak global state.
         remove_pending_request(&other_key, 9);
+    }
+
+    /// #202 / PR #275: a retry after a timeout takes the trade key over, but
+    /// the attempt it replaces stays answerable. Before this, the retry's
+    /// `register_dispute_request` overwrote the timed-out record outright, so a
+    /// genuine late acceptance for the first attempt matched nothing and fell
+    /// through as a bare status update — a trade moved to Dispute with no
+    /// dispute record, the split state this whole change set exists to remove.
+    #[tokio::test]
+    async fn a_dispute_retry_keeps_the_timed_out_attempt_answerable() {
+        let key = "test-dispute-retry-supersede-pubkey";
+        let _rx_a = register_dispute_request(key.to_string(), 81, 4);
+
+        // A times out: the waiter detaches, the record survives.
+        detach_request_waiter(key, 81);
+
+        // The user retries; B takes the key over.
+        let _rx_b = register_dispute_request(key.to_string(), 82, 4);
+        assert!(matches!(
+            pending_requests().lock().unwrap().get(key).unwrap().kind,
+            PendingRequestKind::Dispute { .. }
+        ));
+
+        // The daemon answers A. It is nobody's live reply, but it is ours...
+        assert!(matches!(
+            take_matching_dispute(key, Some(81)),
+            Some(DisputeMatch::Late)
+        ));
+        // ...and B stays registered with its waiter attached.
+        {
+            let map = pending_requests().lock().unwrap();
+            let entry = map.get(key).expect("the retry's record must survive");
+            assert_eq!(entry.request_id, 82);
+            assert!(entry.tx.is_some());
+        }
+
+        // B's own reply still resolves it normally.
+        assert!(matches!(
+            take_matching_dispute(key, Some(82)),
+            Some(DisputeMatch::Waiting(_))
+        ));
+        assert!(!pending_requests().lock().unwrap().contains_key(key));
+    }
+
+    /// A retry whose publish fails must roll back only itself: the timed-out
+    /// attempt it took the key from is still answerable, and taking the whole
+    /// record down would lose that late acceptance.
+    #[tokio::test]
+    async fn a_failed_dispute_retry_restores_the_attempt_it_replaced() {
+        let key = "test-dispute-rollback-pubkey";
+        let _rx_a = register_dispute_request(key.to_string(), 91, 2);
+        detach_request_waiter(key, 91);
+        let _rx_b = register_dispute_request(key.to_string(), 92, 2);
+
+        // B never reaches the wire.
+        roll_back_dispute_request(key, 92);
+        {
+            let map = pending_requests().lock().unwrap();
+            let entry = map.get(key).expect("A must be restored, not dropped");
+            assert_eq!(entry.request_id, 91);
+            assert!(entry.tx.is_none(), "A had already timed out");
+        }
+
+        // A's late acceptance still reconciles...
+        assert!(matches!(
+            take_matching_dispute(key, Some(91)),
+            Some(DisputeMatch::Late)
+        ));
+        assert!(!pending_requests().lock().unwrap().contains_key(key));
+
+        // ...while a first attempt whose publish fails leaves nothing behind.
+        let _rx_c = register_dispute_request(key.to_string(), 93, 2);
+        roll_back_dispute_request(key, 93);
+        assert!(!pending_requests().lock().unwrap().contains_key(key));
+    }
+
+    /// The superseded list is bounded: a retry loop cannot grow one record
+    /// without end, and the oldest nonces are the ones dropped.
+    #[tokio::test]
+    async fn superseded_dispute_nonces_are_bounded() {
+        let key = "test-dispute-supersede-bound-pubkey";
+        let total = MAX_SUPERSEDED_DISPUTE_NONCES as u64 + 3;
+        for nonce in 1..=total {
+            let _rx = register_dispute_request(key.to_string(), nonce, 1);
+            detach_request_waiter(key, nonce);
+        }
+
+        {
+            let map = pending_requests().lock().unwrap();
+            let PendingRequestKind::Dispute { superseded } = &map.get(key).unwrap().kind else {
+                panic!("must be a dispute record");
+            };
+            assert_eq!(superseded.len(), MAX_SUPERSEDED_DISPUTE_NONCES);
+            assert_eq!(
+                superseded.first(),
+                Some(&(total - MAX_SUPERSEDED_DISPUTE_NONCES as u64))
+            );
+            assert_eq!(superseded.last(), Some(&(total - 1)));
+        }
+
+        purge_pending_request(key);
     }
 }

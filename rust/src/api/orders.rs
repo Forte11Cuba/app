@@ -21,7 +21,7 @@ use crate::mostro::pending::{
     pending_local_uuid_for, pending_requests, purge_pending_request, remove_pending_request,
     take_matching_add_invoice, take_matching_dispute, take_matching_request,
     take_matching_restore, take_matching_take, take_pending_create_by_content_key, DaemonReply,
-    PendingRequest, PendingRequestKind, Wake,
+    DisputeMatch, PendingRequest, PendingRequestKind, Wake,
 };
 use crate::nostr::order_events::parse_order_event;
 
@@ -1574,8 +1574,8 @@ async fn dispatch_mostro_message(
         // addresses it to the counterparty's trade key, which has no pending
         // record of ours (mostro src/app/dispute.rs, notify_dispute_to_users).
         if kind.action == Action::DisputeInitiatedByYou {
-            if let Some(pending) = take_matching_dispute(trade_pubkey_hex, kind.request_id) {
-                if let Some(tx) = pending.tx {
+            match take_matching_dispute(trade_pubkey_hex, kind.request_id) {
+                Some(DisputeMatch::Waiting(tx)) => {
                     crate::api::logging::blog_info("daemon-msg", format!(
                         "DisputeInitiatedByYou: accepted waiting open_dispute for trade={}",
                         &trade_pubkey_hex[..8]
@@ -1583,13 +1583,14 @@ async fn dispatch_mostro_message(
                     let _ = tx.send(Wake::from(DaemonReply::DisputeAccepted {
                         dispute_id: dispute_id_from_payload(kind.payload.as_ref()),
                     }));
-                } else {
-                    // Genuine acceptance after the 10s timeout: the caller
-                    // already returned NoDaemonResponse and persisted no
-                    // dispute. Record it now — the status arm below moves the
-                    // trade to Dispute regardless, and a disputed trade with
-                    // no dispute record has no solver to reach (PR #275
-                    // review).
+                }
+                // Genuine acceptance after the 10s timeout — of this attempt or
+                // of an earlier one a retry superseded. The caller already
+                // returned NoDaemonResponse and persisted no dispute. Record it
+                // now: the status arm below moves the trade to Dispute
+                // regardless, and a disputed trade with no dispute record has no
+                // solver to reach (PR #275 review).
+                Some(DisputeMatch::Late) => {
                     crate::api::logging::blog_warn("daemon-msg", format!(
                         "DisputeInitiatedByYou: late acceptance for timed-out open_dispute on trade={}",
                         &trade_pubkey_hex[..8]
@@ -1602,6 +1603,7 @@ async fn dispatch_mostro_message(
                         .await;
                     }
                 }
+                None => {}
             }
         }
     }
@@ -4098,9 +4100,10 @@ mod tests {
 
         assert!(take_matching_dispute(dispute_key, None).is_none());
         assert!(take_matching_dispute(dispute_key, Some(99)).is_none());
-        let pending = take_matching_dispute(dispute_key, Some(72)).expect("must match");
-        assert!(matches!(pending.kind, PendingRequestKind::Dispute));
-        assert_eq!(pending.trade_index, 5);
+        assert!(matches!(
+            take_matching_dispute(dispute_key, Some(72)),
+            Some(DisputeMatch::Waiting(_))
+        ));
         assert!(!pending_requests().lock().unwrap().contains_key(dispute_key));
 
         pending_requests().lock().unwrap().remove(take_key);
@@ -4119,7 +4122,7 @@ mod tests {
         let pending = take_matching_restore(key)
             .or_else(|| take_matching_request(key, Some(73)))
             .expect("the rejection must find the dispute record");
-        assert!(matches!(pending.kind, PendingRequestKind::Dispute));
+        assert!(matches!(pending.kind, PendingRequestKind::Dispute { .. }));
 
         let sent = pending
             .tx

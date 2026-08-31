@@ -55,6 +55,17 @@ ones, solver and `InReview` survive — because the correlated acceptance proves
 the dispute is ours. Any other existing record (a retry that succeeded, a
 resolved dispute) is left untouched.
 
+Retrying after a timeout does not close that window. The retry derives the same
+trade key and takes the pending record over, but the attempt it replaces stays
+**answerable**: its nonce travels into the new record and a reply echoing it is
+still reconciled as a late acceptance, leaving the retry registered for its own
+reply. Without that, the daemon could accept the first attempt while the client
+had already discarded every way to recognize the answer — the trade would move
+to `Disputed` with no dispute record, the split state this whole change set
+exists to remove. A retry whose publish fails rolls back only itself and
+restores the attempt it replaced. The list of superseded nonces is bounded, so
+a retry loop cannot grow the record without end.
+
 The local status check and the reply correlation are two layers of the same
 concern: the check keeps most rejections off the wire, and the correlation
 reconciles the ones that still come back (issues #203 and #202).
