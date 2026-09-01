@@ -177,8 +177,6 @@
 
   "orderDetailsTitle": "ORDER DETAILS",
   "@orderDetailsTitle": {"description": "Screen title for the order/trade details screen"},
-  "timeRemainingLabel": "Time remaining:",
-  "@timeRemainingLabel": {"description": "Label preceding the countdown timer in a trade"},
   "fiatSentButtonLabel": "FIAT SENT",
   "@fiatSentButtonLabel": {"description": "Button label for the buyer to confirm fiat was sent"},
   "disputeButtonLabel": "DISPUTE",

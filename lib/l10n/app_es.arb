@@ -79,7 +79,6 @@
   "orderIdCopied": "ID de orden copiado",
 
   "orderDetailsTitle": "DETALLES DE LA ORDEN",
-  "timeRemainingLabel": "Tiempo restante:",
   "fiatSentButtonLabel": "FIAT ENVIADO",
   "disputeButtonLabel": "DISPUTAR",
   "contactButtonLabel": "CONTACTAR",
@@ -596,7 +595,7 @@
   "ratingStatLabel": "calificación",
   "tradesStatLabel": "operaciones",
   "daysActiveStatLabel": "días activo",
-  "createdOnLabel": "Creado el",
+  "createdOnLabel": "Creada el",
   "timeRemainingLabel": "Tiempo restante: {time}",
   "orderExpiryRemovedNote": "Si expira, la orden se elimina del libro. ",
   "orderExpiryNoReputationNote": "No afectará tu reputación.",
