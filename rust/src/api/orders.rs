@@ -310,30 +310,59 @@ use tokio::sync::OnceCell;
 
 // ── Daemon-message deduplication ─────────────────────────────────────────────
 
-/// Tracks recently processed daemon-message event IDs to avoid duplicate processing
-/// when both the per-trade and global subscriptions receive the same event.
-static PROCESSED_GW: OnceLock<std::sync::Mutex<std::collections::VecDeque<String>>> = OnceLock::new();
+/// Sized for the global feed's history replay on reused keys: a mass replay
+/// longer than this window would evict ids that a slower relay may still
+/// redeliver within the same session.
+const DEDUP_MAX_ENTRIES: usize = 512;
+
+/// Recently processed daemon-message event IDs, so an event delivered by both
+/// the per-trade and the global subscription is only handled once.
+///
+/// `seen` answers the membership question; `order` exists only to know which
+/// id to drop when the window is full. Both hold the same `Arc<str>`, so a new
+/// id is allocated once, and `record` is the only thing that writes them —
+/// split those two writes across call sites and `seen` grows without bound.
+///
+/// `frb(ignore)` because this module is part of `crate::api`, which
+/// flutter_rust_bridge scans: without it the codegen emits bindings for this
+/// private, non-bridgeable type and the wasm build stops compiling.
+#[derive(Default)]
+#[flutter_rust_bridge::frb(ignore)]
+struct DedupWindow {
+    seen: std::collections::HashSet<Arc<str>>,
+    order: std::collections::VecDeque<Arc<str>>,
+}
+
+impl DedupWindow {
+    /// Returns `true` if `event_id` is already in the window. Otherwise records
+    /// it — evicting the oldest id when the window is full — and returns
+    /// `false`.
+    fn record(&mut self, event_id: &str) -> bool {
+        if self.seen.contains(event_id) {
+            return true;
+        }
+        let id: Arc<str> = Arc::from(event_id);
+        self.seen.insert(Arc::clone(&id));
+        self.order.push_back(id);
+        if self.order.len() > DEDUP_MAX_ENTRIES {
+            if let Some(evicted) = self.order.pop_front() {
+                self.seen.remove(&evicted);
+            }
+        }
+        false
+    }
+}
+
+static PROCESSED_GW: OnceLock<std::sync::Mutex<DedupWindow>> = OnceLock::new();
 
 /// Returns `true` if this event ID was already processed (duplicate).
 /// Otherwise records it and returns `false`.
 fn is_duplicate_daemon_message(event_id: &str) -> bool {
-    // Sized for the global feed's history replay on reused keys: a mass
-    // replay longer than this window would evict ids that a slower relay
-    // may still redeliver within the same session.
-    const MAX_ENTRIES: usize = 512;
-    let deque = PROCESSED_GW.get_or_init(|| std::sync::Mutex::new(std::collections::VecDeque::new()));
-    let mut guard = match deque.lock() {
-        Ok(g) => g,
-        Err(_) => return false,
-    };
-    if guard.iter().any(|id| id == event_id) {
-        return true;
+    let window = PROCESSED_GW.get_or_init(|| std::sync::Mutex::new(DedupWindow::default()));
+    match window.lock() {
+        Ok(mut guard) => guard.record(event_id),
+        Err(_) => false,
     }
-    guard.push_back(event_id.to_string());
-    if guard.len() > MAX_ENTRIES {
-        guard.pop_front();
-    }
-    false
 }
 
 static ORDER_BOOK: OnceCell<OrderBook> = OnceCell::const_new();
@@ -3767,6 +3796,43 @@ mod tests {
     use crate::api::types::TradeRole;
     use crate::mostro::pending::register_dispute_request;
     use crate::mostro::session::session_manager;
+
+    /// The window must recognize a repeat, and must forget an id once
+    /// `DEDUP_MAX_ENTRIES` newer ones have arrived — otherwise it would grow
+    /// without bound.
+    ///
+    /// Driven against a local window rather than `is_duplicate_daemon_message`:
+    /// that one shares a process-global static with every other test in this
+    /// binary, so asserting on it would both depend on and destroy state the
+    /// rest of the suite may touch.
+    #[test]
+    fn daemon_message_dedup_recognizes_repeats_and_evicts_oldest() {
+        let mut window = DedupWindow::default();
+        let id = |n: usize| format!("{n:064x}");
+
+        assert!(!window.record(&id(0)));
+        assert!(window.record(&id(0)));
+
+        // One more than capacity, so id(0) is pushed out of the window.
+        for n in 1..=DEDUP_MAX_ENTRIES {
+            window.record(&id(n));
+        }
+
+        assert!(
+            !window.record(&id(0)),
+            "the oldest id should have been evicted once the window filled"
+        );
+        assert_eq!(
+            window.seen.len(),
+            window.order.len(),
+            "the set and the eviction queue drifted apart"
+        );
+        assert!(
+            window.order.len() <= DEDUP_MAX_ENTRIES,
+            "window grew past its bound: {}",
+            window.order.len()
+        );
+    }
 
     #[test]
     fn the_solver_pubkey_is_read_from_a_peer_payload() {
