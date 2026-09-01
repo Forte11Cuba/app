@@ -319,12 +319,38 @@ const DEDUP_MAX_ENTRIES: usize = 512;
 /// the per-trade and the global subscription is only handled once.
 ///
 /// `seen` answers the membership question; `order` exists only to know which
-/// id to drop when the window is full. The two must be mutated together or the
-/// set grows without bound.
+/// id to drop when the window is full. Both hold the same `Arc<str>`, so a new
+/// id is allocated once, and `record` is the only thing that writes them —
+/// split those two writes across call sites and `seen` grows without bound.
+///
+/// `frb(ignore)` because this module is part of `crate::api`, which
+/// flutter_rust_bridge scans: without it the codegen emits bindings for this
+/// private, non-bridgeable type and the wasm build stops compiling.
 #[derive(Default)]
+#[flutter_rust_bridge::frb(ignore)]
 struct DedupWindow {
-    seen: std::collections::HashSet<String>,
-    order: std::collections::VecDeque<String>,
+    seen: std::collections::HashSet<Arc<str>>,
+    order: std::collections::VecDeque<Arc<str>>,
+}
+
+impl DedupWindow {
+    /// Returns `true` if `event_id` is already in the window. Otherwise records
+    /// it — evicting the oldest id when the window is full — and returns
+    /// `false`.
+    fn record(&mut self, event_id: &str) -> bool {
+        if self.seen.contains(event_id) {
+            return true;
+        }
+        let id: Arc<str> = Arc::from(event_id);
+        self.seen.insert(Arc::clone(&id));
+        self.order.push_back(id);
+        if self.order.len() > DEDUP_MAX_ENTRIES {
+            if let Some(evicted) = self.order.pop_front() {
+                self.seen.remove(&evicted);
+            }
+        }
+        false
+    }
 }
 
 static PROCESSED_GW: OnceLock<std::sync::Mutex<DedupWindow>> = OnceLock::new();
@@ -333,20 +359,10 @@ static PROCESSED_GW: OnceLock<std::sync::Mutex<DedupWindow>> = OnceLock::new();
 /// Otherwise records it and returns `false`.
 fn is_duplicate_daemon_message(event_id: &str) -> bool {
     let window = PROCESSED_GW.get_or_init(|| std::sync::Mutex::new(DedupWindow::default()));
-    let mut guard = match window.lock() {
-        Ok(g) => g,
-        Err(_) => return false,
-    };
-    if !guard.seen.insert(event_id.to_string()) {
-        return true;
+    match window.lock() {
+        Ok(mut guard) => guard.record(event_id),
+        Err(_) => false,
     }
-    guard.order.push_back(event_id.to_string());
-    if guard.order.len() > DEDUP_MAX_ENTRIES {
-        if let Some(evicted) = guard.order.pop_front() {
-            guard.seen.remove(&evicted);
-        }
-    }
-    false
 }
 
 static ORDER_BOOK: OnceCell<OrderBook> = OnceCell::const_new();
@@ -3723,22 +3739,37 @@ mod tests {
     /// The window must recognize a repeat, and must forget an id once
     /// `DEDUP_MAX_ENTRIES` newer ones have arrived — otherwise it would grow
     /// without bound.
+    ///
+    /// Driven against a local window rather than `is_duplicate_daemon_message`:
+    /// that one shares a process-global static with every other test in this
+    /// binary, so asserting on it would both depend on and destroy state the
+    /// rest of the suite may touch.
     #[test]
     fn daemon_message_dedup_recognizes_repeats_and_evicts_oldest() {
-        // Prefixed so this test cannot collide with the shared global window.
-        let id = |n: usize| format!("dedup-test-{n:06}");
+        let mut window = DedupWindow::default();
+        let id = |n: usize| format!("{n:064x}");
 
-        assert!(!is_duplicate_daemon_message(&id(0)));
-        assert!(is_duplicate_daemon_message(&id(0)));
+        assert!(!window.record(&id(0)));
+        assert!(window.record(&id(0)));
 
         // One more than capacity, so id(0) is pushed out of the window.
         for n in 1..=DEDUP_MAX_ENTRIES {
-            is_duplicate_daemon_message(&id(n));
+            window.record(&id(n));
         }
 
         assert!(
-            !is_duplicate_daemon_message(&id(0)),
+            !window.record(&id(0)),
             "the oldest id should have been evicted once the window filled"
+        );
+        assert_eq!(
+            window.seen.len(),
+            window.order.len(),
+            "the set and the eviction queue drifted apart"
+        );
+        assert!(
+            window.order.len() <= DEDUP_MAX_ENTRIES,
+            "window grew past its bound: {}",
+            window.order.len()
         );
     }
 
