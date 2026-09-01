@@ -2,7 +2,7 @@
 use anyhow::Result;
 use sqlx::{
     sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous},
-    SqlitePool,
+    SqliteConnection, SqlitePool,
 };
 
 use crate::api::types::{
@@ -39,7 +39,26 @@ impl SqliteStorage {
             .max_connections(MAX_CONNECTIONS)
             .connect_with(options)
             .await?;
-        Self::migrate(&pool).await?;
+
+        // Migrations drop legacy tables, and with `foreign_keys` now enabled
+        // from the moment a connection opens, SQLite runs an implicit
+        // `DELETE FROM` before each `DROP TABLE`. On a schema-v1 database the
+        // surviving `messages` rows still reference `trades(id)`, so that
+        // delete fails with "FOREIGN KEY constraint failed" and aborts
+        // `open()` before the migration that would have removed those rows.
+        // Pin one connection, disable enforcement on it for the migrations
+        // only, and restore it before the connection returns to the pool.
+        let mut conn = pool.acquire().await?;
+        sqlx::query("PRAGMA foreign_keys = OFF")
+            .execute(&mut *conn)
+            .await?;
+        let migrated = Self::migrate(&mut conn).await;
+        sqlx::query("PRAGMA foreign_keys = ON")
+            .execute(&mut *conn)
+            .await?;
+        drop(conn);
+        migrated?;
+
         sqlx::query(SQLITE_INIT_SQL).execute(&pool).await?;
         Ok(Self { pool })
     }
@@ -51,21 +70,24 @@ impl SqliteStorage {
     /// user-critical data (e.g. cached order/trade state that is rebuilt from
     /// the network), but the migration logs a warning so it is visible in debug
     /// output.
-    async fn migrate(pool: &SqlitePool) -> Result<()> {
+    ///
+    /// Runs on a single pinned connection with `foreign_keys` disabled — see
+    /// the call site in `open()`.
+    async fn migrate(conn: &mut SqliteConnection) -> Result<()> {
         // Migration 1 → 2: trades table changed from individual columns to a
         // single JSON `data` blob.  Detect the old schema by checking for the
         // `order_id` column which does not exist in the new schema.
         let old_trades: bool = sqlx::query_scalar(
             "SELECT COUNT(*) > 0 FROM pragma_table_info('trades') WHERE name = 'order_id'",
         )
-        .fetch_one(pool)
+        .fetch_one(&mut *conn)
         .await
         .unwrap_or(false);
 
         if old_trades {
             log::warn!("[db] migrating trades table from schema v1 to v2 (dropping old rows)");
             sqlx::query("DROP TABLE IF EXISTS trades")
-                .execute(pool)
+                .execute(&mut *conn)
                 .await?;
         }
 
@@ -82,7 +104,7 @@ impl SqliteStorage {
         let trades_exists: bool = sqlx::query_scalar(
             "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type = 'table' AND name = 'trades'",
         )
-        .fetch_one(pool)
+        .fetch_one(&mut *conn)
         .await
         .unwrap_or(false);
         if trades_exists {
@@ -95,7 +117,7 @@ impl SqliteStorage {
                  ) \
                  WHERE json_type(data, '$.order.amount_sats') = 'text'",
             )
-            .execute(pool)
+            .execute(&mut *conn)
             .await
             .map(|r| r.rows_affected());
             match repaired {
@@ -120,13 +142,13 @@ impl SqliteStorage {
         let messages_exists: bool = sqlx::query_scalar(
             "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type = 'table' AND name = 'messages'",
         )
-        .fetch_one(pool)
+        .fetch_one(&mut *conn)
         .await
         .unwrap_or(false);
         let messages_has_data: bool = sqlx::query_scalar(
             "SELECT COUNT(*) > 0 FROM pragma_table_info('messages') WHERE name = 'data'",
         )
-        .fetch_one(pool)
+        .fetch_one(&mut *conn)
         .await
         .unwrap_or(false);
         if messages_exists && !messages_has_data {
@@ -134,7 +156,7 @@ impl SqliteStorage {
                 "[db] migrating messages table from schema v1 (dropping unreadable rows)"
             );
             sqlx::query("DROP TABLE IF EXISTS messages")
-                .execute(pool)
+                .execute(&mut *conn)
                 .await?;
         }
 
@@ -149,13 +171,13 @@ impl SqliteStorage {
         let messages_has_fk: bool = sqlx::query_scalar(
             "SELECT COUNT(*) > 0 FROM pragma_foreign_key_list('messages')",
         )
-        .fetch_one(pool)
+        .fetch_one(&mut *conn)
         .await
         .unwrap_or(false);
         if messages_has_fk && messages_has_data {
             log::warn!("[db] migrating messages table from schema v2 to v3 (dropping FK)");
             sqlx::query(crate::db::schema::SQLITE_DROP_MESSAGES_FK_SQL)
-                .execute(pool)
+                .execute(&mut *conn)
                 .await?;
         }
 
@@ -1186,6 +1208,70 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(storage.list_messages("order-1").await.unwrap().len(), 1);
+
+        drop(storage);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// A schema-v1 database carries BOTH the old `trades` table (one column per
+    /// field, with `order_id`) and a `messages` table whose rows reference it.
+    /// `migrate()` drops `trades` first, and with foreign keys enforced SQLite
+    /// runs an implicit `DELETE FROM trades` for that drop — which the surviving
+    /// child rows reject with "FOREIGN KEY constraint failed". The error aborts
+    /// `open()` before the messages migration is ever reached, so the whole
+    /// database fails to open. Migrations therefore run with enforcement off.
+    #[tokio::test]
+    async fn v1_trades_drop_is_not_blocked_by_legacy_message_rows() {
+        let path = temp_db_path();
+        let url = format!("sqlite://{}?mode=rwc", path.to_str().unwrap());
+
+        {
+            let pool = SqlitePoolOptions::new().connect(&url).await.unwrap();
+            sqlx::query(
+                "CREATE TABLE trades (
+                     id TEXT PRIMARY KEY, order_id TEXT NOT NULL, status TEXT NOT NULL,
+                     started_at INTEGER NOT NULL, completed_at INTEGER);
+                 CREATE TABLE messages (
+                     id                TEXT NOT NULL PRIMARY KEY,
+                     trade_id          TEXT NOT NULL REFERENCES trades(id),
+                     sender_pubkey     TEXT NOT NULL,
+                     content_encrypted BLOB NOT NULL,
+                     message_type      TEXT NOT NULL,
+                     is_mine           INTEGER NOT NULL DEFAULT 0,
+                     is_read           INTEGER NOT NULL DEFAULT 0,
+                     attachment_id     TEXT,
+                     created_at        INTEGER NOT NULL);
+                 INSERT INTO trades VALUES ('t1', 'order-1', 'Active', 1, NULL);
+                 INSERT INTO messages VALUES
+                     ('m0', 't1', 'p', x'00', 'Peer', 0, 0, NULL, 1);",
+            )
+            .execute(&pool)
+            .await
+            .unwrap();
+            pool.close().await;
+        }
+
+        // Used to fail with "FOREIGN KEY constraint failed" on the trades drop.
+        let storage = SqliteStorage::open(path.to_str().unwrap()).await.unwrap();
+
+        // Both legacy tables were rebuilt to the current schema.
+        let trade_cols: Vec<(String,)> =
+            sqlx::query_as("SELECT name FROM pragma_table_info('trades')")
+                .fetch_all(&storage.pool)
+                .await
+                .unwrap();
+        let trade_cols: Vec<String> = trade_cols.into_iter().map(|(c,)| c).collect();
+        assert!(
+            !trade_cols.contains(&"order_id".to_string()),
+            "legacy trades column survived: {trade_cols:?}"
+        );
+
+        // And enforcement is back on for normal pool use.
+        let fk: i64 = sqlx::query_scalar("PRAGMA foreign_keys")
+            .fetch_one(&storage.pool)
+            .await
+            .unwrap();
+        assert_eq!(fk, 1, "foreign_keys left disabled after migrations");
 
         drop(storage);
         let _ = std::fs::remove_file(&path);
