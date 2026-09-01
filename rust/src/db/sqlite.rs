@@ -652,6 +652,44 @@ mod tests {
         std::env::temp_dir().join(format!("mostro_test_{}_{n}.db", std::process::id()))
     }
 
+    /// `EXPLAIN QUERY PLAN` rows, joined into one string for assertion.
+    async fn query_plan(storage: &SqliteStorage, sql: &str) -> String {
+        let rows: Vec<(i64, i64, i64, String)> =
+            sqlx::query_as(&format!("EXPLAIN QUERY PLAN {sql}"))
+                .bind("order-plan-1")
+                .fetch_all(&storage.pool)
+                .await
+                .unwrap();
+        rows.into_iter()
+            .map(|(_, _, _, detail)| detail)
+            .collect::<Vec<_>>()
+            .join(" | ")
+    }
+
+    /// The six trade lookups all filter on the same json_extract expression.
+    /// Without a matching expression index SQLite full-scans `trades` and
+    /// re-parses every JSON blob — once per non-pending order event.
+    #[tokio::test]
+    async fn trade_lookup_by_order_id_uses_an_index() {
+        let path = temp_db_path();
+        let storage = SqliteStorage::open(path.to_str().unwrap()).await.unwrap();
+
+        let plan = query_plan(
+            &storage,
+            "SELECT data FROM trades WHERE json_extract(data, '$.order.id') = ? LIMIT 1",
+        )
+        .await;
+
+        assert!(
+            plan.contains("idx_trades_order_id"),
+            "expected the order-id expression index, got: {plan}"
+        );
+
+        drop(storage);
+        let _ = std::fs::remove_file(&path);
+    }
+
+
     #[tokio::test]
     async fn message_exists_is_durable_replay_dedup() {
         use crate::api::types::*;
