@@ -4,6 +4,7 @@ pub mod fsm;
 pub(crate) mod pending;
 pub mod pow;
 pub mod protocol_version;
+pub mod rates;
 pub mod session;
 pub(crate) mod status;
 
