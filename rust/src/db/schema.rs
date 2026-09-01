@@ -38,11 +38,13 @@ PRAGMA foreign_keys = ON;
 /// SQLite DDL executed unconditionally on every `SqliteStorage::open()` call.
 /// Safe to run repeatedly because every statement uses `CREATE TABLE IF NOT
 /// EXISTS` / `CREATE INDEX IF NOT EXISTS`.
+///
+/// Connection pragmas deliberately live in `SqliteStorage::open`'s connect
+/// options instead of here: this SQL runs on one pooled connection, and
+/// `foreign_keys` is connection-scoped, so setting it here left the rest of
+/// the pool with enforcement off.
 #[cfg(not(target_arch = "wasm32"))]
 pub const SQLITE_INIT_SQL: &str = r#"
-PRAGMA journal_mode = WAL;
-PRAGMA foreign_keys = ON;
-
 CREATE TABLE IF NOT EXISTS orders (
     id              TEXT PRIMARY KEY,
     data            TEXT NOT NULL,   -- JSON-serialised OrderInfo
