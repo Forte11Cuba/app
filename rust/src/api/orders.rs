@@ -3069,12 +3069,6 @@ async fn build_trade_key_map() -> HashMap<String, (nostr_sdk::Keys, u32)> {
     map
 }
 
-/// Handle a kind-14 Mostro reply received on the global subscription.
-///
-/// The caller has already pinned the author to the active Mostro pubkey.
-/// Finds which trade key the event is addressed to (via `p` tag), decrypts
-/// via `mostro_core::transport::unwrap_incoming`, and dispatches the recovered
-/// `Message` through `dispatch_mostro_message`.
 /// Find which of our trade keys this kind-14 is addressed to, reading the key
 /// map only for the lookup itself.
 ///
@@ -3108,6 +3102,12 @@ async fn resolve_dm_recipient(
     None
 }
 
+/// Handle a kind-14 Mostro reply received on the global subscription.
+///
+/// The caller has already pinned the author to the active Mostro pubkey and
+/// resolved the addressed trade key via [`resolve_dm_recipient`]. Decrypts
+/// via `mostro_core::transport::unwrap_incoming` and dispatches the recovered
+/// `Message` through `dispatch_mostro_message`.
 async fn handle_global_daemon_message(
     event: &nostr_sdk::Event,
     recipient: (String, nostr_sdk::Keys, u32),
@@ -3800,6 +3800,11 @@ mod tests {
     use crate::mostro::pending::register_dispute_request;
     use crate::mostro::session::session_manager;
 
+    /// `global_dm_keys()` is a process-global shared by every test in this
+    /// binary, and tests run in parallel: the entry is removed before the
+    /// assertions so a failure here cannot leave the map grown for whoever
+    /// runs next (`a_late_derived_key_joins_the_global_dm_coverage` asserts
+    /// on its size).
     #[tokio::test]
     async fn dm_recipient_is_resolved_from_the_p_tag() {
         use nostr_sdk::{EventBuilder, Kind, Tag};
@@ -3807,26 +3812,31 @@ mod tests {
         let mine = nostr_sdk::Keys::generate();
         let mine_hex = mine.public_key().to_hex();
         let stranger = nostr_sdk::Keys::generate();
-        global_dm_keys()
-            .write()
-            .await
-            .insert(mine_hex.clone(), (mine.clone(), 7));
 
         let addressed_to_us = EventBuilder::new(Kind::PrivateDirectMessage, "")
             .tags([Tag::parse(["p", &mine_hex]).unwrap()])
             .sign_with_keys(&nostr_sdk::Keys::generate())
             .unwrap();
-        let resolved = resolve_dm_recipient(&addressed_to_us).await;
-        assert!(
-            matches!(resolved, Some((ref hex, _, 7)) if *hex == mine_hex),
-            "p-tag matching one of our trade keys must resolve to it"
-        );
-
+        // A stranger's key is never inserted, so this one resolves to None
+        // whatever else the shared map happens to hold.
         let addressed_elsewhere = EventBuilder::new(Kind::PrivateDirectMessage, "")
             .tags([Tag::parse(["p", &stranger.public_key().to_hex()]).unwrap()])
             .sign_with_keys(&nostr_sdk::Keys::generate())
             .unwrap();
-        assert!(resolve_dm_recipient(&addressed_elsewhere).await.is_none());
+
+        global_dm_keys()
+            .write()
+            .await
+            .insert(mine_hex.clone(), (mine.clone(), 7));
+        let resolved = resolve_dm_recipient(&addressed_to_us).await;
+        let unresolved = resolve_dm_recipient(&addressed_elsewhere).await;
+        global_dm_keys().write().await.remove(&mine_hex);
+
+        assert!(
+            matches!(resolved, Some((ref hex, _, 7)) if *hex == mine_hex),
+            "p-tag matching one of our trade keys must resolve to it"
+        );
+        assert!(unresolved.is_none());
     }
 
     /// The window must recognize a repeat, and must forget an id once
