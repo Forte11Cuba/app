@@ -8,13 +8,30 @@ Mostro daemon via Kind 38383 Nostr events and cached locally.
 ### Daemon confirmation & request correlation
 
 Every request that expects a daemon reply (`create_order`, `take_order`,
-`send_invoice`) carries a random u64 `request_id` nonce. The daemon echoes
+`send_invoice`, and `open_dispute` from the [disputes](disputes.md) API)
+carries a random u64 `request_id` nonce. The daemon echoes
 it in its reply (success or `CantDo`), and **only a reply echoing the exact
 nonce may resolve or consume the pending request** — stale events replayed
 by relays carry a different (or no) `request_id` and touch nothing. Each
 call waits up to 10 s; on timeout it returns `NoDaemonResponse` and nothing
-is persisted. A genuine late reply is still reconciled where meaningful
-(create), or logged and dropped (take / add-invoice).
+is persisted.
+
+What happens to a genuine reply that arrives **after** that timeout depends on
+the request. The pending record survives the timeout in every case — only its
+waiter detaches — so the late reply is still recognized as ours rather than as
+a stale replay:
+
+- **create**: reconciled — the daemon UUID is bound to the attempt's trade
+  index, and the Kind 38383 fingerprint path restores maker ownership.
+- **take / add-invoice**: logged and dropped; the reply's own status update is
+  processed by the per-action arms as usual.
+- **dispute**: reconciled — `record_late_acceptance` persists the accepted
+  dispute under the daemon-assigned id (unread, and without the reason, which
+  went with the timed-out call). So a `NoDaemonResponse` from `open_dispute` is
+  **not** proof that no dispute can appear for that trade later. Retrying after
+  the timeout does not break this: the retry takes the trade key over but
+  carries every superseded attempt's nonce forward, so a reply to any of them
+  is still correlated. See [disputes.md](disputes.md) for the full behavior.
 
 ## Functions
 
