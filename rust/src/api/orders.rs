@@ -4109,34 +4109,134 @@ mod tests {
         pending_requests().lock().unwrap().remove(take_key);
     }
 
-    /// #202: the CantDo arm resolves whatever request the nonce identifies, so
-    /// a registered dispute is rejected through the same path as any other
-    /// request. Before the dispute registered one, its rejection matched no
-    /// pending request and was dropped — leaving a local dispute Open forever.
+    /// Builds the `UnwrappedMessage` for a daemon reply to an open-dispute,
+    /// signed-by-sender semantics included, for driving the real dispatcher.
+    /// `Action::CantDo` is a `Message::CantDo` on the wire, every other reply
+    /// a `Message::Dispute` — the arms are reached through the dispatcher, not
+    /// re-implemented in the test.
+    fn dispute_reply_message(
+        order_uuid: uuid::Uuid,
+        request_id: u64,
+        trade_index: u32,
+        action: mostro_core::message::Action,
+        payload: Option<mostro_core::message::Payload>,
+    ) -> mostro_core::nip59::UnwrappedMessage {
+        use mostro_core::message::{Action, Message};
+
+        let message = match action {
+            Action::CantDo => Message::cant_do(Some(order_uuid), Some(request_id), payload),
+            other => Message::new_dispute(
+                Some(order_uuid),
+                Some(request_id),
+                Some(trade_index as i64),
+                other,
+                payload,
+            ),
+        };
+        let sender =
+            nostr_sdk::PublicKey::from_hex(&active_mostro_pubkey()).expect("valid mostro pubkey");
+        mostro_core::nip59::UnwrappedMessage {
+            message,
+            signature: None,
+            sender,
+            identity: sender,
+            created_at: nostr_sdk::Timestamp::from(0u64),
+        }
+    }
+
+    /// The acceptance, through the real dispatcher: its `DisputeInitiatedByYou`
+    /// arm must wake the caller with the daemon's dispute id AND still fall
+    /// through to the status arm that moves the trade to Dispute. The matcher's
+    /// own test sees neither half — only this one pins the fall-through the
+    /// arm's comment claims.
+    #[tokio::test]
+    async fn a_dispute_acceptance_wakes_the_caller_and_moves_the_trade() {
+        use crate::api::types::OrderStatus;
+        use mostro_core::message::{Action, Payload};
+
+        let order_uuid = uuid::Uuid::new_v4();
+        let order_id = order_uuid.to_string();
+        let key = "test-dispute-accepted-pubkey";
+        let dispute_uuid = uuid::Uuid::new_v4();
+
+        // A disputable trade, bound to the generation the reply arrives on.
+        let mut info = dummy_order_info(&order_id);
+        info.status = OrderStatus::Active;
+        order_book().upsert_order(info).await;
+        store_trade_key_index(&order_id, 8).await;
+
+        let mut rx = register_dispute_request(key.to_string(), 74, 8);
+
+        dispatch_mostro_message(
+            dispute_reply_message(
+                order_uuid,
+                74,
+                8,
+                Action::DisputeInitiatedByYou,
+                Some(Payload::Dispute(dispute_uuid, None)),
+            ),
+            "test-dispute-accepted",
+            key,
+            8,
+        )
+        .await;
+
+        // The waiting open_dispute gets the daemon's id — the one the solver
+        // and the Kind 38386 event refer to — not a locally minted one.
+        match rx.try_recv() {
+            Ok(Wake { reply: DaemonReply::DisputeAccepted { dispute_id }, .. }) => {
+                assert_eq!(dispute_id, Some(dispute_uuid.to_string()));
+            }
+            _ => panic!("the acceptance must reach the waiting open_dispute"),
+        }
+        assert!(!pending_requests().lock().unwrap().contains_key(key));
+
+        assert_eq!(
+            order_book()
+                .get_order(&order_id)
+                .await
+                .expect("order still cached")
+                .status,
+            OrderStatus::Dispute,
+            "the acceptance is also the status update"
+        );
+    }
+
+    /// #202 itself, driven through the arm that was dropping it: the CantDo arm
+    /// resolves whatever request the nonce identifies, so a registered dispute
+    /// is rejected through the same path as any other request. Before the
+    /// dispute registered one, its rejection matched no pending request and was
+    /// dropped — leaving a local dispute Open forever.
     #[tokio::test]
     async fn a_cantdo_rejection_reaches_the_waiting_open_dispute() {
+        use mostro_core::error::CantDoReason;
+        use mostro_core::message::{Action, Payload};
+
+        let order_uuid = uuid::Uuid::new_v4();
         let key = "test-dispute-cantdo-pubkey";
         let mut rx = register_dispute_request(key.to_string(), 73, 6);
 
-        // Exactly what the Action::CantDo arm does to find its caller.
-        let pending = take_matching_restore(key)
-            .or_else(|| take_matching_request(key, Some(73)))
-            .expect("the rejection must find the dispute record");
-        assert!(matches!(pending.kind, PendingRequestKind::Dispute { .. }));
+        dispatch_mostro_message(
+            dispute_reply_message(
+                order_uuid,
+                73,
+                6,
+                Action::CantDo,
+                Some(Payload::CantDo(Some(CantDoReason::NotAllowedByStatus))),
+            ),
+            "test-dispute-cantdo",
+            key,
+            6,
+        )
+        .await;
 
-        let sent = pending
-            .tx
-            .expect("the waiter is still attached")
-            .send(Wake::from(DaemonReply::Rejected {
-                reason: "NotAllowedByStatus".to_string(),
-                message: "rejected".to_string(),
-            }));
-        assert!(sent.is_ok(), "the caller must still be listening");
-
-        assert!(matches!(
-            rx.try_recv(),
-            Ok(Wake { reply: DaemonReply::Rejected { .. }, .. })
-        ));
+        match rx.try_recv() {
+            Ok(Wake { reply: DaemonReply::Rejected { reason, .. }, .. }) => {
+                assert_eq!(reason, "NotAllowedByStatus");
+            }
+            _ => panic!("the rejection must reach the waiting open_dispute"),
+        }
+        assert!(!pending_requests().lock().unwrap().contains_key(key));
     }
 
     /// Same-key overlap (send_invoice reuses the take's trade key): a newer

@@ -68,8 +68,12 @@ restores the attempt it replaced.
 No retry count changes this: **every** superseded nonce is retained, because
 every one of them is still answerable and dropping one turns its acceptance
 back into that same bare status update. The list only grows through retries the
-user drives, each gated by the 10 s timeout, and the whole record is purged when
-the trade's subscription ends.
+user drives, each gated by the 10 s timeout, and a nonce leaves it as soon as
+its reply is reconciled. Nothing purges the record itself in the common case:
+that only happens when a per-trade daemon subscription exits, and opening a
+dispute starts none — a dispute on a trade loaded from the database after a
+restart is answered over the global feed — so the record can live for the whole
+process.
 
 The local status check and the reply correlation are two layers of the same
 concern: the check keeps most rejections off the wire, and the correlation
@@ -84,6 +88,9 @@ those surface as `NoDaemonResponse` rather than a precise reason.
 
 **Errors**: `TradeNotDisputable`, `DisputeAlreadyOpen`, `ProtocolError`,
 `NoDaemonResponse`, plus daemon `CantDo` reasons passed through as errors.
+`DisputeAlreadyOpen` covers both refusals — a record already exists, or an open
+for this trade is still in flight — and Dart maps the marker to one localized
+message (`localizedDaemonError`).
 
 ---
 

@@ -705,6 +705,8 @@
   "@openDisputeTitle": {"description": "Title of the open-dispute confirmation dialog"},
   "openDisputeConfirmation": "Are you sure you want to open a dispute? This escalates the trade to an admin and cannot be undone.",
   "@openDisputeConfirmation": {"description": "Body of the open-dispute confirmation dialog"},
+  "disputeAlreadyOpen": "A dispute for this trade is already open.",
+  "@disputeAlreadyOpen": {"description": "Snackbar shown when a dispute is opened for a trade that already has one, or while a previous attempt is still in flight"},
   "tradeNotDisputable": "A dispute can only be opened once the funds are locked for this trade.",
   "@tradeNotDisputable": {"description": "Snackbar shown when a dispute is attempted before the trade reaches a disputable state"},
   "tradeWaitingInvoiceBuyerInstruction": "Submit your Lightning invoice so the seller can lock the funds.",

@@ -112,11 +112,16 @@ pub(crate) enum PendingRequestKind {
         /// The list is not capped. Every entry is still answerable — the
         /// daemon may accept any attempt it received — and dropping one turns
         /// its acceptance back into a bare status update, the disputed trade
-        /// with no dispute record this whole change set exists to remove. The
-        /// list only grows through user-driven retries, each gated by a 10 s
-        /// timeout, and the whole record is purged when the trade's
-        /// subscription ends, so eight bytes per retry is not worth trading
-        /// that correctness for.
+        /// with no dispute record this whole change set exists to remove. It
+        /// only grows through user-driven retries, each gated by a 10 s
+        /// timeout, and shrinks as each nonce is reconciled, so eight bytes
+        /// per outstanding attempt is not worth trading that correctness for.
+        ///
+        /// The record's own lifetime is not bounded in the common case:
+        /// [`purge_pending_request`] runs only when a per-trade daemon
+        /// subscription exits, and `open_dispute` starts none — a dispute on
+        /// a trade loaded from the database after a restart is answered over
+        /// the global feed — so the record can live for the whole process.
         superseded: Vec<u64>,
     },
 }
@@ -343,14 +348,17 @@ pub(crate) fn take_matching_dispute(
     got: Option<u64>,
 ) -> Option<DisputeMatch> {
     let mut map = pending_requests().lock().ok()?;
-    let entry = map.get(trade_pubkey_hex)?;
-    let PendingRequestKind::Dispute { superseded } = &entry.kind else {
+    let entry = map.get_mut(trade_pubkey_hex)?;
+    let PendingRequestKind::Dispute { superseded } = &mut entry.kind else {
         return None;
     };
     // An attempt this key's current record replaced: its caller stopped
     // waiting long ago, but the acceptance is real and still ours. Leave the
-    // live record in place — its own reply may yet arrive.
-    if got.is_some_and(|id| superseded.contains(&id)) {
+    // live record in place — its own reply may yet arrive — and drop the
+    // nonce now that it is answered, so the list only ever names attempts
+    // still outstanding.
+    if let Some(answered) = got.and_then(|id| superseded.iter().position(|n| *n == id)) {
+        superseded.remove(answered);
         return Some(DisputeMatch::Late);
     }
     if !request_id_matches(entry.request_id, got) {
@@ -1189,11 +1197,17 @@ mod tests {
             Some(DisputeMatch::Late)
         ));
         // The live record survives it, waiter attached, as for any other
-        // superseded match.
+        // superseded match — and the answered nonce is gone, so the list
+        // never claims an attempt that has already been reconciled.
         {
             let map = pending_requests().lock().unwrap();
             let entry = map.get(key).expect("the live record must survive");
             assert_eq!(entry.request_id, total);
+            let PendingRequestKind::Dispute { superseded } = &entry.kind else {
+                panic!("must be a dispute record");
+            };
+            assert!(!superseded.contains(&1), "the answered nonce must be dropped");
+            assert_eq!(superseded.len() as u64, total - 2);
         }
 
         purge_pending_request(key);
