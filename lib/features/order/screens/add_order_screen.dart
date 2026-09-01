@@ -10,12 +10,15 @@ import 'package:mostro/core/automation/automation_ids.dart';
 import 'package:mostro/core/daemon_errors.dart';
 import 'package:mostro/features/order/widgets/currency_section.dart';
 import 'package:mostro/features/settings/providers/settings_provider.dart';
+import 'package:mostro/features/about/models/mostro_instance.dart';
 import 'package:mostro/features/about/providers/mostro_node_provider.dart';
+import 'package:mostro/features/order/providers/exchange_rate_provider.dart';
 import 'package:mostro/features/order/widgets/order_preset_selector.dart';
 import 'package:mostro/features/order/widgets/payment_method_section.dart';
 import 'package:mostro/features/order/widgets/price_section.dart';
 import 'package:mostro/features/trades/providers/trades_providers.dart'
     show refreshTrades;
+import 'package:mostro/shared/utils/order_amount_limits.dart';
 import 'package:mostro/src/rust/api/orders.dart' as rust_orders;
 import 'package:mostro/src/rust/api/types.dart';
 
@@ -53,6 +56,43 @@ class AddOrderScreen extends ConsumerStatefulWidget {
   if (sats == null) return null;
   if (sats < BigInt.from(minOrder) || sats > BigInt.from(maxOrder)) {
     return (min: minOrder, max: maxOrder);
+  }
+  return null;
+}
+
+/// The amount [text] holds, or null when it is not one the form can submit.
+///
+/// `Infinity`, `-Infinity` and `NaN` all parse as doubles and would pass a
+/// bare positivity check, only to throw in the sats conversion further down —
+/// while the screen is building. Nothing filters the amount fields' input, so
+/// a pasted value can be any of them.
+@visibleForTesting
+double? enteredAmount(String text) {
+  final value = double.tryParse(text.trim());
+  if (value == null || !value.isFinite || value <= 0) return null;
+  return value;
+}
+
+/// Returns the node's accepted `(min, max)` sats range, and that range in
+/// fiat, when a market-price order's amount prices outside it, otherwise null.
+///
+/// Pure and testable, like [satsOutOfNodeRange] above, which is the fixed-sats
+/// counterpart. Takes every amount the daemon will price — one for a
+/// single-amount order, both ends for a range order — because the daemon
+/// prices each of them and rejects the order if any one is out of range
+/// (`mostro/src/app/order.rs`). Fails open on anything it cannot judge; see
+/// [fiatOutOfNodeRange].
+@visibleForTesting
+({int minSats, int maxSats, FiatAmountLimits limits})?
+    marketAmountsOutOfNodeRange(
+  List<String> fiatAmounts,
+  int? minOrder,
+  int? maxOrder,
+  double? rate,
+) {
+  for (final amount in fiatAmounts) {
+    final error = fiatOutOfNodeRange(amount, minOrder, maxOrder, rate);
+    if (error != null) return error;
   }
   return null;
 }
@@ -106,6 +146,51 @@ class _AddOrderScreenState extends ConsumerState<AddOrderScreen> {
     }
   }
 
+  /// [marketAmountsOutOfNodeRange] over whichever amount fields are in play.
+  ({int minSats, int maxSats, FiatAmountLimits limits})? _fiatRangeError(
+    MostroInstance? node,
+    double? rate,
+  ) =>
+      marketAmountsOutOfNodeRange(
+        _isRange
+            ? [_minController.text, _maxController.text]
+            : [_amountController.text],
+        node?.minOrderAmount,
+        node?.maxOrderAmount,
+        rate,
+      );
+
+  /// The out-of-range warning to show under the price card, or null when the
+  /// entered amount is fine — or cannot be checked at all, in which case the
+  /// daemon stays the only authority.
+  String? _rangeWarning({
+    required AppLocalizations l10n,
+    required ({int min, int max})? satsRangeError,
+    required ({int minSats, int maxSats, FiatAmountLimits limits})?
+        fiatRangeError,
+    required String fiatCode,
+  }) {
+    if (satsRangeError != null) {
+      return l10n.orderAmountOutOfRange(satsRangeError.min, satsRangeError.max);
+    }
+    if (fiatRangeError == null) return null;
+    // The sats bounds mean nothing to most users, so a market-price range is
+    // shown in the currency they typed in. Sats are the fallback for when the
+    // whole valid range is under one fiat unit, leaving no enterable whole
+    // number to name.
+    final limits = fiatRangeError.limits;
+    return limits.isDisplayable
+        ? l10n.orderAmountOutOfRangeFiat(
+            limits.minFiat,
+            limits.maxFiat,
+            fiatCode,
+          )
+        : l10n.orderAmountOutOfRange(
+            fiatRangeError.minSats,
+            fiatRangeError.maxSats,
+          );
+  }
+
   bool _checkValid(
     List<String> selectedMethods,
     String customMethod,
@@ -121,12 +206,11 @@ class _AddOrderScreenState extends ConsumerState<AddOrderScreen> {
     }
 
     if (_isRange) {
-      final min = double.tryParse(_minController.text);
-      final max = double.tryParse(_maxController.text);
-      return min != null && max != null && min > 0 && min < max;
+      final min = enteredAmount(_minController.text);
+      final max = enteredAmount(_maxController.text);
+      return min != null && max != null && min < max;
     } else {
-      final amount = double.tryParse(_amountController.text);
-      return amount != null && amount > 0;
+      return enteredAmount(_amountController.text) != null;
     }
   }
 
@@ -202,19 +286,26 @@ class _AddOrderScreenState extends ConsumerState<AddOrderScreen> {
     // out of the node's sats range, but re-check here so no code path submits
     // an out-of-range fixed-sats order (#282).
     final node = ref.read(mostroNodeProvider).valueOrNull;
+    final fiatCode = ref.read(selectedFiatCodeProvider);
     final outOfRange = !isMarket && !_isRange && fixedSatsStr.isNotEmpty
         ? satsOutOfNodeRange(
             fixedSatsStr, node?.minOrderAmount, node?.maxOrderAmount)
         : null;
+    final fiatOutOfRange = isMarket
+        ? _fiatRangeError(
+            node,
+            ref.read(exchangeRateProvider(fiatCode)).valueOrNull,
+          )
+        : null;
     if (_submitting ||
         !_checkValid(selectedMethods, customMethod, isMarket, fixedSatsStr) ||
-        outOfRange != null) {
+        outOfRange != null ||
+        fiatOutOfRange != null) {
       return;
     }
     setState(() => _submitting = true);
 
     try {
-      final fiatCode = ref.read(selectedFiatCodeProvider);
       final isMarket = ref.read(isMarketPriceProvider);
       final premium = isMarket ? ref.read(premiumValueProvider) : 0.0;
       final fixedSatsStr = ref.read(fixedSatsProvider);
@@ -289,10 +380,24 @@ class _AddOrderScreenState extends ConsumerState<AddOrderScreen> {
         ? satsOutOfNodeRange(
             fixedSatsStr, node?.minOrderAmount, node?.maxOrderAmount)
         : null;
+    // Watched rather than read on submit, so the fetch is already in flight by
+    // the time an amount is typed. Null while it is — and for good when the
+    // node publishes no rate — which fails the check open (#337).
+    final rate = isMarket
+        ? ref.watch(exchangeRateProvider(fiatCode)).valueOrNull
+        : null;
+    final fiatRangeError = isMarket ? _fiatRangeError(node, rate) : null;
     final isValid =
         _checkValid(selectedMethods, customMethod, isMarket, fixedSatsStr) &&
-            satsRangeError == null;
+            satsRangeError == null &&
+            fiatRangeError == null;
     final l10n = AppLocalizations.of(context);
+    final rangeWarning = _rangeWarning(
+      l10n: l10n,
+      satsRangeError: satsRangeError,
+      fiatRangeError: fiatRangeError,
+      fiatCode: fiatCode,
+    );
 
     return Scaffold(
       appBar: AppBar(title: Text(l10n.creatingNewOrderTitle)),
@@ -412,18 +517,16 @@ class _AddOrderScreenState extends ConsumerState<AddOrderScreen> {
             color: cardBg,
             child: const PriceSection(),
           ),
-          // Out-of-range warning for fixed-sats orders (#282): show the node's
-          // accepted range so the user can correct it before submitting,
-          // instead of the daemon rejecting the order after the fact.
-          if (satsRangeError != null) ...[
+          // Out-of-range warning, for fixed-sats (#282) and market-price
+          // (#337) orders alike: show the node's accepted range so the user can
+          // correct it before submitting, instead of the daemon rejecting the
+          // order after the fact.
+          if (rangeWarning != null) ...[
             const SizedBox(height: AppSpacing.sm),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
               child: Text(
-                l10n.orderAmountOutOfRange(
-                  satsRangeError.min,
-                  satsRangeError.max,
-                ),
+                rangeWarning,
                 style: TextStyle(
                   color: colors?.destructiveRed ?? const Color(0xFFD84D4D),
                   fontSize: 13,
@@ -524,14 +627,14 @@ class _AddOrderScreenState extends ConsumerState<AddOrderScreen> {
     // Fiat side, mirroring _checkValid's rules.
     String? amountStr;
     if (_isRange) {
-      final min = double.tryParse(_minController.text);
-      final max = double.tryParse(_maxController.text);
-      if (min != null && max != null && min > 0 && min < max) {
+      final min = enteredAmount(_minController.text);
+      final max = enteredAmount(_maxController.text);
+      if (min != null && max != null && min < max) {
         amountStr = '${_formatNum(min)}–${_formatNum(max)} $fiatCode';
       }
     } else {
-      final amount = double.tryParse(_amountController.text);
-      if (amount != null && amount > 0) {
+      final amount = enteredAmount(_amountController.text);
+      if (amount != null) {
         amountStr = '${_formatNum(amount)} $fiatCode';
       }
     }
