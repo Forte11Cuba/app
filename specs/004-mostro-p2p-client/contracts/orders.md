@@ -8,13 +8,30 @@ Mostro daemon via Kind 38383 Nostr events and cached locally.
 ### Daemon confirmation & request correlation
 
 Every request that expects a daemon reply (`create_order`, `take_order`,
-`send_invoice`) carries a random u64 `request_id` nonce. The daemon echoes
+`send_invoice`, and `open_dispute` from the [disputes](disputes.md) API)
+carries a random u64 `request_id` nonce. The daemon echoes
 it in its reply (success or `CantDo`), and **only a reply echoing the exact
 nonce may resolve or consume the pending request** — stale events replayed
 by relays carry a different (or no) `request_id` and touch nothing. Each
 call waits up to 10 s; on timeout it returns `NoDaemonResponse` and nothing
-is persisted. A genuine late reply is still reconciled where meaningful
-(create), or logged and dropped (take / add-invoice).
+is persisted.
+
+What happens to a genuine reply that arrives **after** that timeout depends on
+the request. The pending record survives the timeout in every case — only its
+waiter detaches — so the late reply is still recognized as ours rather than as
+a stale replay:
+
+- **create**: reconciled — the daemon UUID is bound to the attempt's trade
+  index, and the Kind 38383 fingerprint path restores maker ownership.
+- **take / add-invoice**: logged and dropped; the reply's own status update is
+  processed by the per-action arms as usual.
+- **dispute**: reconciled — `record_late_acceptance` persists the accepted
+  dispute under the daemon-assigned id (unread, and without the reason, which
+  went with the timed-out call). So a `NoDaemonResponse` from `open_dispute` is
+  **not** proof that no dispute can appear for that trade later. Retrying after
+  the timeout does not break this: the retry takes the trade key over but
+  carries every superseded attempt's nonce forward, so a reply to any of them
+  is still correlated. See [disputes.md](disputes.md) for the full behavior.
 
 ## Functions
 
@@ -63,6 +80,21 @@ NewOrderParams {
 - If range: `fiat_amount_min` MUST be > 0 and < `fiat_amount_max`
 - `fiat_code` MUST be valid ISO 4217
 - `payment_method` MUST not be empty
+- The amount is checked against the node's advertised `min_order_amount` /
+  `max_order_amount` before anything is sent: directly for a fixed
+  `amount_sats` (#282), and for a market-price order by converting every fiat
+  amount the daemon will price — both ends of a range order — at the rate the
+  node publishes (`fetch_exchange_rate` in `nostr.md`), truncating as the
+  daemon does (#337). The fiat amount is first normalised to the whole unit the
+  wire carries (`new_order` casts it to `i64`), so the check judges the amount
+  the daemon actually receives rather than the decimal the user typed
+
+**Fail-open**: that range check blocks nothing it cannot judge — no rate, no
+advertised bounds, an amount that is not yet a finite positive number. The
+order is submitted and the daemon stays the authority, answering
+`OutOfRangeSatsAmount` if it disagrees. Blocking instead would make
+market-price orders unusable against every node that leaves rate publishing
+off, which the protocol allows.
 
 **Side effects**: Sends the new-order message to the Mostro daemon and waits for its confirmation. The order is created only once the daemon confirms it; the public order book is populated exclusively from the daemon's Kind 38383 event (the order is **not** inserted optimistically). On no confirmation within the timeout the order is treated as not created — nothing is persisted to My Trades and nothing is added to the book.
 
