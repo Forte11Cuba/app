@@ -208,14 +208,35 @@ impl OrderBook {
     /// Insert or update a single order and notify listeners.
     pub async fn upsert_order(&self, order: OrderInfo) {
         let mut orders = self.orders.write().await;
+        Self::apply_upsert(&mut orders, order);
+        let snapshot = orders.clone();
+        drop(orders);
+        let _ = self.tx.send(snapshot);
+    }
+
+    /// Insert or update a single order **without** notifying listeners.
+    ///
+    /// For bulk ingest, where the caller publishes once at the end. Every
+    /// message on this channel is a whole-book snapshot, so publishing per
+    /// event during a refetch of N orders costs N clones of an N-element
+    /// vector and N full payloads across the bridge.
+    pub(crate) async fn upsert_order_deferred(&self, order: OrderInfo) {
+        let mut orders = self.orders.write().await;
+        Self::apply_upsert(&mut orders, order);
+    }
+
+    /// Publish the current book to subscribers.
+    pub(crate) async fn publish(&self) {
+        let snapshot = self.orders.read().await.clone();
+        let _ = self.tx.send(snapshot);
+    }
+
+    fn apply_upsert(orders: &mut Vec<OrderInfo>, order: OrderInfo) {
         if let Some(existing) = orders.iter_mut().find(|o| o.id == order.id) {
             *existing = order;
         } else {
             orders.push(order);
         }
-        let snapshot = orders.clone();
-        drop(orders);
-        let _ = self.tx.send(snapshot);
     }
 
     /// Update the status of an existing cached order and notify listeners.
@@ -2826,8 +2847,14 @@ async fn refetch_active_node_orders() {
                 format!("refetched {} current orders for active node", events.len()),
             );
             for event in events.into_iter() {
-                ingest_order_event(&event).await;
+                ingest_order_event_with(&event, Publish::WhenBatchEnds).await;
             }
+            // One emission for the batch. Publishing per event made a refetch
+            // O(N²): each upsert cloned the whole book and sent it across the
+            // bridge, so N orders cost N clones of an N-element vector. This
+            // path runs on cold start, on every node switch, and on every
+            // pull-to-refresh.
+            order_book().publish().await;
         }
         Err(e) => log::warn!("[orders] refetch: fetch current orders failed: {e}"),
     }
@@ -3196,7 +3223,20 @@ fn dispute_id_from_payload(
 ///
 /// Shared by the live subscription loop and the node-switch refetch so both
 /// paths populate the book identically.
+/// Whether an ingested event publishes the book straight away.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Publish {
+    /// Live subscription: one event, one emission.
+    Immediately,
+    /// Bulk ingest: the caller publishes once for the whole batch.
+    WhenBatchEnds,
+}
+
 async fn ingest_order_event(event: &nostr_sdk::Event) {
+    ingest_order_event_with(event, Publish::Immediately).await;
+}
+
+async fn ingest_order_event_with(event: &nostr_sdk::Event, publish: Publish) {
     log::debug!(
         "[orders] event kind={} author={}",
         event.kind,
@@ -3304,7 +3344,10 @@ async fn ingest_order_event(event: &nostr_sdk::Event) {
                     }
                 }
             }
-            order_book().upsert_order(info).await;
+            match publish {
+                Publish::Immediately => order_book().upsert_order(info).await,
+                Publish::WhenBatchEnds => order_book().upsert_order_deferred(info).await,
+            }
         }
         None => {
             log::warn!(
@@ -3799,6 +3842,47 @@ mod tests {
     use crate::api::types::TradeRole;
     use crate::mostro::pending::register_dispute_request;
     use crate::mostro::session::session_manager;
+
+    /// A refetch replays the node's whole book through ingest. Publishing per
+    /// event made that O(N²) in clones and in bridge payload, so the batch
+    /// must produce exactly one emission.
+    #[tokio::test]
+    async fn a_bulk_ingest_publishes_once_for_the_whole_batch() {
+        const BATCH: usize = 50;
+        let book = OrderBook::new();
+        let mut rx = book.subscribe();
+
+        for n in 0..BATCH {
+            book.upsert_order_deferred(dummy_order_info(&format!("bulk-{n}")))
+                .await;
+        }
+
+        assert!(
+            matches!(rx.try_recv(), Err(broadcast::error::TryRecvError::Empty)),
+            "a deferred upsert must not publish"
+        );
+
+        book.publish().await;
+
+        let snapshot = rx.try_recv().expect("the batch publishes one snapshot");
+        assert_eq!(snapshot.len(), BATCH, "the snapshot carries the whole book");
+        assert!(
+            matches!(rx.try_recv(), Err(broadcast::error::TryRecvError::Empty)),
+            "the batch must publish exactly once"
+        );
+    }
+
+    /// The live subscription still emits per event: deferring is opt-in.
+    #[tokio::test]
+    async fn a_live_upsert_still_publishes_immediately() {
+        let book = OrderBook::new();
+        let mut rx = book.subscribe();
+
+        book.upsert_order(dummy_order_info("live-1")).await;
+
+        let snapshot = rx.try_recv().expect("a live upsert publishes");
+        assert_eq!(snapshot.len(), 1);
+    }
 
     /// `global_dm_keys()` is a process-global shared by every test in this
     /// binary, and tests run in parallel: the entry is removed before the
