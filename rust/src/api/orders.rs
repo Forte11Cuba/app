@@ -3633,7 +3633,25 @@ fn resync_floor(
 ) -> Option<u32> {
     let payload_max = recovered_max_trade_index(info);
     match (daemon_counter, payload_max) {
-        (Some(daemon), Some(payload)) => Some(daemon.max(payload)),
+        (Some(daemon), Some(payload)) => {
+            if payload > daemon {
+                // The invariant argued above says this cannot happen against a
+                // consistent daemon — so seeing it means a stale/partial reply
+                // or a daemon bug, the same "the daemon sent something this
+                // client's model does not cover" class
+                // recovered_max_trade_index already warns about. The behaviour
+                // (take the payload bound) is right; the silence would not be.
+                crate::api::logging::blog_warn(
+                    "restore",
+                    format!(
+                        "LastTradeIndex counter {daemon} is below the restore \
+                         payload max {payload} — inconsistent daemon reply; \
+                         resyncing to the payload bound"
+                    ),
+                );
+            }
+            Some(daemon.max(payload))
+        }
         (daemon, payload) => daemon.or(payload),
     }
 }
@@ -3643,10 +3661,12 @@ fn resync_floor(
 /// (`mostro/src/app/last_trade_index.rs` copies `request_id` into the reply).
 ///
 /// A replayed reply from an earlier request carries a different nonce — or
-/// none, since this client's own pre-hardening requests sent no id — so
-/// accepting `None` would readmit exactly the replays this guards against.
-/// Strict matching means a daemon that does not echo falls back to the
-/// restore-payload maximum, the same designed path as a silent daemon.
+/// none: mostro-cli sends this action with `request_id: None`
+/// (`src/cli/last_trade_index.rs`), so nonce-less replies for the same account
+/// exist in the wild wherever the user also runs the CLI. Accepting `None`
+/// would readmit exactly those replays. Strict matching means a daemon that
+/// does not echo falls back to the restore-payload maximum, the same designed
+/// path as a silent daemon.
 fn is_matching_last_trade_index_reply(
     kind: &mostro_core::message::MessageKind,
     request_id: u64,
@@ -3655,67 +3675,58 @@ fn is_matching_last_trade_index_reply(
         && kind.request_id == Some(request_id)
 }
 
+/// True for the daemon's refusal of THIS request: `CantDo` echoing our nonce.
+///
+/// The daemon answers `LastTradeIndex` with `CantDo(NotFound)` when the
+/// account is unknown — an identity with no trade history on this node, and
+/// every privacy-mode request, since without an identity proof there is no
+/// account to look up — and `CantDo(InvalidTradeIndex)` when the stored
+/// counter is 0. Both echo `request_id` (`mostro/src/app.rs` routes
+/// `MostroCantDo` through `enqueue_cant_do_msg` with the request's id).
+/// Treating them as terminal turns a full REPLY_TIMEOUT stall on those paths
+/// into an immediate, logged fallback.
+fn is_matching_cant_do_refusal(
+    kind: &mostro_core::message::MessageKind,
+    request_id: u64,
+) -> bool {
+    kind.action == mostro_core::message::Action::CantDo
+        && kind.request_id == Some(request_id)
+}
+
 /// Ask the daemon for its authoritative last-known trade index (#328).
 ///
-/// `Action::LastTradeIndex` is account-scoped: the request is signed with the
-/// identity keys for BOTH the Seal and the rumor (see
-/// `actions::last_trade_index`), so it derives NO trade key and the daemon
-/// resolves the account by sender pubkey. The reply is a kind-14 addressed to
-/// the identity pubkey, carrying the counter in `MessageKind::trade_index`.
+/// The rumor is authored by `sender_keys` — the fresh trade key the caller
+/// (`restore_session`) already derived — like every other daemon-bound event:
+/// the outer kind-14 must never be authored by the master identity pubkey,
+/// which would publish a permanent identity→Mostro link on every relay. The
+/// daemon resolves the account from the encrypted identity proof
+/// (`event.identity`) and replies to the rumor author (`event.sender`), so the
+/// reply is a kind-14 addressed to the trade key, carrying the counter in
+/// `MessageKind::trade_index`. The identity keys come from
+/// `get_transport_identity_keys` — the privacy-toggle gate: in full-privacy
+/// mode no proof is attached, the daemon finds no account and refuses with
+/// `CantDo(NotFound)`, and the caller takes the payload fallback (privacy mode
+/// has no stable account to ask about).
 ///
 /// Returns `Ok(Some(idx))` with the sanitized counter, or `Ok(None)` when the
-/// daemon does not answer within the timeout or the reply carries no usable
-/// index — the caller then falls back to `recovered_max_trade_index`.
+/// daemon refuses (`CantDo`), does not answer within the timeout, or the reply
+/// carries no usable index — the caller then falls back to
+/// `recovered_max_trade_index`.
 ///
 /// This is a self-contained request/reply (own subscription + inline wait, like
-/// mostro-cli's `wait_for_dm`) rather than a reuse of the per-trade
-/// subscription/dispatch path: that path derives its recipient keys from a
-/// trade index and is coupled to trade keys, but this reply is encrypted to the
-/// identity key.
-async fn last_trade_index() -> Result<Option<u32>> {
+/// mostro-cli's `wait_for_dm`) rather than a `pending_requests` record: the
+/// reply also reaches the global dispatch path (the trade key is in the bulk
+/// coverage), which ignores it — the restore's pending record was already
+/// consumed — while this loop correlates by its own nonce.
+async fn last_trade_index(sender_keys: &nostr_sdk::Keys) -> Result<Option<u32>> {
     use nostr_sdk::RelayPoolNotification;
     use crate::rt::time::{timeout, Duration};
 
-    let identity_keys = crate::api::identity::get_active_keys().await?;
-    let identity_pk = identity_keys.public_key();
-    let identity_pk_hex = identity_pk.to_hex();
+    let trade_pk = sender_keys.public_key();
+    let trade_pk_hex = trade_pk.to_hex();
     let mostro_pubkey = nostr_sdk::PublicKey::from_hex(&active_mostro_pubkey())?;
-
-    let pool = crate::api::nostr::get_pool()?;
-    let client = pool.client();
-
-    // Grab the notifications receiver BEFORE subscribing so the reply can't
-    // arrive in the gap between subscribe and the first recv.
-    let mut rx = client.notifications();
-
-    // This query, unlike the restore itself, has a fallback (the payload
-    // maximum), so a shorter wait halves the worst-case restore latency
-    // against a silent daemon. Shared by the relay-side auto-close and the
-    // outer wait loop so the two can't drift.
-    const REPLY_TIMEOUT: Duration = Duration::from_secs(5);
-
-    // limit(0): live-only, same rationale as subscribe_daemon_messages — the
-    // reply is published after we subscribe, and we never want a replayed
-    // historical LastTradeIndex to resolve this request.
-    let filter = nostr_sdk::Filter::new()
-        .kind(nostr_sdk::Kind::PrivateDirectMessage)
-        .author(mostro_pubkey)
-        .pubkey(identity_pk)
-        .limit(0);
-    // Auto-close the relay-side subscription — this is a one-shot request/reply
-    // (mostro-cli's wait_for_dm shape), not a long-lived watcher, so the library
-    // issues the CLOSE on every path: after the reply (WaitForEventsAfterEOSE(1))
-    // and, if the daemon never answers, on the timeout. Leaving it to manual
-    // bookkeeping is the leak class #182/#255 address. Auto-close subs are
-    // deliberately excluded from reconnect re-subscription (correct here: if the
-    // socket drops mid-request we fall back to the payload maximum by design).
-    let close_opts = nostr_sdk::prelude::SubscribeAutoCloseOptions::default()
-        .exit_policy(nostr_sdk::prelude::ReqExitPolicy::WaitForEventsAfterEOSE(1))
-        .timeout(Some(REPLY_TIMEOUT));
-    if let Err(e) = client.subscribe(filter, Some(close_opts)).await {
-        log::warn!("[orders] last_trade_index subscribe failed: {e}");
-        return Ok(None);
-    }
+    let identity_keys =
+        crate::api::identity::get_transport_identity_keys(sender_keys).await?;
 
     // Correlation nonce, echoed by the daemon in its reply. Without it any
     // authenticated LastTradeIndex reply resolves this request, so a malicious
@@ -3727,20 +3738,71 @@ async fn last_trade_index() -> Result<Option<u32>> {
         use rand::RngCore;
         rand::rngs::OsRng.next_u64().max(1) // 0 is indistinguishable from "unset"
     };
+
+    // Build the event BEFORE subscribing: wrap_message_first_contact awaits the
+    // PoW capability snapshot and mines the PoW synchronously, so building
+    // after subscribe would start the relay-side auto-close early and shrink
+    // the usable reply window by the PoW + publish cost — at a high
+    // pow_first_contact on a slow device the relay could CLOSE before the
+    // request is even published.
     let event_json =
-        actions::last_trade_index(&identity_keys, &mostro_pubkey, request_id).await?;
+        actions::last_trade_index(&identity_keys, sender_keys, &mostro_pubkey, request_id)
+            .await?;
+
+    let pool = crate::api::nostr::get_pool()?;
+    let client = pool.client();
+
+    // Grab the notifications receiver BEFORE subscribing so the reply can't
+    // arrive in the gap between subscribe and the first recv.
+    let mut rx = client.notifications();
+
+    // This query, unlike the restore itself, has a fallback (the payload
+    // maximum), so a shorter wait halves the worst-case restore latency
+    // against a silent daemon. Shared by the relay-side auto-close and the
+    // outer wait loop — both started at subscribe below, so the two budgets
+    // actually run together.
+    const REPLY_TIMEOUT: Duration = Duration::from_secs(5);
+
+    // limit(0): live-only, same rationale as subscribe_daemon_messages — the
+    // reply is published after we subscribe, and we never want a replayed
+    // historical LastTradeIndex to resolve this request.
+    let filter = nostr_sdk::Filter::new()
+        .kind(nostr_sdk::Kind::PrivateDirectMessage)
+        .author(mostro_pubkey)
+        .pubkey(trade_pk)
+        .limit(0);
+    // Auto-close the relay-side subscription — this is a one-shot request/reply
+    // (mostro-cli's wait_for_dm shape), not a long-lived watcher. Leaving the
+    // CLOSE to manual bookkeeping is the leak class #182/#255 address.
+    // WaitDurationAfterEOSE, not WaitForEventsAfterEOSE(1): the recipient is
+    // the restore's trade key, so a late-propagating duplicate of the restore
+    // reply matches this filter too and would consume a one-event budget before
+    // the LastTradeIndex reply arrives. Holding the subscription open for the
+    // full reply window closes it deterministically on every path without that
+    // race. Auto-close subs are deliberately excluded from reconnect
+    // re-subscription (correct here: if the socket drops mid-request we fall
+    // back to the payload maximum by design).
+    let close_opts = nostr_sdk::prelude::SubscribeAutoCloseOptions::default()
+        .exit_policy(nostr_sdk::prelude::ReqExitPolicy::WaitDurationAfterEOSE(
+            REPLY_TIMEOUT,
+        ))
+        .timeout(Some(REPLY_TIMEOUT));
+    if let Err(e) = client.subscribe(filter, Some(close_opts)).await {
+        log::warn!("[orders] last_trade_index subscribe failed: {e}");
+        return Ok(None);
+    }
+    // Client-side deadline, started at subscribe time — the same instant the
+    // relay-side auto-close starts — so both give up together.
+    let start = crate::rt::time::Instant::now();
+
     publish_event_json(&event_json).await?;
     crate::api::logging::blog_info(
         "restore",
         "LastTradeIndex published — waiting for daemon".to_string(),
     );
 
-    // Wait for the reply. Bounded by REPLY_TIMEOUT — the same budget the
-    // relay-side auto-close uses, so both give up together.
-    let deadline = REPLY_TIMEOUT;
-    let start = crate::rt::time::Instant::now();
     loop {
-        let remaining = deadline.saturating_sub(start.elapsed());
+        let remaining = REPLY_TIMEOUT.saturating_sub(start.elapsed());
         if remaining.is_zero() {
             break;
         }
@@ -3754,27 +3816,40 @@ async fn last_trade_index() -> Result<Option<u32>> {
                 let is_for_us = event.tags.iter().any(|t| {
                     let s = t.as_slice();
                     s.first().map(|v| v.as_str()) == Some("p")
-                        && s.get(1).map(|v| v.as_str()) == Some(identity_pk_hex.as_str())
+                        && s.get(1).map(|v| v.as_str()) == Some(trade_pk_hex.as_str())
                 });
                 if !is_for_us {
                     continue;
                 }
-                match crate::nostr::transport::unwrap_mostro_message(&identity_keys, &event).await {
+                match crate::nostr::transport::unwrap_mostro_message(sender_keys, &event).await {
                     Ok(Some(unwrapped)) => {
                         // Authenticate: the kind-14 author must be the node.
                         if unwrapped.sender != mostro_pubkey {
                             continue;
                         }
                         let kind = unwrapped.message.get_inner_message_kind();
-                        if !is_matching_last_trade_index_reply(kind, request_id) {
-                            continue;
+                        if is_matching_last_trade_index_reply(kind, request_id) {
+                            let idx = kind.trade_index.and_then(sanitize_trade_index);
+                            crate::api::logging::blog_info("restore", format!(
+                                "LastTradeIndex reply: trade_index={:?} -> floor={idx:?}",
+                                kind.trade_index
+                            ));
+                            return Ok(idx);
                         }
-                        let idx = kind.trade_index.and_then(sanitize_trade_index);
-                        crate::api::logging::blog_info("restore", format!(
-                            "LastTradeIndex reply: trade_index={:?} -> floor={idx:?}",
-                            kind.trade_index
-                        ));
-                        return Ok(idx);
+                        if is_matching_cant_do_refusal(kind, request_id) {
+                            let reason = match &kind.payload {
+                                Some(mostro_core::message::Payload::CantDo(Some(r))) => {
+                                    format!("{r:?}")
+                                }
+                                _ => "unspecified".to_string(),
+                            };
+                            crate::api::logging::blog_warn("restore", format!(
+                                "LastTradeIndex refused: CantDo({reason}) — \
+                                 falling back to restore payload max"
+                            ));
+                            return Ok(None);
+                        }
+                        continue;
                     }
                     Ok(None) => continue,
                     Err(e) => {
@@ -3886,7 +3961,7 @@ pub async fn restore_session() -> Result<mostro_core::message::RestoreSessionInf
             // recovered_max_trade_index is a lower bound (a finalized trade
             // holding a higher index is invisible) — kept only as a fallback
             // for when the daemon does not answer.
-            let daemon_counter = match last_trade_index().await {
+            let daemon_counter = match last_trade_index(&sender_keys).await {
                 Ok(idx) => idx,
                 Err(e) => {
                     crate::api::logging::blog_warn("restore", format!(
@@ -4065,13 +4140,33 @@ mod tests {
         assert!(is_matching_last_trade_index_reply(&reply(Some(42)), 42));
         // A replay of an earlier request's reply carries a different nonce...
         assert!(!is_matching_last_trade_index_reply(&reply(Some(41)), 42));
-        // ...or none at all — this client's own earlier requests sent no id,
-        // so their stored replies are exactly the replay material to reject.
+        // ...or none at all — mostro-cli sends this action with no request_id,
+        // so nonce-less replies for the same account exist in the wild and are
+        // exactly the replay material to reject.
         assert!(!is_matching_last_trade_index_reply(&reply(None), 42));
         // A different action never matches, even with the right nonce.
         let other =
             MessageKind::new(None, Some(42), Some(7), Action::RestoreSession, None);
         assert!(!is_matching_last_trade_index_reply(&other, 42));
+    }
+
+    #[test]
+    fn a_cant_do_refusal_matches_only_our_nonce() {
+        use mostro_core::message::{Action, MessageKind};
+
+        let refusal = |request_id: Option<u64>| {
+            MessageKind::new(None, request_id, None, Action::CantDo, None)
+        };
+        // The daemon's refusal of THIS request echoes our nonce and is
+        // terminal — the caller falls back immediately instead of stalling.
+        assert!(is_matching_cant_do_refusal(&refusal(Some(42)), 42));
+        // A replayed or foreign CantDo does not resolve this request.
+        assert!(!is_matching_cant_do_refusal(&refusal(Some(41)), 42));
+        assert!(!is_matching_cant_do_refusal(&refusal(None), 42));
+        // The genuine counter reply is not a refusal.
+        let counter =
+            MessageKind::new(None, Some(42), Some(7), Action::LastTradeIndex, None);
+        assert!(!is_matching_cant_do_refusal(&counter, 42));
     }
 
     #[test]

@@ -421,17 +421,24 @@ pub async fn restore_session(
 
 /// Build and wrap a `LastTradeIndex` request (#328).
 ///
-/// Account-scoped: `identity_keys` sign BOTH the Seal and the rumor, so the
-/// daemon resolves the account by sender pubkey and NO trade key is derived.
-/// The reply carries the counter in `MessageKind::trade_index`. Payload must be
-/// `None` (enforced by mostro-core). Mirrors `mostro-cli`'s
-/// `execute_last_trade_index`, which signs with `identity_keys` for both.
+/// The daemon resolves the account from `event.identity` — the proven pubkey
+/// inside the encrypted identity proof — and uses the rumor author
+/// (`event.sender`) only as the reply address
+/// (`mostro/src/app/last_trade_index.rs`). So the rumor is signed by an
+/// ephemeral trade key, like every other daemon-bound event from this client:
+/// the outer kind-14 must never be authored by the master identity pubkey,
+/// which would publish a permanent identity→Mostro link on every relay.
+/// (mostro-cli signs both with the identity keys and its comment claims the
+/// daemon resolves by sender pubkey — the daemon source says otherwise.)
 ///
-/// `request_id` is the correlation nonce the daemon echoes in its reply
-/// (`mostro/src/app/last_trade_index.rs`) — the caller uses it to reject
-/// replayed replies from earlier requests.
+/// The reply carries the counter in `MessageKind::trade_index`. Payload must be
+/// `None` (enforced by mostro-core).
+///
+/// `request_id` is the correlation nonce the daemon echoes in its reply — the
+/// caller uses it to reject replayed replies from earlier requests.
 pub async fn last_trade_index(
     identity_keys: &Keys,
+    trade_keys: &Keys,
     mostro_pubkey: &PublicKey,
     request_id: u64,
 ) -> Result<String> {
@@ -442,7 +449,7 @@ pub async fn last_trade_index(
         Action::LastTradeIndex,
         None,
     ));
-    wrap_message_first_contact(identity_keys, identity_keys, mostro_pubkey, &msg).await
+    wrap_message_first_contact(identity_keys, trade_keys, mostro_pubkey, &msg).await
 }
 
 #[cfg(test)]
