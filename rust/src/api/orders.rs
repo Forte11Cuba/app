@@ -38,6 +38,48 @@ fn trade_key_map() -> &'static std::sync::RwLock<HashMap<String, u32>> {
     TRADE_KEY_MAP.get_or_init(|| std::sync::RwLock::new(HashMap::new()))
 }
 
+/// Ids the DB has already been asked about and did not have.
+///
+/// The ingest path looks up a content fingerprint for every Kind 38383 event,
+/// and for every order belonging to somebody else that lookup misses — one
+/// storage round trip per event, which on web is an IndexedDB transaction.
+///
+/// Safe to cache only because absence is stable: `store_trade_key_index` is
+/// the sole path from absent to present, and it clears the entry.
+static TRADE_KEY_MISSES: OnceLock<std::sync::RwLock<std::collections::HashSet<String>>> =
+    OnceLock::new();
+
+/// Ceiling on remembered misses.
+const TRADE_KEY_MISS_CAPACITY: usize = 4096;
+
+fn trade_key_misses() -> &'static std::sync::RwLock<std::collections::HashSet<String>> {
+    TRADE_KEY_MISSES.get_or_init(|| std::sync::RwLock::new(std::collections::HashSet::new()))
+}
+
+/// Record `order_id` as absent, keeping the set within its ceiling.
+///
+/// Dropping everything when full is deliberate: this is a cache, so the worst
+/// an eviction costs is one extra storage read, and that is cheaper than
+/// tracking insertion order for entries nobody will ask about twice.
+fn record_miss(misses: &mut std::collections::HashSet<String>, order_id: &str) {
+    if misses.len() >= TRADE_KEY_MISS_CAPACITY {
+        misses.clear();
+    }
+    misses.insert(order_id.to_string());
+}
+
+fn note_trade_key_miss(order_id: &str) {
+    if let Ok(mut misses) = trade_key_misses().write() {
+        record_miss(&mut misses, order_id);
+    }
+}
+
+fn forget_trade_key_miss(order_id: &str) {
+    if let Ok(mut misses) = trade_key_misses().write() {
+        misses.remove(order_id);
+    }
+}
+
 /// Persist `index` for `order_id` in both the in-memory cache and the DB.
 ///
 /// The in-memory write is synchronous and always succeeds.  The DB write is
@@ -48,6 +90,9 @@ async fn store_trade_key_index(order_id: &str, index: u32) {
     if let Ok(mut map) = trade_key_map().write() {
         map.insert(order_id.to_string(), index);
     }
+    // This is the only way an id goes from absent to present, so it is the
+    // only place the negative cache has to be invalidated.
+    forget_trade_key_miss(order_id);
     if let Some(db) = crate::db::app_db::db() {
         if let Err(e) = db.save_trade_key(order_id, index).await {
             log::warn!("[orders] failed to persist trade key for order={order_id}: {e}");
@@ -85,6 +130,13 @@ async fn lookup_trade_key_index(order_id: &str) -> Option<u32> {
     {
         return Some(idx);
     }
+    // Known absent: skip the round trip.
+    if trade_key_misses()
+        .read()
+        .is_ok_and(|misses| misses.contains(order_id))
+    {
+        return None;
+    }
     // Slow path: DB (populates cache on hit for subsequent calls).
     if let Some(db) = crate::db::app_db::db() {
         match db.get_trade_key(order_id).await {
@@ -94,7 +146,9 @@ async fn lookup_trade_key_index(order_id: &str) -> Option<u32> {
                 }
                 return Some(idx);
             }
-            Ok(None) => {}
+            Ok(None) => note_trade_key_miss(order_id),
+            // Deliberately not cached: a failed read is not evidence of
+            // absence, and caching it would strand the order as "not ours".
             Err(e) => log::warn!("[orders] DB trade key lookup failed for order={order_id}: {e}"),
         }
     }
@@ -3859,6 +3913,40 @@ mod tests {
     use crate::api::types::TradeRole;
     use crate::mostro::pending::register_dispute_request;
     use crate::mostro::session::session_manager;
+
+    /// A cached miss that outlived the key being created would make the order
+    /// look like somebody else's, and every later action on it would be signed
+    /// with the wrong key. Storing a key must clear its recorded miss.
+    #[tokio::test]
+    async fn storing_a_trade_key_clears_its_recorded_miss() {
+        let order_id = format!("neg-cache-{}", uuid::Uuid::new_v4());
+        note_trade_key_miss(&order_id);
+        assert!(trade_key_misses().read().unwrap().contains(&order_id));
+
+        store_trade_key_index(&order_id, 7).await;
+
+        assert!(
+            !trade_key_misses().read().unwrap().contains(&order_id),
+            "the miss must not survive the key it denies"
+        );
+    }
+
+    /// The miss set is a cache, not a record: it must not grow without bound
+    /// as strangers' orders stream past.
+    #[test]
+    fn the_miss_cache_stays_bounded() {
+        let mut misses = std::collections::HashSet::new();
+
+        for n in 0..(TRADE_KEY_MISS_CAPACITY * 2) {
+            record_miss(&mut misses, &format!("bound-{n}"));
+        }
+
+        assert!(
+            misses.len() <= TRADE_KEY_MISS_CAPACITY,
+            "miss cache grew to {}",
+            misses.len()
+        );
+    }
 
     /// A refetch replays the node's whole book through ingest. Publishing per
     /// event made that O(N²) in clones and in bridge payload, so the batch
