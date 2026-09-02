@@ -15,24 +15,15 @@ import 'package:mostro/shared/widgets/nym_avatar.dart';
 import 'package:mostro/src/rust/api/messages.dart' as messages_api;
 import 'package:mostro/src/rust/api/types.dart' as rust_types;
 
-/// Route: /chat_room/:orderId
-///
-/// Individual trade chat room screen with message history, info panels,
-/// and a composition bar.
-///
-/// The Rust bridge is fully wired:
-/// - [messages_api.getMessages] seeds message history on open.
-/// - [messages_api.sendMessage] encrypts and publishes outbound messages via
-///   NIP-59 gift wrap, directed to the ECDH shared-key pubkey per the Mostro
-///   P2P chat protocol.
-/// - [incomingMessageProvider] delivers real-time incoming messages from the
-///   Rust `subscribe_incoming_chat` background task.
-/// - [messages_api.markAsRead] resets unread count when the room is entered.
 /// How close to the end of the list still counts as "following along".
 ///
 /// Roughly one message bubble, so a reader who has scrolled up by even one
 /// message is left where they are.
 const double kFollowThresholdPixels = 80;
+
+/// How long a burst of incoming messages may stay quiet before the room is
+/// marked read once, instead of once per message.
+const Duration kMarkReadDebounce = Duration(milliseconds: 400);
 
 /// Whether an arriving message should scroll the list.
 ///
@@ -45,6 +36,20 @@ bool isPinnedToBottom({
 }) =>
     maxScrollExtent - offset <= kFollowThresholdPixels;
 
+/// Route: /chat_room/:orderId
+///
+/// Individual trade chat room screen with message history, info panels,
+/// and a composition bar.
+///
+/// The Rust bridge is fully wired:
+/// - [messages_api.getMessages] seeds message history on open.
+/// - [messages_api.sendMessage] encrypts and publishes outbound messages as
+///   a Mostro chat envelope (kind 14 signed with the shared key, NIP-44
+///   inner kind 1 signed by the trade key), directed to the ECDH shared-key
+///   pubkey per the Mostro P2P chat protocol.
+/// - [incomingMessageProvider] delivers real-time incoming messages from the
+///   Rust `subscribe_incoming_chat` background task.
+/// - [messages_api.markAsRead] resets unread count when the room is entered.
 class ChatRoomScreen extends ConsumerStatefulWidget {
   const ChatRoomScreen({
     super.key,
@@ -74,6 +79,15 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
   /// fire one bridge call per message.
   Timer? _markReadDebounce;
 
+  /// Rooms notifier captured while the widget is live, so a pending
+  /// mark-read can still be flushed from [dispose], where `ref` is unusable.
+  ChatRoomsNotifier? _roomsNotifier;
+
+  /// Follow animations still in flight (see [_scrollToBottom]). While one
+  /// runs the list lags behind the extent it is heading for, so the position
+  /// alone would misreport a reader who never left the bottom.
+  int _followAnimations = 0;
+
   bool _historyLoaded = false;
 
   final ScrollController _scrollController = ScrollController();
@@ -87,7 +101,7 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
 
   @override
   void dispose() {
-    _markReadDebounce?.cancel();
+    _flushMarkRead();
     _scrollController.dispose();
     super.dispose();
   }
@@ -124,10 +138,15 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
     }
   }
 
-  Future<void> _markRead() async {
+  Future<void> _markRead() =>
+      _markReadWith(ref.read(chatRoomsNotifierProvider.notifier));
+
+  /// [rooms] is passed in rather than read from `ref` so [_flushMarkRead]
+  /// can run it from [dispose].
+  Future<void> _markReadWith(ChatRoomsNotifier? rooms) async {
     try {
       await messages_api.markAsRead(tradeId: widget.orderId);
-      ref.read(chatRoomsNotifierProvider.notifier).markRead(widget.orderId);
+      if (rooms != null && rooms.mounted) rooms.markRead(widget.orderId);
     } catch (e) {
       debugPrint('[chat] markAsRead failed: $e');
     }
@@ -143,7 +162,12 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
         content: text.trim(),
       );
       if (!mounted) return;
-      setState(() => _messages.add(sent));
+      // Record the id here too: every path that appends to [_messages] must
+      // go through [_seenIds], or an echo of this send arriving on the
+      // stream would render it twice.
+      if (_seenIds.add(sent.id)) {
+        setState(() => _messages.add(sent));
+      }
       _scrollToBottom();
       ref.read(chatRoomsNotifierProvider.notifier).upsertRoom(
             _buildRoomPreview(
@@ -178,7 +202,9 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
     // _loadHistory).
     if (msg.messageType != rust_types.MessageType.peer) return;
     if (!_seenIds.add(msg.id)) return; // deduplicate
-    // Read the scroll position before the new message changes the extent.
+    // Decide from where the reader is *before* the message is added. The
+    // extent only grows at the next layout, so reading here keeps the
+    // decision about the list they were looking at, whenever that lands.
     final wasAtBottom = _isPinnedToBottom();
     setState(() => _messages.add(msg));
     // Only follow the conversation if the user was already at the bottom;
@@ -198,6 +224,9 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
 
   /// Whether the list is close enough to the end to keep following it.
   bool _isPinnedToBottom() {
+    // A follow animation still in flight means the reader was at the bottom
+    // and only the animation is behind; do not mistake that for scrolling up.
+    if (_followAnimations > 0) return true;
     if (!_scrollController.hasClients) return true;
     final position = _scrollController.position;
     return isPinnedToBottom(
@@ -208,21 +237,42 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
 
   /// Mark the room read once the burst settles, instead of once per message.
   void _scheduleMarkRead() {
+    _roomsNotifier = ref.read(chatRoomsNotifierProvider.notifier);
     _markReadDebounce?.cancel();
-    _markReadDebounce = Timer(const Duration(milliseconds: 400), () {
+    _markReadDebounce = Timer(kMarkReadDebounce, () {
       if (mounted) _markRead();
     });
   }
 
+  /// Runs a pending mark-read now instead of dropping it: the reader saw the
+  /// burst, and leaving within the debounce window must not leave the room
+  /// flagged unread until their next visit.
+  void _flushMarkRead() {
+    final pending = _markReadDebounce;
+    _markReadDebounce = null;
+    if (pending == null || !pending.isActive) return;
+    pending.cancel();
+    unawaited(_markReadWith(_roomsNotifier));
+  }
+
   void _scrollToBottom() {
+    // Counted from the request, not the frame, so a message arriving before
+    // the post-frame callback runs already sees a follow in progress.
+    _followAnimations++;
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scrollController.hasClients) {
-        _scrollController.animateTo(
-          _scrollController.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 200),
-          curve: Curves.easeOut,
-        );
+      if (!mounted || !_scrollController.hasClients) {
+        _followAnimations--;
+        return;
       }
+      // Interrupting an earlier animation (a newer follow, or the reader
+      // dragging) completes its future, so the counter always drains.
+      _scrollController
+          .animateTo(
+            _scrollController.position.maxScrollExtent,
+            duration: const Duration(milliseconds: 200),
+            curve: Curves.easeOut,
+          )
+          .whenComplete(() => _followAnimations--);
     });
   }
 
