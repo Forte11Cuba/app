@@ -166,7 +166,7 @@ Both parties rate each other (optional)
 
 Mostro App uses a **split-architecture** model: all cryptography, protocol logic, and network I/O live in a Rust core; the UI shell is written in Flutter/Dart.
 
-```
+```text
 ┌─────────────────────────────────────────────┐
 │               Flutter / Dart UI             │
 │  Riverpod state · GoRouter · Material 3     │

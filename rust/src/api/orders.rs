@@ -2179,9 +2179,9 @@ async fn dispatch_mostro_message(
                 "OrderAlreadyCanceled" => "Order is already canceled.".to_string(),
                 // mostro-core 0.14.6: the node is draining (e.g. before a
                 // Lightning node migration) and refuses new orders and takes;
-                // actions on existing orders keep working. Stable marker
-                // first — Dart maps `MaintenanceMode` to a localized message.
-                "MaintenanceMode" => "MaintenanceMode: this Mostro node is under maintenance and is not accepting new orders or takes right now.".to_string(),
+                // actions on existing orders keep working. Marker only, no
+                // prose: Dart maps `MaintenanceMode` to a localized message.
+                "MaintenanceMode" => "MaintenanceMode".to_string(),
                 other => format!("Order rejected by Mostro: {other}"),
             };
 
