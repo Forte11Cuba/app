@@ -208,8 +208,7 @@ class _TakeOrderScreenState extends ConsumerState<TakeOrderScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final orders = ref.watch(orderBookProvider).valueOrNull ?? [];
-    final order = orders.where((o) => o.id == widget.orderId).firstOrNull;
+    final order = ref.watch(orderByIdProvider(widget.orderId));
     final theme = Theme.of(context);
     final colors = theme.extension<AppColors>();
     final green = colors?.mostroGreen ?? const Color(0xFF8CC63F);

@@ -95,8 +95,7 @@ class _MyOrderScreenState extends ConsumerState<MyOrderScreen> {
     final liveStatus =
         ref.watch(tradeStatusProvider(widget.orderId)).valueOrNull;
 
-    final orders = ref.watch(orderBookProvider).valueOrNull ?? [];
-    var order = orders.where((o) => o.id == widget.orderId).firstOrNull;
+    var order = ref.watch(orderByIdProvider(widget.orderId));
     // Fallback to the persisted trade DB when the order is no longer in the
     // in-memory order book (e.g. it was taken and moved out of pending).
     if (order == null) {
