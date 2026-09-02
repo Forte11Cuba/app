@@ -6035,4 +6035,104 @@ mod restore_e2e_tests {
             );
         }
     }
+
+    /// #328 e2e: the highest-index trade is already finalized, so the restore
+    /// payload's maximum is a lower bound and only LastTradeIndex carries the
+    /// real counter. Mirrors the probe in the issue: order A open at index 1,
+    /// order B canceled at index 2 — a fresh install that restores must end
+    /// with the counter at the daemon's high-water mark (2) and get its first
+    /// new order accepted (index 3), where the payload-only resync of #239
+    /// left the counter at 1 and the daemon refused the next order with
+    /// CantDo(InvalidTradeIndex).
+    #[tokio::test]
+    #[ignore = "requires live regtest daemon + relay on ws://localhost:7000"]
+    async fn restore_with_finalized_top_index_resyncs_from_last_trade_index() {
+        crate::api::nostr::initialize(Some(vec!["ws://localhost:7000".to_string()]))
+            .await
+            .expect("relay pool init");
+        crate::config::set_active_mostro_pubkey(Some(
+            "bae71ea2566771ed45b1d267dc0c0753028fe960a7bc4aeee08a44da0cb91520".to_string(),
+        ));
+
+        let id = crate::api::identity::create_identity().await.expect("create identity");
+        let words = id.mnemonic_words.clone();
+        println!("[test] identity pubkey={}", id.public_key);
+        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+
+        let params = |fiat: f64| crate::api::types::NewOrderParams {
+            kind: crate::api::types::OrderKind::Sell,
+            fiat_amount: Some(fiat),
+            fiat_amount_min: None,
+            fiat_amount_max: None,
+            fiat_code: "USD".to_string(),
+            payment_method: "cash".to_string(),
+            premium: 0.0,
+            amount_sats: None,
+        };
+        // Distinct fiat amounts so the two orders never share a content
+        // fingerprint slot (see bridge_fingerprint_trade_index).
+        println!("[test] creating order A (index 1)...");
+        let order_a = create_order(params(100.0)).await.expect("create order A");
+        println!("[test] order A id={}", order_a.id);
+        println!("[test] creating order B (index 2)...");
+        let order_b = create_order(params(200.0)).await.expect("create order B");
+        println!("[test] order B id={}", order_b.id);
+
+        // Finalize the top-index trade: cancel B. cancel_order publishes and
+        // returns without waiting for the daemon, so give it time to settle —
+        // the restore below must not see B as pending.
+        cancel_order(order_b.id.clone()).await.expect("cancel order B");
+        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+
+        // Fresh install: same mnemonic, counter back to zero.
+        crate::api::identity::delete_identity().await.expect("delete identity");
+        crate::api::identity::import_from_mnemonic(words, false)
+            .await
+            .expect("re-import identity");
+        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+
+        println!("[test] calling restore_session()...");
+        let info = restore_session().await.expect("restore round-trip");
+        for o in &info.restore_orders {
+            println!(
+                "[test]   order_id={} status={} index={}",
+                o.order_id, o.status, o.trade_index
+            );
+        }
+
+        // The canceled order B must be invisible here — that is exactly what
+        // makes the payload maximum (1) a lower bound of the daemon counter (2).
+        let payload_max = recovered_max_trade_index(&info);
+        assert_eq!(
+            payload_max,
+            Some(1),
+            "restore payload should carry only the open order A"
+        );
+
+        // The resync floor must have come from LastTradeIndex: with the
+        // payload fallback alone the counter would sit at 1.
+        let idx = crate::api::identity::get_identity()
+            .await
+            .expect("get_identity")
+            .expect("identity present after restore")
+            .trade_key_index;
+        assert!(
+            idx >= 2,
+            "counter ({idx}) must be >= 2 — the LastTradeIndex floor, not the payload bound"
+        );
+
+        // And the point of #328: the first post-restore order must be ACCEPTED.
+        println!("[test] creating first post-restore order...");
+        let order_c = create_order(params(300.0)).await.expect(
+            "first post-restore order must be accepted \
+             (was CantDo(InvalidTradeIndex) before #328)",
+        );
+        println!("[test] ✓ post-restore order accepted id={}", order_c.id);
+        let idx_after = crate::api::identity::get_identity()
+            .await
+            .expect("get_identity")
+            .expect("identity present")
+            .trade_key_index;
+        assert_eq!(idx_after, 3, "the post-restore order should consume index 3");
+    }
 }
