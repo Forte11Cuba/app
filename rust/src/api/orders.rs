@@ -19,9 +19,9 @@ use crate::mostro::status::{
 use crate::mostro::pending::{
     classify_take_reply, detach_request_waiter, may_reconcile_stored_id, order_content_key,
     pending_local_uuid_for, pending_requests, purge_pending_request, remove_pending_request,
-    take_matching_add_invoice, take_matching_request, take_matching_restore,
-    take_matching_take, take_pending_create_by_content_key, DaemonReply, PendingRequest,
-    PendingRequestKind, Wake,
+    take_matching_add_invoice, take_matching_dispute, take_matching_request,
+    take_matching_restore, take_matching_take, take_pending_create_by_content_key, DaemonReply,
+    DisputeMatch, PendingRequest, PendingRequestKind, Wake,
 };
 use crate::nostr::order_events::parse_order_event;
 
@@ -38,6 +38,48 @@ fn trade_key_map() -> &'static std::sync::RwLock<HashMap<String, u32>> {
     TRADE_KEY_MAP.get_or_init(|| std::sync::RwLock::new(HashMap::new()))
 }
 
+/// Ids the DB has already been asked about and did not have.
+///
+/// The ingest path looks up a content fingerprint for every Kind 38383 event,
+/// and for every order belonging to somebody else that lookup misses — one
+/// storage round trip per event, which on web is an IndexedDB transaction.
+///
+/// Safe to cache only because absence is stable: `store_trade_key_index` is
+/// the sole path from absent to present, and it clears the entry.
+static TRADE_KEY_MISSES: OnceLock<std::sync::RwLock<std::collections::HashSet<String>>> =
+    OnceLock::new();
+
+/// Ceiling on remembered misses.
+const TRADE_KEY_MISS_CAPACITY: usize = 4096;
+
+fn trade_key_misses() -> &'static std::sync::RwLock<std::collections::HashSet<String>> {
+    TRADE_KEY_MISSES.get_or_init(|| std::sync::RwLock::new(std::collections::HashSet::new()))
+}
+
+/// Record `order_id` as absent, keeping the set within its ceiling.
+///
+/// Dropping everything when full is deliberate: this is a cache, so the worst
+/// an eviction costs is one extra storage read, and that is cheaper than
+/// tracking insertion order for entries nobody will ask about twice.
+fn record_miss(misses: &mut std::collections::HashSet<String>, order_id: &str) {
+    if misses.len() >= TRADE_KEY_MISS_CAPACITY {
+        misses.clear();
+    }
+    misses.insert(order_id.to_string());
+}
+
+fn note_trade_key_miss(order_id: &str) {
+    if let Ok(mut misses) = trade_key_misses().write() {
+        record_miss(&mut misses, order_id);
+    }
+}
+
+fn forget_trade_key_miss(order_id: &str) {
+    if let Ok(mut misses) = trade_key_misses().write() {
+        misses.remove(order_id);
+    }
+}
+
 /// Persist `index` for `order_id` in both the in-memory cache and the DB.
 ///
 /// The in-memory write is synchronous and always succeeds.  The DB write is
@@ -48,6 +90,9 @@ async fn store_trade_key_index(order_id: &str, index: u32) {
     if let Ok(mut map) = trade_key_map().write() {
         map.insert(order_id.to_string(), index);
     }
+    // This is the only way an id goes from absent to present, so it is the
+    // only place the negative cache has to be invalidated.
+    forget_trade_key_miss(order_id);
     if let Some(db) = crate::db::app_db::db() {
         if let Err(e) = db.save_trade_key(order_id, index).await {
             log::warn!("[orders] failed to persist trade key for order={order_id}: {e}");
@@ -85,6 +130,13 @@ async fn lookup_trade_key_index(order_id: &str) -> Option<u32> {
     {
         return Some(idx);
     }
+    // Known absent: skip the round trip.
+    if trade_key_misses()
+        .read()
+        .is_ok_and(|misses| misses.contains(order_id))
+    {
+        return None;
+    }
     // Slow path: DB (populates cache on hit for subsequent calls).
     if let Some(db) = crate::db::app_db::db() {
         match db.get_trade_key(order_id).await {
@@ -94,7 +146,9 @@ async fn lookup_trade_key_index(order_id: &str) -> Option<u32> {
                 }
                 return Some(idx);
             }
-            Ok(None) => {}
+            Ok(None) => note_trade_key_miss(order_id),
+            // Deliberately not cached: a failed read is not evidence of
+            // absence, and caching it would strand the order as "not ours".
             Err(e) => log::warn!("[orders] DB trade key lookup failed for order={order_id}: {e}"),
         }
     }
@@ -175,6 +229,15 @@ pub struct OrderBook {
     tx: broadcast::Sender<Vec<OrderInfo>>,
 }
 
+/// Snapshots retained for a subscriber that has fallen behind.
+///
+/// A cold-start or refetch burst publishes far more updates than the UI reads
+/// in the same instant, so this is sized for that burst rather than for steady
+/// state. While each message is a full snapshot, overflowing is survivable —
+/// the newest snapshot supersedes the dropped ones. That stops being true if
+/// this channel ever carries deltas.
+const ORDER_STREAM_CAPACITY: usize = 64;
+
 impl Default for OrderBook {
     fn default() -> Self {
         Self::new()
@@ -183,7 +246,7 @@ impl Default for OrderBook {
 
 impl OrderBook {
     pub fn new() -> Self {
-        let (tx, _) = broadcast::channel(16);
+        let (tx, _) = broadcast::channel(ORDER_STREAM_CAPACITY);
         Self {
             orders: Arc::new(RwLock::new(Vec::new())),
             tx,
@@ -208,14 +271,35 @@ impl OrderBook {
     /// Insert or update a single order and notify listeners.
     pub async fn upsert_order(&self, order: OrderInfo) {
         let mut orders = self.orders.write().await;
+        Self::apply_upsert(&mut orders, order);
+        let snapshot = orders.clone();
+        drop(orders);
+        let _ = self.tx.send(snapshot);
+    }
+
+    /// Insert or update a single order **without** notifying listeners.
+    ///
+    /// For bulk ingest, where the caller publishes once at the end. Every
+    /// message on this channel is a whole-book snapshot, so publishing per
+    /// event during a refetch of N orders costs N clones of an N-element
+    /// vector and N full payloads across the bridge.
+    pub(crate) async fn upsert_order_deferred(&self, order: OrderInfo) {
+        let mut orders = self.orders.write().await;
+        Self::apply_upsert(&mut orders, order);
+    }
+
+    /// Publish the current book to subscribers.
+    pub(crate) async fn publish(&self) {
+        let snapshot = self.orders.read().await.clone();
+        let _ = self.tx.send(snapshot);
+    }
+
+    fn apply_upsert(orders: &mut Vec<OrderInfo>, order: OrderInfo) {
         if let Some(existing) = orders.iter_mut().find(|o| o.id == order.id) {
             *existing = order;
         } else {
             orders.push(order);
         }
-        let snapshot = orders.clone();
-        drop(orders);
-        let _ = self.tx.send(snapshot);
     }
 
     /// Update the status of an existing cached order and notify listeners.
@@ -310,30 +394,59 @@ use tokio::sync::OnceCell;
 
 // ── Daemon-message deduplication ─────────────────────────────────────────────
 
-/// Tracks recently processed daemon-message event IDs to avoid duplicate processing
-/// when both the per-trade and global subscriptions receive the same event.
-static PROCESSED_GW: OnceLock<std::sync::Mutex<std::collections::VecDeque<String>>> = OnceLock::new();
+/// Sized for the global feed's history replay on reused keys: a mass replay
+/// longer than this window would evict ids that a slower relay may still
+/// redeliver within the same session.
+const DEDUP_MAX_ENTRIES: usize = 512;
+
+/// Recently processed daemon-message event IDs, so an event delivered by both
+/// the per-trade and the global subscription is only handled once.
+///
+/// `seen` answers the membership question; `order` exists only to know which
+/// id to drop when the window is full. Both hold the same `Arc<str>`, so a new
+/// id is allocated once, and `record` is the only thing that writes them —
+/// split those two writes across call sites and `seen` grows without bound.
+///
+/// `frb(ignore)` because this module is part of `crate::api`, which
+/// flutter_rust_bridge scans: without it the codegen emits bindings for this
+/// private, non-bridgeable type and the wasm build stops compiling.
+#[derive(Default)]
+#[flutter_rust_bridge::frb(ignore)]
+struct DedupWindow {
+    seen: std::collections::HashSet<Arc<str>>,
+    order: std::collections::VecDeque<Arc<str>>,
+}
+
+impl DedupWindow {
+    /// Returns `true` if `event_id` is already in the window. Otherwise records
+    /// it — evicting the oldest id when the window is full — and returns
+    /// `false`.
+    fn record(&mut self, event_id: &str) -> bool {
+        if self.seen.contains(event_id) {
+            return true;
+        }
+        let id: Arc<str> = Arc::from(event_id);
+        self.seen.insert(Arc::clone(&id));
+        self.order.push_back(id);
+        if self.order.len() > DEDUP_MAX_ENTRIES {
+            if let Some(evicted) = self.order.pop_front() {
+                self.seen.remove(&evicted);
+            }
+        }
+        false
+    }
+}
+
+static PROCESSED_GW: OnceLock<std::sync::Mutex<DedupWindow>> = OnceLock::new();
 
 /// Returns `true` if this event ID was already processed (duplicate).
 /// Otherwise records it and returns `false`.
 fn is_duplicate_daemon_message(event_id: &str) -> bool {
-    // Sized for the global feed's history replay on reused keys: a mass
-    // replay longer than this window would evict ids that a slower relay
-    // may still redeliver within the same session.
-    const MAX_ENTRIES: usize = 512;
-    let deque = PROCESSED_GW.get_or_init(|| std::sync::Mutex::new(std::collections::VecDeque::new()));
-    let mut guard = match deque.lock() {
-        Ok(g) => g,
-        Err(_) => return false,
-    };
-    if guard.iter().any(|id| id == event_id) {
-        return true;
+    let window = PROCESSED_GW.get_or_init(|| std::sync::Mutex::new(DedupWindow::default()));
+    match window.lock() {
+        Ok(mut guard) => guard.record(event_id),
+        Err(_) => false,
     }
-    guard.push_back(event_id.to_string());
-    if guard.len() > MAX_ENTRIES {
-        guard.pop_front();
-    }
-    false
 }
 
 static ORDER_BOOK: OnceCell<OrderBook> = OnceCell::const_new();
@@ -610,6 +723,7 @@ pub async fn create_order(params: NewOrderParams) -> Result<OrderInfo> {
         peer_rating: None,
         peer_reviews: None,
         peer_days: None,
+        rated_at: None,
     };
     if let Some(db) = crate::db::app_db::db() {
         if let Err(e) = db.save_trade(&trade).await {
@@ -843,6 +957,7 @@ pub async fn take_order(
         peer_rating: None,
         peer_reviews: None,
         peer_days: None,
+        rated_at: None,
     };
 
     // The other side of the race guarded in `dispatch_mostro_message`: this
@@ -1560,6 +1675,50 @@ async fn dispatch_mostro_message(
                     kind.action,
                     &trade_pubkey_hex[..8]
                 ));
+            }
+        }
+
+        // A dispute's only success reply is DisputeInitiatedByYou, so the arm
+        // gates on that action as well as on the nonce — anything else leaves
+        // the record for the genuine reply rather than unblocking the caller
+        // on a message that is not an acceptance. Falls through like an
+        // add-invoice: the reply is also the status update that moves the
+        // order to Dispute.
+        //
+        // DisputeInitiatedByPeer echoes the same nonce but the daemon
+        // addresses it to the counterparty's trade key, which has no pending
+        // record of ours (mostro src/app/dispute.rs, notify_dispute_to_users).
+        if kind.action == Action::DisputeInitiatedByYou {
+            match take_matching_dispute(trade_pubkey_hex, kind.request_id) {
+                Some(DisputeMatch::Waiting(tx)) => {
+                    crate::api::logging::blog_info("daemon-msg", format!(
+                        "DisputeInitiatedByYou: accepted waiting open_dispute for trade={}",
+                        &trade_pubkey_hex[..8]
+                    ));
+                    let _ = tx.send(Wake::from(DaemonReply::DisputeAccepted {
+                        dispute_id: dispute_id_from_payload(kind.payload.as_ref()),
+                    }));
+                }
+                // Genuine acceptance after the 10s timeout — of this attempt or
+                // of an earlier one a retry superseded. The caller already
+                // returned NoDaemonResponse and persisted no dispute. Record it
+                // now: the status arm below moves the trade to Dispute
+                // regardless, and a disputed trade with no dispute record has no
+                // solver to reach (PR #275 review).
+                Some(DisputeMatch::Late) => {
+                    crate::api::logging::blog_warn("daemon-msg", format!(
+                        "DisputeInitiatedByYou: late acceptance for timed-out open_dispute on trade={}",
+                        &trade_pubkey_hex[..8]
+                    ));
+                    if let Some(order_id) = kind.id.map(|id| id.to_string()) {
+                        crate::api::disputes::record_late_acceptance(
+                            &order_id,
+                            dispute_id_from_payload(kind.payload.as_ref()),
+                        )
+                        .await;
+                    }
+                }
+                None => {}
             }
         }
     }
@@ -2751,8 +2910,14 @@ async fn refetch_active_node_orders() {
                 format!("refetched {} current orders for active node", events.len()),
             );
             for event in events.into_iter() {
-                ingest_order_event(&event).await;
+                ingest_order_event_with(&event, Publish::WhenBatchEnds).await;
             }
+            // One emission for the batch. Publishing per event made a refetch
+            // O(N²): each upsert cloned the whole book and sent it across the
+            // bridge, so N orders cost N clones of an N-element vector. This
+            // path runs on cold start, on every node switch, and on every
+            // pull-to-refresh.
+            order_book().publish().await;
         }
         Err(e) => log::warn!("[orders] refetch: fetch current orders failed: {e}"),
     }
@@ -2994,48 +3159,50 @@ async fn build_trade_key_map() -> HashMap<String, (nostr_sdk::Keys, u32)> {
     map
 }
 
-/// Handle a kind-14 Mostro reply received on the global subscription.
+/// Find which of our trade keys this kind-14 is addressed to, reading the key
+/// map only for the lookup itself.
 ///
-/// The caller has already pinned the author to the active Mostro pubkey.
-/// Finds which trade key the event is addressed to (via `p` tag), decrypts
-/// via `mostro_core::transport::unwrap_incoming`, and dispatches the recovered
-/// `Message` through `dispatch_mostro_message`.
-async fn handle_global_daemon_message(
+/// The read guard must not be held past this point: handling a message can end
+/// up in `ensure_global_dm_coverage`, which takes the same lock for writing.
+async fn resolve_dm_recipient(
     event: &nostr_sdk::Event,
-    trade_key_map: &HashMap<String, (nostr_sdk::Keys, u32)>,
-) {
-    // Find the p-tag that matches one of our trade keys.
-    let (recipient_hex, recipient_keys, trade_idx) = {
-        let mut found = None;
-        for tag in event.tags.iter() {
-            let s = tag.as_slice();
-            if s.first().map(|v| v.as_str()) == Some("p") {
-                if let Some(pk_hex) = s.get(1).map(|v| v.as_str()) {
-                    if let Some((keys, idx)) = trade_key_map.get(pk_hex) {
-                        found = Some((pk_hex.to_string(), keys.clone(), *idx));
-                        break;
-                    }
+) -> Option<(String, nostr_sdk::Keys, u32)> {
+    let map = global_dm_keys().read().await;
+    for tag in event.tags.iter() {
+        let s = tag.as_slice();
+        if s.first().map(|v| v.as_str()) == Some("p") {
+            if let Some(pk_hex) = s.get(1).map(|v| v.as_str()) {
+                if let Some((keys, idx)) = map.get(pk_hex) {
+                    return Some((pk_hex.to_string(), keys.clone(), *idx));
                 }
             }
         }
-        match found {
-            Some(f) => f,
-            None => {
-                // The bulk filter pins author + our own p-tags, so a kind-14
-                // that reaches here without a matching key is an anomaly
-                // (stale filter after regenerate? key map gap?) — worth a warn.
-                crate::api::logging::blog_warn(
-                    "daemon-msg",
-                    format!(
-                        "drop ev={} reason=no-matching-p-tag map={}",
-                        crate::api::logging::short_id(&event.id.to_hex()),
-                        trade_key_map.len(),
-                    ),
-                );
-                return;
-            }
-        }
-    };
+    }
+    // The bulk filter pins author + our own p-tags, so a kind-14 that reaches
+    // here without a matching key is an anomaly (stale filter after
+    // regenerate? key map gap?) — worth a warn.
+    crate::api::logging::blog_warn(
+        "daemon-msg",
+        format!(
+            "drop ev={} reason=no-matching-p-tag map={}",
+            crate::api::logging::short_id(&event.id.to_hex()),
+            map.len(),
+        ),
+    );
+    None
+}
+
+/// Handle a kind-14 Mostro reply received on the global subscription.
+///
+/// The caller has already pinned the author to the active Mostro pubkey and
+/// resolved the addressed trade key via [`resolve_dm_recipient`]. Decrypts
+/// via `mostro_core::transport::unwrap_incoming` and dispatches the recovered
+/// `Message` through `dispatch_mostro_message`.
+async fn handle_global_daemon_message(
+    event: &nostr_sdk::Event,
+    recipient: (String, nostr_sdk::Keys, u32),
+) {
+    let (recipient_hex, recipient_keys, trade_idx) = recipient;
 
     let eid = event.id.to_hex();
     if is_duplicate_daemon_message(&eid) {
@@ -3095,8 +3262,21 @@ fn admin_pubkey_from_payload(
 /// rejects it (`InvalidPeer`, #326). This mirrors the v1 client, which keys the
 /// trade index by daemon UUID and never by order content.
 async fn bridge_fingerprint_trade_index(order_id: &str, trade_idx: u32) {
-    if get_trade_key_index(order_id).await.is_none() {
+    // "No binding yet" is the case this function exists to handle, so the
+    // warning variant would fire on the normal path.
+    if lookup_trade_key_index(order_id).await.is_none() {
         store_trade_key_index(order_id, trade_idx).await;
+    }
+}
+
+/// The daemon's dispute UUID out of a `Dispute` payload.
+fn dispute_id_from_payload(
+    payload: Option<&mostro_core::message::Payload>,
+) -> Option<String> {
+    use mostro_core::message::Payload;
+    match payload {
+        Some(Payload::Dispute(id, _)) => Some(id.to_string()),
+        _ => None,
     }
 }
 
@@ -3106,7 +3286,20 @@ async fn bridge_fingerprint_trade_index(order_id: &str, trade_idx: u32) {
 ///
 /// Shared by the live subscription loop and the node-switch refetch so both
 /// paths populate the book identically.
+/// Whether an ingested event publishes the book straight away.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Publish {
+    /// Live subscription: one event, one emission.
+    Immediately,
+    /// Bulk ingest: the caller publishes once for the whole batch.
+    WhenBatchEnds,
+}
+
 async fn ingest_order_event(event: &nostr_sdk::Event) {
+    ingest_order_event_with(event, Publish::Immediately).await;
+}
+
+async fn ingest_order_event_with(event: &nostr_sdk::Event, publish: Publish) {
     log::debug!(
         "[orders] event kind={} author={}",
         event.kind,
@@ -3114,7 +3307,7 @@ async fn ingest_order_event(event: &nostr_sdk::Event) {
     );
     match parse_order_event(event, None) {
         Some(mut info) => {
-            log::info!(
+            log::debug!(
                 "[orders] parsed order id={} kind={:?} status={:?}",
                 info.id,
                 info.kind,
@@ -3132,7 +3325,10 @@ async fn ingest_order_event(event: &nostr_sdk::Event) {
                     &info.payment_method,
                 );
                 log::debug!("[orders] fingerprint check order={} ck={ck}", info.id);
-                if let Some(trade_idx) = get_trade_key_index(&ck).await {
+                // A miss is the expected case here: every order from another
+                // user fails this lookup, so the warning variant would fire
+                // once per ingested event.
+                if let Some(trade_idx) = lookup_trade_key_index(&ck).await {
                     info.is_mine = true;
                     // Bridge content fingerprint → daemon UUID so subsequent
                     // actions (cancel) can look up the trade key by real order ID.
@@ -3211,7 +3407,10 @@ async fn ingest_order_event(event: &nostr_sdk::Event) {
                     }
                 }
             }
-            order_book().upsert_order(info).await;
+            match publish {
+                Publish::Immediately => order_book().upsert_order(info).await,
+                Publish::WhenBatchEnds => order_book().upsert_order_deferred(info).await,
+            }
         }
         None => {
             log::warn!(
@@ -3290,8 +3489,9 @@ async fn _run_order_subscription() {
                     if event.pubkey != active_mostro {
                         continue;
                     }
-                    let keys = global_dm_keys().read().await.clone();
-                    handle_global_daemon_message(&event, &keys).await;
+                    if let Some(recipient) = resolve_dm_recipient(&event).await {
+                        handle_global_daemon_message(&event, recipient).await;
+                    }
                     continue;
                 }
 
@@ -3501,7 +3701,15 @@ impl OrdersStream {
         loop {
             match self.rx.recv().await {
                 Ok(orders) => return Some(orders),
-                Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                // Each message is a full snapshot, so dropping some is
+                // survivable: the next one carries the whole book. Log it
+                // anyway — this is the only backpressure signal there is, and
+                // it stops being harmless the moment this channel carries
+                // deltas instead of snapshots.
+                Err(broadcast::error::RecvError::Lagged(n)) => {
+                    log::warn!("[orders] order-book stream lagged, dropped {n} snapshots");
+                    continue;
+                }
                 Err(broadcast::error::RecvError::Closed) => return None,
             }
         }
@@ -3991,7 +4199,186 @@ pub async fn restore_session() -> Result<mostro_core::message::RestoreSessionInf
 mod tests {
     use super::*;
     use crate::api::types::TradeRole;
+    use crate::mostro::pending::register_dispute_request;
     use crate::mostro::session::session_manager;
+
+    /// A cached miss that outlived the key being created would make the order
+    /// look like somebody else's, and every later action on it would be signed
+    /// with the wrong key. Storing a key must clear its recorded miss.
+    #[tokio::test]
+    async fn storing_a_trade_key_clears_its_recorded_miss() {
+        let order_id = format!("neg-cache-{}", uuid::Uuid::new_v4());
+        note_trade_key_miss(&order_id);
+        assert!(trade_key_misses().read().unwrap().contains(&order_id));
+
+        store_trade_key_index(&order_id, 7).await;
+
+        assert!(
+            !trade_key_misses().read().unwrap().contains(&order_id),
+            "the miss must not survive the key it denies"
+        );
+    }
+
+    /// The miss set is a cache, not a record: it must not grow without bound
+    /// as strangers' orders stream past.
+    #[test]
+    fn the_miss_cache_stays_bounded() {
+        let mut misses = std::collections::HashSet::new();
+
+        for n in 0..(TRADE_KEY_MISS_CAPACITY * 2) {
+            record_miss(&mut misses, &format!("bound-{n}"));
+        }
+
+        assert!(
+            misses.len() <= TRADE_KEY_MISS_CAPACITY,
+            "miss cache grew to {}",
+            misses.len()
+        );
+    }
+
+    /// A refetch replays the node's whole book through ingest. Publishing per
+    /// event made that O(N²) in clones and in bridge payload, so the batch
+    /// must produce exactly one emission.
+    #[tokio::test]
+    async fn a_bulk_ingest_publishes_once_for_the_whole_batch() {
+        const BATCH: usize = 50;
+        let book = OrderBook::new();
+        let mut rx = book.subscribe();
+
+        for n in 0..BATCH {
+            book.upsert_order_deferred(dummy_order_info(&format!("bulk-{n}")))
+                .await;
+        }
+
+        assert!(
+            matches!(rx.try_recv(), Err(broadcast::error::TryRecvError::Empty)),
+            "a deferred upsert must not publish"
+        );
+
+        book.publish().await;
+
+        let snapshot = rx.try_recv().expect("the batch publishes one snapshot");
+        assert_eq!(snapshot.len(), BATCH, "the snapshot carries the whole book");
+        assert!(
+            matches!(rx.try_recv(), Err(broadcast::error::TryRecvError::Empty)),
+            "the batch must publish exactly once"
+        );
+    }
+
+    /// The live subscription still emits per event: deferring is opt-in.
+    #[tokio::test]
+    async fn a_live_upsert_still_publishes_immediately() {
+        let book = OrderBook::new();
+        let mut rx = book.subscribe();
+
+        book.upsert_order(dummy_order_info("live-1")).await;
+
+        let snapshot = rx.try_recv().expect("a live upsert publishes");
+        assert_eq!(snapshot.len(), 1);
+    }
+
+    /// `global_dm_keys()` is a process-global shared by every test in this
+    /// binary, and tests run in parallel: the entry is removed before the
+    /// assertions so a failure here cannot leave the map grown for whoever
+    /// runs next (`a_late_derived_key_joins_the_global_dm_coverage` asserts
+    /// on its size).
+    #[tokio::test]
+    async fn dm_recipient_is_resolved_from_the_p_tag() {
+        use nostr_sdk::{EventBuilder, Kind, Tag};
+
+        let mine = nostr_sdk::Keys::generate();
+        let mine_hex = mine.public_key().to_hex();
+        let stranger = nostr_sdk::Keys::generate();
+
+        let addressed_to_us = EventBuilder::new(Kind::PrivateDirectMessage, "")
+            .tags([Tag::parse(["p", &mine_hex]).unwrap()])
+            .sign_with_keys(&nostr_sdk::Keys::generate())
+            .unwrap();
+        // A stranger's key is never inserted, so this one resolves to None
+        // whatever else the shared map happens to hold.
+        let addressed_elsewhere = EventBuilder::new(Kind::PrivateDirectMessage, "")
+            .tags([Tag::parse(["p", &stranger.public_key().to_hex()]).unwrap()])
+            .sign_with_keys(&nostr_sdk::Keys::generate())
+            .unwrap();
+
+        global_dm_keys()
+            .write()
+            .await
+            .insert(mine_hex.clone(), (mine.clone(), 7));
+        let resolved = resolve_dm_recipient(&addressed_to_us).await;
+        let unresolved = resolve_dm_recipient(&addressed_elsewhere).await;
+        global_dm_keys().write().await.remove(&mine_hex);
+
+        assert!(
+            matches!(resolved, Some((ref hex, _, 7)) if *hex == mine_hex),
+            "p-tag matching one of our trade keys must resolve to it"
+        );
+        assert!(unresolved.is_none());
+    }
+
+    /// The window must recognize a repeat, and must forget an id once
+    /// `DEDUP_MAX_ENTRIES` newer ones have arrived — otherwise it would grow
+    /// without bound.
+    ///
+    /// Driven against a local window rather than `is_duplicate_daemon_message`:
+    /// that one shares a process-global static with every other test in this
+    /// binary, so asserting on it would both depend on and destroy state the
+    /// rest of the suite may touch.
+    #[test]
+    fn daemon_message_dedup_recognizes_repeats_and_evicts_oldest() {
+        let mut window = DedupWindow::default();
+        let id = |n: usize| format!("{n:064x}");
+
+        assert!(!window.record(&id(0)));
+        assert!(window.record(&id(0)));
+
+        // One more than capacity, so id(0) is pushed out of the window.
+        for n in 1..=DEDUP_MAX_ENTRIES {
+            window.record(&id(n));
+        }
+
+        assert!(
+            !window.record(&id(0)),
+            "the oldest id should have been evicted once the window filled"
+        );
+        assert_eq!(
+            window.seen.len(),
+            window.order.len(),
+            "the set and the eviction queue drifted apart"
+        );
+        assert!(
+            window.order.len() <= DEDUP_MAX_ENTRIES,
+            "window grew past its bound: {}",
+            window.order.len()
+        );
+    }
+
+    /// A subscriber that falls behind must resume from the retained window
+    /// rather than closing, and that window is `ORDER_STREAM_CAPACITY` deep.
+    #[tokio::test]
+    async fn a_lagged_orders_stream_resumes_from_the_retained_window() {
+        const SENT: usize = 100;
+        const _: () = assert!(SENT > ORDER_STREAM_CAPACITY, "the test must overflow the channel");
+
+        let book = OrderBook::new();
+        let mut stream = OrdersStream { rx: book.subscribe() };
+
+        // Publish without ever reading, so the receiver is forced to lag.
+        for n in 0..SENT {
+            book.set_orders(vec![dummy_order_info(&format!("order-{n}"))])
+                .await;
+        }
+
+        let recovered = stream
+            .next()
+            .await
+            .expect("a lagged stream must resume, not close");
+        assert_eq!(
+            recovered[0].id,
+            format!("order-{}", SENT - ORDER_STREAM_CAPACITY),
+            "should resume at the oldest snapshot still retained"
+        );
+    }
 
     #[test]
     fn the_solver_pubkey_is_read_from_a_peer_payload() {
@@ -4176,6 +4563,23 @@ mod tests {
         assert_eq!(resync_floor(None, &restore_info(vec![3, 9], vec![4])), Some(9));
         // Nothing anywhere -> no resync (None).
         assert_eq!(resync_floor(None, &restore_info(vec![], vec![])), None);
+    }
+
+    #[test]
+    fn the_daemon_dispute_id_is_read_from_a_dispute_payload() {
+        use mostro_core::message::Payload;
+
+        let id = uuid::Uuid::new_v4();
+        assert_eq!(
+            dispute_id_from_payload(Some(&Payload::Dispute(id, None))).as_deref(),
+            Some(id.to_string().as_str())
+        );
+
+        // An acceptance carrying no dispute payload leaves the id unknown
+        // rather than inventing one — the acceptance is malformed and
+        // open_dispute fails closed on it.
+        assert_eq!(dispute_id_from_payload(None), None);
+        assert_eq!(dispute_id_from_payload(Some(&Payload::Amount(42))), None);
     }
 
     fn insert_pending_create(key: &str, request_id: u64) -> tokio::sync::oneshot::Receiver<Wake> {
@@ -4375,6 +4779,160 @@ mod tests {
         assert!(!pending_requests().lock().unwrap().contains_key(ai_key));
 
         pending_requests().lock().unwrap().remove(take_key);
+    }
+
+    /// `take_matching_dispute` mirrors the take rules for its own kind: only
+    /// Dispute records, only with the exact nonce.
+    #[tokio::test]
+    async fn take_matching_dispute_only_consumes_dispute_records() {
+        let take_key = "test-dispute-take-pubkey";
+        let dispute_key = "test-dispute-dispute-pubkey";
+        let _rx_t = insert_pending_take(take_key, 71);
+        let _rx_d = register_dispute_request(dispute_key.to_string(), 72, 5);
+
+        // A Take record is never consumed here, even with its exact nonce.
+        assert!(take_matching_dispute(take_key, Some(71)).is_none());
+        assert!(pending_requests().lock().unwrap().contains_key(take_key));
+
+        assert!(take_matching_dispute(dispute_key, None).is_none());
+        assert!(take_matching_dispute(dispute_key, Some(99)).is_none());
+        assert!(matches!(
+            take_matching_dispute(dispute_key, Some(72)),
+            Some(DisputeMatch::Waiting(_))
+        ));
+        assert!(!pending_requests().lock().unwrap().contains_key(dispute_key));
+
+        pending_requests().lock().unwrap().remove(take_key);
+    }
+
+    /// Builds the `UnwrappedMessage` for a daemon reply to an open-dispute,
+    /// signed-by-sender semantics included, for driving the real dispatcher.
+    /// `Action::CantDo` is a `Message::CantDo` on the wire, every other reply
+    /// a `Message::Dispute` — the arms are reached through the dispatcher, not
+    /// re-implemented in the test.
+    fn dispute_reply_message(
+        order_uuid: uuid::Uuid,
+        request_id: u64,
+        trade_index: u32,
+        action: mostro_core::message::Action,
+        payload: Option<mostro_core::message::Payload>,
+    ) -> mostro_core::nip59::UnwrappedMessage {
+        use mostro_core::message::{Action, Message};
+
+        let message = match action {
+            Action::CantDo => Message::cant_do(Some(order_uuid), Some(request_id), payload),
+            other => Message::new_dispute(
+                Some(order_uuid),
+                Some(request_id),
+                Some(trade_index as i64),
+                other,
+                payload,
+            ),
+        };
+        let sender =
+            nostr_sdk::PublicKey::from_hex(&active_mostro_pubkey()).expect("valid mostro pubkey");
+        mostro_core::nip59::UnwrappedMessage {
+            message,
+            signature: None,
+            sender,
+            identity: sender,
+            created_at: nostr_sdk::Timestamp::from(0u64),
+        }
+    }
+
+    /// The acceptance, through the real dispatcher: its `DisputeInitiatedByYou`
+    /// arm must wake the caller with the daemon's dispute id AND still fall
+    /// through to the status arm that moves the trade to Dispute. The matcher's
+    /// own test sees neither half — only this one pins the fall-through the
+    /// arm's comment claims.
+    #[tokio::test]
+    async fn a_dispute_acceptance_wakes_the_caller_and_moves_the_trade() {
+        use crate::api::types::OrderStatus;
+        use mostro_core::message::{Action, Payload};
+
+        let order_uuid = uuid::Uuid::new_v4();
+        let order_id = order_uuid.to_string();
+        let key = "test-dispute-accepted-pubkey";
+        let dispute_uuid = uuid::Uuid::new_v4();
+
+        // A disputable trade, bound to the generation the reply arrives on.
+        let mut info = dummy_order_info(&order_id);
+        info.status = OrderStatus::Active;
+        order_book().upsert_order(info).await;
+        store_trade_key_index(&order_id, 8).await;
+
+        let mut rx = register_dispute_request(key.to_string(), 74, 8);
+
+        dispatch_mostro_message(
+            dispute_reply_message(
+                order_uuid,
+                74,
+                8,
+                Action::DisputeInitiatedByYou,
+                Some(Payload::Dispute(dispute_uuid, None)),
+            ),
+            "test-dispute-accepted",
+            key,
+            8,
+        )
+        .await;
+
+        // The waiting open_dispute gets the daemon's id — the one the solver
+        // and the Kind 38386 event refer to — not a locally minted one.
+        match rx.try_recv() {
+            Ok(Wake { reply: DaemonReply::DisputeAccepted { dispute_id }, .. }) => {
+                assert_eq!(dispute_id, Some(dispute_uuid.to_string()));
+            }
+            _ => panic!("the acceptance must reach the waiting open_dispute"),
+        }
+        assert!(!pending_requests().lock().unwrap().contains_key(key));
+
+        assert_eq!(
+            order_book()
+                .get_order(&order_id)
+                .await
+                .expect("order still cached")
+                .status,
+            OrderStatus::Dispute,
+            "the acceptance is also the status update"
+        );
+    }
+
+    /// #202 itself, driven through the arm that was dropping it: the CantDo arm
+    /// resolves whatever request the nonce identifies, so a registered dispute
+    /// is rejected through the same path as any other request. Before the
+    /// dispute registered one, its rejection matched no pending request and was
+    /// dropped — leaving a local dispute Open forever.
+    #[tokio::test]
+    async fn a_cantdo_rejection_reaches_the_waiting_open_dispute() {
+        use mostro_core::error::CantDoReason;
+        use mostro_core::message::{Action, Payload};
+
+        let order_uuid = uuid::Uuid::new_v4();
+        let key = "test-dispute-cantdo-pubkey";
+        let mut rx = register_dispute_request(key.to_string(), 73, 6);
+
+        dispatch_mostro_message(
+            dispute_reply_message(
+                order_uuid,
+                73,
+                6,
+                Action::CantDo,
+                Some(Payload::CantDo(Some(CantDoReason::NotAllowedByStatus))),
+            ),
+            "test-dispute-cantdo",
+            key,
+            6,
+        )
+        .await;
+
+        match rx.try_recv() {
+            Ok(Wake { reply: DaemonReply::Rejected { reason, .. }, .. }) => {
+                assert_eq!(reason, "NotAllowedByStatus");
+            }
+            _ => panic!("the rejection must reach the waiting open_dispute"),
+        }
+        assert!(!pending_requests().lock().unwrap().contains_key(key));
     }
 
     /// Same-key overlap (send_invoice reuses the take's trade key): a newer
