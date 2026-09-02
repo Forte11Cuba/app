@@ -220,6 +220,37 @@ pub fn all_orders_filter(mostro_pubkey: &PublicKey) -> Filter {
         .author(*mostro_pubkey)
 }
 
+/// How far back the recent-changes order filter reaches.
+///
+/// Mirrors v1 (`orderFilterDurationHours = 48` in MostroP2P/mobile): the
+/// daemon's default order lifetime is 24 h, so a 48 h window covers every
+/// order that could still be transitioning out of `pending` when the client
+/// comes back after a long time offline. Anything older is either still
+/// `pending` (covered by [`pending_orders_filter`]) or no longer of interest.
+pub const RECENT_ORDERS_WINDOW_SECS: u64 = 48 * 3600;
+
+/// Filter for **every currently pending** order on a Mostro node.
+///
+/// This is the query that must be complete regardless of relay history size:
+/// relays cap the number of stored events they replay per REQ
+/// (`relay.mostro.network` stops at 300 and, with no `limit`, hands back the
+/// *oldest* 300 — none of them pending once the node has published a few
+/// hundred orders). Scoping by the NIP-69 `s` tag keeps the reply to the
+/// live book, which is orders of magnitude below any such cap.
+pub fn pending_orders_filter(mostro_pubkey: &PublicKey) -> Filter {
+    all_orders_filter(mostro_pubkey).custom_tag(SingleLetterTag::lowercase(Alphabet::S), "pending")
+}
+
+/// Filter for **all recent** order events (any status) since `since`.
+///
+/// Complements [`pending_orders_filter`]: it delivers the `in-progress` /
+/// `canceled` / `success` updates that take an order *out* of the book, which
+/// the pending-only filter would never see. Bounded by `since` so it stays
+/// under relay replay caps.
+pub fn recent_orders_filter(mostro_pubkey: &PublicKey, since: Timestamp) -> Filter {
+    all_orders_filter(mostro_pubkey).since(since)
+}
+
 /// Build a Nostr filter for a **single** Kind 38383 order by `d`-tag (order ID).
 ///
 /// Unlike `all_orders_filter`, this filter is scoped to a single order ID and
@@ -470,5 +501,77 @@ mod tests {
         assert_eq!(order.fiat_amount, None);
         assert_eq!(order.fiat_amount_min, None);
         assert_eq!(order.fiat_amount_max, None);
+    }
+
+    #[test]
+    fn pending_orders_filter_is_author_pinned_and_status_scoped() {
+        let mostro = Keys::generate().public_key();
+
+        let filter = pending_orders_filter(&mostro);
+
+        assert_eq!(filter.kinds, Some([Kind::from(KIND_ORDER)].into_iter().collect()));
+        assert_eq!(filter.authors, Some([mostro].into_iter().collect()));
+        let s_values = filter
+            .generic_tags
+            .get(&SingleLetterTag::lowercase(Alphabet::S))
+            .expect("filter must carry an `s` tag");
+        assert_eq!(s_values.iter().cloned().collect::<Vec<_>>(), vec!["pending".to_string()]);
+        assert_eq!(filter.since, None, "the pending book must not be time-windowed");
+        assert_eq!(filter.limit, None, "a limit silently truncates the book");
+    }
+
+    #[test]
+    fn recent_orders_filter_is_windowed_and_status_agnostic() {
+        let mostro = Keys::generate().public_key();
+        let since = Timestamp::from(1_700_000_000);
+
+        let filter = recent_orders_filter(&mostro, since);
+
+        assert_eq!(filter.kinds, Some([Kind::from(KIND_ORDER)].into_iter().collect()));
+        assert_eq!(filter.authors, Some([mostro].into_iter().collect()));
+        assert_eq!(filter.since, Some(since));
+        assert!(
+            !filter.generic_tags.contains_key(&SingleLetterTag::lowercase(Alphabet::S)),
+            "status changes of every kind must flow through this filter"
+        );
+        assert_eq!(filter.limit, None);
+    }
+
+    #[test]
+    fn recent_orders_window_covers_the_daemon_default_order_lifetime_twice() {
+        assert_eq!(RECENT_ORDERS_WINDOW_SECS, 2 * 24 * 3600);
+    }
+
+    /// Live check of the relay behaviour these filters exist for. Run with
+    /// `cargo test -- --ignored live_relay_serves_the_pending_book`.
+    #[tokio::test]
+    #[ignore = "requires network access to the default Mostro relay"]
+    async fn live_relay_serves_the_pending_book() {
+        let mostro = PublicKey::from_hex(crate::config::DEFAULT_MOSTRO_PUBKEY).unwrap();
+        let client = Client::default();
+        client.add_relay("wss://relay.mostro.network").await.unwrap();
+        client.connect().await;
+        let timeout = std::time::Duration::from_secs(15);
+
+        let pending = client.fetch_events(pending_orders_filter(&mostro), timeout).await.unwrap();
+        let unbounded = client.fetch_events(all_orders_filter(&mostro), timeout).await.unwrap();
+
+        let is_pending = |e: &Event| {
+            e.tags.iter().any(|t| t.as_slice().first().map(|s| s.as_str()) == Some("s")
+                && t.as_slice().get(1).map(|s| s.as_str()) == Some("pending"))
+        };
+        let pending_in_unbounded = unbounded.iter().filter(|e| is_pending(e)).count();
+        eprintln!(
+            "pending filter: {} events; unbounded filter: {} events of which {} pending",
+            pending.len(),
+            unbounded.len(),
+            pending_in_unbounded
+        );
+        assert!(!pending.is_empty(), "the pending filter must return the live book");
+        assert!(pending.iter().all(is_pending));
+        assert!(
+            pending.len() >= pending_in_unbounded,
+            "the status-scoped query must never see fewer pending orders than the unbounded one"
+        );
     }
 }

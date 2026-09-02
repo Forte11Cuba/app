@@ -6,9 +6,16 @@
 use std::sync::RwLock;
 
 /// Default relay URLs seeded on first launch.
+///
+/// These are the four relays the default Mostro node advertises in the
+/// `source` tag of its own Kind 38383 events. `nos.lol` stores none of them
+/// (measured 2026-09-02), so the other two are what actually make the book
+/// reachable when `relay.mostro.network` is slow or capped.
 pub const DEFAULT_RELAYS: &[&str] = &[
     "wss://relay.mostro.network",
     "wss://nos.lol",
+    "wss://mostro-p2p.tech",
+    "wss://relay.shadowbip.com",
 ];
 
 /// Default Mostro daemon public key (hex, 32 bytes).

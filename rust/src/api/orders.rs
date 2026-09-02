@@ -2717,7 +2717,7 @@ static SUBSCRIPTION_ACTIVE: AtomicBool = AtomicBool::new(false);
 /// loop exits (pool shutdown or channel closed).
 ///
 /// Internally spawns a background Tokio task that:
-/// 1. Subscribes to `all_orders_filter()` via the relay pool client.
+/// 1. Subscribes to the `order_book_filters()` pair via the relay pool client.
 /// 2. Loops over `RelayPoolNotification::Event` messages.
 /// 3. Parses each Kind 38383 event via `parse_order_event` and upserts it
 ///    into the order book, which broadcasts the update to all `OrdersStream`
@@ -2941,12 +2941,17 @@ async fn refetch_active_node_orders() {
             return;
         }
     };
-    let order_filter = crate::nostr::order_events::all_orders_filter(&mostro_pubkey);
-    match pool
-        .client()
-        .fetch_events(order_filter, std::time::Duration::from_secs(10))
-        .await
-    {
+    // Same two filters as the live subscription (see `order_book_filters`).
+    let (pending_filter, recent_filter) = order_book_filters(&mostro_pubkey);
+    let client = pool.client();
+    let timeout = std::time::Duration::from_secs(10);
+    let fetched = async {
+        let mut events = client.fetch_events(pending_filter, timeout).await?;
+        events.extend(client.fetch_events(recent_filter, timeout).await?);
+        Ok::<_, nostr_sdk::client::Error>(events)
+    }
+    .await;
+    match fetched {
         Ok(events) => {
             crate::api::logging::blog_info(
                 "orders",
@@ -2966,9 +2971,28 @@ async fn refetch_active_node_orders() {
     }
 }
 
-/// Stable subscription ID for the Kind 38383 order-book feed.
+/// Stable subscription ID for the Kind 38383 pending order-book feed.
 fn orders_subscription_id() -> nostr_sdk::SubscriptionId {
     nostr_sdk::SubscriptionId::new("mostro-orders")
+}
+
+/// Stable subscription ID for the windowed any-status Kind 38383 feed that
+/// carries the transitions taking an order *out* of the book.
+fn recent_orders_subscription_id() -> nostr_sdk::SubscriptionId {
+    nostr_sdk::SubscriptionId::new("mostro-orders-recent")
+}
+
+/// The pair of Kind 38383 filters that together give a complete, bounded
+/// view of a node's book: every pending order plus every status change of
+/// the last [`RECENT_ORDERS_WINDOW_SECS`] hours. Shared by the live
+/// subscription and the refetch so neither can drift back to the
+/// unbounded query.
+///
+/// [`RECENT_ORDERS_WINDOW_SECS`]: crate::nostr::order_events::RECENT_ORDERS_WINDOW_SECS
+fn order_book_filters(mostro_pubkey: &nostr_sdk::PublicKey) -> (nostr_sdk::Filter, nostr_sdk::Filter) {
+    use crate::nostr::order_events::{pending_orders_filter, recent_orders_filter, RECENT_ORDERS_WINDOW_SECS};
+    let since = nostr_sdk::Timestamp::now() - RECENT_ORDERS_WINDOW_SECS;
+    (pending_orders_filter(mostro_pubkey), recent_orders_filter(mostro_pubkey, since))
 }
 
 /// Stable subscription ID for the Kind 14 Mostro-reply feed.
@@ -2988,16 +3012,26 @@ async fn subscribe_node_filters(
     mostro_pubkey: nostr_sdk::PublicKey,
     trade_pubkeys: Vec<nostr_sdk::PublicKey>,
 ) -> Result<()> {
-    let order_filter = crate::nostr::order_events::all_orders_filter(&mostro_pubkey);
+    // Two filters, not one unbounded one: relays cap how many stored events
+    // they replay per REQ (relay.mostro.network: 300, oldest-first when no
+    // limit is given), so a bare `kind+author` filter comes back with the
+    // node's dead history and none of the live book. See `pending_orders_filter`.
+    let (pending_filter, recent_filter) = order_book_filters(&mostro_pubkey);
     client
-        .subscribe_with_id(orders_subscription_id(), order_filter, None)
+        .subscribe_with_id(orders_subscription_id(), pending_filter, None)
         .await
         .map_err(|e| anyhow::anyhow!("order subscribe failed: {e}"))?;
+    client
+        .subscribe_with_id(recent_orders_subscription_id(), recent_filter, None)
+        .await
+        .map_err(|e| anyhow::anyhow!("recent-orders subscribe failed: {e}"))?;
     crate::api::logging::blog_info(
         "relay",
         format!(
-            "sub created id={} kinds=[38383] author={}",
+            "subs created id={} (kinds=[38383] s=pending) + id={} (kinds=[38383] since=-{}h) author={}",
             orders_subscription_id(),
+            recent_orders_subscription_id(),
+            crate::nostr::order_events::RECENT_ORDERS_WINDOW_SECS / 3600,
             crate::api::logging::short_id(&mostro_pubkey.to_hex()),
         ),
     );
