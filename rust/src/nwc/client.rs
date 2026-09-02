@@ -13,13 +13,13 @@ mod native {
 
     use anyhow::{anyhow, bail, Result};
     use nostr_sdk::prelude::*;
-    use nostr_sdk::nips::nip04;
-    use nostr_sdk::nips::nip47::{
+    use nostr_sdk::prelude::nip04;
+    use nostr_sdk::prelude::nip47::{
         GetBalanceResponse, MakeInvoiceRequest,
-        MakeInvoiceResponse, NostrWalletConnectURI, PayInvoiceRequest,
+        MakeInvoiceResponse, Nip47Ciphers, NostrWalletConnectUri, PayInvoiceRequest,
         PayInvoiceResponse, Request,
     };
-    use nostr_sdk::Client;
+    use nostr_sdk::prelude::Client;
 
     use crate::api::types::{NwcWalletInfo, PaymentResult, WalletStatus};
 
@@ -53,7 +53,7 @@ mod native {
 
     /// Decrypt a Kind 23195 event and parse it leniently.
     fn parse_nip47_response(
-        uri: &NostrWalletConnectURI,
+        uri: &NostrWalletConnectUri,
         event: &Event,
     ) -> Result<Nip47Response> {
         let json = nip04::decrypt(&uri.secret, &event.pubkey, &event.content)
@@ -83,7 +83,7 @@ mod native {
     /// wallet's relay.
     pub struct NwcClient {
         client: Client,
-        uri: NostrWalletConnectURI,
+        uri: NostrWalletConnectUri,
         pub info: NwcWalletInfo,
     }
 
@@ -91,11 +91,12 @@ mod native {
         /// Parse a NWC URI, build a nostr-sdk `Client` with the NWC secret
         /// key, add the relay, and connect.
         pub async fn new(uri_str: &str) -> Result<Self> {
-            let uri = NostrWalletConnectURI::parse(uri_str)
+            let uri = NostrWalletConnectUri::parse(uri_str)
                 .map_err(|e| anyhow!("InvalidNwcUri: {e}"))?;
 
-            let keys = Keys::new(uri.secret.clone());
-            let client = Client::new(keys);
+            // The NWC secret signs the request events themselves
+            // (`Request::to_event`); the client needs no signer of its own.
+            let client = Client::new();
 
             // Add all relays from the URI.
             for relay_url in &uri.relays {
@@ -105,13 +106,9 @@ mod native {
                     .map_err(|e| anyhow!("Failed to add relay {relay_url}: {e}"))?;
             }
 
-            client.connect().await;
-
-            // connect() only spawns background tasks — wait for at least
-            // one relay to be actually connected before returning.
-            client
-                .wait_for_connection(Duration::from_secs(10))
-                .await;
+            // Wait for at least one relay to be actually connected before
+            // returning, bounded so a dead wallet relay cannot hang setup.
+            client.connect().and_wait(Duration::from_secs(10)).await;
 
             let relay_urls: Vec<String> =
                 uri.relays.iter().map(|r| r.to_string()).collect();
@@ -152,8 +149,11 @@ mod native {
             // Method name only — params (invoices, amounts) never enter a log.
             let method = request.method.to_string();
             crate::api::logging::blog_info("nwc", format!("→ {method}"));
+            // NIP-04 on purpose: `parse_nip47_response` decrypts replies with
+            // NIP-04, and every NWC wallet supports it. Advertising NIP-44
+            // here would need the response path to follow.
             let event = request
-                .to_event(&self.uri)
+                .to_event(&self.uri, Nip47Ciphers::NIP04)
                 .map_err(|e| anyhow!("Failed to build NIP-47 request event: {e}"))?;
 
             // 1. Start listening for Kind 23195 responses from the wallet
@@ -166,10 +166,10 @@ mod native {
                 .since(event.created_at);
 
             let sub_output = self.client
-                .subscribe(filter, None)
+                .subscribe(filter)
                 .await
                 .map_err(|e| anyhow!("Failed to subscribe for NIP-47 response: {e}"))?;
-            let sub_id = sub_output.val;
+            let sub_id = sub_output.value;
 
             // 2. Send the request event.
             let result: Result<Nip47Response> = async {
@@ -186,8 +186,8 @@ mod native {
                         bail!("NWC timeout: no response received from wallet within {NWC_TIMEOUT:?}");
                     }
 
-                    match crate::rt::time::timeout(remaining, notifications.recv()).await {
-                        Ok(Ok(RelayPoolNotification::Event {
+                    match crate::rt::time::timeout(remaining, notifications.next()).await {
+                        Ok(Some(ClientNotification::Event {
                             event: resp_event, ..
                         })) => {
                             if resp_event.kind == Kind::WalletConnectResponse {
@@ -197,8 +197,8 @@ mod native {
                                 }
                             }
                         }
-                        Ok(Ok(_)) => continue, // other notification types
-                        Ok(Err(_)) => continue, // lagged, retry
+                        Ok(Some(_)) => continue, // other notification types
+                        Ok(None) => bail!("NWC notification stream closed before a response"),
                         Err(_) => {
                             bail!("NWC timeout: no response received from wallet within {NWC_TIMEOUT:?}");
                         }
@@ -207,7 +207,9 @@ mod native {
             }.await;
 
             // Always clean up the subscription, even on timeout/error.
-            self.client.unsubscribe(&sub_id).await;
+            if let Err(e) = self.client.unsubscribe(&sub_id).await {
+                log::debug!("[nwc] unsubscribe after round-trip failed: {e}");
+            }
 
             // One outcome line per round-trip; wallet/transport error text is
             // remote-controlled, so it passes through sanitize_relay_text.
@@ -465,7 +467,7 @@ mod tests {
         assert_eq!(999_u64 / 1000, 0);
     }
 
-    /// URI parsing is delegated to nostr-sdk's `NostrWalletConnectURI::parse`.
+    /// URI parsing is delegated to nostr-sdk's `NostrWalletConnectUri::parse`.
     #[tokio::test]
     async fn parse_rejects_invalid_uri() {
         let err = NwcClient::new("not-a-valid-uri")

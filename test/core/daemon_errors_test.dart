@@ -75,6 +75,22 @@ void main() {
     );
   });
 
+  /// mostro-core 0.14.6 adds `CantDoReason::MaintenanceMode`: the node is
+  /// draining and refuses new orders and takes. The Rust CantDo arm emits
+  /// the marker first, followed by English prose, so the mapper must find
+  /// it by substring like every other marker.
+  test('maps the MaintenanceMode marker to the maintenance guidance', () {
+    expect(
+      localizedDaemonError(
+        l10n,
+        'MaintenanceMode: this Mostro node is under maintenance and is not '
+        'accepting new orders or takes right now.',
+        fallback: 'x',
+      ),
+      l10n.mostroMaintenanceMode,
+    );
+  });
+
   test('maps timeout and storage markers, and falls back otherwise', () {
     expect(
       localizedDaemonError(l10n, 'NoDaemonResponse', fallback: 'x'),

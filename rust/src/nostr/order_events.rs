@@ -230,7 +230,7 @@ pub fn trade_order_filter(mostro_pubkey: &PublicKey, order_id: &str) -> Filter {
     Filter::new()
         .kind(Kind::from(KIND_ORDER))
         .author(*mostro_pubkey)
-        .custom_tag(SingleLetterTag::lowercase(Alphabet::D), order_id)
+        .custom_tag(SingleLetterTag::LOWERCASE_D, order_id)
 }
 
 #[cfg(test)]
@@ -255,7 +255,7 @@ mod tests {
                 Tag::parse(fa_tag).unwrap(),
                 Tag::parse(["z", "order"]).unwrap(),
             ])
-            .sign_with_keys(&keys)
+            .finalize(&keys)
             .unwrap()
     }
 
@@ -287,7 +287,7 @@ mod tests {
                 Tag::parse(["fa", "20"]).unwrap(),
                 Tag::parse(["z", "order"]).unwrap(),
             ])
-            .sign_with_keys(&keys)
+            .finalize(&keys)
             .unwrap();
         let order = parse_order_event(&event, None).unwrap();
         assert_eq!(order.payment_method, "Revolut, Zelle, Strike");
@@ -330,7 +330,7 @@ mod tests {
                 Tag::parse(["rating", rating_value]).unwrap(),
                 Tag::parse(["z", "order"]).unwrap(),
             ])
-            .sign_with_keys(&keys)
+            .finalize(&keys)
             .unwrap()
     }
 
@@ -464,7 +464,7 @@ mod tests {
                 Tag::parse(["s", "pending"]).unwrap(),
                 Tag::parse(["f", "USD"]).unwrap(),
             ])
-            .sign_with_keys(&keys)
+            .finalize(&keys)
             .unwrap();
         let order = parse_order_event(&event, None).unwrap();
         assert_eq!(order.fiat_amount, None);

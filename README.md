@@ -176,8 +176,8 @@ Mostro App uses a **split-architecture** model: all cryptography, protocol logic
 ┌──────────────────▼──────────────────────────┐
 │                  Rust Core                  │
 │                                             │
-│  nostr-sdk 0.44   →  relay pool, NIP-44     │
-│  mostro-core 0.13.1 →  protocol FSM, types,   │
+│  nostr-sdk 0.45   →  relay pool, NIP-44     │
+│  mostro-core 0.14.6 →  protocol FSM, types,   │
 │                      transport              │
 │  bip32 / bip39    →  HD key derivation      │
 │  k256             →  secp256k1 ECDH         │
@@ -205,8 +205,8 @@ Mostro App uses a **split-architecture** model: all cryptography, protocol logic
 | Rust–Dart Bridge | flutter_rust_bridge | 2.11.1 |
 | State Management | Riverpod | 2.6.1 |
 | Routing | GoRouter | 14.8.1 |
-| Nostr Protocol | nostr-sdk | 0.44 |
-| Mostro Types / FSM / Transport | mostro-core | 0.13.1 |
+| Nostr Protocol | nostr-sdk | 0.45 |
+| Mostro Types / FSM / Transport | mostro-core | 0.14.6 |
 | UI-layer Persistence | Sembast | 3.8.2 |
 | Protocol Persistence (native) | SQLite via sqlx | 0.8 |
 | Protocol Persistence (web) | IndexedDB | 0.4 |
