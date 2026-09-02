@@ -175,6 +175,15 @@ pub struct OrderBook {
     tx: broadcast::Sender<Vec<OrderInfo>>,
 }
 
+/// Snapshots retained for a subscriber that has fallen behind.
+///
+/// A cold-start or refetch burst publishes far more updates than the UI reads
+/// in the same instant, so this is sized for that burst rather than for steady
+/// state. While each message is a full snapshot, overflowing is survivable —
+/// the newest snapshot supersedes the dropped ones. That stops being true if
+/// this channel ever carries deltas.
+const ORDER_STREAM_CAPACITY: usize = 64;
+
 impl Default for OrderBook {
     fn default() -> Self {
         Self::new()
@@ -183,7 +192,7 @@ impl Default for OrderBook {
 
 impl OrderBook {
     pub fn new() -> Self {
-        let (tx, _) = broadcast::channel(16);
+        let (tx, _) = broadcast::channel(ORDER_STREAM_CAPACITY);
         Self {
             orders: Arc::new(RwLock::new(Vec::new())),
             tx,
@@ -3638,7 +3647,15 @@ impl OrdersStream {
         loop {
             match self.rx.recv().await {
                 Ok(orders) => return Some(orders),
-                Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                // Each message is a full snapshot, so dropping some is
+                // survivable: the next one carries the whole book. Log it
+                // anyway — this is the only backpressure signal there is, and
+                // it stops being harmless the moment this channel carries
+                // deltas instead of snapshots.
+                Err(broadcast::error::RecvError::Lagged(n)) => {
+                    log::warn!("[orders] order-book stream lagged, dropped {n} snapshots");
+                    continue;
+                }
                 Err(broadcast::error::RecvError::Closed) => return None,
             }
         }
@@ -3957,6 +3974,33 @@ mod tests {
             window.order.len() <= DEDUP_MAX_ENTRIES,
             "window grew past its bound: {}",
             window.order.len()
+        );
+    }
+
+    /// A subscriber that falls behind must resume from the retained window
+    /// rather than closing, and that window is `ORDER_STREAM_CAPACITY` deep.
+    #[tokio::test]
+    async fn a_lagged_orders_stream_resumes_from_the_retained_window() {
+        const SENT: usize = 100;
+        const _: () = assert!(SENT > ORDER_STREAM_CAPACITY, "the test must overflow the channel");
+
+        let book = OrderBook::new();
+        let mut stream = OrdersStream { rx: book.subscribe() };
+
+        // Publish without ever reading, so the receiver is forced to lag.
+        for n in 0..SENT {
+            book.set_orders(vec![dummy_order_info(&format!("order-{n}"))])
+                .await;
+        }
+
+        let recovered = stream
+            .next()
+            .await
+            .expect("a lagged stream must resume, not close");
+        assert_eq!(
+            recovered[0].id,
+            format!("order-{}", SENT - ORDER_STREAM_CAPACITY),
+            "should resume at the oldest snapshot still retained"
         );
     }
 
