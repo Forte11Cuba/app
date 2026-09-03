@@ -154,6 +154,10 @@ bridged by flutter_rust_bridge.
 - **Reputation/ratings come from Kind 38383 event tags, not a DB.** In-memory
   `RATING_STORE`/`DISPUTE_STORE` are correct by design — don't invent "persist to DB" tasks.
   Chat history persists to the `messages` table since #246 (web still memory-only, #233).
+- **Relays persist in the `relays` table and grow from the node's kind 10002 list.** `initialize(None)`
+  restores the persisted set (or seeds the defaults on a fresh install); the active node's NIP-65
+  list is subscribed live and applied **additively** (never disconnects). Removing a
+  `MostroDiscovered` relay blacklists it (persisted), re-adding it lifts the blacklist.
 - **Order book is sourced only from daemon Kind 38383 events.** `create_order` waits for daemon
   confirmation; on timeout it returns an error and **persists nothing** (no phantom order).
 - **The Kind 38383 `s` tag is never a trade's status.** It is NIP-69's four-bucket public view

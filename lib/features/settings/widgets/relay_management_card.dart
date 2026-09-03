@@ -8,6 +8,7 @@ import 'package:mostro/core/mostro_defaults.dart';
 import 'package:mostro/core/test_environment.dart';
 import 'package:mostro/l10n/app_localizations.dart';
 import 'package:mostro/src/rust/api/nostr.dart' as nostr_api;
+import 'package:mostro/src/rust/api/types.dart' show RelaySource;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -25,11 +26,15 @@ class _RelayEntry {
     required this.url,
     required this.isActive,
     required this.isDefault,
+    this.source = RelaySource.default_,
   });
 
   final String url;
   bool isActive;
   final bool isDefault;
+  final RelaySource source;
+
+  bool get isFromMostro => source == RelaySource.mostroDiscovered;
 }
 
 // ── Widget ────────────────────────────────────────────────────────────────────
@@ -37,7 +42,10 @@ class _RelayEntry {
 /// Inline relay management card shown within the Settings screen.
 ///
 /// Default relays (from config.rs) are pre-populated and cannot be removed.
-/// Users may add additional relays with a `wss://` prefix.
+/// Users may add additional relays with a `wss://` prefix. Relays the active
+/// Mostro node announces in its kind 10002 list are auto-added by the Rust
+/// core and labelled as such; removing one blacklists it so the node's list
+/// does not bring it back.
 class RelayManagementCard extends ConsumerStatefulWidget {
   const RelayManagementCard({super.key});
 
@@ -52,6 +60,7 @@ class _RelayManagementCardState extends ConsumerState<RelayManagementCard> {
 
   late List<_RelayEntry> _relays;
   bool _loading = false;
+  bool _disposed = false;
 
   @override
   void initState() {
@@ -60,6 +69,30 @@ class _RelayManagementCardState extends ConsumerState<RelayManagementCard> {
         .map((url) => _RelayEntry(url: url, isActive: true, isDefault: true))
         .toList();
     _loadRelays();
+    _watchAutoSync();
+  }
+
+  @override
+  void dispose() {
+    _disposed = true;
+    super.dispose();
+  }
+
+  /// Reload the list whenever the Rust core auto-adds relays from the
+  /// active node's kind 10002 relay list, so they appear without a
+  /// screen re-entry.
+  Future<void> _watchAutoSync() async {
+    try {
+      final stream = await nostr_api.onRelayAutoSynced();
+      while (!_disposed) {
+        final added = await stream.next();
+        if (added == null || _disposed) break;
+        debugPrint('[RelayManagement] auto-synced relays: $added');
+        await _loadRelays();
+      }
+    } catch (e) {
+      debugPrint('[RelayManagement] auto-sync watch failed: $e');
+    }
   }
 
   Future<void> _loadRelays() async {
@@ -73,6 +106,7 @@ class _RelayManagementCardState extends ConsumerState<RelayManagementCard> {
           url: r.url,
           isActive: r.isActive,
           isDefault: r.isDefault,
+          source: r.source,
         )).toList();
       });
     } catch (e) {
@@ -247,14 +281,26 @@ class _RelayManagementCardState extends ConsumerState<RelayManagementCard> {
                   ),
                 ),
                 const SizedBox(width: AppSpacing.sm),
-                // Relay URL
+                // Relay URL, plus where it came from when a node added it
                 Expanded(
-                  child: Text(
-                    relay.url,
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          fontFamily: 'monospace',
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        relay.url,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              fontFamily: 'monospace',
+                            ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      if (relay.isFromMostro)
+                        Text(
+                          l10n.relayFromMostroLabel,
+                          style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                                color: colors.textDisabled,
+                              ),
                         ),
-                    overflow: TextOverflow.ellipsis,
+                    ],
                   ),
                 ),
                 // Active toggle
@@ -268,7 +314,7 @@ class _RelayManagementCardState extends ConsumerState<RelayManagementCard> {
                     activeThumbColor: colors.mostroGreen,
                   ),
                 ),
-                // Remove button (user-added relays only)
+                // Remove button (user-added and node-announced relays)
                 if (!relay.isDefault)
                   IconButton(
                     icon: Icon(Icons.delete_outline, color: colors.destructiveRed),

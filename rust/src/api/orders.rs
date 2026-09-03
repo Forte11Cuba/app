@@ -2976,6 +2976,11 @@ fn mostro_dm_subscription_id() -> nostr_sdk::SubscriptionId {
     nostr_sdk::SubscriptionId::new("mostro-dm")
 }
 
+/// Stable subscription ID for the node's kind 10002 relay list.
+fn relay_list_subscription_id() -> nostr_sdk::SubscriptionId {
+    nostr_sdk::SubscriptionId::new("mostro-relay-list")
+}
+
 /// (Re)subscribe the order-book (Kind 38383) and Mostro-reply (Kind 14)
 /// filters, author-pinned to `mostro_pubkey`.
 ///
@@ -3000,6 +3005,21 @@ async fn subscribe_node_filters(
             orders_subscription_id(),
             crate::api::logging::short_id(&mostro_pubkey.to_hex()),
         ),
+    );
+
+    // The node's NIP-65 relay list, kept live so an operator adding a relay
+    // reaches running clients; applied additively by apply_relay_list_event.
+    client
+        .subscribe_with_id(
+            relay_list_subscription_id(),
+            crate::nostr::relay_list::relay_list_filter(&mostro_pubkey),
+            None,
+        )
+        .await
+        .map_err(|e| anyhow::anyhow!("relay-list subscribe failed: {e}"))?;
+    crate::api::logging::blog_info(
+        "relay",
+        format!("sub created id={} kinds=[10002]", relay_list_subscription_id()),
     );
 
     // Kind-14 NIP-44 replies authored by Mostro for all known trade pubkeys.
@@ -3539,13 +3559,21 @@ async fn _run_order_subscription() {
                     continue;
                 }
 
-                // ── Kind 38383 order book event ──
-                // Ignore stale orders from a previously-active node (e.g. events
-                // buffered across a node switch); the book only ever holds the
-                // active node's orders.
+                // Everything below is authored by the active node only.
+                // Ignore stale events from a previously-active node (e.g.
+                // buffered across a node switch): the book only ever holds
+                // the active node's orders, and only its relay list is applied.
                 if event.pubkey != active_mostro {
                     continue;
                 }
+
+                // ── Kind 10002 relay list: auto-add announced relays ──
+                if event.kind.as_u16() == crate::nostr::relay_list::KIND_RELAY_LIST {
+                    crate::api::nostr::apply_relay_list_event(&event).await;
+                    continue;
+                }
+
+                // ── Kind 38383 order book event ──
                 ingest_order_event(&event).await;
             }
             // Raw relay control messages. Observation only — every arm just

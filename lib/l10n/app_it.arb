@@ -202,6 +202,7 @@
   "disableRelayLabel": "Disabilita relay {url}",
   "enableRelayLabel": "Abilita relay {url}",
   "removeRelayTooltip": "Rimuovi relay",
+  "relayFromMostroLabel": "Aggiunto dal nodo Mostro",
   "relayAddFailed": "Impossibile aggiungere il relay",
   "relayRemoveFailed": "Impossibile rimuovere il relay",
   "backupConfirmCheckbox": "Ho annotato le mie parole e le ho salvate in modo sicuro",

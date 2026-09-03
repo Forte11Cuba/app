@@ -428,6 +428,8 @@
   },
   "removeRelayTooltip": "Remove relay",
   "@removeRelayTooltip": {"description": "Tooltip for the remove-relay icon button"},
+  "relayFromMostroLabel": "Added from the Mostro node",
+  "@relayFromMostroLabel": {"description": "Label under a relay URL that the active Mostro node announced in its kind 10002 relay list"},
   "relayAddFailed": "Failed to add relay",
   "@relayAddFailed": {"description": "SnackBar message shown when adding a relay fails"},
   "relayRemoveFailed": "Failed to remove relay",

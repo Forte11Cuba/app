@@ -8,11 +8,31 @@ use std::sync::Arc;
 use tokio::sync::OnceCell;
 
 use crate::api::types::{ConnectionState, RelayInfo};
+use crate::db::Storage;
 use crate::nostr::relay_pool::RelayPool;
 use crate::queue::outbox;
 
 /// Global relay pool singleton, initialised once by `initialize()`.
 static POOL: OnceCell<Arc<RelayPool>> = OnceCell::const_new();
+
+/// Newly auto-added relay URLs, one message per applied kind 10002 event.
+static RELAY_SYNC_TX: std::sync::OnceLock<tokio::sync::broadcast::Sender<Vec<String>>> =
+    std::sync::OnceLock::new();
+
+fn relay_sync_tx() -> &'static tokio::sync::broadcast::Sender<Vec<String>> {
+    RELAY_SYNC_TX.get_or_init(|| tokio::sync::broadcast::channel(16).0)
+}
+
+/// `created_at` of the newest kind 10002 applied, per node pubkey. Relays
+/// hold different generations of a replaceable event, so the live
+/// subscription can deliver an older list after a newer one; only the newest
+/// is ever applied.
+static RELAY_LIST_SEEN: std::sync::OnceLock<tokio::sync::Mutex<std::collections::HashMap<String, u64>>> =
+    std::sync::OnceLock::new();
+
+fn relay_list_seen() -> &'static tokio::sync::Mutex<std::collections::HashMap<String, u64>> {
+    RELAY_LIST_SEEN.get_or_init(|| tokio::sync::Mutex::new(std::collections::HashMap::new()))
+}
 
 fn pool() -> Result<&'static Arc<RelayPool>> {
     POOL.get().ok_or_else(|| anyhow::anyhow!("NotInitialized"))
@@ -20,7 +40,11 @@ fn pool() -> Result<&'static Arc<RelayPool>> {
 
 /// Initialize the Nostr client with a relay list.
 ///
-/// If `relays` is empty or `None`, uses preconfigured defaults.
+/// If `relays` is empty or `None`, uses the persisted relay set — every
+/// active relay the user or a Mostro node's kind 10002 list added, with the
+/// user's removals of announced relays restored as the blacklist — and,
+/// when nothing is persisted yet, the compiled-in defaults (which are then
+/// seeded so later runs read them back).
 pub async fn initialize(relays: Option<Vec<String>>) -> Result<()> {
     if POOL.get().is_some() {
         return Err(anyhow::anyhow!("AlreadyInitialized"));
@@ -33,12 +57,34 @@ pub async fn initialize(relays: Option<Vec<String>>) -> Result<()> {
         .filter(|s| !s.is_empty())
         .collect();
 
-    let urls = if urls.is_empty() { default_relays() } else { urls };
+    let (urls, persisted) = if urls.is_empty() {
+        let persisted = load_persisted_relays().await;
+        let active: Vec<String> = persisted
+            .iter()
+            .filter(|r| r.is_active && !r.is_blacklisted)
+            .map(|r| r.url.clone())
+            .collect();
+        if active.is_empty() {
+            (default_relays(), persisted)
+        } else {
+            (active, persisted)
+        }
+    } else {
+        (urls, Vec::new())
+    };
 
     // get_or_try_init is atomic — only one caller creates the pool even if
     // two race past the is_some() guard above.
-    POOL.get_or_try_init(|| async { RelayPool::new(urls).await })
+    let pool_ref = POOL
+        .get_or_try_init(|| async { RelayPool::new(urls).await })
         .await?;
+
+    // Restore what a previous session learned: sources of the persisted
+    // rows and the blacklist that keeps removed announced relays out.
+    pool_ref.restore_persisted(&persisted).await;
+    if persisted.is_empty() {
+        seed_default_relays().await;
+    }
 
     // Spawn a background task that flushes the outbox whenever the relay pool
     // transitions to Online.  The task exits when the broadcast channel closes.
@@ -83,12 +129,159 @@ pub async fn initialize(relays: Option<Vec<String>>) -> Result<()> {
 
 /// Add a new relay and connect to it.
 pub async fn add_relay(url: String) -> Result<RelayInfo> {
-    pool()?.add_relay(&url).await
+    let info = pool()?.add_relay(&url).await?;
+    persist_relay(&info).await;
+    Ok(info)
 }
 
 /// Remove a relay and disconnect.
+///
+/// A relay a Mostro node announced stays persisted as blacklisted, so the
+/// node's list cannot bring it back on the next start either.
 pub async fn remove_relay(url: String) -> Result<()> {
-    pool()?.remove_relay(&url).await
+    let pool = pool()?;
+    let removed = pool.get_relays().await.into_iter().find(|r| r.url == url);
+    pool.remove_relay(&url).await?;
+    match removed {
+        Some(mut info) if matches!(info.source, crate::api::types::RelaySource::MostroDiscovered) => {
+            info.is_active = false;
+            info.is_blacklisted = true;
+            info.status = crate::api::types::RelayStatus::Disconnected;
+            persist_relay(&info).await;
+        }
+        _ => unpersist_relay(&url).await,
+    }
+    Ok(())
+}
+
+/// Stream of relay URLs auto-added from the active node's kind 10002 relay
+/// list, one emission per applied event (only when something was added).
+pub async fn on_relay_auto_synced() -> Result<RelayAutoSyncStream> {
+    Ok(RelayAutoSyncStream {
+        rx: relay_sync_tx().subscribe(),
+    })
+}
+
+/// Wrapper so flutter_rust_bridge can generate a Dart Stream.
+pub struct RelayAutoSyncStream {
+    rx: tokio::sync::broadcast::Receiver<Vec<String>>,
+}
+
+impl RelayAutoSyncStream {
+    pub async fn next(&mut self) -> Option<Vec<String>> {
+        loop {
+            match self.rx.recv().await {
+                Ok(urls) => return Some(urls),
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => return None,
+            }
+        }
+    }
+}
+
+/// Apply a kind 10002 relay list published by the active node (the caller
+/// checks the author): parse it, add every announced relay we do not have
+/// and have not blacklisted, persist the additions, and tell the UI. Older
+/// generations than one already applied for this node are ignored.
+pub(crate) async fn apply_relay_list_event(event: &Event) {
+    let node = event.pubkey.to_hex();
+    let created_at = event.created_at.as_secs();
+    if !note_relay_list_generation(&mut *relay_list_seen().lock().await, &node, created_at) {
+        return;
+    }
+
+    let announced = crate::nostr::relay_list::parse_relay_list(event);
+    crate::api::logging::blog_info(
+        "relay",
+        format!(
+            "kind 10002 from node={}: {} relay(s) announced",
+            crate::api::logging::short_id(&node),
+            announced.len()
+        ),
+    );
+    let Ok(pool) = pool() else {
+        return;
+    };
+    let added = pool.sync_discovered(&announced).await;
+    if added.is_empty() {
+        return;
+    }
+    for info in pool.get_relays().await.iter().filter(|r| added.contains(&r.url)) {
+        persist_relay(info).await;
+    }
+    crate::api::logging::blog_info(
+        "relay",
+        format!(
+            "auto-added {} relay(s) from node list: {}",
+            added.len(),
+            added
+                .iter()
+                .map(|u| crate::api::logging::display_relay(u))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+    );
+    let _ = relay_sync_tx().send(added);
+}
+
+/// Record `created_at` as the newest relay list seen for `node` and say
+/// whether it is newer than every one applied before (strictly: a replay of
+/// the same generation from another relay is not applied twice).
+fn note_relay_list_generation(
+    seen: &mut std::collections::HashMap<String, u64>,
+    node: &str,
+    created_at: u64,
+) -> bool {
+    if seen.get(node).is_some_and(|&newest| created_at <= newest) {
+        return false;
+    }
+    seen.insert(node.to_string(), created_at);
+    true
+}
+
+// ── Relay persistence (best effort: web has no relay store yet, #233) ───────
+
+async fn load_persisted_relays() -> Vec<RelayInfo> {
+    let Some(db) = crate::db::app_db::db() else {
+        return Vec::new();
+    };
+    match db.list_relays().await {
+        Ok(rows) => rows,
+        Err(e) => {
+            log::warn!("[nostr] relay list not loaded from storage: {e}");
+            Vec::new()
+        }
+    }
+}
+
+async fn seed_default_relays() {
+    if let Some(db) = crate::db::app_db::db() {
+        if let Err(e) = crate::db::seeds::seed_defaults(db).await {
+            log::warn!("[nostr] default relays not seeded: {e}");
+        }
+    }
+}
+
+async fn persist_relay(info: &RelayInfo) {
+    if let Some(db) = crate::db::app_db::db() {
+        if let Err(e) = db.save_relay(info).await {
+            log::warn!(
+                "[nostr] relay {} not persisted: {e}",
+                crate::api::logging::display_relay(&info.url)
+            );
+        }
+    }
+}
+
+async fn unpersist_relay(url: &str) {
+    if let Some(db) = crate::db::app_db::db() {
+        if let Err(e) = db.delete_relay(url).await {
+            log::warn!(
+                "[nostr] relay {} not removed from storage: {e}",
+                crate::api::logging::display_relay(url)
+            );
+        }
+    }
 }
 
 /// Get all configured relays with current status.
@@ -506,5 +699,33 @@ mod tests {
             .sign_with_keys(&node)
             .unwrap();
         assert!(select_rates_event([wrong_d_tag], &node.public_key()).is_none());
+    }
+}
+
+#[cfg(test)]
+mod relay_list_generation_tests {
+    use super::note_relay_list_generation;
+    use std::collections::HashMap;
+
+    #[test]
+    fn first_list_for_a_node_is_applied() {
+        let mut seen = HashMap::new();
+        assert!(note_relay_list_generation(&mut seen, "node-a", 100));
+    }
+
+    #[test]
+    fn older_or_replayed_generations_are_ignored() {
+        let mut seen = HashMap::new();
+        assert!(note_relay_list_generation(&mut seen, "node-a", 100));
+        assert!(!note_relay_list_generation(&mut seen, "node-a", 100));
+        assert!(!note_relay_list_generation(&mut seen, "node-a", 99));
+        assert!(note_relay_list_generation(&mut seen, "node-a", 101));
+    }
+
+    #[test]
+    fn generations_are_tracked_per_node() {
+        let mut seen = HashMap::new();
+        assert!(note_relay_list_generation(&mut seen, "node-a", 100));
+        assert!(note_relay_list_generation(&mut seen, "node-b", 50));
     }
 }
