@@ -104,14 +104,14 @@ Independent one-to-few-line fixes. Land in any order.
   the default node (`82fa8cb9…`, `nak req -k 38383 -a <pk>`): `relay.mostro.network` caps every
   REQ at **300 stored events**, and with no `limit` it serves the **oldest** 300 — December 2025
   to April 2026, **zero `pending`** — while the live book was 33 orders. A cold start therefore
-  showed only orders published while the app was open. `nos.lol`, the other default relay, stores
-  none of this node's events at all. Shipped as the **status-scoped query** this entry asked for:
+  showed only orders published while the app was open unless `nos.lol` (cap 500, newest-first)
+  happened to answer. Shipped as the **status-scoped query** this entry asked for:
   `pending_orders_filter` (`#s=pending`, no window, no limit — the whole book is far below any
   cap) plus `recent_orders_filter` (all statuses, `since = now − 48 h`, as v1's
   `orderFilterDurationHours`) so the transitions that take an order *out* of the book still
   arrive. Both the live subscription and the refetch go through `order_book_filters()`. The
-  node's two other advertised relays (`mostro-p2p.tech`, `relay.shadowbip.com`) joined
-  `DEFAULT_RELAYS`. Still open: relay discovery from the node's `source` tag / kind 10002 as v1
+  two other relays in the node's kind 10002 list (`mostro-p2p.tech`, `relay.shadowbip.com`)
+  joined `DEFAULT_RELAYS`. Still open: relay discovery from the node's `source` tag / kind 10002 as v1
   does, and a completeness test against a relay with more than 300 events.
 
 ### PR 1.7 — Surface stream lag instead of swallowing it `fix(observability)`

@@ -7,10 +7,11 @@ use std::sync::RwLock;
 
 /// Default relay URLs seeded on first launch.
 ///
-/// These are the four relays the default Mostro node advertises in the
-/// `source` tag of its own Kind 38383 events. `nos.lol` stores none of them
-/// (measured 2026-09-02), so the other two are what actually make the book
-/// reachable when `relay.mostro.network` is slow or capped.
+/// These are the four relays the default Mostro node lists in its kind 10002
+/// relay list (and in the `source` tag of its Kind 38383 events). Public
+/// relays rate-limit and cap replays differently — `relay.mostro.network`
+/// stops at 300 events, `nos.lol` at 500 — so covering the node's whole set
+/// keeps the book reachable when one of them is throttling us.
 pub const DEFAULT_RELAYS: &[&str] = &[
     "wss://relay.mostro.network",
     "wss://nos.lol",
