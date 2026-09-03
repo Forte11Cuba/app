@@ -59,10 +59,19 @@ class OrderBookList extends StatelessWidget {
         padding: _listPadding,
         itemCount: orders.length,
         separatorBuilder: (_, __) => const SizedBox(height: 12),
-        // Item indices, not child indices: `findChildIndexCallback` is
-        // deprecated here precisely because it made callers double the value to
-        // step over the separators.
-        findItemIndexCallback: indexOfKey,
+        // `separated` builds one child per item *and* one per separator, so a
+        // child index is twice its item index — hence the doubling, which is
+        // the whole reason Flutter later replaced this parameter with
+        // `findItemIndexCallback` (item indices, no arithmetic). That
+        // replacement does not exist in the 3.38.2 this repo pins in
+        // `ci.yml`, so it can only be adopted when that pin moves. The ignore
+        // is for newer local SDKs, where the parameter already warns; on 3.38.2
+        // there is nothing to ignore.
+        // ignore: deprecated_member_use
+        findChildIndexCallback: (key) {
+          final index = indexOfKey(key);
+          return index == null ? null : index * 2;
+        },
         itemBuilder: (context, index) => _card(orders[index]),
       );
     }
