@@ -110,35 +110,58 @@ Get dispute details for a trade. Returns null if no dispute exists.
 ## Persistence and restart
 
 The Dispute record is **in-memory by design** — its status and resolution come
-back from daemon events. Two facts are the exception because they cannot be
-re-derived: the **solver pubkey**, which arrives exactly once in
-`admin-took-dispute`, persisted under `dispute_admin:<order_id>`; and the
-**origin** (whether this side opened the dispute), written by a successful
-`open_dispute` under `dispute_mine:<order_id>` (presence is the value).
+back from daemon events, and so, usually, does the solver assignment: the
+offline catch-up channel (`orders.rs`, no `since`) replays `admin-took-dispute`
+on every reconnect, which rebuilds the record and re-arms the dispute chat on
+its own. Two facts are persisted anyway:
+
+- the **origin** (whether this side opened the dispute), written by a successful
+  `open_dispute` under `dispute_mine:<order_id>` (presence is the value). This
+  one is never re-derivable: the replay always rebuilds the record with
+  `initiated_by_me: false`.
+- the **solver pubkey**, from `admin-took-dispute`, under
+  `dispute_admin:<order_id>`. This is a **fallback**, not the primary path: the
+  replay is bounded by relay retention and by the per-subscription result cap,
+  so a long dispute can outlive it. The stored copy is what re-arms the chat
+  when the replay no longer covers the assignment.
 
 **Rehydration**: on relay (re)connect, dispute records are rebuilt for persisted
-trades that have a stored solver, before dispute-chat listeners are re-armed.
-Restored records are `InReview` (a stored solver means one took the dispute),
-`initiated_by_me` from the origin marker, `reason: null` (not persisted), and
-**unread** — the pre-restart read state is not recoverable and an active dispute
-must surface. Records already in memory win, enforced under the store's single
-write lock so a concurrent `open_dispute` / `admin-took-dispute` is never
-clobbered. This is what makes `get_dispute` non-null and `submit_evidence`
-work again after a restart.
+trades that have a stored solver, before dispute-chat listeners are re-armed and
+before the replay has had a chance to run. Restored records are `InReview` (a
+stored solver means one took the dispute), `initiated_by_me` from the origin
+marker, `reason: null` (not persisted), and **unread** — the pre-restart read
+state is not recoverable and an active dispute must surface. Records already in
+memory win, enforced under the store's single write lock so a concurrent
+`open_dispute` / `admin-took-dispute` is never clobbered. This is what makes
+`get_dispute` non-null and `submit_evidence` work again after a restart.
 
-**Terminal states**: both keys are deleted when a resolution reaches the
-dispute store, and rehydration additionally skips — and clears — any trade whose
-order status is finished (`SettledByAdmin`, `CanceledByAdmin`,
-`CompletedByAdmin`, `Success`, `Canceled`, `CooperativelyCanceled`, `Expired`).
-The trade status, not the dispute record, is the durable signal: the daemon's
-`admin-settled` / `admin-canceled` are persisted by the order status-sync path
-without being routed into the dispute store. Without this, a resolved dispute
-would be resurrected as `InReview` on every restart.
+**Terminal states**: the *trade* status, not the dispute record, is the durable
+signal that a dispute is over — the daemon's `admin-settled` / `admin-canceled`
+are persisted by the order status-sync path without being routed into the
+dispute store. A trade is finished at `SettledByAdmin`, `CanceledByAdmin`,
+`CompletedByAdmin`, `Success`, `Canceled`, `CooperativelyCanceled` or
+`Expired`. Three places enforce it, and all three clear both keys:
 
-**UI wiring**: this is the Rust layer only. The Flutter dispute state is
-in-memory and does not call `get_dispute` at startup yet, so after a restart the
-solver's messages arrive and persist again but the dispute screen is not
-repopulated until the UI reads the record back (tracked as follow-up).
+- rehydration skips a finished trade, and clears any key left for it — the
+  origin marker included, so a dispute opened but never taken does not leave
+  one behind;
+- `admin-took-dispute` is **refused** for a finished trade. Without this the
+  replay would, one second after rehydration cleared the keys, recreate the
+  record as `InReview`, write the solver key straight back and arm a listener
+  nobody is on the other end of — on every startup;
+- a resolution reaching the dispute store clears them too. Today nothing routes
+  the daemon's verdicts there (`handle_admin_settled` / `handle_admin_canceled`
+  have no production caller), so in practice the two trade-status guards above
+  are what clean up; the resolution path is ready for when that wiring lands.
+
+**UI wiring**: this is the Rust layer only. Nothing in Dart consumes the
+rehydrated record yet — `get_dispute`, `submit_evidence` and
+`on_dispute_updated` have no callers outside the generated bindings — and the
+dispute chat has no UI: `chat_room_screen.dart` renders only peer messages and
+`send_message` has no channel parameter, so the solver can be read but not
+written to. What lands today is the re-armed listener: solver messages arrive
+and persist as `MessageType::Admin`. Repopulating the dispute screen and the
+admin chat are the tracked follow-ups.
 
 **Platform limitation (web)**: persistence is native-only today. The Flutter
 shell does not call `init_db` on web, and the IndexedDB store's `list_trades`

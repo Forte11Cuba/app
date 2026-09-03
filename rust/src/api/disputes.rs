@@ -518,6 +518,27 @@ pub async fn get_dispute(trade_id: String) -> Result<Option<Dispute>> {
 pub async fn handle_admin_took_dispute(trade_id: String, admin_pubkey: String) -> Result<()> {
     let admin_pubkey_for_key = admin_pubkey.clone();
 
+    // The offline catch-up channel has no `since` (orders.rs), so this action
+    // is re-delivered on every reconnect — including for disputes the admin
+    // already settled or canceled. Those verdicts are persisted on the trade
+    // row by the status-sync arm, so the trade is the durable "this dispute is
+    // over" signal: refuse here rather than recreate the record as `InReview`,
+    // write the solver key straight back after rehydration just cleared it,
+    // and arm a listener nobody is on the other end of (PR #256 review,
+    // manual E2E). Best-effort like the rest of persistence: no store, or no
+    // persisted trade, means no evidence the dispute ended, so proceed.
+    if persisted_order_is_finished(&trade_id).await {
+        crate::api::logging::blog_info(
+            "disputes",
+            format!(
+                "skip replayed admin-took-dispute order={}: trade already finished",
+                crate::api::logging::short_id(&trade_id),
+            ),
+        );
+        clear_dispute_keys(&trade_id).await;
+        return Ok(());
+    }
+
     // The daemon sends `admin-took-dispute` to BOTH parties, and the side that
     // did not open the dispute has no local record — an update alone would
     // fail with DisputeNotFound and the admin pubkey would be lost. That
@@ -587,18 +608,25 @@ pub async fn handle_admin_took_dispute(trade_id: String, admin_pubkey: String) -
     derive_admin_shared_key(&trade_id, &admin_pubkey_for_key).await
 }
 
-/// Persist the solver pubkey so the dispute chat survives a restart.
+/// Persist the solver pubkey as a fallback for when the daemon replay does
+/// not bring it back.
 ///
 /// Deliberately narrow: the dispute record stays in memory (its status and
-/// resolution come back from daemon events), but this pubkey arrives exactly
-/// once and cannot be re-derived. Without it, a restart mid-dispute leaves the
-/// party unable to reach the solver at all.
+/// resolution come back from daemon events). The solver pubkey normally comes
+/// back too — the catch-up channel replays `admin-took-dispute` on every
+/// reconnect — but that replay is bounded by relay retention and by the
+/// per-subscription result cap, so a long dispute can outlive it. This copy
+/// is what re-arms the dispute chat when the replay no longer covers the
+/// assignment (PR #256 review, A/B against `main`).
 ///
 /// Best-effort — a storage failure must not undo an already-applied dispute
 /// update, and the live listener keeps working for this session.
 async fn persist_admin_pubkey(order_id: &str, admin_pubkey_hex: &str) {
     let Some(db) = crate::db::app_db::db() else {
-        log::warn!("[disputes] no store — solver pubkey will not survive a restart");
+        crate::api::logging::blog_warn(
+            "disputes",
+            "no store — solver pubkey will not survive a restart".to_string(),
+        );
         return;
     };
     if let Err(e) = db
@@ -608,7 +636,31 @@ async fn persist_admin_pubkey(order_id: &str, admin_pubkey_hex: &str) {
         )
         .await
     {
-        log::warn!("[disputes] could not persist solver pubkey for {order_id}: {e}");
+        crate::api::logging::blog_warn(
+            "disputes",
+            format!("could not persist solver pubkey for {order_id}: {e}"),
+        );
+    }
+}
+
+/// `true` when the persisted trade for `order_id` has reached a terminal
+/// status (see [`is_order_finished`]). No store, no persisted trade, or a
+/// storage error all read as "not finished": absence of evidence must not
+/// drop a live assignment.
+async fn persisted_order_is_finished(order_id: &str) -> bool {
+    let Some(db) = crate::db::app_db::db() else {
+        return false;
+    };
+    match db.get_trade_by_order_id(order_id).await {
+        Ok(Some(trade)) => is_order_finished(&trade.order.status),
+        Ok(None) => false,
+        Err(e) => {
+            crate::api::logging::blog_warn(
+                "disputes",
+                format!("could not read trade for {order_id}: {e}"),
+            );
+            false
+        }
     }
 }
 
@@ -626,7 +678,10 @@ async fn persist_dispute_origin(order_id: &str) {
         .set_setting(&crate::db::settings_keys::dispute_mine(order_id), "1")
         .await
     {
-        log::warn!("[disputes] could not persist dispute origin for {order_id}: {e}");
+        crate::api::logging::blog_warn(
+            "disputes",
+            format!("could not persist dispute origin for {order_id}: {e}"),
+        );
     }
 }
 
@@ -636,8 +691,9 @@ async fn persist_dispute_origin(order_id: &str) {
 /// The stored solver is what rehydration reads as "this order has a live
 /// dispute", so it must not outlive the dispute: left behind, every restart
 /// would resurrect a finished dispute as `InReview`, arm a listener for it and
-/// keep accepting evidence. Called both when a resolution reaches the store and
-/// when rehydration meets an already-finished trade.
+/// keep accepting evidence. Called when a resolution reaches the store, when
+/// rehydration meets an already-finished trade, and when a replayed
+/// `admin-took-dispute` is refused for one.
 ///
 /// Best-effort like the writes: a storage failure only means the stale key is
 /// seen again — and cleared again — on the next pass.
@@ -650,7 +706,7 @@ async fn clear_dispute_keys(order_id: &str) {
         crate::db::settings_keys::dispute_mine(order_id),
     ] {
         if let Err(e) = db.delete_setting(&key).await {
-            log::warn!("[disputes] could not clear {key}: {e}");
+            crate::api::logging::blog_warn("disputes", format!("could not clear {key}: {e}"));
         }
     }
 }
@@ -735,6 +791,12 @@ async fn derive_admin_shared_key(trade_id: &str, admin_pubkey_hex: &str) -> Resu
 
 /// Rebuild dispute records for orders with a persisted solver pubkey.
 ///
+/// This runs before the daemon replay has a chance to: the catch-up channel
+/// usually re-delivers `admin-took-dispute` and rebuilds the record on its
+/// own, but always with `initiated_by_me: false`, and only while the relays
+/// still hold the event. Rehydration restores the persisted origin either way
+/// and the solver when the replay no longer covers it.
+///
 /// Trades are the enumeration source, so no key-prefix scan is needed: each
 /// persisted trade is asked whether it has a stored solver. Records already in
 /// memory win — they are at least as fresh as storage — and that rule is
@@ -747,7 +809,8 @@ async fn derive_admin_shared_key(trade_id: &str, admin_pubkey_hex: &str) -> Resu
 /// later resolution arrives as a daemon event. The origin comes from the
 /// persisted marker `open_dispute` writes. Restoring the record is what lets
 /// `submit_evidence` work again after a restart, since it refuses without one.
-/// Only *unfinished* trades are restored — see [`is_order_finished`].
+/// Only *unfinished* trades are restored — see [`is_order_finished`]; finished
+/// ones have both keys cleared, whether or not a solver ever took the dispute.
 ///
 /// **Web has no rehydration.** `app_bootstrap.dart` skips `initDb` off native, and
 /// the IndexedDB store's `list_trades` is still the empty stub of #233, so both
@@ -761,7 +824,10 @@ async fn rehydrate_disputes_from_storage() {
     let trades = match db.list_trades().await {
         Ok(t) => t,
         Err(e) => {
-            log::warn!("[disputes] rehydrate: list_trades failed: {e}");
+            crate::api::logging::blog_warn(
+                "disputes",
+                format!("rehydrate: list_trades failed: {e}"),
+            );
             return;
         }
     };
@@ -773,6 +839,28 @@ async fn rehydrate_disputes_from_storage() {
         if dispute_store().get(&order_id).await.is_some() {
             continue;
         }
+
+        // The trade already ended — any key left for it is stale. A solver
+        // key restored here would recreate the dispute as `InReview` on every
+        // single restart, arm a listener nobody is on the other end of, and
+        // keep letting evidence be submitted against a closed case. Checked
+        // before the solver read so an origin marker whose dispute was never
+        // taken is swept too, instead of staying behind forever.
+        if is_order_finished(&trade.order.status) {
+            if has_dispute_keys(db, &order_id).await {
+                crate::api::logging::blog_info(
+                    "disputes",
+                    format!(
+                        "rehydrate: dropping stale dispute keys for finished order={} status={:?}",
+                        crate::api::logging::short_id(&order_id),
+                        trade.order.status
+                    ),
+                );
+                clear_dispute_keys(&order_id).await;
+            }
+            continue;
+        }
+
         let admin_hex = match db
             .get_setting(&crate::db::settings_keys::dispute_admin(&order_id))
             .await
@@ -780,23 +868,13 @@ async fn rehydrate_disputes_from_storage() {
             Ok(Some(hex)) => hex,
             Ok(None) => continue,
             Err(e) => {
-                log::warn!("[disputes] rehydrate: reading solver for {order_id}: {e}");
+                crate::api::logging::blog_warn(
+                    "disputes",
+                    format!("rehydrate: reading solver for {order_id}: {e}"),
+                );
                 continue;
             }
         };
-
-        // The trade already ended — the solver key is stale. Restoring it here
-        // would recreate the dispute as `InReview` on every single restart,
-        // arm a listener nobody is on the other end of, and keep letting
-        // evidence be submitted against a closed case. Clear it instead.
-        if is_order_finished(&trade.order.status) {
-            log::info!(
-                "[disputes] rehydrate: dropping stale solver for finished order={order_id} status={:?}",
-                trade.order.status
-            );
-            clear_dispute_keys(&order_id).await;
-            continue;
-        }
 
         let initiated_by_me = match db
             .get_setting(&crate::db::settings_keys::dispute_mine(&order_id))
@@ -804,7 +882,10 @@ async fn rehydrate_disputes_from_storage() {
         {
             Ok(marker) => marker.is_some(),
             Err(e) => {
-                log::warn!("[disputes] rehydrate: reading origin for {order_id}: {e}");
+                crate::api::logging::blog_warn(
+                    "disputes",
+                    format!("rehydrate: reading origin for {order_id}: {e}"),
+                );
                 false
             }
         };
@@ -833,8 +914,31 @@ async fn rehydrate_disputes_from_storage() {
                 |_| Ok(()),
             )
             .await;
-        log::info!("[disputes] rehydrated dispute record order={order_id}");
+        crate::api::logging::blog_info(
+            "disputes",
+            format!(
+                "rehydrated dispute record order={}",
+                crate::api::logging::short_id(&order_id)
+            ),
+        );
     }
+}
+
+/// `true` when either persisted dispute key still exists for `order_id`.
+/// Reads only, so a reconnect pass over many finished trades does not turn
+/// into a write per trade; a read error counts as present so the key gets a
+/// clearing attempt rather than being silently kept.
+async fn has_dispute_keys(db: &impl Storage, order_id: &str) -> bool {
+    for key in [
+        crate::db::settings_keys::dispute_admin(order_id),
+        crate::db::settings_keys::dispute_mine(order_id),
+    ] {
+        match db.get_setting(&key).await {
+            Ok(Some(_)) | Err(_) => return true,
+            Ok(None) => {}
+        }
+    }
+    false
 }
 
 /// Re-arm the dispute-chat listener of every in-review dispute with a known
@@ -847,8 +951,9 @@ async fn rehydrate_disputes_from_storage() {
 /// dispute a no-op.
 pub(crate) async fn resubscribe_active_dispute_chats() {
     // A restart leaves the in-memory store empty, so the loop below would find
-    // nothing to re-arm. Refill it from the persisted solver pubkeys first —
-    // that is the one piece of a dispute that cannot be re-derived.
+    // nothing to re-arm. Refill it from the persisted keys first: the origin
+    // is never re-derivable, and the solver pubkey only is while the daemon
+    // replay still covers the assignment.
     rehydrate_disputes_from_storage().await;
 
     for dispute in dispute_store().all().await {
@@ -1151,6 +1256,7 @@ mod tests {
         let live = format!("live-{}", uuid::Uuid::new_v4());
         let peer = format!("peer-{}", uuid::Uuid::new_v4());
         let finished = format!("finished-{}", uuid::Uuid::new_v4());
+        let orphan = format!("orphan-{}", uuid::Uuid::new_v4());
         let in_memory = format!("mem-{}", uuid::Uuid::new_v4());
         let stored_solver = "0000000000000000000000000000000000000000000000000000000000000011";
         let fresher_solver = "0000000000000000000000000000000000000000000000000000000000000022";
@@ -1171,8 +1277,13 @@ mod tests {
             .await
             .unwrap();
         }
-        // `live` and `finished` were opened by this side; `peer` was not.
-        for order_id in [&live, &finished] {
+        // `orphan`: opened by this side, never taken by a solver, then canceled
+        // — only the origin marker exists for it.
+        db.save_trade(&persisted_trade(&orphan, OrderStatus::Canceled))
+            .await
+            .unwrap();
+        // `live`, `finished` and `orphan` were opened by this side; `peer` was not.
+        for order_id in [&live, &finished, &orphan] {
             db.set_setting(&crate::db::settings_keys::dispute_mine(order_id), "1")
                 .await
                 .unwrap();
@@ -1218,9 +1329,93 @@ mod tests {
         let kept = get_dispute(in_memory.clone()).await.unwrap().expect("kept");
         assert_eq!(kept.admin_pubkey.as_deref(), Some(fresher_solver));
 
+        // 4. A finished trade with only the origin marker is swept too — the
+        //    terminal check runs before the solver read, so a dispute that
+        //    was opened but never taken does not leave its marker behind.
+        assert!(get_dispute(orphan.clone()).await.unwrap().is_none());
+        assert_eq!(
+            db.get_setting(&crate::db::settings_keys::dispute_mine(&orphan))
+                .await
+                .unwrap(),
+            None,
+            "an orphan origin marker must be cleared"
+        );
+
         // Cleanup — the rows, not the file: `init_db` is a process-wide
         // OnceCell shared with every later test (see `escrow.rs`).
-        for order_id in [&live, &peer, &finished, &in_memory] {
+        for order_id in [&live, &peer, &finished, &orphan, &in_memory] {
+            clear_dispute_keys(order_id).await;
+            db.delete_trade_by_order_id(order_id).await.unwrap();
+        }
+    }
+
+    /// PR #256 review, manual E2E: the catch-up channel re-delivers
+    /// `admin-took-dispute` on every reconnect, so a second after rehydration
+    /// cleared the keys of a finished dispute, the replay recreated the record
+    /// as `InReview`, wrote the solver key straight back and armed a listener
+    /// — on every startup. The persisted trade status is the guard.
+    #[tokio::test]
+    async fn a_replayed_admin_took_dispute_is_refused_for_a_finished_trade() {
+        let path = std::env::temp_dir()
+            .join(format!("mostro_dispute_replay_{}.db", std::process::id()));
+        let _ = crate::db::app_db::init_db(path.to_str().unwrap()).await;
+        let Some(db) = crate::db::app_db::db() else {
+            panic!("no store: the replay guard cannot be exercised");
+        };
+
+        let finished = format!("replay-finished-{}", uuid::Uuid::new_v4());
+        let live = format!("replay-live-{}", uuid::Uuid::new_v4());
+        let admin_pk = "0000000000000000000000000000000000000000000000000000000000000033";
+
+        db.save_trade(&persisted_trade(&finished, OrderStatus::CanceledByAdmin))
+            .await
+            .unwrap();
+        db.save_trade(&persisted_trade(&live, OrderStatus::Dispute))
+            .await
+            .unwrap();
+        // Stale keys the replay would otherwise keep alive.
+        db.set_setting(&crate::db::settings_keys::dispute_admin(&finished), admin_pk)
+            .await
+            .unwrap();
+        db.set_setting(&crate::db::settings_keys::dispute_mine(&finished), "1")
+            .await
+            .unwrap();
+
+        // Refused, not an error: a skipped replay is the expected path.
+        handle_admin_took_dispute(finished.clone(), admin_pk.to_string())
+            .await
+            .unwrap();
+        assert!(
+            get_dispute(finished.clone()).await.unwrap().is_none(),
+            "a finished trade must not get its dispute resurrected"
+        );
+        for key in [
+            crate::db::settings_keys::dispute_admin(&finished),
+            crate::db::settings_keys::dispute_mine(&finished),
+        ] {
+            assert_eq!(
+                db.get_setting(&key).await.unwrap(),
+                None,
+                "the refused replay must not leave (or write back) a key"
+            );
+        }
+
+        // The same message for a trade still under dispute is applied as
+        // before — the guard reads the trade, not the message.
+        handle_admin_took_dispute(live.clone(), admin_pk.to_string())
+            .await
+            .unwrap();
+        let restored = get_dispute(live.clone()).await.unwrap().expect("applied");
+        assert_eq!(restored.admin_pubkey.as_deref(), Some(admin_pk));
+        assert_eq!(
+            db.get_setting(&crate::db::settings_keys::dispute_admin(&live))
+                .await
+                .unwrap()
+                .as_deref(),
+            Some(admin_pk)
+        );
+
+        for order_id in [&finished, &live] {
             clear_dispute_keys(order_id).await;
             db.delete_trade_by_order_id(order_id).await.unwrap();
         }
