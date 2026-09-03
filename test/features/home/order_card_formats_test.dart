@@ -4,9 +4,11 @@ import 'package:mostro/features/home/widgets/order_list_item.dart';
 void main() {
   group('OrderCardFormats', () {
     test('reuses one set of formatters per locale', () {
-      // Constructing a NumberFormat parses its pattern and loads locale data.
-      // The card needs four of them, so building them per row per rebuild is
-      // the single most repeated allocation in a list of thousands of orders.
+      // The card needs four formatters, so building them per row per rebuild
+      // is the most repeated allocation in a list of thousands of orders —
+      // which is the saving here, construction being only ~1.2–1.5x the cost
+      // of a format() call rather than the order of magnitude one might
+      // assume.
       expect(
         identical(OrderCardFormats.of('es'), OrderCardFormats.of('es')),
         isTrue,

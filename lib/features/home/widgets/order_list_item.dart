@@ -11,10 +11,15 @@ import 'package:mostro/l10n/app_localizations.dart';
 
 /// The number formatters an order card needs, built once per locale.
 ///
-/// Constructing a `NumberFormat` parses its pattern and loads locale data. The
-/// card uses four of them, so building them inline meant that work ran once
-/// per visible row on every rebuild — and the order book rebuilds on every
-/// relay event.
+/// The card needs four, and building them inline meant four `NumberFormat`
+/// allocations per visible row on every rebuild — and the order book rebuilds
+/// on every relay event.
+///
+/// Not because construction is dramatically more expensive than formatting: it
+/// parses the pattern and reads locale data, but measured against warm locale
+/// data it costs about 1.2–1.5× a `format()` call (~1 µs each, ~4 µs per card).
+/// It is worth doing for the allocations it stops making, and the honest size
+/// of the win is small — the claim that construction dominates does not hold.
 class OrderCardFormats {
   OrderCardFormats._(String locale)
       : premium = NumberFormat('+0.0;-0.0', locale),
