@@ -4,7 +4,7 @@ Auto-generated from all feature plans. Last updated: 2026-06-26
 
 ## Active Technologies
 - Rust stable 1.94+ (core); Dart 3.x / Flutter 3.x (UI shell) (004-mostro-p2p-client)
-- nostr-sdk 0.44+, mostro-core 0.13.1, flutter_rust_bridge 2.11.1, Riverpod (state),
+- nostr-sdk 0.45+, mostro-core 0.14.6, flutter_rust_bridge 2.11.1, Riverpod (state),
   go_router (navigation), sqlx (SQLite, native) / indexed_db_futures (IndexedDB, web),
   sembast (Dart UI-layer state), bip32/bip39 (keys), chacha20poly1305 (file encryption)
 - Sembast (Dart, all platforms) for UI-layer state; SQLite via `sqlx` (Rust, native) /
@@ -49,6 +49,11 @@ flutter gen-l10n                            # after editing lib/l10n/*.arb
   (`--base-href` for the sub-path, `--pwa-strategy=none` so Flutter's service worker does not
   take the isolation shim's scope). Every one of these, when wrong, yields a **blank page** —
   `test/web/pages_bundle_test.dart` guards them statically.
+- `cargo check --target wasm32-unknown-unknown` is **not** a substitute for `build-web.sh`: two
+  wasm-only requirements fail later than type-checking. `getrandom` (0.2 via bip32/k256, 0.4 via
+  nostr's `rand`) needs its JS backend feature enabled in `rust/Cargo.toml`, and nostr 0.45's
+  `universal-time` refuses to **link** until the final crate defines a time provider
+  (`rt::browser_clock`). Both used to come for free from nostr 0.44 and vanished with 0.45.
 - The build itself lives in the reusable **`.github/workflows/web-build.yml`**, called by both
   `ci.yml` (every PR) and `deploy-pages.yml` — edit it there, never in a caller, or the bundle
   CI validates drifts from the one that ships.

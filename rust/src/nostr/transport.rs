@@ -149,15 +149,10 @@ pub async fn mostro_wrap(
     // silently drop the second one.
     let nonce: [u8; 8] = rand::random();
 
-    let inner = EventBuilder::text_note(message)
-        .tag(Tag::custom(
-            TagKind::custom("u"),
-            [hex::encode(nonce)],
-        ))
+    let inner = EventBuilder::new(Kind::TextNote, message)
+        .tag(Tag::custom("u", [hex::encode(nonce)]))
         .custom_created_at(now)
-        .build(sender_trade.public_key())
-        .sign(sender_trade)
-        .await
+        .finalize(sender_trade)
         .map_err(|e| anyhow!("inner event sign failed: {e}"))?;
 
     // NIP-44 self-encryption: K_conv is both sides of the key exchange.
@@ -183,15 +178,22 @@ pub async fn mostro_wrap(
 
     // Exactly one `p` tag, ours. Anything else could hide the message from
     // the `#p` query a dispute solver uses to rebuild the transcript.
-    let builder = EventBuilder::new(Kind::PrivateDirectMessage, content)
+    let unsigned = EventBuilder::new(Kind::PrivateDirectMessage, content)
         .tag(Tag::public_key(conv.public_key()))
-        .custom_created_at(now);
+        .custom_created_at(now)
+        .finalize_unsigned(sign.public_key());
 
-    let pow = crate::mostro::pow::get_pow();
-    let builder = if pow > 0 { builder.pow(pow) } else { builder };
+    // PoW is mined on the unsigned event before signing (nostr 0.45 dropped
+    // `EventBuilder::pow`); the id is only computed once mining settles.
+    let unsigned = match core::num::NonZeroU8::new(crate::mostro::pow::get_pow()) {
+        Some(difficulty) => unsigned
+            .mine(&SingleThreadPow, difficulty)
+            .map_err(|e| anyhow!("outer event PoW failed: {e}"))?,
+        None => unsigned,
+    };
 
-    let outer = builder
-        .sign_with_keys(sign)
+    let outer = unsigned
+        .finalize(sign)
         .map_err(|e| anyhow!("outer event sign failed: {e}"))?;
 
     Ok((outer, inner))
@@ -249,7 +251,7 @@ pub fn mostro_unwrap(
     let mut p_tags = outer
         .tags
         .iter()
-        .filter(|t| t.kind() == TagKind::p());
+        .filter(|t| t.kind() == "p");
     match (p_tags.next().and_then(|t| t.content()), p_tags.next()) {
         (Some(pk), None) if pk == conv.public_key().to_hex() => {}
         _ => {
@@ -386,7 +388,7 @@ mod chat_envelope_tests {
         let forged = EventBuilder::new(Kind::PrivateDirectMessage, content)
             .tag(Tag::public_key(c.conv.public_key()))
             .custom_created_at(inner.created_at)
-            .sign_with_keys(&mallory)
+            .finalize(&mallory)
             .unwrap();
 
         let err = unwrap_now(&c, &forged).unwrap_err().to_string();
@@ -411,7 +413,7 @@ mod chat_envelope_tests {
         // in the #p transcript a dispute solver retrieves.
         let no_p = EventBuilder::new(Kind::PrivateDirectMessage, content.clone())
             .custom_created_at(inner.created_at)
-            .sign_with_keys(&c.sign)
+            .finalize(&c.sign)
             .unwrap();
         assert!(unwrap_now(&c, &no_p).is_err());
 
@@ -419,7 +421,7 @@ mod chat_envelope_tests {
         let foreign = EventBuilder::new(Kind::PrivateDirectMessage, content.clone())
             .tag(Tag::public_key(Keys::generate().public_key()))
             .custom_created_at(inner.created_at)
-            .sign_with_keys(&c.sign)
+            .finalize(&c.sign)
             .unwrap();
         assert!(unwrap_now(&c, &foreign).is_err());
 
@@ -428,7 +430,7 @@ mod chat_envelope_tests {
             .tag(Tag::public_key(c.conv.public_key()))
             .tag(Tag::public_key(Keys::generate().public_key()))
             .custom_created_at(inner.created_at)
-            .sign_with_keys(&c.sign)
+            .finalize(&c.sign)
             .unwrap();
         assert!(unwrap_now(&c, &two).is_err());
     }
@@ -440,11 +442,9 @@ mod chat_envelope_tests {
         // passes, only the absolute bound against our clock catches it —
         // this is the cursor-poisoning defence.
         let future = Timestamp::from_secs(Timestamp::now().as_secs() + 7 * 24 * 3600);
-        let inner = EventBuilder::text_note("poison")
+        let inner = EventBuilder::new(Kind::TextNote, "poison")
             .custom_created_at(future)
-            .build(c.alice_trade.public_key())
-            .sign(&c.alice_trade)
-            .await
+            .finalize(&c.alice_trade)
             .unwrap();
         let content = nip44::encrypt(
             c.conv.secret_key(),
@@ -456,7 +456,7 @@ mod chat_envelope_tests {
         let outer = EventBuilder::new(Kind::PrivateDirectMessage, content)
             .tag(Tag::public_key(c.conv.public_key()))
             .custom_created_at(future)
-            .sign_with_keys(&c.sign)
+            .finalize(&c.sign)
             .unwrap();
 
         let err = unwrap_now(&c, &outer).unwrap_err().to_string();
@@ -469,7 +469,7 @@ mod chat_envelope_tests {
         let big = "x".repeat(MAX_CONTENT_BYTES + 1);
         let outer = EventBuilder::new(Kind::PrivateDirectMessage, big)
             .tag(Tag::public_key(c.conv.public_key()))
-            .sign_with_keys(&c.sign)
+            .finalize(&c.sign)
             .unwrap();
 
         let err = unwrap_now(&c, &outer).unwrap_err().to_string();
@@ -511,7 +511,7 @@ mod chat_envelope_tests {
         let outer = EventBuilder::new(Kind::PrivateDirectMessage, content)
             .tag(Tag::public_key(c.conv.public_key()))
             .custom_created_at(inner.created_at)
-            .sign_with_keys(&c.sign)
+            .finalize(&c.sign)
             .unwrap();
 
         assert!(unwrap_now(&c, &outer).is_err());
@@ -537,7 +537,7 @@ mod chat_envelope_tests {
         let rewrap = EventBuilder::new(Kind::PrivateDirectMessage, content)
             .tag(Tag::public_key(c.conv.public_key()))
             .custom_created_at(later)
-            .sign_with_keys(&c.sign)
+            .finalize(&c.sign)
             .unwrap();
 
         let err = mostro_unwrap(
@@ -609,14 +609,11 @@ mod chat_envelope_tests {
         let mut builder = EventBuilder::new(Kind::PrivateDirectMessage, content)
             .tag(Tag::public_key(c.conv.public_key()));
         for i in 0..2000 {
-            builder = builder.tag(Tag::custom(
-                TagKind::custom("x"),
-                [format!("junk-{i}")],
-            ));
+            builder = builder.tag(Tag::custom("x", [format!("junk-{i}")]));
         }
         let padded = builder
             .custom_created_at(inner.created_at)
-            .sign_with_keys(&c.sign)
+            .finalize(&c.sign)
             .unwrap();
 
         let err = unwrap_now(&c, &padded).unwrap_err().to_string();
@@ -641,7 +638,7 @@ mod chat_envelope_tests {
         let signed_with_conv = EventBuilder::new(Kind::PrivateDirectMessage, content)
             .tag(Tag::public_key(c.conv.public_key()))
             .custom_created_at(inner.created_at)
-            .sign_with_keys(&c.conv)
+            .finalize(&c.conv)
             .unwrap();
 
         assert!(unwrap_now(&c, &signed_with_conv).is_err());

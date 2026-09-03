@@ -228,7 +228,7 @@ pub async fn submit_rating(trade_id: String, score: u8) -> Result<()> {
             let identity_keys =
                 crate::api::identity::get_transport_identity_keys(&sender_keys).await?;
             let mostro_pubkey =
-                nostr_sdk::PublicKey::from_hex(&crate::config::active_mostro_pubkey())
+                nostr_sdk::prelude::PublicKey::from_hex(&crate::config::active_mostro_pubkey())
                     .map_err(|e| anyhow::anyhow!("invalid mostro pubkey: {e}"))?;
             let event_json = crate::mostro::actions::rate_user(
                 &identity_keys,
