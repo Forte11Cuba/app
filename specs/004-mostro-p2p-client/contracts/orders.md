@@ -92,6 +92,18 @@ That persistence half runs under the per-order lock (see *Per-order
 serialization*), acquired after the reply and never around the wait for it.
 On rejection or timeout **nothing is persisted** — no phantom trade.
 
+The row is created with an **empty `counterparty_pubkey`**: a book
+order's `creator_pubkey` is the Mostro node (the 38383 event author),
+never the peer, and seeding it there poisons the durable peer record
+(#334). The real peer arrives via the peer-reveal capture (see *Inbound
+Kind 14 actions*), which may already have run on the take's first reply —
+in that case the session **pre-exists** with peer and shared key set, the
+`create_session` here fails duplicate-create as an expected error, and,
+because the reveal ran before the row existed, its durable write was a
+no-op: the persistence block replays it from the session and mirrors the
+peer onto the returned `TradeInfo` (the field the UI gates the chat room
+on).
+
 **Errors**: `OrderNotFound`, `CannotTakeOwnOrder`, `OrderAlreadyTaken`,
 `InvalidRole`, `FiatAmountRequired`/`OutOfRange` (range orders),
 `BondRequired` (daemon requires an anti-abuse bond — not supported yet),
@@ -288,12 +300,33 @@ Coverage invariants:
 
 ### Inbound Kind 14 actions consumed by `dispatch_mostro_message`
 
+**Peer-reveal capture (#334), before the per-action arms.** Any message —
+whatever its action — whose payload carries a `SmallOrder` naming **both**
+trade pubkeys (an `Order` payload or a `PaymentRequest`) reveals the
+counterparty: our trade key is matched against the two and the other side
+is taken, symmetrically, with no per-action role table. The peer is then
+persisted to the trade row (`update_trade_counterparty` — the row is the
+durable peer record, the session a cache of it) and the session is
+updated **or created**: no session is the maker's *normal* case, since
+`take_order` is the only other session creator. Ordering is load-bearing:
+the capture runs after the generation gate and the local→daemon UUID
+reconciliation (it writes by the daemon's order id) but **before the
+take-waiter interception**, so a take's first reply — consumed there and
+never seen by the arms — still reveals. `BondSlashed` is exempt for the
+same reason it skips the generation gate: it may address a superseded
+generation and must not write order state. Empty or unparsable pubkeys do
+not qualify, the terminal-status guard applies (a stale replay over a
+finished trade must not respawn chat state), and an already-complete
+capture (session holds peer + shared key) short-circuits — the capture
+runs for every replayed message on each restart, and that replay is also
+what rebuilds sessions after one.
+
 | Action                             | Payload variant                                     | Effect on the local trade row                                                    |
 |------------------------------------|-----------------------------------------------------|----------------------------------------------------------------------------------|
 | `WaitingBuyerInvoice`              | (status sync)                                       | `status → WaitingBuyerInvoice`                                                   |
 | `AddInvoice`                       | `Payload::Order(small_order)`                       | Maker-buyer path (a taker's nonce-correlated copy is consumed by the take interception, even when late): `status → WaitingBuyerInvoice` (payload status, fallback `status_for_action`), `amount_sats ← small_order.amount` when > 0 — synced to book **and** DB so `tradeAmountProvider` sees the sats. Keyed by the message's order id (`trade_index` is `None`). The follow-up `AddInvoice` with a `Payload::Peer` (counterparty reputation) is ignored. |
 | `PayInvoice`                       | `Payload::PaymentRequest(small_order, bolt11, amt)` | `hold_invoice ← bolt11`, `amount_sats ← amt ?? small_order.amount`, `status → WaitingPayment` |
-| `BuyerTookOrder` / `HoldInvoicePaymentAccepted` | `SmallOrder` with `status = active`      | `status → Active` (routed through `map_core_status` kebab-case)                  |
+| `BuyerTookOrder` / `HoldInvoicePaymentAccepted` | `SmallOrder` with `status = active`      | `status → Active` (routed through `map_core_status` kebab-case). The peer reveal happens in the pre-dispatch capture above, not in this arm. |
 | `FiatSentOk`                       | (status sync)                                       | `status → FiatSent`                                                              |
 | `HoldInvoicePaymentSettled` / `Released` / `PurchaseCompleted` | (status sync)             | `status → SettledHoldInvoice`                                                    |
 | `CooperativeCancelAccepted`        | (status sync)                                       | `status → CooperativelyCanceled`                                                 |

@@ -162,6 +162,14 @@ completed_at: i64?
 outcome: TradeOutcome?
 ```
 
+`counterparty_pubkey` is the **peer's trade pubkey**, never the Mostro
+node's (`order.creator_pubkey` on a book order is the node — the 38383
+event author). It starts **empty** for both roles and is populated when a
+daemon message names both trade pubkeys (the peer-reveal capture, #334 —
+see `orders.md`). The trade row is the **durable** peer record; the
+in-memory session is only a cache of it. Once set it never changes for a
+trade, and it is what the chat UI gates the room on.
+
 ### ChatMessage
 ```text
 id: String

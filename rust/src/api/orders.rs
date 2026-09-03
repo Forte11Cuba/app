@@ -2360,7 +2360,10 @@ async fn maybe_capture_peer_reveal(
 /// names, or `None` when it names fewer than both. Both sides required: with
 /// only one pubkey there is no telling which side is ours, and single-sided
 /// payloads (e.g. the maker's own NewOrder confirmation) reveal nothing
-/// anyway.
+/// anyway. `Some("")` counts as absent, matching mostrix — this runs for
+/// every daemon message and every replayed one, so letting an empty string
+/// through to `PublicKey::from_hex` would warn-log the whole history on each
+/// restart of a daemon that emits `Some("")` for "no pubkey".
 fn peer_reveal_pubkeys(
     payload: Option<&mostro_core::message::Payload>,
 ) -> Option<(&str, &str)> {
@@ -2373,7 +2376,11 @@ fn peer_reveal_pubkeys(
         small_order.buyer_trade_pubkey.as_deref(),
         small_order.seller_trade_pubkey.as_deref(),
     ) {
-        (Some(buyer_hex), Some(seller_hex)) => Some((buyer_hex, seller_hex)),
+        (Some(buyer_hex), Some(seller_hex))
+            if !buyer_hex.is_empty() && !seller_hex.is_empty() =>
+        {
+            Some((buyer_hex, seller_hex))
+        }
         _ => None,
     }
 }
@@ -4932,6 +4939,14 @@ mod tests {
         let seller_only = Payload::Order(order(None, Some("s")));
         assert_eq!(peer_reveal_pubkeys(Some(&seller_only)), None);
 
+        // `Some("")` is absent, not present (mostrix parity): it must be
+        // filtered here, not warn-logged downstream for every replayed
+        // message of a daemon that encodes "no pubkey" as an empty string.
+        let empty_buyer = Payload::Order(order(Some(""), Some("s")));
+        assert_eq!(peer_reveal_pubkeys(Some(&empty_buyer)), None);
+        let empty_seller = Payload::Order(order(Some("b"), Some("")));
+        assert_eq!(peer_reveal_pubkeys(Some(&empty_seller)), None);
+
         // No SmallOrder at all: bare PaymentRequest, non-order payload, none.
         let bare_pay_req = Payload::PaymentRequest(None, "lnbc1".into(), None);
         assert_eq!(peer_reveal_pubkeys(Some(&bare_pay_req)), None);
@@ -4988,6 +5003,147 @@ mod tests {
             crate::crypto::ecdh::derive_nip04_shared_key(&trade_keys, &peer_keys.public_key())
                 .expect("ECDH derivation");
         assert_eq!(session.shared_key, Some(expected));
+    }
+
+    /// The seam test for #334: `dispatch_mostro_message` is the ONLY caller
+    /// of `maybe_capture_peer_reveal` — deleting that call leaves every other
+    /// test green, because they exercise the pieces directly. This drives one
+    /// daemon message naming both trade pubkeys through the real dispatcher,
+    /// starting from a row exactly as `take_order` leaves it (empty
+    /// counterparty), and asserts the durable write and the session both
+    /// happened.
+    ///
+    /// `#[ignore]`d because it claims two process-global singletons for the
+    /// whole test binary — the `app_db` OnceCell and the in-memory identity —
+    /// which cannot be shared with the rest of the suite (same pattern as
+    /// `restore_e2e_tests`). Run with:
+    ///   cargo test --lib peer_reveal_capture_is_wired_into_dispatch -- --ignored
+    #[tokio::test]
+    #[ignore = "claims the process-global app_db and identity — run with --ignored"]
+    async fn peer_reveal_capture_is_wired_into_dispatch() {
+        use mostro_core::message::{Action, Message, Payload};
+
+        let db_path = std::env::temp_dir().join(format!(
+            "mostro-wiring-test-{}.db",
+            uuid::Uuid::new_v4()
+        ));
+        crate::db::app_db::init_db(db_path.to_str().unwrap())
+            .await
+            .expect("init app db");
+        crate::api::identity::import_from_mnemonic(
+            "abandon abandon abandon abandon abandon abandon abandon abandon \
+             abandon abandon abandon about"
+                .split_whitespace()
+                .map(String::from)
+                .collect(),
+            false,
+        )
+        .await
+        .expect("import identity");
+
+        let trade_index = 3u32;
+        let trade_keys = crate::api::identity::get_active_trade_keys(trade_index)
+            .await
+            .expect("derive trade key");
+        let my_hex = trade_keys.public_key().to_hex();
+        let peer_keys = nostr_sdk::Keys::generate();
+        let peer_hex = peer_keys.public_key().to_hex();
+
+        // The world as a maker-seller take leaves it: book entry, trade-key
+        // binding (the generation gate reads it), and a persisted row with an
+        // EMPTY counterparty.
+        let order_uuid = uuid::Uuid::new_v4();
+        let order_id = order_uuid.to_string();
+        let mut order_info = dummy_order_info(&order_id);
+        order_info.kind = crate::api::types::OrderKind::Sell;
+        order_info.status = crate::api::types::OrderStatus::Active;
+        order_book().upsert_order(order_info.clone()).await;
+        store_trade_key_index(&order_id, trade_index).await;
+        let db = crate::db::app_db::db().expect("db just initialized");
+        db.save_trade(&crate::api::types::TradeInfo {
+            id: order_id.clone(),
+            order: order_info,
+            role: TradeRole::Seller,
+            counterparty_pubkey: String::new(),
+            current_step: crate::api::types::TradeStep::Seller(
+                crate::api::types::SellerStep::TakerFound,
+            ),
+            hold_invoice: None,
+            buyer_invoice: None,
+            trade_key_index: trade_index,
+            cooperative_cancel_state: None,
+            timeout_at: None,
+            started_at: 1,
+            completed_at: None,
+            outcome: None,
+            peer_rating: None,
+            peer_reviews: None,
+            peer_days: None,
+            rated_at: None,
+        })
+        .await
+        .expect("save the pre-reveal row");
+
+        // One daemon message whose payload names BOTH trade pubkeys — the
+        // buyer is the peer, the seller is our derived trade key.
+        let so = mostro_core::order::SmallOrder::new(
+            Some(order_uuid),
+            Some(mostro_core::order::Kind::Sell),
+            Some(mostro_core::order::Status::Active),
+            457,
+            "USD".to_string(),
+            None,
+            None,
+            100,
+            "bank".to_string(),
+            0,
+            Some(peer_hex.clone()),
+            Some(my_hex.clone()),
+            None,
+            None,
+            None,
+        );
+        let sender = nostr_sdk::PublicKey::from_hex(&active_mostro_pubkey())
+            .expect("valid mostro pubkey");
+        let unwrapped = mostro_core::nip59::UnwrappedMessage {
+            message: Message::new_order(
+                Some(order_uuid),
+                None,
+                None,
+                Action::BuyerTookOrder,
+                Some(Payload::Order(so)),
+            ),
+            signature: None,
+            sender,
+            identity: sender,
+            created_at: nostr_sdk::Timestamp::from(0u64),
+        };
+        dispatch_mostro_message(unwrapped, "test-peer-reveal-wiring", &my_hex, trade_index)
+            .await;
+
+        // The durable write: the row now holds the peer. This is the
+        // assertion that fails when the dispatcher call is deleted.
+        let row = db
+            .get_trade_by_order_id(&order_id)
+            .await
+            .expect("row query")
+            .expect("row survives dispatch");
+        assert_eq!(row.counterparty_pubkey, peer_hex);
+
+        // The session cache: created by the same capture, with peer, role and
+        // the real ECDH shared key.
+        let session = session_manager()
+            .get_session(&order_id)
+            .await
+            .expect("capture must create the maker's session");
+        assert!(matches!(session.role, TradeRole::Seller));
+        assert_eq!(session.peer_pubkey.as_deref(), Some(peer_hex.as_str()));
+        let expected =
+            crate::crypto::ecdh::derive_nip04_shared_key(&trade_keys, &peer_keys.public_key())
+                .expect("ECDH derivation");
+        assert_eq!(session.shared_key, Some(expected));
+
+        let _ = std::fs::remove_file(&db_path);
     }
 
     // ── #259 per-order dispatch serialization ─────────────────────────────────
