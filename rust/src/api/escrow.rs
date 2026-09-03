@@ -49,7 +49,7 @@ fn snapshot() -> EscrowModeInfo {
 fn validate_mint_url(url: &str) -> Result<()> {
     // `Url` comes from nostr-sdk's re-export of the `url` crate — no new
     // dependency for one validation.
-    let parsed = nostr_sdk::Url::parse(url)
+    let parsed = nostr_sdk::prelude::Url::parse(url)
         .map_err(|e| anyhow::anyhow!("InvalidMintUrl: '{url}' is not a URL ({e})"))?;
 
     if !matches!(parsed.scheme(), "http" | "https") {
