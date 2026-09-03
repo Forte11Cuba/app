@@ -539,8 +539,7 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen> {
     }
 
     // Look up order details from the live order book.
-    final allOrders = ref.watch(orderBookProvider).valueOrNull ?? [];
-    final order = allOrders.where((o) => o.id == widget.orderId).firstOrNull;
+    final order = ref.watch(orderByIdProvider(widget.orderId));
 
     // Counterpart (taker) reputation snapshot persisted from the daemon's
     // follow-up Peer DM (#305). Read via tradeInfoProvider (not the polling
