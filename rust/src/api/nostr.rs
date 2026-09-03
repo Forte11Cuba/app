@@ -23,15 +23,37 @@ fn relay_sync_tx() -> &'static tokio::sync::broadcast::Sender<Vec<String>> {
     RELAY_SYNC_TX.get_or_init(|| tokio::sync::broadcast::channel(16).0)
 }
 
-/// `created_at` of the newest kind 10002 applied, per node pubkey. Relays
-/// hold different generations of a replaceable event, so the live
-/// subscription can deliver an older list after a newer one; only the newest
-/// is ever applied.
-static RELAY_LIST_SEEN: std::sync::OnceLock<tokio::sync::Mutex<std::collections::HashMap<String, u64>>> =
-    std::sync::OnceLock::new();
+/// The newest kind 10002 generation applied, per node pubkey. Relays hold
+/// different generations of a replaceable event, so the live subscription can
+/// deliver an older list after a newer one; only the newest is ever applied.
+///
+/// A generation is `(created_at, event id)`, not just `created_at`: NIP-01
+/// breaks a timestamp tie between two revisions of a replaceable event by
+/// keeping the **lowest** event id, so two lists published within the same
+/// second must be ordered by id and not both rejected.
+type RelayListGeneration = (u64, nostr_sdk::prelude::EventId);
 
-fn relay_list_seen() -> &'static tokio::sync::Mutex<std::collections::HashMap<String, u64>> {
+static RELAY_LIST_SEEN: std::sync::OnceLock<
+    tokio::sync::Mutex<std::collections::HashMap<String, RelayListGeneration>>,
+> = std::sync::OnceLock::new();
+
+fn relay_list_seen(
+) -> &'static tokio::sync::Mutex<std::collections::HashMap<String, RelayListGeneration>> {
     RELAY_LIST_SEEN.get_or_init(|| tokio::sync::Mutex::new(std::collections::HashMap::new()))
+}
+
+/// Order two generations of the same node's relay list the way NIP-01 orders
+/// revisions of a replaceable event: newer `created_at` wins, and on a tie the
+/// lower event id wins.
+fn generation_is_newer(candidate: RelayListGeneration, applied: RelayListGeneration) -> bool {
+    let (cand_at, cand_id) = candidate;
+    let (seen_at, seen_id) = applied;
+    match cand_at.cmp(&seen_at) {
+        std::cmp::Ordering::Greater => true,
+        std::cmp::Ordering::Less => false,
+        // Same second: NIP-01 retains the lexically lowest id.
+        std::cmp::Ordering::Equal => cand_id.as_bytes() < seen_id.as_bytes(),
+    }
 }
 
 fn pool() -> Result<&'static Arc<RelayPool>> {
@@ -142,16 +164,28 @@ pub async fn remove_relay(url: String) -> Result<()> {
     let pool = pool()?;
     let removed = pool.get_relays().await.into_iter().find(|r| r.url == url);
     pool.remove_relay(&url).await?;
-    match removed {
-        Some(mut info) if matches!(info.source, crate::api::types::RelaySource::MostroDiscovered) => {
-            info.is_active = false;
-            info.is_blacklisted = true;
-            info.status = crate::api::types::RelayStatus::Disconnected;
-            persist_relay(&info).await;
-        }
-        _ => unpersist_relay(&url).await,
+    match removal_effect(removed) {
+        Some(row) => persist_relay(&row).await,
+        None => unpersist_relay(&url).await,
     }
     Ok(())
+}
+
+/// What removing a relay leaves in storage: `Some(row)` to persist, `None` to
+/// delete the row outright.
+///
+/// A relay a Mostro node announced is kept as a blacklisted row instead of
+/// being deleted — the node re-announces its list on every reconnect, so
+/// forgetting the removal would bring the relay straight back.
+fn removal_effect(removed: Option<RelayInfo>) -> Option<RelayInfo> {
+    let mut info = removed?;
+    if !matches!(info.source, crate::api::types::RelaySource::MostroDiscovered) {
+        return None;
+    }
+    info.is_active = false;
+    info.is_blacklisted = true;
+    info.status = crate::api::types::RelayStatus::Disconnected;
+    Some(info)
 }
 
 /// Stream of relay URLs auto-added from the active node's kind 10002 relay
@@ -185,8 +219,8 @@ impl RelayAutoSyncStream {
 /// generations than one already applied for this node are ignored.
 pub(crate) async fn apply_relay_list_event(event: &Event) {
     let node = event.pubkey.to_hex();
-    let created_at = event.created_at.as_secs();
-    if !note_relay_list_generation(&mut *relay_list_seen().lock().await, &node, created_at) {
+    let generation = (event.created_at.as_secs(), event.id);
+    if !note_relay_list_generation(&mut *relay_list_seen().lock().await, &node, generation) {
         return;
     }
 
@@ -224,18 +258,21 @@ pub(crate) async fn apply_relay_list_event(event: &Event) {
     let _ = relay_sync_tx().send(added);
 }
 
-/// Record `created_at` as the newest relay list seen for `node` and say
+/// Record `generation` as the newest relay list seen for `node` and say
 /// whether it is newer than every one applied before (strictly: a replay of
 /// the same generation from another relay is not applied twice).
 fn note_relay_list_generation(
-    seen: &mut std::collections::HashMap<String, u64>,
+    seen: &mut std::collections::HashMap<String, RelayListGeneration>,
     node: &str,
-    created_at: u64,
+    generation: RelayListGeneration,
 ) -> bool {
-    if seen.get(node).is_some_and(|&newest| created_at <= newest) {
+    if seen
+        .get(node)
+        .is_some_and(|&applied| !generation_is_newer(generation, applied))
+    {
         return false;
     }
-    seen.insert(node.to_string(), created_at);
+    seen.insert(node.to_string(), generation);
     true
 }
 
@@ -704,30 +741,159 @@ mod tests {
     }
 }
 
+/// The remove → restart → restore → re-add lifecycle, against a real SQLite
+/// file rather than an in-memory fixture: a relay the node announced and the
+/// user removed must stay out across a restart, and adding it back by hand
+/// must lift the blacklist for good.
+///
+/// Native only: the IndexedDB backend does not persist relays yet (#233).
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod relay_blacklist_restart_tests {
+    use super::{removal_effect, RelayInfo};
+    use crate::db::sqlite::SqliteStorage;
+    use crate::db::Storage;
+    use crate::nostr::relay_pool::RelayPool;
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    const DEFAULT: &str = "wss://default.example";
+    const ANNOUNCED: &str = "wss://announced.example";
+
+    fn temp_db_path() -> std::path::PathBuf {
+        static COUNTER: AtomicU32 = AtomicU32::new(0);
+        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+        std::env::temp_dir().join(format!("mostro_relay_bl_{}_{n}.db", std::process::id()))
+    }
+
+    /// A fresh pool restored from `storage`, the way `initialize(None)` builds
+    /// one at startup.
+    async fn boot(storage: &SqliteStorage) -> (std::sync::Arc<RelayPool>, Vec<RelayInfo>) {
+        let persisted = storage.list_relays().await.unwrap();
+        let urls: Vec<String> = if persisted.is_empty() {
+            vec![DEFAULT.to_string()]
+        } else {
+            persisted
+                .iter()
+                .filter(|r| !r.is_blacklisted)
+                .map(|r| r.url.clone())
+                .collect()
+        };
+        let pool = RelayPool::new(urls).await.unwrap();
+        pool.restore_persisted(&persisted).await;
+        (pool, persisted)
+    }
+
+    #[tokio::test]
+    async fn a_removed_announced_relay_stays_out_across_a_restart_until_re_added() {
+        let path = temp_db_path();
+        let db = path.to_str().unwrap().to_string();
+
+        // ── Session 1: the node announces a relay, the user removes it ──
+        {
+            let storage = SqliteStorage::open(&db).await.unwrap();
+            let (pool, _) = boot(&storage).await;
+            let added = pool.sync_discovered(&[ANNOUNCED.to_string()]).await;
+            assert_eq!(added, vec![ANNOUNCED.to_string()], "relay not auto-added");
+            for info in pool.get_relays().await {
+                storage.save_relay(&info).await.unwrap();
+            }
+
+            let removed = pool.get_relays().await.into_iter().find(|r| r.url == ANNOUNCED);
+            pool.remove_relay(ANNOUNCED).await.unwrap();
+            let row = removal_effect(removed).expect("an announced relay is kept, not deleted");
+            assert!(row.is_blacklisted);
+            storage.save_relay(&row).await.unwrap();
+        }
+
+        // ── Session 2: restart — the blacklist comes back from storage ──
+        {
+            let storage = SqliteStorage::open(&db).await.unwrap();
+            let (pool, persisted) = boot(&storage).await;
+            assert!(
+                persisted.iter().any(|r| r.url == ANNOUNCED && r.is_blacklisted),
+                "blacklisted row did not survive the restart"
+            );
+            assert_eq!(pool.blacklist().await, vec![ANNOUNCED.to_string()]);
+
+            // The node re-announces it on reconnect: it must not come back.
+            let added = pool.sync_discovered(&[ANNOUNCED.to_string()]).await;
+            assert!(added.is_empty(), "a blacklisted relay was re-added: {added:?}");
+
+            // Adding it by hand lifts the blacklist and persists it as active.
+            let info = pool.add_relay(ANNOUNCED).await.unwrap();
+            assert!(!info.is_blacklisted);
+            assert!(pool.blacklist().await.is_empty());
+            storage.save_relay(&info).await.unwrap();
+        }
+
+        // ── Session 3: restart again — it is a normal relay now ──
+        {
+            let storage = SqliteStorage::open(&db).await.unwrap();
+            let (pool, _) = boot(&storage).await;
+            assert!(pool.blacklist().await.is_empty(), "blacklist not cleared");
+            assert!(
+                pool.get_relays().await.iter().any(|r| r.url == ANNOUNCED),
+                "re-added relay missing after restart"
+            );
+        }
+
+        let _ = std::fs::remove_file(&path);
+    }
+}
+
 #[cfg(test)]
 mod relay_list_generation_tests {
-    use super::note_relay_list_generation;
+    use super::{note_relay_list_generation, RelayListGeneration};
+    use nostr_sdk::prelude::EventId;
     use std::collections::HashMap;
+
+    /// An event id whose first byte is `lead`; the rest is zero, so ids
+    /// compare in the order their `lead` bytes do.
+    fn id(lead: u8) -> EventId {
+        let mut bytes = [0u8; 32];
+        bytes[0] = lead;
+        EventId::from_byte_array(bytes)
+    }
+
+    fn gen(created_at: u64, lead: u8) -> RelayListGeneration {
+        (created_at, id(lead))
+    }
 
     #[test]
     fn first_list_for_a_node_is_applied() {
         let mut seen = HashMap::new();
-        assert!(note_relay_list_generation(&mut seen, "node-a", 100));
+        assert!(note_relay_list_generation(&mut seen, "node-a", gen(100, 1)));
     }
 
     #[test]
     fn older_or_replayed_generations_are_ignored() {
         let mut seen = HashMap::new();
-        assert!(note_relay_list_generation(&mut seen, "node-a", 100));
-        assert!(!note_relay_list_generation(&mut seen, "node-a", 100));
-        assert!(!note_relay_list_generation(&mut seen, "node-a", 99));
-        assert!(note_relay_list_generation(&mut seen, "node-a", 101));
+        assert!(note_relay_list_generation(&mut seen, "node-a", gen(100, 1)));
+        assert!(!note_relay_list_generation(&mut seen, "node-a", gen(100, 1)));
+        assert!(!note_relay_list_generation(&mut seen, "node-a", gen(99, 1)));
+        assert!(note_relay_list_generation(&mut seen, "node-a", gen(101, 1)));
     }
 
     #[test]
     fn generations_are_tracked_per_node() {
         let mut seen = HashMap::new();
-        assert!(note_relay_list_generation(&mut seen, "node-a", 100));
-        assert!(note_relay_list_generation(&mut seen, "node-b", 50));
+        assert!(note_relay_list_generation(&mut seen, "node-a", gen(100, 1)));
+        assert!(note_relay_list_generation(&mut seen, "node-b", gen(50, 1)));
+    }
+
+    /// NIP-01 breaks a `created_at` tie between two revisions of a
+    /// replaceable event by keeping the lowest event id — so the winner must
+    /// be applied whichever order the two arrive in.
+    #[test]
+    fn an_equal_timestamp_list_with_a_lower_id_wins() {
+        let mut seen = HashMap::new();
+        assert!(note_relay_list_generation(&mut seen, "node-a", gen(100, 9)));
+        assert!(note_relay_list_generation(&mut seen, "node-a", gen(100, 2)));
+    }
+
+    #[test]
+    fn an_equal_timestamp_list_with_a_higher_id_loses() {
+        let mut seen = HashMap::new();
+        assert!(note_relay_list_generation(&mut seen, "node-a", gen(100, 2)));
+        assert!(!note_relay_list_generation(&mut seen, "node-a", gen(100, 9)));
     }
 }

@@ -79,8 +79,11 @@ writes where we read and reads where we write). URLs are normalised
 Applying a list is **additive only**: relays already configured (whatever
 their source) are left alone, nothing is ever disconnected, and a relay the
 node stops announcing is not removed. Only the newest generation per node is
-applied (older/replayed events from other relays are ignored). Added relays
-get `RelaySource::MostroDiscovered` and are persisted.
+applied (older/replayed events from other relays are ignored); a generation is
+`(created_at, event id)` and is ordered the way NIP-01 orders revisions of a
+replaceable event — newer `created_at` wins, and on a same-second tie the lower
+event id does. Added relays get `RelaySource::MostroDiscovered` and are
+persisted.
 
 Removing a `MostroDiscovered` relay through `remove_relay` **blacklists**
 it (persisted as `is_blacklisted = true`, `is_active = false`), so neither a
@@ -91,6 +94,11 @@ blacklist it.
 `initialize(None)` restores the persisted relay set (active, non-blacklisted
 rows) and the blacklist; only a store with no rows falls back to the
 compiled-in defaults, which are then seeded.
+
+Persistence here is the **native** (SQLite) story. On web the IndexedDB relay
+store is still a stub (#233): discovery and the blacklist work for the life of
+the session, every write is logged and ignored, and a reload starts from the
+compiled-in defaults again.
 
 ---
 

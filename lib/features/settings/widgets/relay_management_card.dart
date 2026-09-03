@@ -5,7 +5,9 @@ import 'package:mostro/core/app_theme.dart';
 import 'package:mostro/core/automation/automation_id.dart';
 import 'package:mostro/core/automation/automation_ids.dart';
 import 'package:mostro/core/mostro_defaults.dart';
+import 'package:mostro/core/services/coalescing_loader.dart';
 import 'package:mostro/core/test_environment.dart';
+import 'package:mostro/features/settings/providers/relay_auto_sync_provider.dart';
 import 'package:mostro/l10n/app_localizations.dart';
 import 'package:mostro/src/rust/api/nostr.dart' as nostr_api;
 import 'package:mostro/src/rust/api/types.dart' show RelaySource;
@@ -59,8 +61,11 @@ class _RelayManagementCardState extends ConsumerState<RelayManagementCard> {
   static const _defaultRelays = defaultMostroRelays;
 
   late List<_RelayEntry> _relays;
-  bool _loading = false;
-  bool _disposed = false;
+  /// Serialises reloads and keeps the one an auto-sync asks for while another
+  /// is in flight — that load may have read its snapshot before the new relay
+  /// existed, so dropping the request would hide it until a screen re-entry.
+  late final CoalescingLoader _loader = CoalescingLoader(_readRelays);
+  ProviderSubscription<AsyncValue<List<String>>>? _autoSyncSub;
 
   @override
   void initState() {
@@ -68,36 +73,33 @@ class _RelayManagementCardState extends ConsumerState<RelayManagementCard> {
     _relays = _defaultRelays
         .map((url) => _RelayEntry(url: url, isActive: true, isDefault: true))
         .toList();
-    _loadRelays();
-    _watchAutoSync();
+    // The initial load is driven by this subscription, not started here:
+    // `relayAutoSyncProvider` emits once the Rust-side receiver exists, so
+    // the first snapshot is taken with nothing able to slip past it. Every
+    // later emission is a node-announced relay to fold into the list.
+    _autoSyncSub = ref.listenManual<AsyncValue<List<String>>>(
+      relayAutoSyncProvider,
+      (_, next) => next.whenData((added) {
+        if (added.isNotEmpty) {
+          debugPrint('[RelayManagement] auto-synced relays: $added');
+        }
+        _loadRelays();
+      }),
+      onError: (e, _) =>
+          debugPrint('[RelayManagement] auto-sync watch failed: $e'),
+      fireImmediately: true,
+    );
   }
 
   @override
   void dispose() {
-    _disposed = true;
+    _autoSyncSub?.close();
     super.dispose();
   }
 
-  /// Reload the list whenever the Rust core auto-adds relays from the
-  /// active node's kind 10002 relay list, so they appear without a
-  /// screen re-entry.
-  Future<void> _watchAutoSync() async {
-    try {
-      final stream = await nostr_api.onRelayAutoSynced();
-      while (!_disposed) {
-        final added = await stream.next();
-        if (added == null || _disposed) break;
-        debugPrint('[RelayManagement] auto-synced relays: $added');
-        await _loadRelays();
-      }
-    } catch (e) {
-      debugPrint('[RelayManagement] auto-sync watch failed: $e');
-    }
-  }
+  Future<void> _loadRelays() => _loader.run();
 
-  Future<void> _loadRelays() async {
-    if (_loading) return;
-    _loading = true;
+  Future<void> _readRelays() async {
     try {
       final relays = await nostr_api.getRelays();
       if (!mounted) return;
@@ -111,8 +113,6 @@ class _RelayManagementCardState extends ConsumerState<RelayManagementCard> {
       });
     } catch (e) {
       debugPrint('[RelayManagement] failed to load relays: $e');
-    } finally {
-      _loading = false;
     }
   }
 
