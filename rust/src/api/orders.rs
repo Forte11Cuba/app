@@ -2826,6 +2826,39 @@ fn spawn_stale_sweep() {
     });
 }
 
+/// Look a single order's public status up directly on the relays, bypassing
+/// the in-memory book.
+///
+/// The book is fed by [`order_book_filters`], whose any-status half is
+/// windowed to `RECENT_ORDERS_WINDOW_SECS` (48 h). A trade whose cancellation
+/// the app missed while offline for longer than that window therefore has no
+/// cached status at all, and the sweep would keep it waiting forever — which
+/// is exactly the case the sweep exists for. An unwindowed `d`-tag query
+/// returns a single addressable event, so it is cheap and no relay replay cap
+/// can hide it.
+async fn fetch_public_order_status(order_id: &str) -> Option<crate::api::types::OrderStatus> {
+    let pool = crate::api::nostr::get_pool().ok()?;
+    let mostro_pubkey = nostr_sdk::prelude::PublicKey::from_hex(&active_mostro_pubkey()).ok()?;
+    let filter = crate::nostr::order_events::trade_order_filter(&mostro_pubkey, order_id);
+    let events = match pool
+        .client()
+        .fetch_events(filter)
+        .timeout(std::time::Duration::from_secs(10))
+        .await
+    {
+        Ok(events) => events,
+        Err(e) => {
+            log::warn!("[orders] sweep: d-tag fetch for {order_id} failed: {e}");
+            return None;
+        }
+    };
+    events
+        .into_iter()
+        .max_by_key(|e| e.created_at)
+        .and_then(|e| crate::nostr::order_events::parse_order_event(&e, None))
+        .map(|o| o.status)
+}
+
 /// Reconcile trades stuck in waiting states with the daemon's public book.
 ///
 /// Covers cancellations whose daemon message the app never received (closed or
@@ -2862,7 +2895,12 @@ async fn run_stale_sweep_once() {
         }
         examined += 1;
         let oid = trade.order.id.clone();
-        let book_status = order_book().get_order(&oid).await.map(|o| o.status);
+        // The book first (free); on a miss, ask the relays for this one order.
+        // A miss is the long-offline case the windowed filter cannot cover.
+        let book_status = match order_book().get_order(&oid).await.map(|o| o.status) {
+            Some(status) => Some(status),
+            None => fetch_public_order_status(&oid).await,
+        };
         match sweep_action(trade.order.is_mine, book_status.as_ref()) {
             SweepAction::Wipe => match db.delete_trade_by_order_id(&oid).await {
                 Ok(()) => {
@@ -2947,30 +2985,38 @@ async fn refetch_active_node_orders() {
     let (pending_filter, recent_filter) = order_book_filters(&mostro_pubkey);
     let client = pool.client();
     let timeout = std::time::Duration::from_secs(10);
-    let fetched = async {
-        let mut events = client.fetch_events(pending_filter).timeout(timeout).await?;
-        events.extend(client.fetch_events(recent_filter).timeout(timeout).await?);
-        Ok::<_, nostr_sdk::error::Error>(events)
+    // Fetched independently on purpose: the two scopes fail independently, and
+    // losing the recent-changes pass must not throw away a pending book that
+    // arrived fine (that would leave the UI empty on a transient relay error).
+    let pending = client.fetch_events(pending_filter).timeout(timeout).await;
+    let recent = client.fetch_events(recent_filter).timeout(timeout).await;
+    if let Err(e) = &pending {
+        log::warn!("[orders] refetch: pending-book fetch failed: {e}");
     }
-    .await;
-    match fetched {
-        Ok(events) => {
-            crate::api::logging::blog_info(
-                "orders",
-                format!("refetched {} current orders for active node", events.len()),
-            );
-            for event in events.into_iter() {
-                ingest_order_event_with(&event, Publish::WhenBatchEnds).await;
-            }
-            // One emission for the batch. Publishing per event made a refetch
-            // O(N²): each upsert cloned the whole book and sent it across the
-            // bridge, so N orders cost N clones of an N-element vector. This
-            // path runs on cold start, on every node switch, and on every
-            // pull-to-refresh.
-            order_book().publish().await;
-        }
-        Err(e) => log::warn!("[orders] refetch: fetch current orders failed: {e}"),
+    if let Err(e) = &recent {
+        log::warn!("[orders] refetch: recent-changes fetch failed: {e}");
     }
+    if pending.is_err() && recent.is_err() {
+        // Both scopes failed: nothing to ingest, and the warnings above say why.
+        return;
+    }
+    let mut events: Vec<nostr_sdk::prelude::Event> = Vec::new();
+    for batch in [pending, recent].into_iter().flatten() {
+        events.extend(batch);
+    }
+    crate::api::logging::blog_info(
+        "orders",
+        format!("refetched {} current orders for active node", events.len()),
+    );
+    for event in events.into_iter() {
+        ingest_order_event_with(&event, Publish::WhenBatchEnds).await;
+    }
+    // One emission for the batch. Publishing per event made a refetch
+    // O(N²): each upsert cloned the whole book and sent it across the
+    // bridge, so N orders cost N clones of an N-element vector. This
+    // path runs on cold start, on every node switch, and on every
+    // pull-to-refresh.
+    order_book().publish().await;
 }
 
 /// Stable subscription ID for the Kind 38383 pending order-book feed.

@@ -70,7 +70,9 @@ configuration.
 **Blocks**: T012 (relay pool initialization), T029 (Nostr relay API)
 
 - [x] T012b Create `rust/src/config.rs` with hardcoded seed constants:
-  - `DEFAULT_RELAYS: &[&str]` = `["wss://relay.mostro.network", "wss://nos.lol"]`
+  - `DEFAULT_RELAYS: &[&str]` = `["wss://relay.mostro.network", "wss://nos.lol",
+    "wss://mostro-p2p.tech", "wss://relay.shadowbip.com"]` — the default node's
+    own kind 10002 relay list; see `contracts/settings.md` → Default Relays
   - `DEFAULT_MOSTRO_PUBKEY: &str` = `"82fa8cb978b43c79b2156585bac2c011176a21d2aead6d9f7c575c005be88390"`
   - `DEFAULT_MOSTRO_NAME: &str` = `"Mostro"`
   - Export from `lib.rs`

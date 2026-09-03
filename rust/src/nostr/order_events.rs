@@ -538,6 +538,25 @@ mod tests {
     }
 
     #[test]
+    fn trade_order_filter_is_unwindowed_so_the_stale_sweep_can_reconcile() {
+        // `fetch_public_order_status` (api::orders) leans on this: it is the
+        // only path that can see a terminal status older than
+        // `RECENT_ORDERS_WINDOW_SECS`, so a `since` or `limit` here would
+        // strand trades whose cancellation arrived while the app was offline.
+        let mostro = Keys::generate().public_key();
+
+        let filter = trade_order_filter(&mostro, "order-1");
+
+        assert_eq!(filter.since, None, "a window would hide long-past terminal statuses");
+        assert_eq!(filter.limit, None);
+        let d_values = filter
+            .generic_tags
+            .get(&SingleLetterTag::LOWERCASE_D)
+            .expect("filter must carry a `d` tag");
+        assert_eq!(d_values.iter().cloned().collect::<Vec<_>>(), vec!["order-1".to_string()]);
+    }
+
+    #[test]
     fn recent_orders_window_covers_the_daemon_default_order_lifetime_twice() {
         assert_eq!(RECENT_ORDERS_WINDOW_SECS, 2 * 24 * 3600);
     }
