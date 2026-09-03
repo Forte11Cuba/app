@@ -13,7 +13,7 @@ use nostr_sdk::prelude::*;
 // conflicting with our internal `RelayStatus` from `crate::api::types`.
 use nostr_sdk::prelude::RelayStatus as SdkRelayStatus;
 use std::collections::HashSet;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::{broadcast, RwLock};
 
@@ -31,6 +31,10 @@ pub struct RelayPool {
     /// without this the removed relay would come straight back.
     blacklist: RwLock<HashSet<String>>,
     conn_tx: broadcast::Sender<ConnectionState>,
+    /// The last state actually sent on `conn_tx`, shared by every path that
+    /// publishes (`new`, add/remove and the status monitor) so a subscriber
+    /// only ever sees real transitions — see `broadcast_if_changed`.
+    last_broadcast: Arc<Mutex<Option<ConnectionState>>>,
     relay_tx: broadcast::Sender<RelayInfo>,
 }
 
@@ -49,6 +53,7 @@ impl RelayPool {
             relays: Arc::new(RwLock::new(Vec::new())),
             blacklist: RwLock::new(HashSet::new()),
             conn_tx,
+            last_broadcast: Arc::new(Mutex::new(None)),
             relay_tx,
         });
 
@@ -234,7 +239,7 @@ impl RelayPool {
 
     async fn broadcast_connection_state(&self) {
         let state = derive_connection_state(&self.relays.read().await);
-        let _ = self.conn_tx.send(state);
+        broadcast_if_changed(&self.last_broadcast, &self.conn_tx, state);
     }
 
     /// Spawn a background task that polls each relay's SDK status every
@@ -249,13 +254,10 @@ impl RelayPool {
         let client = self.client.clone();
         let relays = self.relays.clone();
         let conn_tx = self.conn_tx.clone();
+        let last_broadcast = self.last_broadcast.clone();
         let relay_tx = self.relay_tx.clone();
 
         crate::rt::spawn(async move {
-            // Last state actually broadcast, so a poll that changes a relay
-            // without changing the aggregate stays silent.
-            let mut last_state: Option<ConnectionState> = None;
-
             loop {
                 crate::rt::time::sleep(Duration::from_secs(STATUS_POLL_INTERVAL_SECS)).await;
 
@@ -304,9 +306,7 @@ impl RelayPool {
 
                 if any_changed {
                     let state = derive_connection_state(&relays.read().await);
-                    if let Some(state) = next_broadcast(&mut last_state, state) {
-                        let _ = conn_tx.send(state);
-                    }
+                    broadcast_if_changed(&last_broadcast, &conn_tx, state);
                 }
             }
         });
@@ -315,13 +315,36 @@ impl RelayPool {
 
 // ── Pure helpers ──────────────────────────────────────────────────────────────
 
+/// Send `state` on `tx` only if it differs from what was last sent.
+///
+/// Every publisher must go through here. The gate has to be shared: if only
+/// the monitor deduplicated, an add/remove sending directly would leave the
+/// monitor's view stale, and its next genuine transition back (e.g. `Offline`
+/// after a removal, then the relay reconnecting to `Online`) would be dropped
+/// as a duplicate — leaving subscribers believing the pool is down for the
+/// rest of the session.
+fn broadcast_if_changed(
+    last: &Mutex<Option<ConnectionState>>,
+    tx: &broadcast::Sender<ConnectionState>,
+    state: ConnectionState,
+) {
+    let next = next_broadcast(&mut last.lock().unwrap_or_else(|e| e.into_inner()), state);
+    if let Some(state) = next {
+        let _ = tx.send(state);
+    }
+}
+
 /// The state to broadcast, or `None` when it has not actually changed.
 ///
-/// The monitor polls every relay, so one flapping relay ticks `any_changed`
-/// on every poll while the derived state stays put. Every `Online` reaching
-/// the subscriber in `api/nostr.rs` costs a capability fetch, an outbox flush
-/// and a full resubscribe of orders and chats — so rebroadcasting an unchanged
-/// state turns one bad relay into a permanent background storm.
+/// The monitor broadcasts whenever any relay's status moved, and a relay that
+/// connects and drops (the SDK's reconnect backoff makes that a few times a
+/// minute) ticks `any_changed` on each move while the derived state stays
+/// `Online` as long as another relay is up. A relay that is simply
+/// unreachable settles into `Disconnected` and is harmless. Every `Online`
+/// reaching the subscriber in `api/nostr.rs` costs a capability fetch, an
+/// outbox flush and a full resubscribe of orders and chats — so rebroadcasting
+/// an unchanged state turns one flapping relay into a permanent background
+/// storm.
 fn next_broadcast(
     last: &mut Option<ConnectionState>,
     current: ConnectionState,
@@ -389,10 +412,10 @@ use crate::rt::unix_now;
 mod tests {
     use super::*;
 
-    /// One relay flapping while another stays connected changes a relay's
-    /// status on every poll without changing the derived state. Broadcasting
-    /// that re-ran a capability fetch, an outbox flush and a full resubscribe
-    /// of orders and chats every two seconds, indefinitely.
+    /// One relay connecting and dropping while another stays connected
+    /// changes a relay's status without changing the derived state.
+    /// Broadcasting that re-ran a capability fetch, an outbox flush and a
+    /// full resubscribe of orders and chats on every reconnect, indefinitely.
     #[test]
     fn an_unchanged_state_is_not_rebroadcast() {
         let mut last = None;
@@ -428,6 +451,44 @@ mod tests {
             Some(ConnectionState::Online),
             "coming back online must re-arm the subscriber's recovery work"
         );
+    }
+
+    /// Review scenario (PR #364): the monitor has published `Online`, then
+    /// the user removes the only connected relay — `remove_relay` publishes
+    /// directly. When the remaining relay later connects, the monitor's
+    /// `Online` is a genuine transition and must not be dropped because the
+    /// monitor never saw the removal's broadcast. All publishers share one
+    /// gate.
+    #[tokio::test]
+    async fn direct_and_monitor_publishers_share_one_gate() {
+        let pool = RelayPool::new(vec![
+            "ws://127.0.0.1:1".to_string(),
+            "ws://127.0.0.1:2".to_string(),
+        ])
+        .await
+        .unwrap();
+        let mut rx = pool.subscribe_connection_state();
+
+        // Stand in for the monitor: the pool is up.
+        broadcast_if_changed(&pool.last_broadcast, &pool.conn_tx, ConnectionState::Online);
+        assert_eq!(rx.try_recv().unwrap(), ConnectionState::Online);
+
+        // The remaining relay is still `Connecting` in our view, so the
+        // removal derives `Reconnecting` — a real transition, sent directly.
+        pool.remove_relay("ws://127.0.0.1:2").await.unwrap();
+        assert_eq!(rx.try_recv().unwrap(), ConnectionState::Reconnecting);
+
+        // The surviving relay connects (what the monitor would observe) and
+        // the monitor's `Online` must get through: with a monitor-local gate
+        // its stale `Online` would suppress it.
+        pool.relays.write().await[0].status = RelayStatus::Connected;
+        broadcast_if_changed(&pool.last_broadcast, &pool.conn_tx, ConnectionState::Online);
+        assert_eq!(rx.try_recv().unwrap(), ConnectionState::Online);
+
+        // And the reverse: adding a relay while already online must not
+        // re-emit `Online` and re-run the whole recovery sequence.
+        pool.add_relay("ws://127.0.0.1:3").await.unwrap();
+        assert!(rx.try_recv().is_err(), "unchanged state must stay silent");
     }
 
     fn relay(url: &str, source: RelaySource) -> RelayInfo {

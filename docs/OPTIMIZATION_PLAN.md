@@ -250,14 +250,24 @@ Each PR stands alone; none requires Phase 3's redesign.
 - **Verify:** Rust test: ingest terminal status ⇒ order leaves the book; long-session memory
   stays flat.
 
-### PR 2.5 — Fix the connection-state resubscribe storm `fix(relay)`
-- **Evidence:** `relay_pool.rs:211-214` broadcasts on **any** relay status change even when the
-  derived state is unchanged (`Online → Online`); each event drives a 10 s `fetch_events`, an
-  outbox flush and full resubscribes (`rust/src/api/nostr.rs:51-69`). One flapping relay at
-  the 2 s poll interval (`relay_pool.rs:22`) reproduces this indefinitely.
-- **Fix:** only send when the derived `ConnectionState` actually changed; debounce the
-  Online handler.
-- **Verify:** Rust test with a mock flapping relay: exactly one resubscribe cycle.
+### PR 2.5 — Fix the connection-state resubscribe storm `fix(relay)` — #364
+- **Evidence:** `relay_pool.rs` broadcast on **any** relay status change even when the
+  derived state was unchanged (`Online → Online`); each event drives a 10 s `fetch_events`, an
+  outbox flush and full resubscribes (`rust/src/api/nostr.rs`, the `Online` handler). The
+  trigger is a relay that **connects and drops** while another stays up — the cadence is the
+  SDK's reconnect backoff (~8/min measured), not the 2 s poll. A relay that is simply
+  unreachable settles into `Disconnected` and produces no storm (review of #364).
+- **Fix (done in #364):** every publisher (`new`, add/remove, status monitor) goes through one
+  shared gate that sends only when the derived `ConnectionState` actually changed. The gate
+  must be shared: a monitor-local one dropped a genuine `Online` after a direct `Offline`
+  from `remove_relay`, leaving subscribers believing the pool was down (reproduced in review).
+- **Remaining gap (not done):** debouncing the `Online` handler. With a single relay, or every
+  relay flapping in lockstep, the derived state genuinely oscillates and each real `Online`
+  still re-runs the whole sequence. Related pre-existing gap surfaced by the fix: the outbox
+  has retry backoff fields but nothing schedules a retry, and `fetch_and_set_node_capabilities`
+  has no retry either — the storm was the only thing re-driving both.
+- **Verify:** Rust tests in `relay_pool.rs`: unchanged state not rebroadcast, real transitions
+  pass in both directions, direct and monitor publishers share one gate.
 
 ### PR 2.6 — Close relay-side subscriptions on task exit `fix(relay)`
 - **Evidence:** `subscribe_daemon_messages` (`orders.rs:1203`) and `subscribe_single_order`
