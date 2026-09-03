@@ -142,6 +142,13 @@ before the user adds or removes anything.
 |-----|---------|
 | `wss://relay.mostro.network` | Primary Mostro relay |
 | `wss://nos.lol` | General Nostr relay (fallback) |
+| `wss://mostro-p2p.tech` | Mostro relay (default node's kind 10002 list) |
+| `wss://relay.shadowbip.com` | Mostro relay (default node's kind 10002 list) |
+
+The set mirrors the default node's own kind 10002 relay list. Public relays
+rate-limit and cap replays differently (`relay.mostro.network` stops at 300
+stored events per REQ, `nos.lol` at 500), so seeding all four keeps the order
+book reachable when one of them is throttling the client.
 
 These are stored as `RelayInfo` entries with `user_added: false`. They cannot be
 removed by the user from the UI (only user-added relays are deletable), but they
@@ -164,6 +171,8 @@ switches to another one from Settings → Mostro Node via `set_active_mostro_nod
 pub const DEFAULT_RELAYS: &[&str] = &[
     "wss://relay.mostro.network",
     "wss://nos.lol",
+    "wss://mostro-p2p.tech",
+    "wss://relay.shadowbip.com",
 ];
 
 pub const DEFAULT_MOSTRO_PUBKEY: &str =

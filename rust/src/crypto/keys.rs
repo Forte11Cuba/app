@@ -22,15 +22,12 @@ pub fn generate_mnemonic() -> Result<Vec<String>> {
     Ok(mnemonic.words().map(|w| w.to_string()).collect())
 }
 
-/// Parse and validate a mnemonic from a word list.
-/// Accepts 12 or 24 words. Returns error on invalid words or checksum.
-pub fn validate_mnemonic(words: &[String]) -> Result<()> {
-    let phrase = words.join(" ");
-    Mnemonic::parse(&phrase).map_err(|e| anyhow!("invalid mnemonic: {e}"))?;
-    Ok(())
-}
-
 /// Derive the identity (`N=0`) Nostr `Keys` from a mnemonic.
+///
+/// **This is also the validation.** Deriving parses the phrase, so a word list
+/// with a bad word or a bad checksum fails here with `invalid mnemonic: …`.
+/// There is no separate validate-then-derive pair: two parses of the same
+/// phrase is two places for "what counts as a valid mnemonic" to be answered.
 pub fn derive_master_key(mnemonic_words: &[String]) -> Result<Keys> {
     derive_at_index(mnemonic_words, 0)
 }
@@ -78,6 +75,38 @@ mod tests {
         let k1 = derive_master_key(&words).unwrap();
         let k2 = derive_master_key(&words).unwrap();
         assert_eq!(k1.public_key(), k2.public_key());
+    }
+
+    /// The import path relies on derivation to reject a bad phrase — it no
+    /// longer validates separately first. If that ever stops being true, a
+    /// typo'd word becomes some other user's key rather than an error.
+    #[test]
+    fn deriving_refuses_a_phrase_that_is_not_a_mnemonic() {
+        // Arrange — real BIP-39 words, wrong checksum; then a word that is not
+        // in the list at all. The dialog that feeds this only checks the shape
+        // (12 or 24 alphabetic words), so both reach Rust.
+        let bad_checksum: Vec<String> = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon"
+            .split(' ')
+            .map(str::to_string)
+            .collect();
+        let not_a_word: Vec<String> = "mostro abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
+            .split(' ')
+            .map(str::to_string)
+            .collect();
+
+        // Act / Assert
+        for words in [&bad_checksum, &not_a_word] {
+            let err = derive_master_key(words).unwrap_err();
+            assert!(
+                err.to_string().contains("invalid mnemonic"),
+                "got {err}"
+            );
+            assert!(derive_trade_key(words, 1).is_err());
+        }
+
+        // And an empty list is not a mnemonic either — an nsec-imported
+        // identity stores no words.
+        assert!(derive_master_key(&[]).is_err());
     }
 
     #[test]
