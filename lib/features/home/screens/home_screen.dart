@@ -9,6 +9,7 @@ import 'package:mostro/core/automation/automation_ids.dart';
 import 'package:mostro/features/drawer/screens/drawer_menu.dart';
 import 'package:mostro/features/home/providers/home_order_providers.dart';
 import 'package:mostro/features/home/providers/order_reason_provider.dart';
+import 'package:mostro/features/home/widgets/order_book_list.dart';
 import 'package:mostro/features/home/widgets/order_list_item.dart';
 import 'package:mostro/shared/widgets/bottom_nav_bar.dart';
 import 'package:mostro/shared/utils/fiat_currencies.dart';
@@ -77,42 +78,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
     Widget orderContent(void Function(String orderId, OrderType type) onTap) {
       if (filteredOrders.isEmpty) return const OrderListEmpty();
-      // Mock list: 8px top, 16px sides, 90px bottom clearance, 12px card gap.
-      const listPadding = EdgeInsets.fromLTRB(16, 8, 16, 90);
-      if (columns == 1) {
-        return ListView.separated(
-          padding: listPadding,
-          itemCount: filteredOrders.length,
-          separatorBuilder: (_, __) => const SizedBox(height: 12),
-          itemBuilder: (context, index) {
-            final order = filteredOrders[index];
-            return OrderListItem(
-              order: order,
-              currencyFlags: flags,
-              reason: orderReasons[order.id],
-              onTap: () => onTap(order.id, ref.read(homeOrderTypeProvider)),
-            );
-          },
-        );
-      }
-      return GridView.builder(
-        padding: listPadding,
-        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: columns,
-          crossAxisSpacing: 12,
-          mainAxisSpacing: 12,
-          childAspectRatio: 1.1,
-        ),
-        itemCount: filteredOrders.length,
-        itemBuilder: (context, index) {
-          final order = filteredOrders[index];
-          return OrderListItem(
-            order: order,
-            currencyFlags: flags,
-            reason: orderReasons[order.id],
-            onTap: () => onTap(order.id, ref.read(homeOrderTypeProvider)),
-          );
-        },
+      return OrderBookList(
+        orders: filteredOrders,
+        currencyFlags: flags,
+        reasons: orderReasons,
+        columns: columns,
+        onOrderTap: (id) => onTap(id, ref.read(homeOrderTypeProvider)),
       );
     }
 
