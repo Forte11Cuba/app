@@ -110,19 +110,23 @@ Get dispute details for a trade. Returns null if no dispute exists.
 ## Persistence and restart
 
 The Dispute record is **in-memory by design** — its status and resolution come
-back from daemon events. One field is the exception: the **solver pubkey**
-arrives exactly once, in `admin-took-dispute`, and cannot be re-derived. It is
-persisted to the settings KV under `dispute_admin:<order_id>`.
+back from daemon events. Two facts are the exception because they cannot be
+re-derived: the **solver pubkey**, which arrives exactly once in
+`admin-took-dispute`, persisted under `dispute_admin:<order_id>`; and the
+**origin** (whether this side opened the dispute), written by a successful
+`open_dispute` under `dispute_mine:<order_id>` (presence is the value).
 
 **Rehydration**: on relay (re)connect, dispute records are rebuilt for persisted
 trades that have a stored solver, before dispute-chat listeners are re-armed.
 Restored records are `InReview` (a stored solver means one took the dispute),
-`initiated_by_me: false`, and **unread** — the pre-restart read state is not
-recoverable and an active dispute must surface. Records already in memory win.
-This is what makes `get_dispute` non-null and `submit_evidence` work again after
-a restart.
+`initiated_by_me` from the origin marker, `reason: null` (not persisted), and
+**unread** — the pre-restart read state is not recoverable and an active dispute
+must surface. Records already in memory win, enforced under the store's single
+write lock so a concurrent `open_dispute` / `admin-took-dispute` is never
+clobbered. This is what makes `get_dispute` non-null and `submit_evidence`
+work again after a restart.
 
-**Terminal states**: the solver key is deleted when a resolution reaches the
+**Terminal states**: both keys are deleted when a resolution reaches the
 dispute store, and rehydration additionally skips — and clears — any trade whose
 order status is finished (`SettledByAdmin`, `CanceledByAdmin`,
 `CompletedByAdmin`, `Success`, `Canceled`, `CooperativelyCanceled`, `Expired`).
@@ -130,6 +134,11 @@ The trade status, not the dispute record, is the durable signal: the daemon's
 `admin-settled` / `admin-canceled` are persisted by the order status-sync path
 without being routed into the dispute store. Without this, a resolved dispute
 would be resurrected as `InReview` on every restart.
+
+**UI wiring**: this is the Rust layer only. The Flutter dispute state is
+in-memory and does not call `get_dispute` at startup yet, so after a restart the
+solver's messages arrive and persist again but the dispute screen is not
+repopulated until the UI reads the record back (tracked as follow-up).
 
 **Platform limitation (web)**: persistence is native-only today. The Flutter
 shell does not call `init_db` on web, and the IndexedDB store's `list_trades`

@@ -51,6 +51,17 @@ pub mod settings_keys {
     pub fn dispute_admin(order_id: &str) -> String {
         format!("{DISPUTE_ADMIN_PREFIX}{order_id}")
     }
+
+    /// Per-order marker that *this* side opened the dispute.
+    pub const DISPUTE_MINE_PREFIX: &str = "dispute_mine:";
+
+    /// Build the settings key marking the dispute on `order_id` as opened by
+    /// this side. Like the solver pubkey, the origin is not re-derivable from
+    /// daemon events after a restart (PR #256 review), so it is persisted
+    /// alongside and read back by rehydration. Presence is the value.
+    pub fn dispute_mine(order_id: &str) -> String {
+        format!("{DISPUTE_MINE_PREFIX}{order_id}")
+    }
 }
 
 /// Storage trait — implemented by both SQLite (native) and IndexedDB (WASM).

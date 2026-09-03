@@ -35,7 +35,7 @@ impl DisputeStore {
         }
     }
 
-    #[allow(dead_code)]
+    #[cfg(test)]
     async fn upsert(&self, dispute: Dispute) {
         {
             let mut store = self.disputes.write().await;
@@ -373,9 +373,11 @@ pub async fn open_dispute(trade_id: String, reason: Option<String>) -> Result<Di
         is_read: true,
     };
 
-    dispute_store()
+    let stored = dispute_store()
         .try_insert_if_absent_or_resolved(dispute)
-        .await
+        .await?;
+    persist_dispute_origin(&trade_id).await;
+    Ok(stored)
 }
 
 /// Submit free-text evidence for an open dispute.
@@ -610,25 +612,46 @@ async fn persist_admin_pubkey(order_id: &str, admin_pubkey_hex: &str) {
     }
 }
 
-/// Drop the persisted solver pubkey for `order_id`.
+/// Persist that this side opened the dispute on `order_id`.
 ///
-/// The stored key is what rehydration reads as "this order has a live
+/// Same category as the solver pubkey (PR #256 review): the origin is not
+/// re-derivable from daemon events, and a rehydrated record that silently
+/// claimed "the counterparty opened this" would show the initiator the wrong
+/// description. Best-effort like the pubkey.
+async fn persist_dispute_origin(order_id: &str) {
+    let Some(db) = crate::db::app_db::db() else {
+        return;
+    };
+    if let Err(e) = db
+        .set_setting(&crate::db::settings_keys::dispute_mine(order_id), "1")
+        .await
+    {
+        log::warn!("[disputes] could not persist dispute origin for {order_id}: {e}");
+    }
+}
+
+/// Drop the persisted dispute keys (solver pubkey, origin marker) for
+/// `order_id`.
+///
+/// The stored solver is what rehydration reads as "this order has a live
 /// dispute", so it must not outlive the dispute: left behind, every restart
 /// would resurrect a finished dispute as `InReview`, arm a listener for it and
 /// keep accepting evidence. Called both when a resolution reaches the store and
 /// when rehydration meets an already-finished trade.
 ///
-/// Best-effort like the write: a storage failure only means the stale key is
+/// Best-effort like the writes: a storage failure only means the stale key is
 /// seen again — and cleared again — on the next pass.
-async fn clear_admin_pubkey(order_id: &str) {
+async fn clear_dispute_keys(order_id: &str) {
     let Some(db) = crate::db::app_db::db() else {
         return;
     };
-    if let Err(e) = db
-        .delete_setting(&crate::db::settings_keys::dispute_admin(order_id))
-        .await
-    {
-        log::warn!("[disputes] could not clear solver pubkey for {order_id}: {e}");
+    for key in [
+        crate::db::settings_keys::dispute_admin(order_id),
+        crate::db::settings_keys::dispute_mine(order_id),
+    ] {
+        if let Err(e) = db.delete_setting(&key).await {
+            log::warn!("[disputes] could not clear {key}: {e}");
+        }
     }
 }
 
@@ -639,19 +662,30 @@ async fn clear_admin_pubkey(order_id: &str) {
 /// daemon's `admin-settled` / `admin-canceled` are persisted by the status-sync
 /// arm in `orders.rs`, which does not route them into the dispute store, so the
 /// trade row is the durable evidence that the dispute is over.
+///
+/// Exhaustive on purpose: a variant added later must decide here whether it
+/// ends a dispute, instead of silently falling through as "live" and
+/// resurrecting closed disputes — the one thing this function exists to
+/// prevent.
 fn is_order_finished(status: &OrderStatus) -> bool {
-    matches!(
-        status,
+    match status {
         OrderStatus::SettledByAdmin
-            | OrderStatus::CanceledByAdmin
-            | OrderStatus::CompletedByAdmin
-            | OrderStatus::Success
-            | OrderStatus::Canceled
-            | OrderStatus::CooperativelyCanceled
-            | OrderStatus::Expired
-    )
+        | OrderStatus::CanceledByAdmin
+        | OrderStatus::CompletedByAdmin
+        | OrderStatus::Success
+        | OrderStatus::Canceled
+        | OrderStatus::CooperativelyCanceled
+        | OrderStatus::Expired => true,
+        OrderStatus::Pending
+        | OrderStatus::WaitingBuyerInvoice
+        | OrderStatus::WaitingPayment
+        | OrderStatus::Active
+        | OrderStatus::FiatSent
+        | OrderStatus::SettledHoldInvoice
+        | OrderStatus::Dispute
+        | OrderStatus::InProgress => false,
+    }
 }
-
 
 /// Derive the dispute-chat keys for `trade_id` and start listening.
 ///
@@ -699,26 +733,23 @@ async fn derive_admin_shared_key(trade_id: &str, admin_pubkey_hex: &str) -> Resu
     Ok(())
 }
 
-/// Re-arm the dispute-chat listener of every in-review dispute with a known
-/// solver. Called when the relay pool comes (back) online, mirroring
-/// `resubscribe_active_chats` for the peer channel (PR #254 review): listener
-/// startup is best-effort at assignment time and can fail while keys or
-/// connectivity are not there yet, and without a rearm path solver replies
-/// would stay invisible for the rest of the process. Idempotent — the
-/// per-channel single-owner guard makes a spawn for an already-listening
-/// dispute a no-op.
 /// Rebuild dispute records for orders with a persisted solver pubkey.
 ///
 /// Trades are the enumeration source, so no key-prefix scan is needed: each
 /// persisted trade is asked whether it has a stored solver. Records already in
-/// memory win — they are at least as fresh as storage.
+/// memory win — they are at least as fresh as storage — and that rule is
+/// enforced under the store's single write lock (`upsert_or_update` with a
+/// no-op update), not by a check-then-act: an `admin-took-dispute` or an
+/// `open_dispute` landing while this pass is awaiting storage must not be
+/// clobbered by a stale rehydrated record (PR #256 review).
 ///
 /// Status is `InReview`: a stored solver means one took the dispute, and any
-/// later resolution arrives as a daemon event. Restoring the record is what
-/// lets `submit_evidence` work again after a restart, since it refuses without
-/// one. Only *unfinished* trades are restored — see [`is_order_finished`].
+/// later resolution arrives as a daemon event. The origin comes from the
+/// persisted marker `open_dispute` writes. Restoring the record is what lets
+/// `submit_evidence` work again after a restart, since it refuses without one.
+/// Only *unfinished* trades are restored — see [`is_order_finished`].
 ///
-/// **Web has no rehydration.** `lib/main.dart` skips `initDb` off native, and
+/// **Web has no rehydration.** `app_bootstrap.dart` skips `initDb` off native, and
 /// the IndexedDB store's `list_trades` is still the empty stub of #233, so both
 /// the store lookup and the enumeration source are missing there. A browser
 /// reload therefore still loses the solver pubkey; the persistence path lights
@@ -737,6 +768,8 @@ async fn rehydrate_disputes_from_storage() {
 
     for trade in trades {
         let order_id = trade.order.id.clone();
+        // Cheap skip only — not the guard. The record can still appear while
+        // the reads below await; `upsert_or_update` is what makes it win.
         if dispute_store().get(&order_id).await.is_some() {
             continue;
         }
@@ -761,31 +794,57 @@ async fn rehydrate_disputes_from_storage() {
                 "[disputes] rehydrate: dropping stale solver for finished order={order_id} status={:?}",
                 trade.order.status
             );
-            clear_admin_pubkey(&order_id).await;
+            clear_dispute_keys(&order_id).await;
             continue;
         }
 
-        dispute_store()
-            .upsert(Dispute {
-                id: uuid::Uuid::new_v4().to_string(),
-                trade_id: order_id.clone(),
-                status: DisputeStatus::InReview,
-                initiated_by_me: false,
-                reason: None,
-                admin_pubkey: Some(admin_hex),
-                resolution: None,
-                opened_at: unix_now(),
-                resolved_at: None,
-                // The pre-restart read state is not recoverable, and this is
-                // an active dispute waiting on the user — default to unread so
-                // it surfaces rather than being silently marked as seen.
-                is_read: false,
-            })
+        let initiated_by_me = match db
+            .get_setting(&crate::db::settings_keys::dispute_mine(&order_id))
+            .await
+        {
+            Ok(marker) => marker.is_some(),
+            Err(e) => {
+                log::warn!("[disputes] rehydrate: reading origin for {order_id}: {e}");
+                false
+            }
+        };
+
+        let make_id = order_id.clone();
+        let _ = dispute_store()
+            .upsert_or_update(
+                &order_id,
+                || Dispute {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    trade_id: make_id,
+                    status: DisputeStatus::InReview,
+                    initiated_by_me,
+                    reason: None,
+                    admin_pubkey: Some(admin_hex),
+                    resolution: None,
+                    opened_at: unix_now(),
+                    resolved_at: None,
+                    // The pre-restart read state is not recoverable, and this
+                    // is an active dispute waiting on the user — default to
+                    // unread so it surfaces rather than being silently marked
+                    // as seen.
+                    is_read: false,
+                },
+                // Already in memory: at least as fresh as storage, keep it.
+                |_| Ok(()),
+            )
             .await;
         log::info!("[disputes] rehydrated dispute record order={order_id}");
     }
 }
 
+/// Re-arm the dispute-chat listener of every in-review dispute with a known
+/// solver. Called when the relay pool comes (back) online, mirroring
+/// `resubscribe_active_chats` for the peer channel (PR #254 review): listener
+/// startup is best-effort at assignment time and can fail while keys or
+/// connectivity are not there yet, and without a rearm path solver replies
+/// would stay invisible for the rest of the process. Idempotent — the
+/// per-channel single-owner guard makes a spawn for an already-listening
+/// dispute a no-op.
 pub(crate) async fn resubscribe_active_dispute_chats() {
     // A restart leaves the in-memory store empty, so the loop below would find
     // nothing to re-arm. Refill it from the persisted solver pubkeys first —
@@ -831,7 +890,7 @@ async fn resolve_dispute(trade_id: String, resolution: DisputeResolution) -> Res
     // and leaving it stored would have the next restart rehydrate this exact
     // dispute back to `InReview`. Only on success: a rejected resolution left
     // the dispute live.
-    clear_admin_pubkey(&trade_id).await;
+    clear_dispute_keys(&trade_id).await;
     Ok(())
 }
 
@@ -1062,6 +1121,10 @@ mod tests {
             started_at: 1,
             completed_at: None,
             outcome: None,
+            peer_rating: None,
+            peer_reviews: None,
+            peer_days: None,
+            rated_at: None,
         }
     }
 
@@ -1086,6 +1149,7 @@ mod tests {
         };
 
         let live = format!("live-{}", uuid::Uuid::new_v4());
+        let peer = format!("peer-{}", uuid::Uuid::new_v4());
         let finished = format!("finished-{}", uuid::Uuid::new_v4());
         let in_memory = format!("mem-{}", uuid::Uuid::new_v4());
         let stored_solver = "0000000000000000000000000000000000000000000000000000000000000011";
@@ -1093,6 +1157,7 @@ mod tests {
 
         for (order_id, status) in [
             (&live, OrderStatus::Dispute),
+            (&peer, OrderStatus::Dispute),
             (&finished, OrderStatus::SettledByAdmin),
             (&in_memory, OrderStatus::Dispute),
         ] {
@@ -1105,6 +1170,12 @@ mod tests {
             )
             .await
             .unwrap();
+        }
+        // `live` and `finished` were opened by this side; `peer` was not.
+        for order_id in [&live, &finished] {
+            db.set_setting(&crate::db::settings_keys::dispute_mine(order_id), "1")
+                .await
+                .unwrap();
         }
 
         // The record that survived in memory — it must win over storage.
@@ -1121,22 +1192,38 @@ mod tests {
         assert_eq!(restored.status, DisputeStatus::InReview);
         assert_eq!(restored.admin_pubkey.as_deref(), Some(stored_solver));
         assert!(!restored.is_read, "an active dispute must surface as unread");
+        assert!(
+            restored.initiated_by_me,
+            "the origin is persisted too: the initiator must not be told the peer opened it"
+        );
+        let peer_opened = get_dispute(peer.clone()).await.unwrap().expect("restored");
+        assert!(!peer_opened.initiated_by_me);
 
-        // 2. The finished one did not, and its stale key is gone — otherwise
+        // 2. The finished one did not, and its stale keys are gone — otherwise
         //    every later restart resurrects it as InReview.
         assert!(get_dispute(finished.clone()).await.unwrap().is_none());
-        assert_eq!(
-            db.get_setting(&crate::db::settings_keys::dispute_admin(&finished))
-                .await
-                .unwrap(),
-            None,
-            "the stale solver key must be cleared, not just skipped"
-        );
+        for key in [
+            crate::db::settings_keys::dispute_admin(&finished),
+            crate::db::settings_keys::dispute_mine(&finished),
+        ] {
+            assert_eq!(
+                db.get_setting(&key).await.unwrap(),
+                None,
+                "the stale key must be cleared, not just skipped"
+            );
+        }
 
         // 3. The in-memory record is at least as fresh as storage, so the
         //    older stored solver must not overwrite it.
         let kept = get_dispute(in_memory.clone()).await.unwrap().expect("kept");
         assert_eq!(kept.admin_pubkey.as_deref(), Some(fresher_solver));
+
+        // Cleanup — the rows, not the file: `init_db` is a process-wide
+        // OnceCell shared with every later test (see `escrow.rs`).
+        for order_id in [&live, &peer, &finished, &in_memory] {
+            clear_dispute_keys(order_id).await;
+            db.delete_trade_by_order_id(order_id).await.unwrap();
+        }
     }
 
     #[test]
