@@ -827,7 +827,7 @@ pub async fn take_order(
         order_info.amount_sats = amount_sats;
     }
 
-    let trade = TradeInfo {
+    let mut trade = TradeInfo {
         id: uuid::Uuid::new_v4().to_string(),
         order: order_info,
         role,
@@ -910,7 +910,10 @@ pub async fn take_order(
         .await;
     // In that same case the reveal ran before the trade row existed, so its
     // durable write was a no-op — replay it from the session now that the
-    // row is persisted (#334).
+    // row is persisted (#334). Mirror it on the returned struct too:
+    // `TradeInfo.counterparty_pubkey` is what `tradeInfoToChatRoom` gates
+    // the chat room on, so the value handed across the bridge must agree
+    // with the row just written.
     if let Some(session) = crate::mostro::session::session_manager()
         .get_session(&order_id)
         .await
@@ -921,6 +924,7 @@ pub async fn take_order(
                     log::warn!("[orders] take_order: failed to persist counterparty: {e}");
                 }
             }
+            trade.counterparty_pubkey = peer;
         }
     }
 
@@ -1796,16 +1800,17 @@ async fn dispatch_mostro_message(
                     return;
                 }
             };
-            // Before ANY side effect — a stale replay over a finished trade
-            // must not re-derive the peer key, recreate session state, or
-            // respawn the chat subscription either (the legit re-take of a
+            // Terminal guard for the status sync below: a stale replay over a
+            // finished trade must not resurrect its status. (Peer capture
+            // already ran in `maybe_capture_peer_reveal`, which carries its
+            // own copy of this guard.) The legit re-take of a
             // timeout-canceled order is unaffected: its wiped row leaves the
-            // book's `pending` as the local status, which passes).
+            // book's `pending` as the local status, which passes.
             if status_sync_blocked_by_terminal(&order_id, &kind.action).await {
                 return;
             }
             let small_order = match &kind.payload {
-                Some(mostro_core::message::Payload::Order(o)) => o.clone(),
+                Some(mostro_core::message::Payload::Order(o)) => o,
                 _ => {
                     log::warn!(
                         "[orders] daemon-msg {:?} payload is not an Order",
@@ -2272,7 +2277,7 @@ pub(crate) async fn local_trade_status(order_id: &str) -> Option<OrderStatus> {
 /// and take the other — no per-action role table to maintain, and every
 /// replayed reveal is another chance to self-heal a trade row that missed
 /// it. Persists the peer to the trade row (the durable record — the session
-/// is only a cache) and routes through [`on_peer_pubkey_received`] for the
+/// is only a cache) and routes through [`apply_peer_reveal`] for the
 /// session and the incoming-chat subscription.
 ///
 /// `trade_index` is the index of the key that decrypted the message — ours by
@@ -2284,20 +2289,31 @@ async fn maybe_capture_peer_reveal(
     payload: Option<&mostro_core::message::Payload>,
     trade_index: u32,
 ) {
-    let small_order = match payload {
-        Some(mostro_core::message::Payload::Order(o)) => o,
-        Some(mostro_core::message::Payload::PaymentRequest(Some(o), _, _)) => o,
-        _ => return,
-    };
-    // Both sides required: with only one pubkey there is no telling which
-    // side is ours, and single-sided payloads (e.g. the maker's own NewOrder
-    // confirmation) reveal nothing anyway.
-    let (Some(buyer_hex), Some(seller_hex)) = (
-        small_order.buyer_trade_pubkey.as_deref(),
-        small_order.seller_trade_pubkey.as_deref(),
-    ) else {
+    let Some((buyer_hex, seller_hex)) = peer_reveal_pubkeys(payload) else {
         return;
     };
+    // Capture already complete → free. This path runs for essentially every
+    // daemon message of a trade — and for the whole replayed history on each
+    // restart (the global DM filter carries no `since` on purpose) — so
+    // without this the key derivation, DB write, ECDH and spawn below repeat
+    // per message. The self-heal property survives: after a restart there is
+    // no session, so the first replayed reveal still does the full pass
+    // (including the durable write) and only the repeats short-circuit.
+    // Session pubkeys are normalized lowercase hex; a payload in another case
+    // merely misses the shortcut and takes the (idempotent) full path.
+    if let Some(session) = crate::mostro::session::session_manager()
+        .get_session(order_id)
+        .await
+    {
+        if session.shared_key.is_some()
+            && session
+                .peer_pubkey
+                .as_deref()
+                .is_some_and(|p| p == buyer_hex || p == seller_hex)
+        {
+            return;
+        }
+    }
     let (Ok(buyer_pk), Ok(seller_pk)) = (
         nostr_sdk::PublicKey::from_hex(buyer_hex),
         nostr_sdk::PublicKey::from_hex(seller_hex),
@@ -2337,7 +2353,29 @@ async fn maybe_capture_peer_reveal(
             log::warn!("[orders] peer-reveal: failed to persist counterparty: {e}");
         }
     }
-    on_peer_pubkey_received(order_id, &peer_hex, trade_index, Some(role)).await;
+    apply_peer_reveal(order_id, &peer_hex, &trade_keys, trade_index, role).await;
+}
+
+/// Pure payload side of the reveal: the two trade pubkeys a daemon payload
+/// names, or `None` when it names fewer than both. Both sides required: with
+/// only one pubkey there is no telling which side is ours, and single-sided
+/// payloads (e.g. the maker's own NewOrder confirmation) reveal nothing
+/// anyway.
+fn peer_reveal_pubkeys(
+    payload: Option<&mostro_core::message::Payload>,
+) -> Option<(&str, &str)> {
+    let small_order = match payload {
+        Some(mostro_core::message::Payload::Order(o)) => o,
+        Some(mostro_core::message::Payload::PaymentRequest(Some(o), _, _)) => o,
+        _ => return None,
+    };
+    match (
+        small_order.buyer_trade_pubkey.as_deref(),
+        small_order.seller_trade_pubkey.as_deref(),
+    ) {
+        (Some(buyer_hex), Some(seller_hex)) => Some((buyer_hex, seller_hex)),
+        _ => None,
+    }
 }
 
 /// Pure side of the symmetric reveal: which of the two named trade pubkeys is
@@ -2357,43 +2395,28 @@ fn resolve_peer_side(
 }
 
 /// Called when a daemon message reveals the counterparty's trade pubkey
-/// (via [`maybe_capture_peer_reveal`]).
+/// (via [`maybe_capture_peer_reveal`], which already holds the trade keys —
+/// no second identity load or BIP-32 derivation here).
 ///
 /// Derives the ECDH shared key from `(our_trade_key, peer_trade_pubkey)`,
 /// stores it in the session — creating the session if none exists, which is
 /// the maker's normal case, `take_order` being the only other creator (#334)
 /// — and spawns an incoming-chat subscription on the shared-key pubkey so we
-/// receive peer messages from the moment the trade goes active.
-async fn on_peer_pubkey_received(
-    order_id: &str,
-    peer_pubkey_hex: &str,
-    trade_index: u32,
-    role: Option<TradeRole>,
-) {
-    let trade_keys = match crate::api::identity::get_active_trade_keys(trade_index).await {
-        Ok(k) => k,
-        Err(e) => {
-            log::error!("[orders] on_peer_pubkey_received: key load failed: {e}");
-            return;
-        }
-    };
-    apply_peer_reveal(order_id, peer_pubkey_hex, &trade_keys, trade_index, role).await;
-}
-
-/// Everything after the identity load, split out so tests can exercise the
-/// session logic with generated keys instead of mutating the process-global
-/// identity (shared with every other test in the binary).
+/// receive peer messages from the moment the trade goes active. Split from
+/// the capture so tests can exercise the session logic with generated keys
+/// instead of mutating the process-global identity (shared with every other
+/// test in the binary).
 async fn apply_peer_reveal(
     order_id: &str,
     peer_pubkey_hex: &str,
     trade_keys: &nostr_sdk::Keys,
     trade_index: u32,
-    role: Option<TradeRole>,
+    role: TradeRole,
 ) {
     let peer_pubkey = match nostr_sdk::PublicKey::from_hex(peer_pubkey_hex) {
         Ok(pk) => pk,
         Err(e) => {
-            log::error!("[orders] on_peer_pubkey_received: invalid peer pubkey: {e}");
+            log::error!("[orders] peer-reveal: invalid peer pubkey: {e}");
             return;
         }
     };
@@ -2402,7 +2425,7 @@ async fn apply_peer_reveal(
         match crate::crypto::ecdh::derive_nip04_shared_key(trade_keys, &peer_pubkey) {
             Ok(k) => k,
             Err(e) => {
-                log::error!("[orders] on_peer_pubkey_received: ECDH failed: {e}");
+                log::error!("[orders] peer-reveal: ECDH failed: {e}");
                 return;
             }
         };
@@ -2412,12 +2435,12 @@ async fn apply_peer_reveal(
     let shared_pubkey = match nostr_sdk::SecretKey::from_slice(&shared_key_bytes) {
         Ok(sk) => nostr_sdk::Keys::new(sk).public_key(),
         Err(e) => {
-            log::error!("[orders] on_peer_pubkey_received: shared key→pubkey failed: {e}");
+            log::error!("[orders] peer-reveal: shared key→pubkey failed: {e}");
             return;
         }
     };
     log::info!(
-        "[orders] on_peer_pubkey_received: order={order_id}          peer={peer_pubkey_hex} shared_pubkey={}",
+        "[orders] peer-reveal: order={order_id} peer={peer_pubkey_hex} shared_pubkey={}",
         shared_pubkey.to_hex()
     );
     // Update or create the session with peer + shared key. No session is the
@@ -2428,54 +2451,49 @@ async fn apply_peer_reveal(
     let mgr = crate::mostro::session::session_manager();
     let session = match mgr.get_session(order_id).await {
         Some(s) => Some(s),
-        None => match role {
-            None => None,
-            Some(role) => {
-                // Order info: the persisted trade row wins; the public book
-                // covers platforms without one (web) and the pre-persistence
-                // window of a take's first reply.
-                let from_row = match crate::db::app_db::db() {
-                    Some(db) => db
-                        .get_trade_by_order_id(order_id)
-                        .await
-                        .ok()
-                        .flatten()
-                        .map(|t| t.order),
-                    None => None,
-                };
-                let order_info = match from_row {
-                    Some(o) => Some(o),
-                    None => order_book().get_order(order_id).await,
-                };
-                match order_info {
-                    None => {
-                        log::warn!(
-                            "[orders] on_peer_pubkey_received: no order info for order={order_id} — cannot create session"
-                        );
-                        None
-                    }
-                    Some(order_info) => mgr
-                        .create_session(order_id.to_string(), role, trade_index, order_info)
-                        .await
-                        .map_err(|e| {
-                            log::warn!(
-                                "[orders] on_peer_pubkey_received: session create failed: {e}"
-                            )
-                        })
-                        .ok(),
+        None => {
+            // Order info: the persisted trade row wins; the public book
+            // covers platforms without one (web) and the pre-persistence
+            // window of a take's first reply.
+            let from_row = match crate::db::app_db::db() {
+                Some(db) => db
+                    .get_trade_by_order_id(order_id)
+                    .await
+                    .ok()
+                    .flatten()
+                    .map(|t| t.order),
+                None => None,
+            };
+            let order_info = match from_row {
+                Some(o) => Some(o),
+                None => order_book().get_order(order_id).await,
+            };
+            match order_info {
+                None => {
+                    log::warn!(
+                        "[orders] peer-reveal: no order info for order={order_id} — cannot create session"
+                    );
+                    None
                 }
+                Some(order_info) => mgr
+                    .create_session(order_id.to_string(), role, trade_index, order_info)
+                    .await
+                    .map_err(|e| {
+                        log::warn!("[orders] peer-reveal: session create failed: {e}")
+                    })
+                    .ok(),
             }
-        },
+        }
     };
     if let Some(mut session) = session {
         session.peer_pubkey = Some(peer_pubkey_hex.to_string());
         session.shared_key = Some(shared_key_bytes);
         if let Err(e) = mgr.update_session(order_id, session).await {
-            log::warn!("[orders] on_peer_pubkey_received: session update failed: {e}");
+            log::warn!("[orders] peer-reveal: session update failed: {e}");
         }
     } else {
         log::warn!(
-            "[orders] on_peer_pubkey_received: no session and none creatable for order={order_id} — incoming subscription still spawned"
+            "[orders] peer-reveal: no session and none creatable for order={order_id} — incoming subscription still spawned"
         );
     }
     // Derive the chat conversation keys (K_conv / K_sign — HKDF split of the
@@ -2485,7 +2503,7 @@ async fn apply_peer_reveal(
     {
         Ok(pair) => pair,
         Err(e) => {
-            log::error!("[orders] on_peer_pubkey_received: chat key derivation failed: {e}");
+            log::error!("[orders] peer-reveal: chat key derivation failed: {e}");
             return;
         }
     };
@@ -4887,15 +4905,56 @@ mod tests {
         assert!(resolve_peer_side(&stranger, &buyer, &seller).is_none());
     }
 
-    /// on_peer_pubkey_received with no session for the order is a graceful no-op.
+    /// The payload side of the capture (#334): only a `SmallOrder` naming
+    /// BOTH trade pubkeys qualifies as a reveal, whether it arrives as an
+    /// `Order` payload or inside a `PaymentRequest`.
+    #[test]
+    fn peer_reveal_pubkeys_requires_both_sides() {
+        use mostro_core::message::Payload;
+        let order = |buyer: Option<&str>, seller: Option<&str>| {
+            let mut o = small_order_with(mostro_core::order::Status::Active, 100);
+            o.buyer_trade_pubkey = buyer.map(String::from);
+            o.seller_trade_pubkey = seller.map(String::from);
+            o
+        };
+
+        // Both pubkeys present → reveals, from either carrying payload.
+        let both = Payload::Order(order(Some("b"), Some("s")));
+        assert_eq!(peer_reveal_pubkeys(Some(&both)), Some(("b", "s")));
+        let pay_req =
+            Payload::PaymentRequest(Some(order(Some("b"), Some("s"))), "lnbc1".into(), None);
+        assert_eq!(peer_reveal_pubkeys(Some(&pay_req)), Some(("b", "s")));
+
+        // Single-sided payloads (e.g. the maker's own NewOrder confirmation)
+        // reveal nothing — there is no telling which side is ours.
+        let buyer_only = Payload::Order(order(Some("b"), None));
+        assert_eq!(peer_reveal_pubkeys(Some(&buyer_only)), None);
+        let seller_only = Payload::Order(order(None, Some("s")));
+        assert_eq!(peer_reveal_pubkeys(Some(&seller_only)), None);
+
+        // No SmallOrder at all: bare PaymentRequest, non-order payload, none.
+        let bare_pay_req = Payload::PaymentRequest(None, "lnbc1".into(), None);
+        assert_eq!(peer_reveal_pubkeys(Some(&bare_pay_req)), None);
+        let text = Payload::TextMessage("hi".into());
+        assert_eq!(peer_reveal_pubkeys(Some(&text)), None);
+        assert_eq!(peer_reveal_pubkeys(None), None);
+    }
+
+    /// A reveal for an order with no session AND no order info anywhere
+    /// (row or book) cannot create one — it must degrade to a warning, not
+    /// a panic. Exercised through `apply_peer_reveal` with generated keys,
+    /// same as the maker-session test below.
     #[tokio::test]
     async fn peer_pubkey_with_no_session_does_not_panic() {
-        // Use a random order_id that has no session — should log a warning only.
-        on_peer_pubkey_received(
+        let trade_keys = nostr_sdk::Keys::generate();
+        let peer_hex = nostr_sdk::Keys::generate().public_key().to_hex();
+        // Random order_id: no session, no trade row, not in the order book.
+        apply_peer_reveal(
             &uuid::Uuid::new_v4().to_string(),
-            "aabbccdd", // peer_pubkey_hex (irrelevant, no identity loaded)
+            &peer_hex,
+            &trade_keys,
             0,
-            None,
+            TradeRole::Buyer,
         )
         .await;
         // If we reach here without panicking the test passes.
@@ -4916,7 +4975,7 @@ mod tests {
 
         order_book().upsert_order(dummy_order_info(&order_id)).await;
 
-        apply_peer_reveal(&order_id, &peer_hex, &trade_keys, 7, Some(TradeRole::Seller)).await;
+        apply_peer_reveal(&order_id, &peer_hex, &trade_keys, 7, TradeRole::Seller).await;
 
         let session = session_manager()
             .get_session(&order_id)

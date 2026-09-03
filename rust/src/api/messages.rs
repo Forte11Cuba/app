@@ -940,7 +940,7 @@ impl ChatChannel {
 
 }
 
-/// Orders with a live chat task. Single-owner guard: `on_peer_pubkey_received`
+/// Orders with a live chat task. Single-owner guard: the peer-reveal capture
 /// fires again on daemon replays and reconnect backfills, and a second task
 /// for the same order would double-process events and race on the cursor.
 static ACTIVE_CHATS: OnceLock<tokio::sync::Mutex<std::collections::HashSet<String>>> =
@@ -1081,7 +1081,7 @@ fn parse_chat_payload(payload: &str) -> (String, Option<AttachmentInfo>) {
 /// signature or decryption work happens before the budget gate).
 ///
 /// Lifecycle: exactly one task per order (`ACTIVE_CHATS` guard — daemon
-/// replays re-invoke `on_peer_pubkey_received` and must be no-ops), explicit
+/// replays re-invoke the peer-reveal capture and must be no-ops), explicit
 /// subscription ids unsubscribed on every exit path, and **no idle timeout**:
 /// the listener lives until relay-pool shutdown or a flood trip, because a
 /// quiet half hour is normal in a fiat trade and the next peer message must
@@ -1437,16 +1437,21 @@ pub(crate) async fn resubscribe_active_chats() {
 /// A persisted trade still needs a live chat listener: it has a known peer
 /// and has not reached a terminal outcome.
 ///
-/// The daemon-pubkey check is an invariant guard (#334): a row whose
+/// The pubkey checks are an invariant guard (#334): a row whose
 /// "counterparty" is the Mostro node itself (rows written before the fix
 /// seeded `creator_pubkey` = the 38383 event author) would derive garbage
 /// chat keys AND claim the single-owner subscription guard with them,
 /// silently blocking the correct subscription when a replayed reveal
-/// arrives.
+/// arrives. The `creator_pubkey` comparison is the load-bearing one: it is
+/// the exact field the pre-fix seed copied from, on the same row, so it
+/// catches the poison whichever node published the event — the trades table
+/// is not scoped per node, and this iterates rows from every node the user
+/// has pointed at. The active-pubkey check stays as defense in depth.
 fn chat_still_relevant(trade: &crate::api::types::TradeInfo) -> bool {
     use crate::api::types::OrderStatus::*;
     trade.outcome.is_none()
         && !trade.counterparty_pubkey.is_empty()
+        && trade.counterparty_pubkey != trade.order.creator_pubkey
         && trade.counterparty_pubkey != crate::config::active_mostro_pubkey()
         && matches!(
             trade.order.status,
@@ -1944,6 +1949,14 @@ mod tests {
         let mut daemon_peer = base.clone();
         daemon_peer.counterparty_pubkey = crate::config::active_mostro_pubkey();
         assert!(!chat_still_relevant(&daemon_peer));
+
+        // Same poison, different node: the trades table is not scoped per
+        // node, so a row seeded while ANOTHER node was active carries that
+        // node's pubkey — which never equals the currently-active one. The
+        // row-local `creator_pubkey` comparison is what catches it.
+        let mut other_node_peer = base.clone();
+        other_node_peer.counterparty_pubkey = "maker".into(); // == creator_pubkey
+        assert!(!chat_still_relevant(&other_node_peer));
 
         let mut canceled = base;
         canceled.order.status = OrderStatus::Canceled;

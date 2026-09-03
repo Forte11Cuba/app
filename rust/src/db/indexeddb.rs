@@ -321,8 +321,12 @@ impl Storage for IndexedDbStorage {
         _counterparty_pubkey: &str,
     ) -> Result<()> {
         // No trades store on web yet (#233): chat identity survives only via
-        // the in-memory session created at reveal time.
-        log::warn!("update_trade_counterparty: IndexedDB backend not implemented — counterparty will not persist");
+        // the in-memory session created at reveal time. `debug`, not `warn`
+        // (unlike `mark_trade_rated`, once per trade): this fires for every
+        // qualifying daemon message and every replayed one, so at `warn` it
+        // floods the web log with a line that carries no information after
+        // the first.
+        log::debug!("update_trade_counterparty: IndexedDB backend not implemented — counterparty will not persist");
         Ok(())
     }
 }
