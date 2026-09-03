@@ -203,6 +203,7 @@
   "disableRelayLabel": "Désactiver le relais {url}",
   "enableRelayLabel": "Activer le relais {url}",
   "removeRelayTooltip": "Supprimer le relais",
+  "relayFromMostroLabel": "Ajouté depuis le nœud Mostro",
   "relayAddFailed": "Échec de l'ajout du relais",
   "relayRemoveFailed": "Échec de la suppression du relais",
   "backupConfirmCheckbox": "J'ai noté mes mots et les ai sauvegardés en lieu sûr",
