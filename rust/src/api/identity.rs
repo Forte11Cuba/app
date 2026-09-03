@@ -167,7 +167,9 @@ pub async fn load_identity_from_mnemonic(
     privacy_mode: bool,
     created_at: Option<i64>,
 ) -> Result<IdentityInfo> {
-    key_ops::validate_mnemonic(&words)?;
+    // Deriving is the validation: it parses the phrase and fails on a bad word
+    // or checksum with the same `invalid mnemonic` error the explicit check
+    // used to produce.
     let keys = key_ops::derive_master_key(&words)?;
     let public_key = keys.public_key().to_hex();
 
