@@ -149,8 +149,10 @@ Removes a user-added node; removing an absent one is a no-op.
 ### refresh_mostro_node_metadata() → Vec<MostroNodeEntry>
 Fetches kind 0 profile events for all known nodes in one relay query (10s
 timeout), updates the persisted cache, and returns the refreshed registry.
-Best-effort: a timeout returns the registry unchanged. `picture`/`website`
-are kept only when `https://` — a kind 0 event is attacker-controlled input.
+Best-effort with partial updates: whatever arrives within the window is
+cached, even when some authors never answered; only an outright query failure
+errors, leaving the cache untouched. `picture`/`website` are kept only when
+`https://` — a kind 0 event is attacker-controlled input.
 
 **Persistence**: `custom_mostro_nodes` (JSON array) and
 `mostro_node_metadata` (JSON map, pubkey → metadata) in the generic

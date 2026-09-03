@@ -204,10 +204,16 @@ pub async fn set_active_mostro_node(pubkey: String) -> Result<()> {
     nostr_sdk::PublicKey::from_hex(&pubkey)
         .map_err(|e| anyhow::anyhow!("InvalidPubkey: {e}"))?;
 
-    if let Some(db) = crate::db::app_db::db() {
-        db.save_active_mostro_pubkey(&pubkey).await?;
+    {
+        // Same lock as the node registry: without it, a concurrent
+        // remove_custom_mostro_node could pass its is-active check and then
+        // save a list missing the key this call is about to activate.
+        let _guard = crate::api::nodes::registry_lock().lock().await;
+        if let Some(db) = crate::db::app_db::db() {
+            db.save_active_mostro_pubkey(&pubkey).await?;
+        }
+        crate::config::set_active_mostro_pubkey(Some(pubkey));
     }
-    crate::config::set_active_mostro_pubkey(Some(pubkey));
     crate::api::orders::refresh_subscriptions_for_active_node().await;
     Ok(())
 }

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -59,6 +61,10 @@ class _FakeNodesNotifier extends MostroNodesNotifier {
   final List<String> selected = [];
   final List<String> removed = [];
 
+  /// When set, [selectNode] waits on it — lets a test hold a switch in
+  /// flight while interacting with the UI.
+  Future<void>? selectGate;
+
   @override
   Future<List<MostroNodeEntry>> build() async => nodes;
 
@@ -67,6 +73,8 @@ class _FakeNodesNotifier extends MostroNodesNotifier {
 
   @override
   Future<void> selectNode(String pubkey) async {
+    final gate = selectGate;
+    if (gate != null) await gate;
     if (failSelect) throw Exception('boom');
     selected.add(pubkey);
   }
@@ -161,6 +169,59 @@ void main() {
       expect(find.byType(MostroNodeSelector), findsOneWidget);
       expect(find.text('Failed to switch node'), findsOneWidget);
     });
+
+    testWidgets(
+      'dismissing the sheet during a slow switch never pops the route beneath',
+      (tester) async {
+        final gate = Completer<void>();
+        final notifier = _FakeNodesNotifier(_fixtureNodes)
+          ..selectGate = gate.future;
+        final container = createContainer(
+          overrides: [mostroNodesProvider.overrideWith(() => notifier)],
+        );
+        await tester.pumpWidget(
+          UncontrolledProviderScope(
+            container: container,
+            child: MaterialApp(
+              theme: buildDarkTheme(),
+              locale: const Locale('en'),
+              localizationsDelegates: const [
+                AppLocalizations.delegate,
+                GlobalMaterialLocalizations.delegate,
+                GlobalWidgetsLocalizations.delegate,
+                GlobalCupertinoLocalizations.delegate,
+              ],
+              supportedLocales: AppLocalizations.supportedLocales,
+              home: Scaffold(
+                body: Builder(
+                  builder: (context) => TextButton(
+                    onPressed: () => showMostroNodeSelector(context),
+                    child: const Text('open selector'),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.tap(find.text('open selector'));
+        await tester.pumpAndSettle();
+        expect(find.byType(MostroNodeSelector), findsOneWidget);
+
+        await tester.tap(find.text('Kmbalache 🇨🇺'));
+        await tester.pump(); // switch now pending behind the gate
+
+        // Dismiss the sheet while the switch is still in flight.
+        await tester.tap(find.byIcon(Icons.close));
+        await tester.pumpAndSettle();
+        expect(find.byType(MostroNodeSelector), findsNothing);
+
+        gate.complete();
+        await tester.pumpAndSettle();
+
+        // The stale continuation must not pop the underlying route.
+        expect(find.text('open selector'), findsOneWidget);
+      },
+    );
 
     testWidgets('custom node exposes delete; confirming removes it', (
       tester,

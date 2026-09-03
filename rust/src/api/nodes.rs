@@ -23,11 +23,14 @@ use crate::db::{settings_keys, Storage};
 /// Serializes every load-modify-save cycle on the registry's KV blobs
 /// (`CUSTOM_MOSTRO_NODES`, `MOSTRO_NODE_METADATA`). The blobs are written as a
 /// whole, so two concurrent cycles (e.g. a metadata refresh racing an
-/// add-custom-node) would silently drop one side's update. Never held across
-/// a relay round trip — only around the KV read/write itself.
+/// add-custom-node) would silently drop one side's update. Active-node
+/// selection (`settings::set_active_mostro_node`) takes the same lock while
+/// persisting the active key, so a removal cannot interleave with a selection
+/// of the same pubkey (the auto-import would resurrect it nameless). Never
+/// held across a relay round trip — only around the KV read/write itself.
 static REGISTRY_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
-fn registry_lock() -> &'static Mutex<()> {
+pub(crate) fn registry_lock() -> &'static Mutex<()> {
     REGISTRY_LOCK.get_or_init(|| Mutex::new(()))
 }
 
@@ -288,9 +291,6 @@ pub async fn add_custom_mostro_node(
 /// `NotInitialized` (no storage yet).
 pub async fn remove_custom_mostro_node(pubkey: String) -> Result<()> {
     let pubkey = pubkey.to_lowercase();
-    if pubkey == crate::config::active_mostro_pubkey() {
-        bail!("CannotRemoveActiveNode: select another node first");
-    }
     if is_trusted_pubkey(&pubkey) {
         bail!("NodeIsTrusted: compiled-in nodes cannot be removed");
     }
@@ -298,6 +298,11 @@ pub async fn remove_custom_mostro_node(pubkey: String) -> Result<()> {
         bail!("NotInitialized: storage is not ready");
     };
     let _guard = registry_lock().lock().await;
+    // Active check under the lock: selection holds the same lock, so the key
+    // cannot become active between this check and the save below.
+    if pubkey == crate::config::active_mostro_pubkey() {
+        bail!("CannotRemoveActiveNode: select another node first");
+    }
     let mut custom = load_custom_nodes(db).await?;
     custom.retain(|n| n.pubkey != pubkey);
     save_custom_nodes(db, &custom).await
@@ -306,9 +311,11 @@ pub async fn remove_custom_mostro_node(pubkey: String) -> Result<()> {
 /// Fetch kind 0 profile events for every known node in one relay query,
 /// update the persisted metadata cache, and return the refreshed registry.
 ///
-/// Best-effort by design: nodes without a kind 0 event keep their cached (or
-/// empty) metadata, and a relay timeout returns the registry unchanged rather
-/// than failing the selector.
+/// Best-effort by design: partial updates are allowed. Whatever events arrive
+/// within the 10s window are cached — including when the window closes before
+/// every author answered — and nodes without a kind 0 event keep their cached
+/// (or empty) metadata. Only an outright query failure returns an error, and
+/// then the cache is untouched.
 pub async fn refresh_mostro_node_metadata() -> Result<Vec<MostroNodeEntry>> {
     use nostr_sdk::prelude::*;
     use std::time::Duration;

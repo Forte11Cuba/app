@@ -90,7 +90,9 @@ class _MostroNodeSelectorState extends ConsumerState<MostroNodeSelector> {
     final navigator = Navigator.of(context);
     try {
       await ref.read(mostroNodesProvider.notifier).selectNode(entry.pubkey);
-      navigator.pop();
+      // The user may have dismissed the sheet during the switch; popping via
+      // the captured navigator would then close the route underneath it.
+      if (mounted) navigator.pop();
       messenger.showSnackBar(
         SnackBar(
           content: Text(l10n.nodeSwitchedSuccess(nodeDisplayName(entry))),
