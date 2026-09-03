@@ -69,7 +69,7 @@ mod tests {
     fn relay_list_event(tags: &[&[&str]]) -> Event {
         EventBuilder::new(Kind::from(KIND_RELAY_LIST), "")
             .tags(tags.iter().map(|t| Tag::parse(t.iter().copied()).unwrap()))
-            .sign_with_keys(&Keys::generate())
+            .finalize(&Keys::generate())
             .unwrap()
     }
 

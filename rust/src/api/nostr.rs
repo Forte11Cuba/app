@@ -3,7 +3,7 @@
 /// Thin facade over `RelayPool` — keeps all async/relay logic in the pool
 /// while exposing a flat function interface for the Dart side.
 use anyhow::Result;
-use nostr_sdk::Event;
+use nostr_sdk::prelude::Event;
 use std::sync::Arc;
 use tokio::sync::OnceCell;
 
@@ -383,7 +383,7 @@ pub async fn fetch_mostro_instance_tags(
 
     let client = pool()?.client();
 
-    let pubkey = nostr_sdk::PublicKey::from_hex(&mostro_pubkey_hex)
+    let pubkey = nostr_sdk::prelude::PublicKey::from_hex(&mostro_pubkey_hex)
         .map_err(|e| anyhow::anyhow!("invalid pubkey hex: {e}"))?;
 
     // Kind 38385 is a NIP-33 addressable event; the `d` tag uniquely identifies
@@ -393,11 +393,12 @@ pub async fn fetch_mostro_instance_tags(
     let filter = Filter::new()
         .kind(Kind::from(38385u16))
         .author(pubkey)
-        .custom_tag(SingleLetterTag::lowercase(Alphabet::D), &mostro_pubkey_hex)
+        .custom_tag(SingleLetterTag::LOWERCASE_D, &mostro_pubkey_hex)
         .limit(1);
 
     let events = client
-        .fetch_events(filter, Duration::from_secs(10))
+        .fetch_events(filter)
+        .timeout(Duration::from_secs(10))
         .await
         .map_err(|e| anyhow::anyhow!("fetch_events failed: {e}"))?;
 
@@ -446,17 +447,18 @@ pub async fn fetch_exchange_rate(
 
     let client = pool()?.client();
 
-    let pubkey = nostr_sdk::PublicKey::from_hex(&mostro_pubkey_hex)
+    let pubkey = nostr_sdk::prelude::PublicKey::from_hex(&mostro_pubkey_hex)
         .map_err(|e| anyhow::anyhow!("invalid pubkey hex: {e}"))?;
 
     let filter = Filter::new()
         .kind(Kind::from(rates::RATES_KIND))
         .author(pubkey)
-        .custom_tag(SingleLetterTag::lowercase(Alphabet::D), rates::RATES_D_TAG)
+        .custom_tag(SingleLetterTag::LOWERCASE_D, rates::RATES_D_TAG)
         .limit(1);
 
     let events = client
-        .fetch_events(filter, Duration::from_secs(10))
+        .fetch_events(filter)
+        .timeout(Duration::from_secs(10))
         .await
         .map_err(|e| anyhow::anyhow!("fetch_events failed: {e}"))?;
 
@@ -502,9 +504,9 @@ pub async fn fetch_exchange_rate(
 /// range check. Verification runs before the newest-first pick, so a forgery
 /// cannot shadow the genuine event by claiming a later `created_at` either.
 fn select_rates_event(
-    events: impl IntoIterator<Item = nostr_sdk::Event>,
-    pubkey: &nostr_sdk::PublicKey,
-) -> Option<nostr_sdk::Event> {
+    events: impl IntoIterator<Item = nostr_sdk::prelude::Event>,
+    pubkey: &nostr_sdk::prelude::PublicKey,
+) -> Option<nostr_sdk::prelude::Event> {
     use crate::mostro::rates;
     use nostr_sdk::prelude::*;
 
@@ -526,7 +528,7 @@ fn select_rates_event(
 }
 
 /// First value of the single-letter or named tag `name` on `event`.
-fn tag_value(event: &nostr_sdk::Event, name: &str) -> Option<String> {
+fn tag_value(event: &nostr_sdk::prelude::Event, name: &str) -> Option<String> {
     event
         .tags
         .iter()
@@ -621,7 +623,7 @@ mod tests {
         EventBuilder::new(Kind::from(rates::RATES_KIND), content)
             .tag(Tag::parse(["d", rates::RATES_D_TAG]).unwrap())
             .custom_created_at(Timestamp::from(created_at))
-            .sign_with_keys(keys)
+            .finalize(keys)
             .unwrap()
     }
 
@@ -690,13 +692,13 @@ mod tests {
 
         let wrong_kind = EventBuilder::new(Kind::TextNote, RATES)
             .tag(Tag::parse(["d", rates::RATES_D_TAG]).unwrap())
-            .sign_with_keys(&node)
+            .finalize(&node)
             .unwrap();
         assert!(select_rates_event([wrong_kind], &node.public_key()).is_none());
 
         let wrong_d_tag = EventBuilder::new(Kind::from(rates::RATES_KIND), RATES)
             .tag(Tag::parse(["d", "something-else"]).unwrap())
-            .sign_with_keys(&node)
+            .finalize(&node)
             .unwrap();
         assert!(select_rates_event([wrong_d_tag], &node.public_key()).is_none());
     }

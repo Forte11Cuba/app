@@ -11,7 +11,7 @@ use anyhow::{anyhow, Result};
 use nostr_sdk::prelude::*;
 // The SDK re-exports its own `RelayStatus` via the prelude. Alias it to avoid
 // conflicting with our internal `RelayStatus` from `crate::api::types`.
-use nostr_sdk::RelayStatus as SdkRelayStatus;
+use nostr_sdk::prelude::RelayStatus as SdkRelayStatus;
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
@@ -37,8 +37,9 @@ pub struct RelayPool {
 impl RelayPool {
     /// Create a new pool with the given relay URLs.
     pub async fn new(relay_urls: Vec<String>) -> Result<Arc<Self>> {
-        let ephemeral_keys = Keys::generate();
-        let client = Arc::new(Client::new(ephemeral_keys));
+        // No signer: every event this pool sends is signed by the caller
+        // with the trade or chat key it belongs to.
+        let client = Arc::new(Client::new());
 
         let (conn_tx, _) = broadcast::channel(16);
         let (relay_tx, _) = broadcast::channel(64);
@@ -259,7 +260,7 @@ impl RelayPool {
                 let mut any_changed = false;
 
                 for url in relay_urls {
-                    let Ok(sdk_relay) = client.relay(&url).await else {
+                    let Ok(Some(sdk_relay)) = client.relay(&url).await else {
                         continue;
                     };
                     let new_status = map_sdk_status(sdk_relay.status());
@@ -351,7 +352,8 @@ fn map_sdk_status(s: SdkRelayStatus) -> RelayStatus {
         SdkRelayStatus::Disconnected
         | SdkRelayStatus::Terminated
         | SdkRelayStatus::Initialized
-        | SdkRelayStatus::Sleeping => RelayStatus::Disconnected,
+        | SdkRelayStatus::Sleeping
+        | SdkRelayStatus::Shutdown => RelayStatus::Disconnected,
         SdkRelayStatus::Banned => RelayStatus::Error,
     }
 }

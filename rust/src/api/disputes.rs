@@ -288,7 +288,7 @@ pub async fn open_dispute(trade_id: String, reason: Option<String>) -> Result<Di
         let identity_keys =
             crate::api::identity::get_transport_identity_keys(&sender_keys).await?;
         let mostro_pubkey =
-            nostr_sdk::PublicKey::from_hex(&crate::config::active_mostro_pubkey())
+            nostr_sdk::prelude::PublicKey::from_hex(&crate::config::active_mostro_pubkey())
                 .map_err(|e| anyhow!("invalid mostro pubkey: {e}"))?;
         let event_json = crate::mostro::actions::dispute(
             &identity_keys,
@@ -402,7 +402,7 @@ pub async fn submit_evidence(trade_id: String, text: String) -> Result<()> {
         .as_deref()
         .ok_or_else(|| anyhow!("AdminNotAssigned: dispute has no admin yet"))?;
 
-    let admin_pubkey = nostr_sdk::PublicKey::from_hex(admin_pubkey_hex)
+    let admin_pubkey = nostr_sdk::prelude::PublicKey::from_hex(admin_pubkey_hex)
         .map_err(|e| anyhow!("invalid admin pubkey: {e}"))?;
 
     // Look up the trade key index.
@@ -603,7 +603,7 @@ async fn derive_admin_shared_key(trade_id: &str, admin_pubkey_hex: &str) -> Resu
             .await
             .ok_or_else(|| anyhow!("no trade key for trade {trade_id}"))?;
         let trade_keys = crate::api::identity::get_active_trade_keys(trade_index).await?;
-        let admin_pk = nostr_sdk::PublicKey::from_hex(&admin_pubkey_hex)
+        let admin_pk = nostr_sdk::prelude::PublicKey::from_hex(&admin_pubkey_hex)
             .map_err(|e| anyhow!("invalid admin pubkey: {e}"))?;
         let (conv, sign) = crate::crypto::chat_keys::derive_chat_keys(&trade_keys, &admin_pk)?;
 

@@ -627,7 +627,7 @@ pub async fn create_order(params: NewOrderParams) -> Result<OrderInfo> {
     // DO NOT add to order book or DB yet — wait for daemon confirmation first.
     // This avoids a phantom "pending" order when the daemon rejects (CantDo).
 
-    let mostro_pubkey = nostr_sdk::PublicKey::from_hex(&active_mostro_pubkey())?;
+    let mostro_pubkey = nostr_sdk::prelude::PublicKey::from_hex(&active_mostro_pubkey())?;
     let identity_keys =
         crate::api::identity::get_transport_identity_keys(&sender_keys).await?;
 
@@ -840,7 +840,7 @@ pub async fn take_order(
     // published yet, so pretending the take went through (the old behavior)
     // would show the user a trade that never existed.
     let sender_keys = crate::api::identity::get_active_trade_keys(trade_index).await?;
-    let mostro_pubkey = nostr_sdk::PublicKey::from_hex(&active_mostro_pubkey())?;
+    let mostro_pubkey = nostr_sdk::prelude::PublicKey::from_hex(&active_mostro_pubkey())?;
     let identity_keys =
         crate::api::identity::get_transport_identity_keys(&sender_keys).await?;
 
@@ -1089,7 +1089,7 @@ pub async fn send_invoice(
     let sender_keys = crate::api::identity::get_active_trade_keys(trade_index).await?;
     let identity_keys =
         crate::api::identity::get_transport_identity_keys(&sender_keys).await?;
-    let mostro_pubkey = nostr_sdk::PublicKey::from_hex(&active_mostro_pubkey())?;
+    let mostro_pubkey = nostr_sdk::prelude::PublicKey::from_hex(&active_mostro_pubkey())?;
 
     // Correlation nonce for this submission. The daemon echoes it in its
     // reply (progression message or CantDo, e.g. InvalidInvoice); only a
@@ -1189,7 +1189,7 @@ pub async fn send_fiat_sent(order_id: String) -> Result<()> {
     let sender_keys = crate::api::identity::get_active_trade_keys(trade_index).await?;
     let identity_keys =
         crate::api::identity::get_transport_identity_keys(&sender_keys).await?;
-    let mostro_pubkey = nostr_sdk::PublicKey::from_hex(&active_mostro_pubkey())?;
+    let mostro_pubkey = nostr_sdk::prelude::PublicKey::from_hex(&active_mostro_pubkey())?;
     let event_json = actions::fiat_sent(
         &identity_keys,
         &sender_keys,
@@ -1220,7 +1220,7 @@ pub async fn release_order(order_id: String) -> Result<()> {
     let sender_keys = crate::api::identity::get_active_trade_keys(trade_index).await?;
     let identity_keys =
         crate::api::identity::get_transport_identity_keys(&sender_keys).await?;
-    let mostro_pubkey = nostr_sdk::PublicKey::from_hex(&active_mostro_pubkey())?;
+    let mostro_pubkey = nostr_sdk::prelude::PublicKey::from_hex(&active_mostro_pubkey())?;
     let event_json = actions::release(
         &identity_keys,
         &sender_keys,
@@ -1252,7 +1252,7 @@ pub async fn cancel_order(order_id: String) -> Result<()> {
     let sender_keys = crate::api::identity::get_active_trade_keys(trade_index).await?;
     let identity_keys =
         crate::api::identity::get_transport_identity_keys(&sender_keys).await?;
-    let mostro_pubkey = nostr_sdk::PublicKey::from_hex(&active_mostro_pubkey())?;
+    let mostro_pubkey = nostr_sdk::prelude::PublicKey::from_hex(&active_mostro_pubkey())?;
     let event_json = actions::cancel(
         &identity_keys,
         &sender_keys,
@@ -1305,7 +1305,7 @@ pub async fn cancel_order(order_id: String) -> Result<()> {
 /// The relay subscription is established synchronously (awaited) before returning,
 /// then the event loop is spawned as a background task. This guarantees the
 /// subscription is active before the caller publishes the order event.
-pub(crate) async fn subscribe_daemon_messages(trade_pubkey: nostr_sdk::PublicKey, trade_index: u32) {
+pub(crate) async fn subscribe_daemon_messages(trade_pubkey: nostr_sdk::prelude::PublicKey, trade_index: u32) {
     // ── Synchronous setup: awaited by the caller ──
     let recipient_keys = match crate::api::identity::get_active_trade_keys(trade_index).await {
         Ok(k) => k,
@@ -1322,7 +1322,7 @@ pub(crate) async fn subscribe_daemon_messages(trade_pubkey: nostr_sdk::PublicKey
     let client = pool.client();
 
     let mostro_pubkey =
-        match nostr_sdk::PublicKey::from_hex(&crate::config::active_mostro_pubkey()) {
+        match nostr_sdk::prelude::PublicKey::from_hex(&crate::config::active_mostro_pubkey()) {
             Ok(pk) => pk,
             Err(e) => {
                 log::error!("[orders] subscribe_daemon_messages: invalid mostro pubkey: {e}");
@@ -1351,12 +1351,12 @@ pub(crate) async fn subscribe_daemon_messages(trade_pubkey: nostr_sdk::PublicKey
     // never touches live events, so it cannot drop the genuine reply when
     // the client clock runs ahead of the daemon's. Offline catch-up is the
     // global feed's job (see subscribe_node_filters), which replays history.
-    let filter = nostr_sdk::Filter::new()
-        .kind(nostr_sdk::Kind::PrivateDirectMessage)
+    let filter = nostr_sdk::prelude::Filter::new()
+        .kind(nostr_sdk::prelude::Kind::PrivateDirectMessage)
         .author(mostro_pubkey)
         .pubkey(trade_pubkey)
         .limit(0);
-    if let Err(e) = client.subscribe(filter, None).await {
+    if let Err(e) = client.subscribe(filter).await {
         log::warn!("[orders] subscribe_daemon_messages subscribe failed: {e}");
         return;
     }
@@ -1369,7 +1369,7 @@ pub(crate) async fn subscribe_daemon_messages(trade_pubkey: nostr_sdk::PublicKey
 
     // ── Event loop: spawned as a background task ──
     crate::rt::spawn(async move {
-        use nostr_sdk::RelayPoolNotification;
+        use nostr_sdk::prelude::{ClientNotification, StreamExt};
         use crate::rt::time::{timeout, Duration};
 
         const IDLE_TIMEOUT_SECS: u64 = 30 * 60;
@@ -1382,9 +1382,9 @@ pub(crate) async fn subscribe_daemon_messages(trade_pubkey: nostr_sdk::PublicKey
                 break;
             }
 
-            match timeout(remaining, rx.recv()).await {
-                Ok(Ok(RelayPoolNotification::Event { event, .. })) => {
-                    if event.kind != nostr_sdk::Kind::PrivateDirectMessage {
+            match timeout(remaining, rx.next()).await {
+                Ok(Some(ClientNotification::Event { event, .. })) => {
+                    if event.kind != nostr_sdk::prelude::Kind::PrivateDirectMessage {
                         continue;
                     }
                     // Disambiguate Mostro replies from NIP-17 peer chat (also
@@ -1437,14 +1437,9 @@ pub(crate) async fn subscribe_daemon_messages(trade_pubkey: nostr_sdk::PublicKey
                         )),
                     }
                 }
-                Ok(Ok(RelayPoolNotification::Shutdown)) => break,
-                Ok(Err(broadcast::error::RecvError::Lagged(n))) => {
-                    log::warn!("[orders] daemon-msg lagged by {n} messages");
-                    continue;
-                }
-                Ok(Err(broadcast::error::RecvError::Closed)) => break,
+                Ok(Some(ClientNotification::Shutdown)) | Ok(None) => break,
                 Err(_) => break, // idle timeout
-                Ok(Ok(_)) => continue,
+                Ok(Some(_)) => continue,
             }
         }
 
@@ -1496,7 +1491,7 @@ async fn dispatch_mostro_message(
     // active Mostro pubkey. The event signature is verified inside
     // `unwrap_incoming`, so `sender` is the cryptographically authoritative
     // origin.
-    match nostr_sdk::PublicKey::from_hex(&crate::config::active_mostro_pubkey()) {
+    match nostr_sdk::prelude::PublicKey::from_hex(&crate::config::active_mostro_pubkey()) {
         Ok(expected) if expected == sender => {}
         Ok(expected) => {
             crate::api::logging::blog_warn("daemon-msg", format!(
@@ -2279,6 +2274,11 @@ async fn dispatch_mostro_message(
                 "IsNotYourOrder" => "Order rejected: this order does not belong to you.".to_string(),
                 "NotAllowedByStatus" => "Action rejected: not allowed in the current order status.".to_string(),
                 "OrderAlreadyCanceled" => "Order is already canceled.".to_string(),
+                // mostro-core 0.14.6: the node is draining (e.g. before a
+                // Lightning node migration) and refuses new orders and takes;
+                // actions on existing orders keep working. Marker only, no
+                // prose: Dart maps `MaintenanceMode` to a localized message.
+                "MaintenanceMode" => "MaintenanceMode".to_string(),
                 other => format!("Order rejected by Mostro: {other}"),
             };
 
@@ -2476,7 +2476,7 @@ async fn on_peer_pubkey_received(order_id: &str, peer_pubkey_hex: &str) {
             return;
         }
     };
-    let peer_pubkey = match nostr_sdk::PublicKey::from_hex(peer_pubkey_hex) {
+    let peer_pubkey = match nostr_sdk::prelude::PublicKey::from_hex(peer_pubkey_hex) {
         Ok(pk) => pk,
         Err(e) => {
             log::error!("[orders] on_peer_pubkey_received: invalid peer pubkey: {e}");
@@ -2495,8 +2495,8 @@ async fn on_peer_pubkey_received(order_id: &str, peer_pubkey_hex: &str) {
     // Derive the shared-key *pubkey* (the p-tag subscribed by chat listeners).
     // The shared secret is used as a private scalar to derive the corresponding
     // public key — this is the convention used by v1 and the chat protocol spec.
-    let shared_pubkey = match nostr_sdk::SecretKey::from_slice(&shared_key_bytes) {
-        Ok(sk) => nostr_sdk::Keys::new(sk).public_key(),
+    let shared_pubkey = match nostr_sdk::prelude::SecretKey::from_slice(&shared_key_bytes) {
+        Ok(sk) => nostr_sdk::prelude::Keys::new(sk).public_key(),
         Err(e) => {
             log::error!("[orders] on_peer_pubkey_received: shared key→pubkey failed: {e}");
             return;
@@ -2563,7 +2563,7 @@ async fn subscribe_single_order(order_id: &str) {
         };
         let client = pool.client();
         let mostro_pubkey =
-            match nostr_sdk::PublicKey::from_hex(&crate::config::active_mostro_pubkey()) {
+            match nostr_sdk::prelude::PublicKey::from_hex(&crate::config::active_mostro_pubkey()) {
                 Ok(pk) => pk,
                 Err(e) => {
                     log::error!("[orders] subscribe_single_order: invalid pubkey: {e}");
@@ -2573,13 +2573,13 @@ async fn subscribe_single_order(order_id: &str) {
 
         let mut rx = client.notifications();
         let filter = crate::nostr::order_events::trade_order_filter(&mostro_pubkey, &order_id);
-        if let Err(e) = client.subscribe(filter, None).await {
+        if let Err(e) = client.subscribe(filter).await {
             log::warn!("[orders] subscribe_single_order subscribe failed: {e}");
             return;
         }
         log::info!("[orders] subscribed to d-tag updates for order={order_id}");
 
-        use nostr_sdk::RelayPoolNotification;
+        use nostr_sdk::prelude::{ClientNotification, StreamExt};
         use crate::rt::time::{timeout, Duration};
 
         // Exit after 30 minutes of inactivity (no order updates received).
@@ -2595,8 +2595,8 @@ async fn subscribe_single_order(order_id: &str) {
                 break;
             }
 
-            match timeout(remaining, rx.recv()).await {
-                Ok(Ok(RelayPoolNotification::Event { event, .. })) => {
+            match timeout(remaining, rx.next()).await {
+                Ok(Some(ClientNotification::Event { event, .. })) => {
                     if let Some(mut order) =
                         crate::nostr::order_events::parse_order_event(&event, None)
                     {
@@ -2643,10 +2643,9 @@ async fn subscribe_single_order(order_id: &str) {
                         }
                     }
                 }
-                Ok(Ok(RelayPoolNotification::Shutdown)) => break,
-                Ok(Err(_)) => break,
+                Ok(Some(ClientNotification::Shutdown)) | Ok(None) => break,
                 Err(_) => break, // idle timeout
-                Ok(Ok(_)) => continue,
+                Ok(Some(_)) => continue,
             }
         }
     });
@@ -2661,7 +2660,7 @@ async fn subscribe_single_order(order_id: &str) {
 async fn publish_event_json(event_json: &str) -> Result<()> {
     let pool =
         crate::api::nostr::get_pool().map_err(|_| anyhow::anyhow!("RelayPoolNotInitialized"))?;
-    let event: nostr_sdk::Event =
+    let event: nostr_sdk::prelude::Event =
         serde_json::from_str(event_json).map_err(|e| anyhow::anyhow!("invalid event JSON: {e}"))?;
     let kind = event.kind.as_u16();
     let eid = event.id.to_hex();
@@ -2672,7 +2671,7 @@ async fn publish_event_json(event_json: &str) -> Result<()> {
         .map_err(|e| anyhow::anyhow!("publish failed: {e}"))?;
     // Per-relay outcome: with one relay habitually down, knowing WHERE each
     // event actually landed is what makes delivery issues diagnosable.
-    for relay in &output.success {
+    for relay in output.success.keys() {
         crate::api::logging::blog_info(
             "publish",
             format!(
@@ -2934,7 +2933,7 @@ async fn refetch_active_node_orders() {
         log::warn!("[orders] refetch: relay pool not initialized");
         return;
     };
-    let mostro_pubkey = match nostr_sdk::PublicKey::from_hex(&active_mostro_pubkey()) {
+    let mostro_pubkey = match nostr_sdk::prelude::PublicKey::from_hex(&active_mostro_pubkey()) {
         Ok(pk) => pk,
         Err(e) => {
             log::error!("[orders] refetch: invalid mostro pubkey: {e}");
@@ -2944,7 +2943,8 @@ async fn refetch_active_node_orders() {
     let order_filter = crate::nostr::order_events::all_orders_filter(&mostro_pubkey);
     match pool
         .client()
-        .fetch_events(order_filter, std::time::Duration::from_secs(10))
+        .fetch_events(order_filter)
+        .timeout(std::time::Duration::from_secs(10))
         .await
     {
         Ok(events) => {
@@ -2967,18 +2967,18 @@ async fn refetch_active_node_orders() {
 }
 
 /// Stable subscription ID for the Kind 38383 order-book feed.
-fn orders_subscription_id() -> nostr_sdk::SubscriptionId {
-    nostr_sdk::SubscriptionId::new("mostro-orders")
+fn orders_subscription_id() -> nostr_sdk::prelude::SubscriptionId {
+    nostr_sdk::prelude::SubscriptionId::new("mostro-orders")
 }
 
 /// Stable subscription ID for the Kind 14 Mostro-reply feed.
-fn mostro_dm_subscription_id() -> nostr_sdk::SubscriptionId {
-    nostr_sdk::SubscriptionId::new("mostro-dm")
+fn mostro_dm_subscription_id() -> nostr_sdk::prelude::SubscriptionId {
+    nostr_sdk::prelude::SubscriptionId::new("mostro-dm")
 }
 
 /// Stable subscription ID for the node's kind 10002 relay list.
-fn relay_list_subscription_id() -> nostr_sdk::SubscriptionId {
-    nostr_sdk::SubscriptionId::new("mostro-relay-list")
+fn relay_list_subscription_id() -> nostr_sdk::prelude::SubscriptionId {
+    nostr_sdk::prelude::SubscriptionId::new("mostro-relay-list")
 }
 
 /// (Re)subscribe the order-book (Kind 38383) and Mostro-reply (Kind 14)
@@ -2989,13 +2989,14 @@ fn relay_list_subscription_id() -> nostr_sdk::SubscriptionId {
 /// overwrites the subscription for a known ID) instead of leaking a second
 /// subscription that keeps the old node's events flowing.
 async fn subscribe_node_filters(
-    client: &nostr_sdk::Client,
-    mostro_pubkey: nostr_sdk::PublicKey,
-    trade_pubkeys: Vec<nostr_sdk::PublicKey>,
+    client: &nostr_sdk::prelude::Client,
+    mostro_pubkey: nostr_sdk::prelude::PublicKey,
+    trade_pubkeys: Vec<nostr_sdk::prelude::PublicKey>,
 ) -> Result<()> {
     let order_filter = crate::nostr::order_events::all_orders_filter(&mostro_pubkey);
     client
-        .subscribe_with_id(orders_subscription_id(), order_filter, None)
+        .subscribe(order_filter)
+        .with_id(orders_subscription_id())
         .await
         .map_err(|e| anyhow::anyhow!("order subscribe failed: {e}"))?;
     crate::api::logging::blog_info(
@@ -3010,11 +3011,8 @@ async fn subscribe_node_filters(
     // The node's NIP-65 relay list, kept live so an operator adding a relay
     // reaches running clients; applied additively by apply_relay_list_event.
     client
-        .subscribe_with_id(
-            relay_list_subscription_id(),
-            crate::nostr::relay_list::relay_list_filter(&mostro_pubkey),
-            None,
-        )
+        .subscribe(crate::nostr::relay_list::relay_list_filter(&mostro_pubkey))
+        .with_id(relay_list_subscription_id())
         .await
         .map_err(|e| anyhow::anyhow!("relay-list subscribe failed: {e}"))?;
     crate::api::logging::blog_info(
@@ -3031,12 +3029,13 @@ async fn subscribe_node_filters(
     // per-trade subscription (subscribe_daemon_messages) carries a cutoff.
     if !trade_pubkeys.is_empty() {
         let p_count = trade_pubkeys.len();
-        let dm_filter = nostr_sdk::Filter::new()
-            .kind(nostr_sdk::Kind::PrivateDirectMessage)
+        let dm_filter = nostr_sdk::prelude::Filter::new()
+            .kind(nostr_sdk::prelude::Kind::PrivateDirectMessage)
             .author(mostro_pubkey)
             .pubkeys(trade_pubkeys);
         client
-            .subscribe_with_id(mostro_dm_subscription_id(), dm_filter, None)
+            .subscribe(dm_filter)
+            .with_id(mostro_dm_subscription_id())
             .await
             .map_err(|e| anyhow::anyhow!("dm subscribe failed: {e}"))?;
         crate::api::logging::blog_info(
@@ -3078,7 +3077,7 @@ pub(crate) async fn refresh_subscriptions_for_active_node() {
     };
     let client = pool.client();
 
-    let mostro_pubkey = match nostr_sdk::PublicKey::from_hex(&active_mostro_pubkey()) {
+    let mostro_pubkey = match nostr_sdk::prelude::PublicKey::from_hex(&active_mostro_pubkey()) {
         Ok(pk) => pk,
         Err(e) => {
             log::error!("[orders] node switch: invalid mostro pubkey: {e}");
@@ -3123,10 +3122,10 @@ pub(crate) async fn refresh_subscriptions_for_active_node() {
 /// alone, so an unseeded or shrunk map makes previous sessions' trades
 /// undecryptable and silently unsubscribes them.
 static GLOBAL_DM_KEYS: std::sync::OnceLock<
-    tokio::sync::RwLock<HashMap<String, (nostr_sdk::Keys, u32)>>,
+    tokio::sync::RwLock<HashMap<String, (nostr_sdk::prelude::Keys, u32)>>,
 > = std::sync::OnceLock::new();
 
-fn global_dm_keys() -> &'static tokio::sync::RwLock<HashMap<String, (nostr_sdk::Keys, u32)>> {
+fn global_dm_keys() -> &'static tokio::sync::RwLock<HashMap<String, (nostr_sdk::prelude::Keys, u32)>> {
     GLOBAL_DM_KEYS.get_or_init(|| tokio::sync::RwLock::new(HashMap::new()))
 }
 
@@ -3135,7 +3134,7 @@ fn global_dm_keys() -> &'static tokio::sync::RwLock<HashMap<String, (nostr_sdk::
 /// key (including an admin-took-dispute long after creation) are received
 /// for the whole life of the process, not just while the temporary per-trade
 /// receiver runs. Idempotent: a key already covered causes no relay churn.
-pub(crate) async fn ensure_global_dm_coverage(keys: &nostr_sdk::Keys, trade_index: u32) {
+pub(crate) async fn ensure_global_dm_coverage(keys: &nostr_sdk::prelude::Keys, trade_index: u32) {
     let hex = keys.public_key().to_hex();
     {
         let mut map = global_dm_keys().write().await;
@@ -3154,26 +3153,27 @@ async fn resubscribe_global_dm_filter() {
     let Ok(pool) = crate::api::nostr::get_pool() else {
         return;
     };
-    let Ok(mostro_pubkey) = nostr_sdk::PublicKey::from_hex(&active_mostro_pubkey()) else {
+    let Ok(mostro_pubkey) = nostr_sdk::prelude::PublicKey::from_hex(&active_mostro_pubkey()) else {
         return;
     };
-    let trade_pubkeys: Vec<nostr_sdk::PublicKey> = global_dm_keys()
+    let trade_pubkeys: Vec<nostr_sdk::prelude::PublicKey> = global_dm_keys()
         .read()
         .await
         .keys()
-        .filter_map(|hex| nostr_sdk::PublicKey::from_hex(hex).ok())
+        .filter_map(|hex| nostr_sdk::prelude::PublicKey::from_hex(hex).ok())
         .collect();
     if trade_pubkeys.is_empty() {
         return;
     }
     let p_count = trade_pubkeys.len();
-    let dm_filter = nostr_sdk::Filter::new()
-        .kind(nostr_sdk::Kind::PrivateDirectMessage)
+    let dm_filter = nostr_sdk::prelude::Filter::new()
+        .kind(nostr_sdk::prelude::Kind::PrivateDirectMessage)
         .author(mostro_pubkey)
         .pubkeys(trade_pubkeys);
     if let Err(e) = pool
         .client()
-        .subscribe_with_id(mostro_dm_subscription_id(), dm_filter, None)
+        .subscribe(dm_filter)
+        .with_id(mostro_dm_subscription_id())
         .await
     {
         log::warn!("[orders] bulk DM filter refresh failed: {e}");
@@ -3193,18 +3193,18 @@ async fn resubscribe_global_dm_filter() {
 ///
 /// Union, not replace: a session key inserted concurrently (create/take in
 /// flight while subscriptions restart) must never be evicted.
-async fn seed_global_dm_coverage() -> Vec<nostr_sdk::PublicKey> {
+async fn seed_global_dm_coverage() -> Vec<nostr_sdk::prelude::PublicKey> {
     let derived = build_trade_key_map().await;
     let mut map = global_dm_keys().write().await;
     for (hex, entry) in derived {
         map.entry(hex).or_insert(entry);
     }
     map.keys()
-        .filter_map(|hex| nostr_sdk::PublicKey::from_hex(hex).ok())
+        .filter_map(|hex| nostr_sdk::prelude::PublicKey::from_hex(hex).ok())
         .collect()
 }
 
-async fn build_trade_key_map() -> HashMap<String, (nostr_sdk::Keys, u32)> {
+async fn build_trade_key_map() -> HashMap<String, (nostr_sdk::prelude::Keys, u32)> {
     let mut map = HashMap::new();
     let max_index = match crate::api::identity::get_identity().await {
         Ok(Some(info)) => info.trade_key_index,
@@ -3228,8 +3228,8 @@ async fn build_trade_key_map() -> HashMap<String, (nostr_sdk::Keys, u32)> {
 /// The read guard must not be held past this point: handling a message can end
 /// up in `ensure_global_dm_coverage`, which takes the same lock for writing.
 async fn resolve_dm_recipient(
-    event: &nostr_sdk::Event,
-) -> Option<(String, nostr_sdk::Keys, u32)> {
+    event: &nostr_sdk::prelude::Event,
+) -> Option<(String, nostr_sdk::prelude::Keys, u32)> {
     let map = global_dm_keys().read().await;
     for tag in event.tags.iter() {
         let s = tag.as_slice();
@@ -3262,8 +3262,8 @@ async fn resolve_dm_recipient(
 /// via `mostro_core::transport::unwrap_incoming` and dispatches the recovered
 /// `Message` through `dispatch_mostro_message`.
 async fn handle_global_daemon_message(
-    event: &nostr_sdk::Event,
-    recipient: (String, nostr_sdk::Keys, u32),
+    event: &nostr_sdk::prelude::Event,
+    recipient: (String, nostr_sdk::prelude::Keys, u32),
 ) {
     let (recipient_hex, recipient_keys, trade_idx) = recipient;
 
@@ -3359,11 +3359,11 @@ enum Publish {
     WhenBatchEnds,
 }
 
-async fn ingest_order_event(event: &nostr_sdk::Event) {
+async fn ingest_order_event(event: &nostr_sdk::prelude::Event) {
     ingest_order_event_with(event, Publish::Coalesced).await;
 }
 
-async fn ingest_order_event_with(event: &nostr_sdk::Event, publish: Publish) {
+async fn ingest_order_event_with(event: &nostr_sdk::prelude::Event, publish: Publish) {
     log::debug!(
         "[orders] event kind={} author={}",
         event.kind,
@@ -3500,7 +3500,7 @@ async fn _run_order_subscription() {
 
     // The Mostro daemon is the author of all Kind 38383 events.
     // Use the compiled-in default pubkey (mirrors config.rs / settings screen).
-    let mostro_pubkey = match nostr_sdk::PublicKey::from_hex(&crate::config::active_mostro_pubkey())
+    let mostro_pubkey = match nostr_sdk::prelude::PublicKey::from_hex(&crate::config::active_mostro_pubkey())
     {
         Ok(pk) => pk,
         Err(e) => {
@@ -3533,21 +3533,21 @@ async fn _run_order_subscription() {
 
     crate::api::logging::blog_info("orders", "subscriptions active — waiting for events".to_string());
 
-    use nostr_sdk::RelayPoolNotification;
+    use nostr_sdk::prelude::{ClientNotification, StreamExt};
 
     loop {
-        match rx.recv().await {
-            Ok(RelayPoolNotification::Event { event, .. }) => {
+        match rx.next().await {
+            Some(ClientNotification::Event { event, .. }) => {
                 // Resolve the *current* active node for each event so a node
                 // switch is respected without restarting this loop.
                 let Ok(active_mostro) =
-                    nostr_sdk::PublicKey::from_hex(&active_mostro_pubkey())
+                    nostr_sdk::prelude::PublicKey::from_hex(&active_mostro_pubkey())
                 else {
                     continue;
                 };
 
                 // ── Kind 14 NIP-44 Mostro reply: decrypt and dispatch ──
-                if event.kind == nostr_sdk::Kind::PrivateDirectMessage {
+                if event.kind == nostr_sdk::prelude::Kind::PrivateDirectMessage {
                     // Disambiguate from NIP-17 peer chat (also kind 14): only
                     // the active node may author a Mostro reply.
                     if event.pubkey != active_mostro {
@@ -3580,9 +3580,9 @@ async fn _run_order_subscription() {
             // logs. CLOSED and NOTICE are anomalies (a relay refusing or
             // complaining about a subscription) that were previously
             // swallowed by the catch-all and undiagnosable in the field.
-            Ok(RelayPoolNotification::Message { relay_url, message }) => {
-                use nostr_sdk::RelayMessage;
-                match message {
+            Some(ClientNotification::Message { relay_url, message }) => {
+                use nostr_sdk::prelude::RelayMessage;
+                match *message {
                     // Ground truth for delivery questions: this fires for
                     // every frame the relay pushes, BEFORE the SDK's
                     // first-time-seen dedup that gates the Event
@@ -3647,17 +3647,13 @@ async fn _run_order_subscription() {
                     _ => {}
                 }
             }
-            Ok(RelayPoolNotification::Shutdown) => {
+            Some(ClientNotification::Shutdown) => {
                 log::info!("[orders] relay pool shutdown — subscription loop exiting");
                 break;
             }
-            Err(broadcast::error::RecvError::Closed) => {
-                log::warn!("[orders] notification channel closed");
+            None => {
+                log::warn!("[orders] notification stream closed");
                 break;
-            }
-            Err(broadcast::error::RecvError::Lagged(n)) => {
-                log::warn!("[orders] lagged by {n} messages");
-                continue;
             }
         }
     }
@@ -3794,8 +3790,8 @@ impl OrdersStream {
 // `upsert_order`. Kept as a reusable helper for future event-processing paths.
 #[allow(dead_code)]
 pub(crate) async fn process_order_event(
-    event: &nostr_sdk::Event,
-    my_pubkey: Option<&nostr_sdk::PublicKey>,
+    event: &nostr_sdk::prelude::Event,
+    my_pubkey: Option<&nostr_sdk::prelude::PublicKey>,
 ) {
     if let Some(order) = parse_order_event(event, my_pubkey) {
         order_book().upsert_order(order).await;
@@ -3904,7 +3900,7 @@ pub async fn restore_session() -> Result<mostro_core::message::RestoreSessionInf
     ensure_global_dm_coverage(&sender_keys, trade_index).await;
     let trade_pk_hex = sender_keys.public_key().to_hex();
 
-    let mostro_pubkey = nostr_sdk::PublicKey::from_hex(&active_mostro_pubkey())?;
+    let mostro_pubkey = nostr_sdk::prelude::PublicKey::from_hex(&active_mostro_pubkey())?;
     // Identity/transport keys sign the Seal -> event.identity (master key).
     let identity_keys =
         crate::api::identity::get_transport_identity_keys(&sender_keys).await?;
@@ -4122,21 +4118,21 @@ mod tests {
     /// on its size).
     #[tokio::test]
     async fn dm_recipient_is_resolved_from_the_p_tag() {
-        use nostr_sdk::{EventBuilder, Kind, Tag};
+        use nostr_sdk::prelude::{EventBuilder, FinalizeEvent, Kind, Tag};
 
-        let mine = nostr_sdk::Keys::generate();
+        let mine = nostr_sdk::prelude::Keys::generate();
         let mine_hex = mine.public_key().to_hex();
-        let stranger = nostr_sdk::Keys::generate();
+        let stranger = nostr_sdk::prelude::Keys::generate();
 
         let addressed_to_us = EventBuilder::new(Kind::PrivateDirectMessage, "")
             .tags([Tag::parse(["p", &mine_hex]).unwrap()])
-            .sign_with_keys(&nostr_sdk::Keys::generate())
+            .finalize(&nostr_sdk::prelude::Keys::generate())
             .unwrap();
         // A stranger's key is never inserted, so this one resolves to None
         // whatever else the shared map happens to hold.
         let addressed_elsewhere = EventBuilder::new(Kind::PrivateDirectMessage, "")
             .tags([Tag::parse(["p", &stranger.public_key().to_hex()]).unwrap()])
-            .sign_with_keys(&nostr_sdk::Keys::generate())
+            .finalize(&nostr_sdk::prelude::Keys::generate())
             .unwrap();
 
         global_dm_keys()
@@ -4591,13 +4587,13 @@ mod tests {
             ),
         };
         let sender =
-            nostr_sdk::PublicKey::from_hex(&active_mostro_pubkey()).expect("valid mostro pubkey");
+            nostr_sdk::prelude::PublicKey::from_hex(&active_mostro_pubkey()).expect("valid mostro pubkey");
         mostro_core::nip59::UnwrappedMessage {
             message,
             signature: None,
             sender,
             identity: sender,
-            created_at: nostr_sdk::Timestamp::from(0u64),
+            created_at: nostr_sdk::prelude::Timestamp::from(0u64),
         }
     }
 
@@ -5008,7 +5004,7 @@ mod tests {
     /// refresh itself is a no-op here: no pool in unit tests.)
     #[tokio::test]
     async fn a_late_derived_key_joins_the_global_dm_coverage() {
-        let keys = nostr_sdk::Keys::generate();
+        let keys = nostr_sdk::prelude::Keys::generate();
         let hex = keys.public_key().to_hex();
 
         ensure_global_dm_coverage(&keys, 91).await;
@@ -5070,7 +5066,7 @@ mod tests {
 
         let mut rx = trade_updates_tx().subscribe();
 
-        let sender = nostr_sdk::PublicKey::from_hex(&active_mostro_pubkey())
+        let sender = nostr_sdk::prelude::PublicKey::from_hex(&active_mostro_pubkey())
             .expect("valid mostro pubkey");
         let unwrapped = mostro_core::nip59::UnwrappedMessage {
             message: Message::new_order(
@@ -5083,7 +5079,7 @@ mod tests {
             signature: None,
             sender,
             identity: sender,
-            created_at: nostr_sdk::Timestamp::from(0u64),
+            created_at: nostr_sdk::prelude::Timestamp::from(0u64),
         };
         dispatch_mostro_message(unwrapped, "test-cancel-replay", "ff00ff00", 1).await;
 
@@ -5183,7 +5179,7 @@ mod tests {
             None,
             None,
         );
-        let sender = nostr_sdk::PublicKey::from_hex(&active_mostro_pubkey())
+        let sender = nostr_sdk::prelude::PublicKey::from_hex(&active_mostro_pubkey())
             .expect("valid mostro pubkey");
         let unwrapped = mostro_core::nip59::UnwrappedMessage {
             message: Message::new_order(
@@ -5196,7 +5192,7 @@ mod tests {
             signature: None,
             sender,
             identity: sender,
-            created_at: nostr_sdk::Timestamp::from(0u64),
+            created_at: nostr_sdk::prelude::Timestamp::from(0u64),
         };
         dispatch_mostro_message(unwrapped, "test-take-replay", "ff00ff01", 93).await;
 
@@ -5230,7 +5226,7 @@ mod tests {
     /// unsubscribes them.
     #[tokio::test]
     async fn seeding_coverage_never_evicts_existing_keys() {
-        let session = nostr_sdk::Keys::generate();
+        let session = nostr_sdk::prelude::Keys::generate();
         ensure_global_dm_coverage(&session, 92).await;
 
         // No identity in unit tests → the derived set is empty; the seed
@@ -5494,13 +5490,13 @@ mod tests {
         let mut rx = trade_updates_tx().subscribe();
 
         let sender =
-            nostr_sdk::PublicKey::from_hex(&active_mostro_pubkey()).expect("valid mostro pubkey");
+            nostr_sdk::prelude::PublicKey::from_hex(&active_mostro_pubkey()).expect("valid mostro pubkey");
         let unwrapped = mostro_core::nip59::UnwrappedMessage {
             message: Message::new_order(Some(order_uuid), None, None, Action::Canceled, None),
             signature: None,
             sender,
             identity: sender,
-            created_at: nostr_sdk::Timestamp::from(0u64),
+            created_at: nostr_sdk::prelude::Timestamp::from(0u64),
         };
 
         // The retake enters its persistence block...
@@ -5535,13 +5531,13 @@ mod tests {
     fn canceled_message(order_uuid: uuid::Uuid) -> mostro_core::nip59::UnwrappedMessage {
         use mostro_core::message::{Action, Message};
         let sender =
-            nostr_sdk::PublicKey::from_hex(&active_mostro_pubkey()).expect("valid mostro pubkey");
+            nostr_sdk::prelude::PublicKey::from_hex(&active_mostro_pubkey()).expect("valid mostro pubkey");
         mostro_core::nip59::UnwrappedMessage {
             message: Message::new_order(Some(order_uuid), None, None, Action::Canceled, None),
             signature: None,
             sender,
             identity: sender,
-            created_at: nostr_sdk::Timestamp::from(0u64),
+            created_at: nostr_sdk::prelude::Timestamp::from(0u64),
         }
     }
 
@@ -5637,7 +5633,7 @@ mod tests {
         let mut rx = insert_pending_take(trade_pk, 91);
 
         let sender =
-            nostr_sdk::PublicKey::from_hex(&active_mostro_pubkey()).expect("valid mostro pubkey");
+            nostr_sdk::prelude::PublicKey::from_hex(&active_mostro_pubkey()).expect("valid mostro pubkey");
         let unwrapped = mostro_core::nip59::UnwrappedMessage {
             message: Message::new_order(
                 Some(order_uuid),
@@ -5649,7 +5645,7 @@ mod tests {
             signature: None,
             sender,
             identity: sender,
-            created_at: nostr_sdk::Timestamp::from(0u64),
+            created_at: nostr_sdk::prelude::Timestamp::from(0u64),
         };
         dispatch_mostro_message(unwrapped, "test-handoff-live", trade_pk, 4).await;
 
@@ -5675,7 +5671,7 @@ mod tests {
         drop(insert_pending_take(trade_pk, 92));
 
         let sender =
-            nostr_sdk::PublicKey::from_hex(&active_mostro_pubkey()).expect("valid mostro pubkey");
+            nostr_sdk::prelude::PublicKey::from_hex(&active_mostro_pubkey()).expect("valid mostro pubkey");
         let unwrapped = mostro_core::nip59::UnwrappedMessage {
             message: Message::new_order(
                 Some(order_uuid),
@@ -5687,7 +5683,7 @@ mod tests {
             signature: None,
             sender,
             identity: sender,
-            created_at: nostr_sdk::Timestamp::from(0u64),
+            created_at: nostr_sdk::prelude::Timestamp::from(0u64),
         };
         dispatch_mostro_message(unwrapped, "test-handoff-dead", trade_pk, 4).await;
 
