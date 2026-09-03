@@ -102,7 +102,9 @@ in that case the session **pre-exists** with peer and shared key set, the
 because the reveal ran before the row existed, its durable write was a
 no-op: the persistence block replays it from the session and mirrors the
 peer onto the returned `TradeInfo` (the field the UI gates the chat room
-on).
+on). The durable half applies to backends with a trades store — on web
+(#233) the write is a stub and only the session and the returned struct
+carry the peer.
 
 **Errors**: `OrderNotFound`, `CannotTakeOwnOrder`, `OrderAlreadyTaken`,
 `InvalidRole`, `FiatAmountRequired`/`OutOfRange` (range orders),
@@ -306,7 +308,8 @@ trade pubkeys (an `Order` payload or a `PaymentRequest`) reveals the
 counterparty: our trade key is matched against the two and the other side
 is taken, symmetrically, with no per-action role table. The peer is then
 persisted to the trade row (`update_trade_counterparty` — the row is the
-durable peer record, the session a cache of it) and the session is
+durable peer record, the session a cache of it; on web the write is a
+stub, #233, and the session is the only holder) and the session is
 updated **or created**: no session is the maker's *normal* case, since
 `take_order` is the only other session creator. Ordering is load-bearing:
 the capture runs after the generation gate and the local→daemon UUID
