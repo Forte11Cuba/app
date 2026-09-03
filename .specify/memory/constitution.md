@@ -14,6 +14,19 @@
       → 0.45+ (PR #376).
   Added/Removed sections: None
   Templates requiring updates: None — no template references the chat transport.
+  Downstream docs synced with this amendment (they still required kind 1059 for
+  chat, which would have left two mutually exclusive requirements in the repo):
+    - CONTRIBUTING.md "Protocol / Transport Changes"
+    - .specify/PROTOCOL.md, .specify/ARCHITECTURE.md, .specify/README.md
+    - specs/004: plan.md, data-model.md, contracts/orders.md, and the
+      superseding banners on research.md and tasks.md
+    - specs/005: a scope note on spec.md (User Story 2, FR-004), plan.md,
+      tasks.md and research.md — 005 deliberately migrated the daemon channel
+      only, so its chat carve-out is marked as a record of that scope rather
+      than rewritten
+  The live chat contract is specs/004-mostro-p2p-client/contracts/messages.md.
+  .specify/v1-reference/ is untouched on purpose: it is descriptive of v1, which
+  did use gift wrap.
   Follow-up TODOs: None
 
   Earlier: 1.0.0 → 1.1.0 added the Core Principles (7, incl. VII. V1 User
