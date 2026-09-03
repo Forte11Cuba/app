@@ -238,8 +238,8 @@ impl RelayPool {
     // ── Internal helpers ──────────────────────────────────────────────────────
 
     async fn broadcast_connection_state(&self) {
-        let state = derive_connection_state(&self.relays.read().await);
-        broadcast_if_changed(&self.last_broadcast, &self.conn_tx, state);
+        let relays = self.relays.read().await;
+        broadcast_if_changed(&self.last_broadcast, &self.conn_tx, &relays);
     }
 
     /// Spawn a background task that polls each relay's SDK status every
@@ -305,8 +305,8 @@ impl RelayPool {
                 }
 
                 if any_changed {
-                    let state = derive_connection_state(&relays.read().await);
-                    broadcast_if_changed(&last_broadcast, &conn_tx, state);
+                    let relays_r = relays.read().await;
+                    broadcast_if_changed(&last_broadcast, &conn_tx, &relays_r);
                 }
             }
         });
@@ -315,7 +315,8 @@ impl RelayPool {
 
 // ── Pure helpers ──────────────────────────────────────────────────────────────
 
-/// Send `state` on `tx` only if it differs from what was last sent.
+/// Derive the state from `relays` and send it on `tx` only if it differs
+/// from what was last sent.
 ///
 /// Every publisher must go through here. The gate has to be shared: if only
 /// the monitor deduplicated, an add/remove sending directly would leave the
@@ -323,11 +324,17 @@ impl RelayPool {
 /// after a removal, then the relay reconnecting to `Online`) would be dropped
 /// as a duplicate — leaving subscribers believing the pool is down for the
 /// rest of the session.
+///
+/// Takes the relay list rather than a derived state so the caller derives and
+/// sends while still holding the `relays` read guard: no writer can slip a
+/// newer observation in between, so a newer state is never sent before an
+/// older snapshot of it. The gate lock is never held across an await.
 fn broadcast_if_changed(
     last: &Mutex<Option<ConnectionState>>,
     tx: &broadcast::Sender<ConnectionState>,
-    state: ConnectionState,
+    relays: &[RelayInfo],
 ) {
+    let state = derive_connection_state(relays);
     let next = next_broadcast(&mut last.lock().unwrap_or_else(|e| e.into_inner()), state);
     if let Some(state) = next {
         let _ = tx.send(state);
@@ -469,26 +476,80 @@ mod tests {
         .unwrap();
         let mut rx = pool.subscribe_connection_state();
 
-        // Stand in for the monitor: the pool is up.
-        broadcast_if_changed(&pool.last_broadcast, &pool.conn_tx, ConnectionState::Online);
+        // Stand in for the monitor observing a connection: the pool is up.
+        pool.relays.write().await[0].status = RelayStatus::Connected;
+        broadcast_if_changed(
+            &pool.last_broadcast,
+            &pool.conn_tx,
+            &pool.relays.read().await,
+        );
         assert_eq!(rx.try_recv().unwrap(), ConnectionState::Online);
 
-        // The remaining relay is still `Connecting` in our view, so the
-        // removal derives `Reconnecting` — a real transition, sent directly.
-        pool.remove_relay("ws://127.0.0.1:2").await.unwrap();
+        // The connected relay is removed and the other is still `Connecting`
+        // in our view, so the removal derives `Reconnecting` — a real
+        // transition, sent directly.
+        pool.remove_relay("ws://127.0.0.1:1").await.unwrap();
         assert_eq!(rx.try_recv().unwrap(), ConnectionState::Reconnecting);
 
         // The surviving relay connects (what the monitor would observe) and
         // the monitor's `Online` must get through: with a monitor-local gate
         // its stale `Online` would suppress it.
         pool.relays.write().await[0].status = RelayStatus::Connected;
-        broadcast_if_changed(&pool.last_broadcast, &pool.conn_tx, ConnectionState::Online);
+        broadcast_if_changed(
+            &pool.last_broadcast,
+            &pool.conn_tx,
+            &pool.relays.read().await,
+        );
         assert_eq!(rx.try_recv().unwrap(), ConnectionState::Online);
 
         // And the reverse: adding a relay while already online must not
         // re-emit `Online` and re-run the whole recovery sequence.
         pool.add_relay("ws://127.0.0.1:3").await.unwrap();
         assert!(rx.try_recv().is_err(), "unchanged state must stay silent");
+    }
+
+    /// A publisher that has already observed the relay list must send before
+    /// a newer observation can be written and sent — otherwise subscribers
+    /// would end on a stale `Offline` after a genuine `Online`.
+    #[tokio::test]
+    async fn an_older_snapshot_is_never_sent_after_a_newer_one() {
+        let pool = RelayPool::new(vec!["ws://127.0.0.1:1".to_string()])
+            .await
+            .unwrap();
+        let mut rx = pool.subscribe_connection_state();
+
+        // Publisher A observes the relay drop but has not sent yet.
+        pool.relays.write().await[0].status = RelayStatus::Disconnected;
+        let snapshot = pool.relays.read().await;
+
+        // Publisher B observes the relay connect and wants to send `Online`.
+        // Its write must wait for A.
+        let b_pool = pool.clone();
+        let b = tokio::spawn(async move {
+            b_pool.relays.write().await[0].status = RelayStatus::Connected;
+            let relays = b_pool.relays.read().await;
+            broadcast_if_changed(&b_pool.last_broadcast, &b_pool.conn_tx, &relays);
+        });
+        for _ in 0..8 {
+            tokio::task::yield_now().await;
+        }
+        assert!(
+            !b.is_finished(),
+            "B must not publish while A holds its observation"
+        );
+        assert!(rx.try_recv().is_err());
+
+        broadcast_if_changed(&pool.last_broadcast, &pool.conn_tx, &snapshot);
+        drop(snapshot);
+        b.await.unwrap();
+
+        assert_eq!(rx.try_recv().unwrap(), ConnectionState::Offline);
+        assert_eq!(
+            rx.try_recv().unwrap(),
+            ConnectionState::Online,
+            "the newer state wins"
+        );
+        assert!(rx.try_recv().is_err());
     }
 
     fn relay(url: &str, source: RelaySource) -> RelayInfo {
