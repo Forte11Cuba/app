@@ -197,6 +197,10 @@ pub fn get_mostro_pubkey() -> String {
 ///
 /// **Errors**: `InvalidPubkey` if `pubkey` is not a valid 64-char hex key.
 pub async fn set_active_mostro_node(pubkey: String) -> Result<()> {
+    // Lowercase before persisting: the node registry compares pubkeys as
+    // lowercase hex, and an uppercase active key would read as unknown there
+    // (auto-imported duplicate, never flagged active, undeletable).
+    let pubkey = pubkey.to_lowercase();
     nostr_sdk::PublicKey::from_hex(&pubkey)
         .map_err(|e| anyhow::anyhow!("InvalidPubkey: {e}"))?;
 
@@ -381,6 +385,18 @@ mod tests {
             .await
             .unwrap_err();
         assert!(err.to_string().contains("InvalidLightningAddress"));
+    }
+
+    #[tokio::test]
+    async fn set_active_mostro_node_normalizes_to_lowercase() {
+        let _g = settings_lock().lock().unwrap();
+        // The node registry compares pubkeys as lowercase hex; an uppercase
+        // active key would read as unknown there.
+        let upper = crate::config::DEFAULT_MOSTRO_PUBKEY.to_uppercase();
+        set_active_mostro_node(upper).await.unwrap();
+        assert_eq!(get_mostro_pubkey(), crate::config::DEFAULT_MOSTRO_PUBKEY);
+        // Restore the compiled-in default.
+        crate::config::set_active_mostro_pubkey(None);
     }
 
     #[tokio::test]
