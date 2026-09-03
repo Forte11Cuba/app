@@ -238,7 +238,7 @@ pub const RECENT_ORDERS_WINDOW_SECS: u64 = 48 * 3600;
 /// hundred orders). Scoping by the NIP-69 `s` tag keeps the reply to the
 /// live book, which is orders of magnitude below any such cap.
 pub fn pending_orders_filter(mostro_pubkey: &PublicKey) -> Filter {
-    all_orders_filter(mostro_pubkey).custom_tag(SingleLetterTag::lowercase(Alphabet::S), "pending")
+    all_orders_filter(mostro_pubkey).custom_tag(SingleLetterTag::LOWERCASE_S, "pending")
 }
 
 /// Filter for **all recent** order events (any status) since `since`.
@@ -261,7 +261,7 @@ pub fn trade_order_filter(mostro_pubkey: &PublicKey, order_id: &str) -> Filter {
     Filter::new()
         .kind(Kind::from(KIND_ORDER))
         .author(*mostro_pubkey)
-        .custom_tag(SingleLetterTag::lowercase(Alphabet::D), order_id)
+        .custom_tag(SingleLetterTag::LOWERCASE_D, order_id)
 }
 
 #[cfg(test)]
@@ -286,7 +286,7 @@ mod tests {
                 Tag::parse(fa_tag).unwrap(),
                 Tag::parse(["z", "order"]).unwrap(),
             ])
-            .sign_with_keys(&keys)
+            .finalize(&keys)
             .unwrap()
     }
 
@@ -318,7 +318,7 @@ mod tests {
                 Tag::parse(["fa", "20"]).unwrap(),
                 Tag::parse(["z", "order"]).unwrap(),
             ])
-            .sign_with_keys(&keys)
+            .finalize(&keys)
             .unwrap();
         let order = parse_order_event(&event, None).unwrap();
         assert_eq!(order.payment_method, "Revolut, Zelle, Strike");
@@ -361,7 +361,7 @@ mod tests {
                 Tag::parse(["rating", rating_value]).unwrap(),
                 Tag::parse(["z", "order"]).unwrap(),
             ])
-            .sign_with_keys(&keys)
+            .finalize(&keys)
             .unwrap()
     }
 
@@ -495,7 +495,7 @@ mod tests {
                 Tag::parse(["s", "pending"]).unwrap(),
                 Tag::parse(["f", "USD"]).unwrap(),
             ])
-            .sign_with_keys(&keys)
+            .finalize(&keys)
             .unwrap();
         let order = parse_order_event(&event, None).unwrap();
         assert_eq!(order.fiat_amount, None);
@@ -513,7 +513,7 @@ mod tests {
         assert_eq!(filter.authors, Some([mostro].into_iter().collect()));
         let s_values = filter
             .generic_tags
-            .get(&SingleLetterTag::lowercase(Alphabet::S))
+            .get(&SingleLetterTag::LOWERCASE_S)
             .expect("filter must carry an `s` tag");
         assert_eq!(s_values.iter().cloned().collect::<Vec<_>>(), vec!["pending".to_string()]);
         assert_eq!(filter.since, None, "the pending book must not be time-windowed");
@@ -531,7 +531,7 @@ mod tests {
         assert_eq!(filter.authors, Some([mostro].into_iter().collect()));
         assert_eq!(filter.since, Some(since));
         assert!(
-            !filter.generic_tags.contains_key(&SingleLetterTag::lowercase(Alphabet::S)),
+            !filter.generic_tags.contains_key(&SingleLetterTag::LOWERCASE_S),
             "status changes of every kind must flow through this filter"
         );
         assert_eq!(filter.limit, None);
@@ -553,8 +553,8 @@ mod tests {
         client.connect().await;
         let timeout = std::time::Duration::from_secs(15);
 
-        let pending = client.fetch_events(pending_orders_filter(&mostro), timeout).await.unwrap();
-        let unbounded = client.fetch_events(all_orders_filter(&mostro), timeout).await.unwrap();
+        let pending = client.fetch_events(pending_orders_filter(&mostro)).timeout(timeout).await.unwrap();
+        let unbounded = client.fetch_events(all_orders_filter(&mostro)).timeout(timeout).await.unwrap();
 
         let is_pending = |e: &Event| {
             e.tags.iter().any(|t| t.as_slice().first().map(|s| s.as_str()) == Some("s")

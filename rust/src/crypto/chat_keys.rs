@@ -11,21 +11,17 @@
 /// * `K_sign` — signs the outer kind 14 event; `pub(K_sign)` is the author
 ///   every client filters on. Never disclosed.
 ///
-/// The ECDH here is `nostr::util::generate_shared_key` (the raw x-coordinate
-/// of the shared point) — **not** `ecdh::derive_nip04_shared_key`, which
-/// hashes it with SHA-256. The spec's test vector is derived from the raw
-/// form; mixing the two silently yields a different conversation.
+/// The ECDH is the raw x-coordinate of the shared point — **not**
+/// `ecdh::derive_nip04_shared_key`, which hashes it with SHA-256. The spec's
+/// test vector is derived from the raw form; mixing the two silently yields a
+/// different conversation.
+///
+/// Since nostr 0.45 made its `generate_shared_key` crate-private, the
+/// derivation is delegated to `mostro_core::chat::derive_chat_keys`, which
+/// implements the same HKDF split with the same `info` strings. The test
+/// vector below pins that equivalence.
 use anyhow::{anyhow, Result};
-// Leading `::` selects the `hkdf` crate: `nostr_sdk::prelude` also exports a
-// module by that name, so a plain `use hkdf::Hkdf` is ambiguous.
-use ::hkdf::Hkdf;
 use nostr_sdk::prelude::*;
-use nostr_sdk::util::generate_shared_key;
-use sha2::Sha256;
-
-/// HKDF `info` strings. Changing either value changes the wire format.
-const CONV_INFO: &[u8] = b"mostro:chat:conv:v1";
-const SIGN_INFO: &[u8] = b"mostro:chat:sign:v1";
 
 /// Derive the domain-separated conversation and signing keys for one order.
 ///
@@ -34,29 +30,8 @@ const SIGN_INFO: &[u8] = b"mostro:chat:sign:v1";
 ///
 /// Returns `(K_conv, K_sign)`.
 pub fn derive_chat_keys(own_trade: &Keys, peer_trade: &PublicKey) -> Result<(Keys, Keys)> {
-    let shared = generate_shared_key(own_trade.secret_key(), peer_trade)
-        .map_err(|e| anyhow!("chat ECDH failed: {e}"))?;
-    let hkdf = Hkdf::<Sha256>::new(None, &shared);
-
-    let derive = |info: &[u8]| -> Result<Keys> {
-        // Retry with a counter byte on the negligible chance that the output
-        // is not a valid secp256k1 secret key (zero or >= curve order).
-        for counter in 0u16..=255 {
-            let mut labelled = info.to_vec();
-            if counter > 0 {
-                labelled.push(counter as u8);
-            }
-            let mut out = [0u8; 32];
-            hkdf.expand(&labelled, &mut out)
-                .map_err(|e| anyhow!("HKDF expand failed: {e}"))?;
-            if let Ok(sk) = SecretKey::from_slice(&out) {
-                return Ok(Keys::new(sk));
-            }
-        }
-        Err(anyhow!("HKDF failed to produce a valid secret key"))
-    };
-
-    Ok((derive(CONV_INFO)?, derive(SIGN_INFO)?))
+    mostro_core::chat::derive_chat_keys(own_trade, peer_trade)
+        .map_err(|e| anyhow!("chat key derivation failed: {e}"))
 }
 
 #[cfg(test)]

@@ -27,6 +27,12 @@ String localizedDaemonError(
   if (raw.contains('NodeCapabilitiesUnknown')) {
     return l10n.nodeCapabilitiesUnknown;
   }
+  // The node is in maintenance mode (mostro-core 0.14.6 `MaintenanceMode`):
+  // it refuses new orders and takes until it comes back. Waiting or picking
+  // another node in Settings are the only remedies.
+  if (raw.contains('MaintenanceMode')) {
+    return l10n.mostroMaintenanceMode;
+  }
   // The daemon never answered within the reply window.
   if (raw.contains('NoDaemonResponse')) {
     return l10n.sessionTimeoutMessage;

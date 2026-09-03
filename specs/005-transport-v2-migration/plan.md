@@ -1,5 +1,11 @@
 # Implementation Plan: Transport v2 — NIP-44 Direct Messaging
 
+> **Scope note (post-005)**: this feature migrated the *daemon* channel only and
+> deliberately left peer/dispute chat on gift wrap (kind 1059). #246 later moved
+> chat to the kind 14 chat envelope, so no channel uses kind 1059 any more. The
+> "chat stays on gift wrap" steps below are a record of what 005 did, not a live
+> requirement — see `specs/004-mostro-p2p-client/contracts/messages.md`.
+
 **Branch**: `005-transport-v2-migration` | **Date**: 2026-06-19 | **Spec**: [spec.md](spec.md)
 **Reference**: [`.specify/v1-reference/TRANSPORT_V2_MIGRATION.md`](../../.specify/v1-reference/TRANSPORT_V2_MIGRATION.md)
 

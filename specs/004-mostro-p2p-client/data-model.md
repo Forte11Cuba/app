@@ -155,7 +155,7 @@ disputes. Persisted locally after decryption.
 | is_read | bool | Whether user has seen this message |
 | created_at | Timestamp | When message was sent |
 | received_at | Timestamp | When message was received locally |
-| nostr_event_id | String? | Incoming event ID for dedup (Kind 14 from daemon / Kind 1059 from peer chat) |
+| nostr_event_id | String? | Incoming event ID for dedup (Kind 14 — from the daemon, or a peer-chat envelope) |
 
 **Validation rules**:
 - `content` MUST not be empty.
@@ -242,7 +242,7 @@ Outgoing messages queued when offline.
 | Field | Type | Description |
 |-------|------|-------------|
 | id | UUID | Primary key |
-| event_json | String | Serialized outbound Nostr event (Kind 14 NIP-44 for daemon actions; Kind 1059 gift wrap for peer chat) |
+| event_json | String | Serialized outbound Nostr event (Kind 14 NIP-44 throughout: daemon actions, and the chat envelope for peer chat) |
 | target_relays | String | JSON array of relay URLs to publish to |
 | created_at | Timestamp | When queued |
 | retry_count | u32 | Number of send attempts |

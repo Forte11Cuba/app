@@ -7,6 +7,12 @@
 protocol-v1 gift wrap (kind 1059). This app targets **protocol v2 only** — no dual
 support. Behavioural reference: `.specify/v1-reference/TRANSPORT_V2_MIGRATION.md`.
 
+> **Scope note (post-005)**: this feature deliberately migrated the *daemon*
+> channel only and left peer/dispute chat on gift wrap. #246 later moved chat to
+> the kind 14 chat envelope, so no channel uses kind 1059 any more. The chat
+> carve-out below (User Story 2, FR-004) is a record of 005's scope; the live
+> chat contract is `specs/004-mostro-p2p-client/contracts/messages.md`.
+
 ---
 
 ## User Scenarios & Testing *(mandatory)*
@@ -40,9 +46,15 @@ received and parsed.
 
 ### User Story 2 — Peer-to-peer chat is unaffected (Priority: P1)
 
+> **Superseded by #246.** This story scoped the migration: chat was deliberately
+> left alone so the daemon transport could move on its own. Chat has since moved
+> too — to the **chat envelope**, not to the daemon's form — so the requirement
+> below is a record of 005's scope, not a live one. See
+> `specs/004-mostro-p2p-client/contracts/messages.md`.
+
 A user in an active trade exchanges encrypted chat messages with the counterparty and
-(if disputed) with an admin. This traffic continues to use NIP-59 gift wrap (kind 1059)
-and is unchanged by the transport migration.
+(if disputed) with an admin. At the time of this migration that traffic used NIP-59
+gift wrap (kind 1059) and was unchanged by it.
 
 **Why this priority**: Regression guard. The migration must not break existing chat.
 
@@ -52,7 +64,8 @@ delivery and decryption are unchanged.
 **Acceptance Scenarios**:
 
 1. **Given** an active trade, **When** a peer chat message is sent, **Then** it is
-   still wrapped as a kind-1059 gift wrap and delivered/decrypted as before.
+   delivered and decrypted as before — under 005, still wrapped as a kind-1059
+   gift wrap; since #246, as a kind-14 chat envelope.
 
 ---
 
@@ -74,8 +87,13 @@ delivery and decryption are unchanged.
   verdict.
 - **FR-003**: Incoming kind-14 Mostro replies MUST be disambiguated from NIP-17 peer
   chat by author = node pubkey (subscription author-pin + per-event re-check).
-- **FR-004**: NIP-17 peer-to-peer chat and dispute-admin chat MUST remain on gift
-  wrap (kind 1059), unchanged.
+- **FR-004**: Peer-to-peer chat and dispute-admin chat MUST NOT be changed by this
+  migration. *(As written in 005 this read "MUST remain on gift wrap (kind 1059)".
+  **Superseded by #246**, which moved both to the chat envelope — a kind 14 outer
+  event signed with `K_sign`, carrying a NIP-44-encrypted inner kind 1 signed by
+  the trade key — to close a gift-wrap flood attack. This client now reads and
+  writes no kind 1059 in either direction; the live contract is
+  `specs/004-mostro-p2p-client/contracts/messages.md`.)*
 - **FR-005**: Outgoing v2 events MUST carry no NIP-40 expiration tag (`expiration:
   None`), mirroring the reference client; the daemon fills its own.
 - **FR-006**: Full-privacy mode MUST behave as today (identity key = trade key).
