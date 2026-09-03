@@ -13,6 +13,7 @@ use anyhow::{anyhow, Result};
 use bip32::{DerivationPath, XPrv};
 use bip39::Mnemonic;
 use nostr_sdk::prelude::{Keys, SecretKey};
+use zeroize::Zeroizing;
 
 const DERIVATION_PREFIX: &str = "m/44'/1237'/38383'/0";
 
@@ -41,20 +42,38 @@ pub fn derive_trade_key(mnemonic_words: &[String], index: u32) -> Result<Keys> {
     derive_at_index(mnemonic_words, index)
 }
 
+/// Derive the raw BIP-39 seed from a mnemonic — the one place in this file that
+/// turns words into a seed.
+///
+/// It is what [`derive_at_index`] feeds into BIP-32, so identity keys, trade
+/// keys and the Cashu wallet all descend from the same bytes with the same
+/// empty passphrase (NIP-06). `cdk` derives its blinding secrets from a 64-byte
+/// seed, which is what makes the ecash recoverable from the words the user
+/// already backed up — one secret to protect, not two.
+///
+/// Returned in a [`Zeroizing`] wrapper so the copy is wiped when the caller
+/// drops it: the seed is the whole account, and it crosses into a third-party
+/// crate.
+pub fn derive_bip39_seed(mnemonic_words: &[String]) -> Result<Zeroizing<[u8; 64]>> {
+    let phrase = mnemonic_words.join(" ");
+    let mnemonic = Mnemonic::parse(&phrase).map_err(|e| anyhow!("invalid mnemonic: {e}"))?;
+    Ok(Zeroizing::new(mnemonic.to_seed("")))
+}
+
 // ── Internal ─────────────────────────────────────────────────────────────────
 
 fn derive_at_index(mnemonic_words: &[String], index: u32) -> Result<Keys> {
-    let phrase = mnemonic_words.join(" ");
-    let mnemonic = Mnemonic::parse(&phrase).map_err(|e| anyhow!("invalid mnemonic: {e}"))?;
-    // BIP-39 seed — no passphrase per the Nostr NIP-06 convention.
-    let seed = mnemonic.to_seed("");
+    // The same seed the Cashu wallet is handed — derived here rather than
+    // re-parsed, so there is one definition of "the seed of this mnemonic" and
+    // this path gets the zeroizing wrapper too.
+    let seed = derive_bip39_seed(mnemonic_words)?;
 
     let path_str = format!("{}/{}", DERIVATION_PREFIX, index);
     let path: DerivationPath = path_str
         .parse()
         .map_err(|e| anyhow!("derivation path parse: {e}"))?;
 
-    let xprv = XPrv::derive_from_path(seed, &path)
+    let xprv = XPrv::derive_from_path(seed.as_slice(), &path)
         .map_err(|e| anyhow!("BIP-32 derive error: {e}"))?;
 
     // k256 signing key → raw 32-byte secret
@@ -66,6 +85,14 @@ fn derive_at_index(mnemonic_words: &[String], index: u32) -> Result<Keys> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The canonical BIP-39 test mnemonic, valid checksum and all.
+    fn abandon_mnemonic() -> Vec<String> {
+        "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
+            .split(' ')
+            .map(str::to_string)
+            .collect()
+    }
 
     #[test]
     fn round_trip_mnemonic_generates_stable_keys() {
@@ -115,6 +142,55 @@ mod tests {
         let identity = derive_master_key(&words).unwrap();
         let trade = derive_trade_key(&words, 1).unwrap();
         assert_ne!(identity.public_key(), trade.public_key());
+    }
+
+    /// The Cashu wallet seeds itself from this, so it is not enough that the
+    /// derivation is stable — it has to be *the* BIP-39 seed, or the ecash is
+    /// recoverable only by this app and the user's 12 words buy them nothing in
+    /// any other wallet. The vector is the canonical all-`abandon` mnemonic
+    /// with an empty passphrase.
+    #[test]
+    fn the_bip39_seed_matches_the_standard_vector() {
+        // Arrange
+        let words = abandon_mnemonic();
+
+        // Act
+        let seed = derive_bip39_seed(&words).unwrap();
+
+        // Assert
+        assert_eq!(
+            hex::encode(*seed),
+            "5eb00bbddcf069084889a8ab9155568165f5c453ccb85e70811aaed6f6da5fc19a5ac40b389cd370d086206dec8aa6c43daea6690f20ad3d8d48b2d2ce9e38e4"
+        );
+    }
+
+    /// The derivation path is a protocol constant shared with the daemon, so
+    /// what comes out of it is one too: if these change, every existing user's
+    /// identity and trade keys change with them and their account is gone. The
+    /// other tests here only check that the derivation agrees with itself,
+    /// which a rewrite of this file would also do.
+    #[test]
+    fn the_derived_keys_are_pinned_to_their_path() {
+        // Arrange
+        let words = abandon_mnemonic();
+
+        // Act / Assert — m/44'/1237'/38383'/0/{0,1} for the canonical mnemonic.
+        assert_eq!(
+            derive_master_key(&words).unwrap().public_key().to_hex(),
+            "faa27ea81c85e00798598b46d1f36c1700221a1242b563861fa536dc2314f1df"
+        );
+        assert_eq!(
+            derive_trade_key(&words, 1).unwrap().public_key().to_hex(),
+            "f5afa0b09d50fc78d3b3836122b43105a018a30e5ab3eccb36480a525271f3f1"
+        );
+    }
+
+    #[test]
+    fn a_mnemonic_that_is_not_one_is_refused() {
+        // Assert — the seed derivation validates rather than hashing whatever
+        // it was handed; an nsec-imported identity has no words at all.
+        assert!(derive_bip39_seed(&[]).is_err());
+        assert!(derive_bip39_seed(&["not".to_string(), "a".to_string(), "mnemonic".to_string()]).is_err());
     }
 
     #[test]
