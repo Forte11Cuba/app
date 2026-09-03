@@ -161,6 +161,13 @@ pub trait Storage: Send + Sync {
         order_id: &str,
     ) -> Result<Option<crate::api::types::TradeInfo>>;
 
+    /// Delete a persisted trade by the order ID it is associated with.
+    ///
+    /// Chat messages are keyed separately (`messages.trade_id` holds the
+    /// order id, no FK) and are deliberately NOT touched here. No-op when
+    /// no matching trade exists.
+    async fn delete_trade_by_order_id(&self, order_id: &str) -> Result<()>;
+
     /// Update the order ID inside a persisted trade (e.g. local UUID → daemon UUID).
     ///
     /// Loads the trade whose `order.id == old_order_id`, replaces `order.id`
@@ -182,4 +189,23 @@ pub trait Storage: Send + Sync {
         hold_invoice: Option<String>,
         amount_sats: Option<u64>,
     ) -> Result<()>;
+
+    /// Persist the counterparty (taker) reputation snapshot on a trade
+    /// identified by `order.id` (issue #305). No-op when no matching trade
+    /// exists. `days` saturates at `u32::MAX`; a full-privacy taker sends no
+    /// snapshot, so this is only called when one was carried.
+    async fn update_trade_peer_reputation(
+        &self,
+        order_id: &str,
+        rating: f64,
+        reviews: u32,
+        days: u32,
+    ) -> Result<()>;
+
+    /// Set the durable "local user rated this trade" marker (`rated_at`, unix
+    /// seconds) on the trade identified by `order.id` (issue #339). Written
+    /// after `submit_rating` publishes so the rated state and the
+    /// duplicate-rating guard survive a restart. No-op when no matching trade
+    /// exists.
+    async fn mark_trade_rated(&self, order_id: &str, rated_at: i64) -> Result<()>;
 }
