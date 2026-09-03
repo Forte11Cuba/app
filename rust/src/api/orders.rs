@@ -2719,7 +2719,7 @@ static SUBSCRIPTION_ACTIVE: AtomicBool = AtomicBool::new(false);
 /// loop exits (pool shutdown or channel closed).
 ///
 /// Internally spawns a background Tokio task that:
-/// 1. Subscribes to `all_orders_filter()` via the relay pool client.
+/// 1. Subscribes to the `order_book_filters()` pair via the relay pool client.
 /// 2. Loops over `ClientNotification::Event` messages.
 /// 3. Parses each Kind 38383 event via `parse_order_event` and upserts it
 ///    into the order book, which broadcasts the update to all `OrdersStream`
@@ -2826,6 +2826,39 @@ fn spawn_stale_sweep() {
     });
 }
 
+/// Look a single order's public status up directly on the relays, bypassing
+/// the in-memory book.
+///
+/// The book is fed by [`order_book_filters`], whose any-status half is
+/// windowed to `RECENT_ORDERS_WINDOW_SECS` (48 h). A trade whose cancellation
+/// the app missed while offline for longer than that window therefore has no
+/// cached status at all, and the sweep would keep it waiting forever — which
+/// is exactly the case the sweep exists for. An unwindowed `d`-tag query
+/// returns a single addressable event, so it is cheap and no relay replay cap
+/// can hide it.
+async fn fetch_public_order_status(order_id: &str) -> Option<crate::api::types::OrderStatus> {
+    let pool = crate::api::nostr::get_pool().ok()?;
+    let mostro_pubkey = nostr_sdk::prelude::PublicKey::from_hex(&active_mostro_pubkey()).ok()?;
+    let filter = crate::nostr::order_events::trade_order_filter(&mostro_pubkey, order_id);
+    let events = match pool
+        .client()
+        .fetch_events(filter)
+        .timeout(std::time::Duration::from_secs(10))
+        .await
+    {
+        Ok(events) => events,
+        Err(e) => {
+            log::warn!("[orders] sweep: d-tag fetch for {order_id} failed: {e}");
+            return None;
+        }
+    };
+    events
+        .into_iter()
+        .max_by_key(|e| e.created_at)
+        .and_then(|e| crate::nostr::order_events::parse_order_event(&e, None))
+        .map(|o| o.status)
+}
+
 /// Reconcile trades stuck in waiting states with the daemon's public book.
 ///
 /// Covers cancellations whose daemon message the app never received (closed or
@@ -2862,7 +2895,12 @@ async fn run_stale_sweep_once() {
         }
         examined += 1;
         let oid = trade.order.id.clone();
-        let book_status = order_book().get_order(&oid).await.map(|o| o.status);
+        // The book first (free); on a miss, ask the relays for this one order.
+        // A miss is the long-offline case the windowed filter cannot cover.
+        let book_status = match order_book().get_order(&oid).await.map(|o| o.status) {
+            Some(status) => Some(status),
+            None => fetch_public_order_status(&oid).await,
+        };
         match sweep_action(trade.order.is_mine, book_status.as_ref()) {
             SweepAction::Wipe => match db.delete_trade_by_order_id(&oid).await {
                 Ok(()) => {
@@ -2943,35 +2981,68 @@ async fn refetch_active_node_orders() {
             return;
         }
     };
-    let order_filter = crate::nostr::order_events::all_orders_filter(&mostro_pubkey);
-    match pool
-        .client()
-        .fetch_events(order_filter)
-        .timeout(std::time::Duration::from_secs(10))
-        .await
-    {
-        Ok(events) => {
-            crate::api::logging::blog_info(
-                "orders",
-                format!("refetched {} current orders for active node", events.len()),
-            );
-            for event in events.into_iter() {
-                ingest_order_event_with(&event, Publish::WhenBatchEnds).await;
-            }
-            // One emission for the batch. Publishing per event made a refetch
-            // O(N²): each upsert cloned the whole book and sent it across the
-            // bridge, so N orders cost N clones of an N-element vector. This
-            // path runs on cold start, on every node switch, and on every
-            // pull-to-refresh.
-            order_book().publish().await;
-        }
-        Err(e) => log::warn!("[orders] refetch: fetch current orders failed: {e}"),
+    // Same two filters as the live subscription (see `order_book_filters`).
+    let (pending_filter, recent_filter) = order_book_filters(&mostro_pubkey);
+    let client = pool.client();
+    let timeout = std::time::Duration::from_secs(10);
+    // Fetched independently on purpose: the two scopes fail independently, and
+    // losing the recent-changes pass must not throw away a pending book that
+    // arrived fine (that would leave the UI empty on a transient relay error).
+    let pending = client.fetch_events(pending_filter).timeout(timeout).await;
+    let recent = client.fetch_events(recent_filter).timeout(timeout).await;
+    if let Err(e) = &pending {
+        log::warn!("[orders] refetch: pending-book fetch failed: {e}");
     }
+    if let Err(e) = &recent {
+        log::warn!("[orders] refetch: recent-changes fetch failed: {e}");
+    }
+    if pending.is_err() && recent.is_err() {
+        // Both scopes failed: nothing to ingest, and the warnings above say why.
+        return;
+    }
+    let mut events: Vec<nostr_sdk::prelude::Event> = Vec::new();
+    for batch in [pending, recent].into_iter().flatten() {
+        events.extend(batch);
+    }
+    crate::api::logging::blog_info(
+        "orders",
+        format!("refetched {} current orders for active node", events.len()),
+    );
+    for event in events.into_iter() {
+        ingest_order_event_with(&event, Publish::WhenBatchEnds).await;
+    }
+    // One emission for the batch. Publishing per event made a refetch
+    // O(N²): each upsert cloned the whole book and sent it across the
+    // bridge, so N orders cost N clones of an N-element vector. This
+    // path runs on cold start, on every node switch, and on every
+    // pull-to-refresh.
+    order_book().publish().await;
 }
 
-/// Stable subscription ID for the Kind 38383 order-book feed.
+/// Stable subscription ID for the Kind 38383 pending order-book feed.
 fn orders_subscription_id() -> nostr_sdk::prelude::SubscriptionId {
     nostr_sdk::prelude::SubscriptionId::new("mostro-orders")
+}
+
+/// Stable subscription ID for the windowed any-status Kind 38383 feed that
+/// carries the transitions taking an order *out* of the book.
+fn recent_orders_subscription_id() -> nostr_sdk::prelude::SubscriptionId {
+    nostr_sdk::prelude::SubscriptionId::new("mostro-orders-recent")
+}
+
+/// The pair of Kind 38383 filters that together give a complete, bounded
+/// view of a node's book: every pending order plus every status change of
+/// the last [`RECENT_ORDERS_WINDOW_SECS`] hours. Shared by the live
+/// subscription and the refetch so neither can drift back to the
+/// unbounded query.
+///
+/// [`RECENT_ORDERS_WINDOW_SECS`]: crate::nostr::order_events::RECENT_ORDERS_WINDOW_SECS
+fn order_book_filters(
+    mostro_pubkey: &nostr_sdk::prelude::PublicKey,
+) -> (nostr_sdk::prelude::Filter, nostr_sdk::prelude::Filter) {
+    use crate::nostr::order_events::{pending_orders_filter, recent_orders_filter, RECENT_ORDERS_WINDOW_SECS};
+    let since = nostr_sdk::prelude::Timestamp::now() - RECENT_ORDERS_WINDOW_SECS;
+    (pending_orders_filter(mostro_pubkey), recent_orders_filter(mostro_pubkey, since))
 }
 
 /// Stable subscription ID for the Kind 14 Mostro-reply feed.
@@ -2996,17 +3067,28 @@ async fn subscribe_node_filters(
     mostro_pubkey: nostr_sdk::prelude::PublicKey,
     trade_pubkeys: Vec<nostr_sdk::prelude::PublicKey>,
 ) -> Result<()> {
-    let order_filter = crate::nostr::order_events::all_orders_filter(&mostro_pubkey);
+    // Two filters, not one unbounded one: relays cap how many stored events
+    // they replay per REQ (relay.mostro.network: 300, oldest-first when no
+    // limit is given), so a bare `kind+author` filter comes back with the
+    // node's dead history and none of the live book. See `pending_orders_filter`.
+    let (pending_filter, recent_filter) = order_book_filters(&mostro_pubkey);
     client
-        .subscribe(order_filter)
+        .subscribe(pending_filter)
         .with_id(orders_subscription_id())
         .await
         .map_err(|e| anyhow::anyhow!("order subscribe failed: {e}"))?;
+    client
+        .subscribe(recent_filter)
+        .with_id(recent_orders_subscription_id())
+        .await
+        .map_err(|e| anyhow::anyhow!("recent-orders subscribe failed: {e}"))?;
     crate::api::logging::blog_info(
         "relay",
         format!(
-            "sub created id={} kinds=[38383] author={}",
+            "subs created id={} (kinds=[38383] s=pending) + id={} (kinds=[38383] since=-{}h) author={}",
             orders_subscription_id(),
+            recent_orders_subscription_id(),
+            crate::nostr::order_events::RECENT_ORDERS_WINDOW_SECS / 3600,
             crate::api::logging::short_id(&mostro_pubkey.to_hex()),
         ),
     );

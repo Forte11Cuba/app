@@ -100,6 +100,32 @@ Independent one-to-few-line fixes. Land in any order.
   tag, with no client-side retention policy to derive a cutoff from.
 - **If the unbounded replay is to be bounded, it needs pagination or a status-scoped protocol
   query** — and a test with more than N active orders proving completeness.
+- **Superseded (2026-09-02): the unbounded replay was never complete either.** Measured against
+  the default node (`82fa8cb9…`, `nak req -k 38383 -a <pk>`): `relay.mostro.network` caps every
+  REQ at **300 stored events**, and with no `limit` it serves the **oldest** 300 — December 2025
+  to April 2026, **zero `pending`** — while the live book was 33 orders. A cold start therefore
+  showed only orders published while the app was open unless `nos.lol` (cap 500, newest-first)
+  happened to answer. Shipped as the **status-scoped query** this entry asked for:
+  `pending_orders_filter` (`#s=pending`, no window, no limit — the whole book is far below any
+  cap) plus `recent_orders_filter` (all statuses, `since = now − 48 h`, as v1's
+  `orderFilterDurationHours`) so the transitions that take an order *out* of the book still
+  arrive. Both the live subscription and the refetch go through `order_book_filters()`. The
+  two other relays in the node's kind 10002 list (`mostro-p2p.tech`, `relay.shadowbip.com`)
+  joined `DEFAULT_RELAYS` (live kind 10002 discovery itself landed separately, PR #385).
+- **What the 48 h window assumes.** `recent_orders_filter` cannot recover a non-`pending`
+  Kind 38383 update older than 48 h, so the book alone is not a reliable status source after
+  a longer offline stretch. That is fine for *display* (such an order is gone from the book
+  either way) but not for reconciliation, so `run_stale_sweep_once` no longer trusts a book
+  miss: for a waiting trade absent from the book it issues an unwindowed `d`-tag query
+  (`trade_order_filter`, one addressable event, no replay cap applies) and decides on that.
+  The window itself rests on the daemon's 24 h default order lifetime — double it, as v1 does.
+- **What it assumes about relays.** `ingest_order_event_with` replaces a book entry by `id`
+  without comparing `created_at`, so a relay that violates NIP-01 addressable semantics and
+  serves an obsolete `pending` copy can momentarily restore stale state. Correct relays cannot:
+  they keep only the latest event per `(kind, author, d)`. Open if it ever bites: guard the
+  upsert with `created_at` (the parser already carries `event.created_at`).
+- Still open: a completeness test against a relay holding more than 300 events, and a cold-start
+  test after more than 48 h offline.
 
 ### PR 1.7 — Surface stream lag instead of swallowing it `fix(observability)`
 - **Evidence:** `OrdersStream::next` silently swallows `broadcast::error::RecvError::Lagged`
