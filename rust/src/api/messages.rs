@@ -406,11 +406,10 @@ pub async fn send_message(trade_id: String, content: String) -> Result<ChatMessa
         );
     }
 
-    // Look up session to get peer pubkey and trade key index.
-    // If no session exists (e.g. order not yet active), fall back to local-only.
-    let session = crate::mostro::session::session_manager()
-        .get_session(&trade_id)
-        .await;
+    // Look up session to get peer pubkey and trade key index — rebuilding it
+    // from the trade row when absent (#381). Local-only remains the fallback
+    // for trades the row cannot serve either (peer not yet revealed, web).
+    let session = session_or_rebuild(&trade_id).await;
 
     // Local-only defaults, replaced on successful publish by the inner
     // event's identity so both sides agree on the message id.
@@ -510,9 +509,9 @@ pub async fn send_file(
         bail!("UnsupportedFileType: {mime_type}");
     }
 
-    // 1. Fetch session once and extract everything needed for the entire flow.
-    let session = crate::mostro::session::session_manager()
-        .get_session(&trade_id)
+    // 1. Fetch session once — rebuilt from the trade row when absent (#381) —
+    // and extract everything needed for the entire flow.
+    let session = session_or_rebuild(&trade_id)
         .await
         .ok_or_else(|| anyhow!("SessionNotFound: {trade_id}"))?;
 
@@ -635,10 +634,9 @@ pub async fn download_attachment(message_id: String) -> Result<FileDownloadResul
         bail!("AttachmentNotFound: message has no valid Blossom URL in content");
     }
 
-    // 2. Get the session shared key to decrypt.
-    let session = crate::mostro::session::session_manager()
-        .get_session(&msg.trade_id)
-        .await;
+    // 2. Get the session shared key to decrypt — rebuilding the session from
+    // the trade row when absent (#381).
+    let session = session_or_rebuild(&msg.trade_id).await;
 
     let shared_key: [u8; 32] = match session {
         None => bail!("SessionNotFound: cannot decrypt attachment without session"),
@@ -1466,6 +1464,88 @@ fn chat_still_relevant(trade: &crate::api::types::TradeInfo) -> bool {
         )
 }
 
+/// Session lookup with a durable fallback (#381): a missing session is
+/// rebuilt from the persisted trade row before any chat function degrades
+/// (local-only send, `SessionNotFound`). Sessions are memory-only, so after
+/// a restart the send path would otherwise stay broken until a relay
+/// replays the peer reveal — and permanently, if every relay has pruned the
+/// trade's daemon messages. The row already carries everything needed:
+/// trade key index and counterparty pubkey.
+///
+/// Gated by [`chat_still_relevant`], the same invariant guard the startup
+/// resubscription uses: without it, a poisoned pre-#334 row (counterparty =
+/// the Mostro node) would be resurrected into a session with garbage keys.
+/// On web the trades store is a stub (#233), the row lookup returns `None`
+/// and behavior is unchanged — the session remains replay-only there.
+async fn session_or_rebuild(trade_id: &str) -> Option<crate::mostro::session::Session> {
+    let mgr = crate::mostro::session::session_manager();
+    if let Some(s) = mgr.get_session(trade_id).await {
+        return Some(s);
+    }
+    let db = crate::db::app_db::db()?;
+    let trade = db.get_trade_by_order_id(trade_id).await.ok().flatten()?;
+    if !chat_still_relevant(&trade) {
+        return None;
+    }
+    let trade_keys = match crate::api::identity::get_active_trade_keys(trade.trade_key_index).await
+    {
+        Ok(k) => k,
+        Err(e) => {
+            log::warn!("[messages] session rebuild trade={trade_id}: key load failed: {e}");
+            return None;
+        }
+    };
+    rebuild_session(&trade, &trade_keys).await
+}
+
+/// The derivation half of [`session_or_rebuild`], split so tests can inject
+/// generated keys instead of mutating the process-global identity (the same
+/// seam as `apply_peer_reveal` in `orders.rs`). Derives the ECDH shared key
+/// from `(our_trade_key, row.counterparty_pubkey)`, creates the session and
+/// populates it — the session stays a pure cache of the row.
+async fn rebuild_session(
+    trade: &crate::api::types::TradeInfo,
+    trade_keys: &nostr_sdk::Keys,
+) -> Option<crate::mostro::session::Session> {
+    let order_id = &trade.order.id;
+    let peer_pk = match nostr_sdk::PublicKey::from_hex(&trade.counterparty_pubkey) {
+        Ok(pk) => pk,
+        Err(e) => {
+            log::warn!("[messages] session rebuild order={order_id}: invalid peer pubkey: {e}");
+            return None;
+        }
+    };
+    let shared_key = match crate::crypto::ecdh::derive_nip04_shared_key(trade_keys, &peer_pk) {
+        Ok(k) => k,
+        Err(e) => {
+            log::warn!("[messages] session rebuild order={order_id}: ECDH failed: {e}");
+            return None;
+        }
+    };
+    let mgr = crate::mostro::session::session_manager();
+    let mut session = match mgr
+        .create_session(
+            order_id.clone(),
+            trade.role.clone(),
+            trade.trade_key_index,
+            trade.order.clone(),
+        )
+        .await
+    {
+        Ok(s) => s,
+        // Benign race: a concurrent rebuild or a live peer reveal created it
+        // between our lookup and here — theirs is at least as complete.
+        Err(_) => return mgr.get_session(order_id).await,
+    };
+    session.peer_pubkey = Some(trade.counterparty_pubkey.clone());
+    session.shared_key = Some(shared_key);
+    if let Err(e) = mgr.update_session(order_id, session.clone()).await {
+        log::warn!("[messages] session rebuild order={order_id}: update failed: {e}");
+    }
+    log::info!("[messages] session rebuilt from trade row order={order_id} (#381)");
+    Some(session)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1961,6 +2041,172 @@ mod tests {
         let mut canceled = base;
         canceled.order.status = OrderStatus::Canceled;
         assert!(!chat_still_relevant(&canceled));
+    }
+
+    /// A live trade row shaped like the ones `take_order` persists after the
+    /// peer reveal: known counterparty, non-terminal status.
+    fn live_trade(order_id: &str, counterparty: &str, index: u32) -> crate::api::types::TradeInfo {
+        use crate::api::types::*;
+        TradeInfo {
+            id: order_id.into(),
+            order: OrderInfo {
+                id: order_id.into(),
+                kind: OrderKind::Sell,
+                status: OrderStatus::Active,
+                amount_sats: None,
+                fiat_amount: Some(100.0),
+                fiat_amount_min: None,
+                fiat_amount_max: None,
+                fiat_code: "VES".into(),
+                payment_method: "bank".into(),
+                premium: 0.0,
+                creator_pubkey: "maker".into(),
+                created_at: 1,
+                expires_at: None,
+                is_mine: false,
+                rating: 0.0,
+                total_reviews: 0,
+                days_active: 0,
+            },
+            role: TradeRole::Buyer,
+            counterparty_pubkey: counterparty.into(),
+            current_step: TradeStep::Buyer(BuyerStep::FiatSent),
+            hold_invoice: None,
+            buyer_invoice: None,
+            trade_key_index: index,
+            cooperative_cancel_state: None,
+            timeout_at: None,
+            started_at: 1,
+            completed_at: None,
+            outcome: None,
+            peer_rating: None,
+            peer_reviews: None,
+            peer_days: None,
+            rated_at: None,
+        }
+    }
+
+    /// The derivation half of the #381 fallback: a live row plus our trade
+    /// keys yields a session carrying the row's role/index/peer and the real
+    /// ECDH shared key. Exercised with generated keys — loading a real
+    /// identity would mutate process-global state (same seam as the
+    /// `apply_peer_reveal` tests in orders.rs).
+    #[tokio::test]
+    async fn rebuild_session_derives_from_trade_row() {
+        let order_id = uuid::Uuid::new_v4().to_string();
+        let trade_keys = nostr_sdk::Keys::generate();
+        let peer_keys = nostr_sdk::Keys::generate();
+        let trade = live_trade(&order_id, &peer_keys.public_key().to_hex(), 9);
+
+        let session = rebuild_session(&trade, &trade_keys)
+            .await
+            .expect("live row must rebuild a session");
+        assert!(matches!(session.role, crate::api::types::TradeRole::Buyer));
+        assert_eq!(session.trade_key_index, 9);
+        assert_eq!(
+            session.peer_pubkey.as_deref(),
+            Some(trade.counterparty_pubkey.as_str())
+        );
+        let expected =
+            crate::crypto::ecdh::derive_nip04_shared_key(&trade_keys, &peer_keys.public_key())
+                .expect("ECDH derivation");
+        assert_eq!(session.shared_key, Some(expected));
+
+        // Benign race arm: a second rebuild finds the session already created
+        // and returns the EXISTING one — even when called with other keys, it
+        // must not overwrite the first derivation.
+        let other_keys = nostr_sdk::Keys::generate();
+        let again = rebuild_session(&trade, &other_keys)
+            .await
+            .expect("existing session is returned, not rebuilt");
+        assert_eq!(again.shared_key, Some(expected));
+    }
+
+    /// A garbage counterparty on the row degrades to `None` — no session, no
+    /// panic. (Poisoned/terminal/empty rows never reach the derivation at
+    /// all: `session_or_rebuild` filters them with `chat_still_relevant`,
+    /// covered above.)
+    #[tokio::test]
+    async fn rebuild_session_rejects_unparseable_peer() {
+        let order_id = uuid::Uuid::new_v4().to_string();
+        let trade_keys = nostr_sdk::Keys::generate();
+        let trade = live_trade(&order_id, "not-a-pubkey", 1);
+        assert!(rebuild_session(&trade, &trade_keys).await.is_none());
+        assert!(crate::mostro::session::session_manager().get_session(&order_id).await.is_none());
+    }
+
+    /// The seam test for #381: `session_or_rebuild` is only useful if the
+    /// three chat functions actually call it — this drives `send_message`
+    /// end to end from a persisted row with NO session and asserts it takes
+    /// the publishable path (sender = our trade key, not the local-only
+    /// empty marker) and leaves the rebuilt session in the manager. Deleting
+    /// the fallback from `send_message` fails this test.
+    ///
+    /// `#[ignore]`d because it claims the process-global `app_db` OnceCell
+    /// and identity (same pattern and same mnemonic as
+    /// `peer_reveal_capture_is_wired_into_dispatch` in orders.rs, so the two
+    /// coexist under `--ignored`). Run with:
+    ///   cargo test --lib send_message_rebuilds_session -- --ignored
+    #[tokio::test]
+    #[ignore = "claims the process-global app_db and identity — run with --ignored"]
+    async fn send_message_rebuilds_session_from_trade_row() {
+        let db_path = std::env::temp_dir().join(format!(
+            "mostro-381-seam-test-{}.db",
+            uuid::Uuid::new_v4()
+        ));
+        crate::db::app_db::init_db(db_path.to_str().unwrap())
+            .await
+            .expect("init app db");
+        crate::api::identity::import_from_mnemonic(
+            "abandon abandon abandon abandon abandon abandon abandon abandon \
+             abandon abandon abandon about"
+                .split_whitespace()
+                .map(String::from)
+                .collect(),
+            false,
+        )
+        .await
+        .expect("import identity");
+
+        let trade_index = 5u32;
+        let trade_keys = crate::api::identity::get_active_trade_keys(trade_index)
+            .await
+            .expect("derive trade key");
+        let peer_keys = nostr_sdk::Keys::generate();
+        let peer_hex = peer_keys.public_key().to_hex();
+
+        let order_id = uuid::Uuid::new_v4().to_string();
+        crate::db::app_db::db()
+            .expect("db just initialized")
+            .save_trade(&live_trade(&order_id, &peer_hex, trade_index))
+            .await
+            .expect("save the post-reveal row");
+        assert!(
+            crate::mostro::session::session_manager().get_session(&order_id).await.is_none(),
+            "the restart shape: row persisted, session gone"
+        );
+
+        let msg = send_message(order_id.clone(), "hola".into())
+            .await
+            .expect("send returns the stored message");
+
+        // Publishable path, not local-only: the sender is our trade key.
+        // (Publish itself fails harmlessly here — no relay pool in tests —
+        // but local-only would have left sender_pubkey empty.)
+        assert_eq!(msg.sender_pubkey, trade_keys.public_key().to_hex());
+
+        // And the rebuilt session is now cached for every later call.
+        let session = crate::mostro::session::session_manager()
+            .get_session(&order_id)
+            .await
+            .expect("fallback must leave the session in the manager");
+        assert_eq!(session.peer_pubkey.as_deref(), Some(peer_hex.as_str()));
+        let expected =
+            crate::crypto::ecdh::derive_nip04_shared_key(&trade_keys, &peer_keys.public_key())
+                .expect("ECDH derivation");
+        assert_eq!(session.shared_key, Some(expected));
+
+        let _ = std::fs::remove_file(&db_path);
     }
 
     #[tokio::test]
