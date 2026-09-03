@@ -398,12 +398,22 @@ hard prerequisite, not a nice-to-have.
 - `rust/src/cashu/mod.rs` — `CashuWallet`:
   - `connect(mint_url)` — reachability + **required NUTs 07/11/12** + `sat` keyset
     (mirror of daemon `CashuClient::connect`);
-  - `balance()`, `receive_token(encoded)` (swap-in, DLEQ-verified),
-    `create_token(amount)` (send/export), `check_proofs_state()` (NUT-07);
+  - `balance()`, `receive_token(encoded)` (swap-in; DLEQ verified **before** the
+    swap — cdk's own receive path skips a proof that carries none),
+    `create_token(amount)` (send/export), `sweep_spent_proofs()` (NUT-07);
+  - the sweep is housekeeping, **not** recovery: cdk's state check ignores proofs
+    an operation reserved, so an unredeemed token of ours is not reclaimed by it.
+    Reclaiming one (`get_pending_sends` + `revoke_send`) is C10 — the single
+    exception here is a send whose `confirm` fails, which revokes its own
+    operation rather than leaving the proofs stranded;
   - proof storage via `cdk-sqlite` in the app data dir (own DB file; never mixes with
     the app's sqlite schema).
-- `rust/src/api/cashu.rs` — FRB: `cashu_connect_status`, `cashu_get_balance`,
-  `cashu_receive_token`, `cashu_create_token`, `on_cashu_wallet_changed` stream.
+- `rust/src/api/cashu.rs` — FRB: `cashu_connect`, `cashu_status`,
+  `cashu_disconnect`, `cashu_get_balance`, `cashu_receive_token`,
+  `cashu_create_token`, `cashu_sweep_spent_proofs`, `on_cashu_wallet_changed`
+  stream. Every operating call checks that the wallet is still bound to the mint
+  the *active* node resolves to (`CashuMintChanged`), not merely that the node
+  speaks Cashu.
 - Wallet initializes **lazily and only when** resolved mode == Cashu (from C1 when
   merged; behind a plain function parameter until then — no hard dependency).
 - Unit tests against a mocked/local mint where feasible; integration test target

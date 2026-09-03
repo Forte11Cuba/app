@@ -105,6 +105,37 @@ mod tests {
         assert_ne!(identity.public_key(), trade.public_key());
     }
 
+    /// The Cashu wallet seeds itself from this, so it is not enough that the
+    /// derivation is stable — it has to be *the* BIP-39 seed, or the ecash is
+    /// recoverable only by this app and the user's 12 words buy them nothing in
+    /// any other wallet. The vector is the canonical all-`abandon` mnemonic
+    /// with an empty passphrase.
+    #[test]
+    fn the_bip39_seed_matches_the_standard_vector() {
+        // Arrange
+        let words: Vec<String> = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
+            .split(' ')
+            .map(str::to_string)
+            .collect();
+
+        // Act
+        let seed = derive_bip39_seed(&words).unwrap();
+
+        // Assert
+        assert_eq!(
+            hex::encode(*seed),
+            "5eb00bbddcf069084889a8ab9155568165f5c453ccb85e70811aaed6f6da5fc19a5ac40b389cd370d086206dec8aa6c43daea6690f20ad3d8d48b2d2ce9e38e4"
+        );
+    }
+
+    #[test]
+    fn a_mnemonic_that_is_not_one_is_refused() {
+        // Assert — the seed derivation validates rather than hashing whatever
+        // it was handed; an nsec-imported identity has no words at all.
+        assert!(derive_bip39_seed(&[]).is_err());
+        assert!(derive_bip39_seed(&["not".to_string(), "a".to_string(), "mnemonic".to_string()]).is_err());
+    }
+
     #[test]
     fn different_indices_produce_different_keys() {
         let words = generate_mnemonic().unwrap();
