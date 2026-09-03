@@ -4890,6 +4890,56 @@ mod tests {
         assert!(session.shared_key.is_none());
     }
 
+    /// `create_session_with_peer` is the atomic counterpart (#381 review):
+    /// the session is complete from the first moment any reader can see it —
+    /// what the MANAGER returns for the order already carries peer and
+    /// shared key, so no concurrent send can observe a keyless intermediate
+    /// and degrade to local-only. Duplicate semantics match `create_session`.
+    #[tokio::test]
+    async fn session_created_with_peer_is_never_observable_keyless() {
+        let order_id = uuid::Uuid::new_v4().to_string();
+        let order = dummy_order_info(&order_id);
+        let peer_hex = nostr_sdk::Keys::generate().public_key().to_hex();
+        let shared = [7u8; 32];
+
+        let mgr = session_manager();
+        let returned = mgr
+            .create_session_with_peer(
+                order_id.clone(),
+                TradeRole::Buyer,
+                4,
+                order.clone(),
+                peer_hex.clone(),
+                shared,
+            )
+            .await
+            .unwrap();
+        assert_eq!(returned.peer_pubkey.as_deref(), Some(peer_hex.as_str()));
+        assert_eq!(returned.shared_key, Some(shared));
+
+        // The stored copy — what any concurrent reader gets — is the same
+        // complete session, not a keyless one later patched up.
+        let observed = mgr.get_session(&order_id).await.expect("session stored");
+        assert_eq!(observed.peer_pubkey.as_deref(), Some(peer_hex.as_str()));
+        assert_eq!(observed.shared_key, Some(shared));
+
+        // Same duplicate guard as create_session: second insert fails and
+        // leaves the original untouched.
+        let dup = mgr
+            .create_session_with_peer(
+                order_id.clone(),
+                TradeRole::Buyer,
+                4,
+                order,
+                "other-peer".into(),
+                [9u8; 32],
+            )
+            .await;
+        assert!(dup.is_err());
+        let kept = mgr.get_session(&order_id).await.expect("still stored");
+        assert_eq!(kept.peer_pubkey.as_deref(), Some(peer_hex.as_str()));
+    }
+
     // ── Peer-pubkey resolution ────────────────────────────────────────────────
 
     /// Symmetric reveal resolution (#334): whichever side our trade key

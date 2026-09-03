@@ -1501,8 +1501,8 @@ async fn session_or_rebuild(trade_id: &str) -> Option<crate::mostro::session::Se
 /// The derivation half of [`session_or_rebuild`], split so tests can inject
 /// generated keys instead of mutating the process-global identity (the same
 /// seam as `apply_peer_reveal` in `orders.rs`). Derives the ECDH shared key
-/// from `(our_trade_key, row.counterparty_pubkey)`, creates the session and
-/// populates it — the session stays a pure cache of the row.
+/// from `(our_trade_key, row.counterparty_pubkey)` and inserts the session
+/// **already populated** — the session stays a pure cache of the row.
 async fn rebuild_session(
     trade: &crate::api::types::TradeInfo,
     trade_keys: &nostr_sdk::Keys,
@@ -1523,27 +1523,30 @@ async fn rebuild_session(
         }
     };
     let mgr = crate::mostro::session::session_manager();
-    let mut session = match mgr
-        .create_session(
+    // Atomic insert: the session enters the manager already carrying peer +
+    // shared key. A create-then-update pair exposes a keyless intermediate
+    // between the two locks, and a concurrent send_message reading it would
+    // silently degrade to local-only — the exact failure this fallback
+    // exists to eliminate.
+    match mgr
+        .create_session_with_peer(
             order_id.clone(),
             trade.role.clone(),
             trade.trade_key_index,
             trade.order.clone(),
+            trade.counterparty_pubkey.clone(),
+            shared_key,
         )
         .await
     {
-        Ok(s) => s,
+        Ok(session) => {
+            log::info!("[messages] session rebuilt from trade row order={order_id} (#381)");
+            Some(session)
+        }
         // Benign race: a concurrent rebuild or a live peer reveal created it
         // between our lookup and here — theirs is at least as complete.
-        Err(_) => return mgr.get_session(order_id).await,
-    };
-    session.peer_pubkey = Some(trade.counterparty_pubkey.clone());
-    session.shared_key = Some(shared_key);
-    if let Err(e) = mgr.update_session(order_id, session.clone()).await {
-        log::warn!("[messages] session rebuild order={order_id}: update failed: {e}");
+        Err(_) => mgr.get_session(order_id).await,
     }
-    log::info!("[messages] session rebuilt from trade row order={order_id} (#381)");
-    Some(session)
 }
 
 #[cfg(test)]
