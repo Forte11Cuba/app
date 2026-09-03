@@ -95,7 +95,7 @@ pub async fn unwrap_mostro_message(
 // chat spec. The caller (api/messages.rs) owns the stateful steps: outer-id
 // LRU, rate-limit budget, durable inner-id dedup, and the `since` cursor.
 //
-// mostro-core 0.14.1 still ships the superseded gift-wrap chat
+// mostro-core 0.14.6 still ships the superseded gift-wrap chat
 // (`wrap_chat_message` / `unwrap_chat_message`); this stays a local
 // implementation until the canonical one lands upstream — flagged in #246.
 
@@ -364,6 +364,62 @@ mod chat_envelope_tests {
         let got = unwrap_now(&c, &outer).unwrap();
         assert_eq!(got.id, inner.id);
         assert_eq!(got.pubkey, c.alice_trade.public_key());
+        assert_eq!(got.content, "hola");
+    }
+
+    /// The chat envelope mines its own NIP-13 PoW: nostr 0.45 removed
+    /// `EventBuilder::pow`, so `mostro_wrap` mines the *unsigned* outer event
+    /// itself, and the difficulty and the `nonce` tag it adds are this
+    /// module's responsibility rather than the SDK builder's. Unlike the
+    /// daemon path — where mining stays inside `mostro-core` and is covered by
+    /// `mostro::actions` — nothing else exercises this code, because
+    /// `get_pow()` is 0 for every other test in the suite.
+    ///
+    /// A mined envelope must also still pass every receive-side check: the
+    /// `nonce` tag is an extra tag inside `MAX_OUTER_TAGS` that the single-`p`
+    /// scan has to ignore.
+    #[tokio::test]
+    async fn a_mined_chat_envelope_meets_the_difficulty_and_still_unwraps() {
+        // Serializes against every other test touching the process-global PoW
+        // snapshot, and restores "nothing advertised" on drop.
+        let _pow = crate::mostro::pow::test_support::lock_pow();
+
+        // 8 bits: ~256 tries, so instant, while an *unmined* id would clear
+        // the assertion only 1 time in 256 — low enough that a regression
+        // shows up rather than passing by luck.
+        const DIFFICULTY: u8 = 8;
+        crate::mostro::pow::set_pows("node-under-test", DIFFICULTY, None);
+
+        let c = convo();
+        // Mining is probabilistic; cap wall time so a regression that stalls
+        // does not hang CI.
+        let (outer, inner) = crate::rt::time::timeout(
+            std::time::Duration::from_secs(30),
+            mostro_wrap(&c.alice_trade, &c.conv, &c.sign, "hola"),
+        )
+        .await
+        .expect("mined wrap timed out")
+        .expect("mined wrap failed");
+
+        assert!(
+            nip13::get_leading_zero_bits(outer.id) >= DIFFICULTY,
+            "outer id {} has {} leading zero bits, expected >= {DIFFICULTY}",
+            outer.id.to_hex(),
+            nip13::get_leading_zero_bits(outer.id),
+        );
+
+        // The nonce tag is what carries the proof; signing happens after
+        // mining, so the id the difficulty was met on is the id that ships.
+        assert!(
+            outer.tags.iter().any(|t| t.kind() == "nonce"),
+            "a mined event must carry its NIP-13 nonce tag: {:?}",
+            outer.tags
+        );
+        assert!(outer.tags.len() <= MAX_OUTER_TAGS);
+        assert!(outer.verify().is_ok(), "the mined id must be the signed id");
+
+        let got = unwrap_now(&c, &outer).expect("a mined envelope must still unwrap");
+        assert_eq!(got.id, inner.id);
         assert_eq!(got.content, "hola");
     }
 

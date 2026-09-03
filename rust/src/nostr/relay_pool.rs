@@ -241,9 +241,10 @@ impl RelayPool {
     /// `STATUS_POLL_INTERVAL_SECS` seconds and broadcasts changes on
     /// `relay_tx` / `conn_tx` when a relay transitions between states.
     ///
-    /// `RelayPoolNotification` in nostr-sdk 0.44 does not expose relay-level
-    /// status transitions, so polling `client.relay(url).status()` is the
-    /// available mechanism.
+    /// `ClientNotification` in nostr-sdk 0.45 carries only `Event`, `Message`
+    /// and `Shutdown` — no relay-level status transitions — so polling
+    /// `client.relay(url).status()` remains the available mechanism. (Was
+    /// `RelayPoolNotification` before 0.45; re-checked on the bump, unchanged.)
     fn spawn_status_monitor(self: &Arc<Self>) {
         let client = self.client.clone();
         let relays = self.relays.clone();

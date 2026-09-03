@@ -2692,8 +2692,11 @@ async fn publish_event_json(event_json: &str) -> Result<()> {
             ),
         );
     }
-    // The SDK returns Ok even when every relay rejected the event (verified
-    // in nostr-relay-pool 0.44: `send_event_to` has no empty-success guard).
+    // The SDK returns Ok even when every relay rejected the event (re-verified
+    // on the 0.45 bump: the pool collects per-relay outcomes and ends in a
+    // bare `Ok(output)`, with no empty-success guard. `success` still means
+    // accepted — an `OK false` becomes a relay error and lands in `failed`.
+    // nostr-relay-pool was folded into nostr-sdk itself in 0.45.)
     // Without this, fire-and-forget actions (fiat-sent, release, cancel)
     // would report success having reached zero relays, and correlated ones
     // would wait 10s for a reply that can never arrive. Partial success
@@ -2717,7 +2720,7 @@ static SUBSCRIPTION_ACTIVE: AtomicBool = AtomicBool::new(false);
 ///
 /// Internally spawns a background Tokio task that:
 /// 1. Subscribes to `all_orders_filter()` via the relay pool client.
-/// 2. Loops over `RelayPoolNotification::Event` messages.
+/// 2. Loops over `ClientNotification::Event` messages.
 /// 3. Parses each Kind 38383 event via `parse_order_event` and upserts it
 ///    into the order book, which broadcasts the update to all `OrdersStream`
 ///    subscribers.

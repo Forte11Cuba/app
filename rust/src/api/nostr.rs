@@ -532,14 +532,18 @@ pub async fn fetch_exchange_rate(
 /// filter never asked for, and pricing an order off another kind, another
 /// d-tag or another author's event would be worse than not checking at all.
 ///
-/// The signature check is what makes the author check mean anything. Up to
-/// 0.44.7 `nostr-sdk` does not guarantee that a fetched event was verified
-/// before it reaches the caller (GHSA-f96q-5f6p-v7cj), and this crate pins
-/// 0.44.1, so a relay can hand us an event carrying the node's pubkey that the
-/// node never signed. Every field below is attacker-chosen until `verify()`
-/// says otherwise, and a forged price would silently move the client's whole
-/// range check. Verification runs before the newest-first pick, so a forgery
-/// cannot shadow the genuine event by claiming a later `created_at` either.
+/// The signature check is what makes the author check mean anything. It was
+/// load-bearing under nostr-sdk 0.44, which did not guarantee that a fetched
+/// event had been verified before it reached the caller
+/// (GHSA-f96q-5f6p-v7cj): a relay could hand us an event carrying the node's
+/// pubkey that the node never signed. 0.45 fixed that — every incoming event
+/// is verified (and filter-matched) inside the relay before the caller sees
+/// it — so this is now defence in depth, kept on purpose: it is the one
+/// property of this event the client cannot re-derive, a forged price would
+/// silently move the whole range check, and the cost is one signature check
+/// on a single event fetched once. Verification runs before the newest-first
+/// pick, so a forgery cannot shadow the genuine event by claiming a later
+/// `created_at` either.
 fn select_rates_event(
     events: impl IntoIterator<Item = nostr_sdk::prelude::Event>,
     pubkey: &nostr_sdk::prelude::PublicKey,
