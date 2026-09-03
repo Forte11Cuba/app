@@ -87,6 +87,12 @@ Pending
 SettledHoldInvoice, Success, Canceled, CooperativelyCanceled, Dispute, InProgress,
 SettledByAdmin, CanceledByAdmin, CompletedByAdmin, Expired.
 
+This is the protocol state machine, which only daemon messages expose in full.
+The public Kind 38383 event carries NIP-69's four-bucket view instead, so an
+`InProgress` reaching this client stands for "taken, real state unknown" rather
+than for the admin-took-dispute transition above. See "Public status vs. trade
+status" in `contracts/orders.md`.
+
 ---
 
 ### Trade
@@ -106,10 +112,17 @@ trade at a time (v2.0 scope constraint).
 | trade_key_index | u32 | BIP-32 key index for this trade |
 | shared_key | String? | ECDH-derived key for P2P chat (hex) |
 | cooperative_cancel_state | Enum? | `RequestedByMe`, `RequestedByPeer`, `Accepted`, null |
-| timeout_at | Timestamp? | When current state times out |
+| timeout_at | Timestamp? | When current state times out (set on take: `now + 900`; used by the stale-state sweep as its age gate) |
 | started_at | Timestamp | When trade began |
 | completed_at | Timestamp? | When trade finished (null if active) |
 | outcome | Enum? | `Success`, `Canceled`, `Expired`, `DisputeWon`, `DisputeLost` |
+| rated_at | Timestamp? | When the local user rated the counterparty; durable marker written by `db.mark_trade_rated` after `submit_rating` publishes (issue #339). "Did I rate this trade" is local knowledge nothing on the wire can rebuild, so the in-memory `RATING_STORE` rehydrates from this on restart — the store stays the cache, this is authoritative on load. The score itself is not persisted (the rated UI shows only a label) |
+
+Trade rows are history: they are updated in place (`status`,
+`hold_invoice`, `amount_sats` — see `update_trade_fields`) but never
+deleted, with one exception: a trade canceled by the daemon while still
+in pending/waiting states (never active) is **deleted** rather than kept
+(see `contracts/orders.md` — Daemon cancellation semantics).
 
 **Buyer progress steps**: `OrderTaken`, `PayInvoice`, `PaymentLocked`,
 `FiatSent`, `AwaitingRelease`, `Complete`
@@ -142,7 +155,7 @@ disputes. Persisted locally after decryption.
 | is_read | bool | Whether user has seen this message |
 | created_at | Timestamp | When message was sent |
 | received_at | Timestamp | When message was received locally |
-| nostr_event_id | String? | Incoming event ID for dedup (Kind 14 from daemon / Kind 1059 from peer chat) |
+| nostr_event_id | String? | Incoming event ID for dedup (Kind 14 — from the daemon, or a peer-chat envelope) |
 
 **Validation rules**:
 - `content` MUST not be empty.
@@ -179,7 +192,7 @@ An exception flow on an active trade.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| id | UUID | Primary key |
+| id | UUID | Primary key — the daemon's dispute id when we opened it (see below) |
 | trade_id | UUID | FK → Trade |
 | initiated_by | Enum | `Me` or `Counterparty` |
 | reason | String? | Optional reason text |
@@ -192,6 +205,13 @@ An exception flow on an active trade.
 - A dispute can only be opened on a trade with `current_step` between
   `PaymentLocked` and `AwaitingRelease`/`AwaitingFiat`.
 - Only one open dispute per trade.
+
+**On `id`**: for a dispute we opened, this is the UUID the daemon assigned and
+returned in its acceptance — the same id its Kind 38386 dispute event and the
+solver use. A record created for a **peer-opened** dispute (built from
+`admin-took-dispute`, which is the first the counterparty hears of it) still
+gets a locally minted UUID, so the two sides currently know the same dispute
+under different ids.
 
 ---
 
@@ -222,7 +242,7 @@ Outgoing messages queued when offline.
 | Field | Type | Description |
 |-------|------|-------------|
 | id | UUID | Primary key |
-| event_json | String | Serialized outbound Nostr event (Kind 14 NIP-44 for daemon actions; Kind 1059 gift wrap for peer chat) |
+| event_json | String | Serialized outbound Nostr event (Kind 14 NIP-44 throughout: daemon actions, and the chat envelope for peer chat) |
 | target_relays | String | JSON array of relay URLs to publish to |
 | created_at | Timestamp | When queued |
 | retry_count | u32 | Number of send attempts |

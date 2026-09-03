@@ -2,7 +2,7 @@
 ///
 /// Each function constructs a `Message` using the `mostro-core` types,
 /// wraps it as a transport-v2 (NIP-44, signed Kind 14) event via
-/// `gift_wrap::wrap_mostro_message`, and returns the event JSON ready for
+/// `transport::wrap_mostro_message`, and returns the event JSON ready for
 /// publication.
 ///
 /// **Key split.** Mostro-core 0.10 requires two `Keys` values per wrap:
@@ -18,7 +18,7 @@ use nostr_sdk::prelude::*;
 use uuid::Uuid;
 
 use crate::api::types::{NewOrderParams, OrderKind};
-use crate::nostr::gift_wrap;
+use crate::nostr::transport;
 
 // ── Public action builders ────────────────────────────────────────────────────
 
@@ -76,7 +76,7 @@ pub async fn new_order(
         Action::NewOrder,
         payload,
     );
-    wrap_message(identity_keys, trade_keys, mostro_pubkey, &msg).await
+    wrap_message_first_contact(identity_keys, trade_keys, mostro_pubkey, &msg).await
 }
 
 /// Build and wrap a TakeBuy MostroMessage.
@@ -196,22 +196,29 @@ pub async fn cancel(
 }
 
 /// Build and wrap a Dispute MostroMessage.
+///
+/// `request_id` is the correlation nonce the daemon echoes in its reply
+/// (`DisputeInitiatedByYou` or `CantDo`); `open_dispute` relies on it to tell
+/// the genuine reply apart from stale relay-replayed events. This is why the
+/// message is built here instead of through `simple_action`, which sends no
+/// nonce.
 pub async fn dispute(
     identity_keys: &Keys,
     trade_keys: &Keys,
     mostro_pubkey: &PublicKey,
     order_id: &str,
     trade_index: u32,
+    request_id: u64,
 ) -> Result<String> {
-    simple_action(
-        identity_keys,
-        trade_keys,
-        mostro_pubkey,
-        order_id,
-        trade_index,
+    let id = Uuid::parse_str(order_id)?;
+    let msg = Message::new_order(
+        Some(id),
+        Some(request_id),
+        Some(trade_index as i64),
         Action::Dispute,
-    )
-    .await
+        None,
+    );
+    wrap_message(identity_keys, trade_keys, mostro_pubkey, &msg).await
 }
 
 /// Build and wrap a RateUser MostroMessage.
@@ -321,7 +328,7 @@ async fn take_order_impl(
         action,
         payload,
     );
-    wrap_message(identity_keys, trade_keys, mostro_pubkey, &msg).await
+    wrap_message_first_contact(identity_keys, trade_keys, mostro_pubkey, &msg).await
 }
 
 /// Helper for actions that only need an order ID and no additional payload.
@@ -339,7 +346,7 @@ async fn simple_action(
 }
 
 /// Wrap `msg` as a transport-v2 (NIP-44, signed Kind 14) event via
-/// `gift_wrap::wrap_mostro_message`, applying the daemon-advertised PoW
+/// `transport::wrap_mostro_message`, applying the daemon-advertised PoW
 /// difficulty, and return the event JSON.
 async fn wrap_message(
     identity_keys: &Keys,
@@ -347,9 +354,56 @@ async fn wrap_message(
     mostro_pubkey: &PublicKey,
     msg: &Message,
 ) -> Result<String> {
-    let pow = crate::mostro::pow::get_pow();
+    wrap_message_at(
+        identity_keys,
+        trade_keys,
+        mostro_pubkey,
+        msg,
+        crate::mostro::pow::get_pow(),
+    )
+    .await
+}
+
+/// [`wrap_message`] for a **first-contact** event — one whose visible sender is
+/// a trade key the daemon does not yet associate with an active order or
+/// dispute: creating an order, taking one, or a restore under a fresh trade
+/// key. Those pay `pow_first_contact`, which is never lower than `pow` and is
+/// typically higher; mining such an event at `pow` gets it dropped before the
+/// daemon decrypts anything, with no reply of any kind, so the caller sees only
+/// a timeout (issue #177).
+///
+/// The difficulty must come from a capability snapshot fetched *from
+/// `mostro_pubkey`*: at startup none exists yet, and right after a node switch
+/// the store still holds the previous node's values. `first_contact_pow_for`
+/// waits for the right generation and fails closed (`PowUnknown`) if it never
+/// arrives, rather than mine at a difficulty that may be silently rejected.
+async fn wrap_message_first_contact(
+    identity_keys: &Keys,
+    trade_keys: &Keys,
+    mostro_pubkey: &PublicKey,
+    msg: &Message,
+) -> Result<String> {
+    let pow = crate::mostro::pow::first_contact_pow_for(&mostro_pubkey.to_hex()).await?;
+    wrap_message_at(identity_keys, trade_keys, mostro_pubkey, msg, pow).await
+}
+
+async fn wrap_message_at(
+    identity_keys: &Keys,
+    trade_keys: &Keys,
+    mostro_pubkey: &PublicKey,
+    msg: &Message,
+    pow: u8,
+) -> Result<String> {
+    // A node speaking a different wire protocol never decrypts what we send
+    // and never answers, so every caller would time out with no way to tell
+    // that apart from an unreachable daemon. Refuse up front — for every
+    // daemon-bound wrap, first-contact or not — with a marker Dart localizes.
+    // Protocol v1 (gift wrap) is being removed, not implemented: this client
+    // is v2-native, and the fix for such a node is to run a v2 daemon.
+    crate::mostro::protocol_version::ensure_supported(&mostro_pubkey.to_hex()).await?;
+
     let event =
-        gift_wrap::wrap_mostro_message(identity_keys, trade_keys, mostro_pubkey, msg, pow).await?;
+        transport::wrap_mostro_message(identity_keys, trade_keys, mostro_pubkey, msg, pow).await?;
     Ok(event.as_json())
 }
 
@@ -369,12 +423,133 @@ pub async fn restore_session(
     // daemon to look up the user's trades); trade_keys sign the rumor
     // (-> event.sender, the key the daemon replies to). Mirrors new_order.
     let msg = Message::new_restore(None);
-    wrap_message(identity_keys, trade_keys, mostro_pubkey, &msg).await
+    wrap_message_first_contact(identity_keys, trade_keys, mostro_pubkey, &msg).await
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The NIP-13 target difficulty the event was mined at, read from its
+    /// nonce tag (`["nonce", "<nonce>", "<target>"]`), or `None` when the
+    /// event was not mined at all.
+    fn mined_target(json: &str) -> Option<String> {
+        let event = Event::from_json(json).unwrap();
+        event.tags.iter().find_map(|t| {
+            let tag = t.as_slice();
+            (tag.first().map(String::as_str) == Some("nonce"))
+                .then(|| tag.get(2).cloned())
+                .flatten()
+        })
+    }
+
+    fn sample_params() -> NewOrderParams {
+        NewOrderParams {
+            kind: OrderKind::Sell,
+            fiat_amount: Some(100.0),
+            fiat_amount_min: None,
+            fiat_amount_max: None,
+            fiat_code: "USD".to_string(),
+            payment_method: "cashapp".to_string(),
+            premium: 0.0,
+            amount_sats: None,
+        }
+    }
+
+    /// Directed PoW-selection coverage (issue #177): create, take, and restore
+    /// are first-contact events — their visible sender is a trade key the
+    /// daemon does not know yet — so they must mine at `first_contact_pow()`,
+    /// not the base difficulty. Distinct values (1 vs 4) make the nonce tag
+    /// betray which one was selected; both are low enough to mine instantly.
+    #[tokio::test]
+    async fn create_take_and_restore_mine_at_the_first_contact_difficulty() {
+        use std::time::Duration;
+
+        let identity_keys = Keys::generate();
+        let trade_keys = Keys::generate();
+        let mostro_pubkey = Keys::generate().public_key();
+        let order_id = "94486ae3-4083-4dfe-b543-53fe761025e9";
+
+        let _pow = crate::mostro::pow::test_support::lock_pow();
+        crate::mostro::pow::set_pows(&mostro_pubkey.to_hex(), 1, Some(4));
+        crate::mostro::protocol_version::set_protocol_version(&mostro_pubkey.to_hex(), Some(2));
+
+        // Mining is probabilistic — cap wall time so a regression that stalls
+        // does not hang CI indefinitely.
+        let wraps = crate::rt::time::timeout(Duration::from_secs(60), async {
+            let create = new_order(
+                &identity_keys,
+                &trade_keys,
+                &mostro_pubkey,
+                &sample_params(),
+                3,
+                42,
+            )
+            .await
+            .unwrap();
+            let take = take_sell(
+                &identity_keys,
+                &trade_keys,
+                &mostro_pubkey,
+                order_id,
+                5,
+                None,
+                None,
+                77,
+            )
+            .await
+            .unwrap();
+            let restore = restore_session(&identity_keys, &trade_keys, &mostro_pubkey)
+                .await
+                .unwrap();
+            [("create", create), ("take", take), ("restore", restore)]
+        })
+        .await
+        .expect("first-contact wraps timed out");
+
+        for (name, json) in wraps {
+            assert_eq!(
+                mined_target(&json).as_deref(),
+                Some("4"),
+                "{name} must mine at first_contact_pow(), not the base pow"
+            );
+        }
+    }
+
+    /// The counterpart: an action on an order the daemon already knows the
+    /// trade key for pays only the base `pow`, never `pow_first_contact`.
+    #[tokio::test]
+    async fn generic_actions_mine_at_the_base_difficulty() {
+        use std::time::Duration;
+
+        let identity_keys = Keys::generate();
+        let trade_keys = Keys::generate();
+        let mostro_pubkey = Keys::generate().public_key();
+
+        let _pow = crate::mostro::pow::test_support::lock_pow();
+        crate::mostro::pow::set_pows(&mostro_pubkey.to_hex(), 1, Some(4));
+        crate::mostro::protocol_version::set_protocol_version(&mostro_pubkey.to_hex(), Some(2));
+
+        let json = crate::rt::time::timeout(
+            Duration::from_secs(60),
+            fiat_sent(
+                &identity_keys,
+                &trade_keys,
+                &mostro_pubkey,
+                "94486ae3-4083-4dfe-b543-53fe761025e9",
+                5,
+            ),
+        )
+        .await
+        .expect("generic wrap timed out")
+        .unwrap();
+
+        assert_eq!(
+            mined_target(&json).as_deref(),
+            Some("1"),
+            "a generic action must mine at get_pow()"
+        );
+    }
 
     /// The outgoing new-order message must carry the caller's request_id —
     /// it is the correlation nonce the daemon echoes in its reply, and
@@ -385,6 +560,15 @@ mod tests {
         let identity_keys = Keys::generate();
         let trade_keys = Keys::generate();
         let mostro_keys = Keys::generate();
+
+        // First-contact wrapping fails closed until this node's capabilities
+        // are published — a test double for the Kind 38385 fetch.
+        let _pow = crate::mostro::pow::test_support::lock_pow();
+        crate::mostro::pow::set_pows(&mostro_keys.public_key().to_hex(), 0, None);
+        crate::mostro::protocol_version::set_protocol_version(
+            &mostro_keys.public_key().to_hex(),
+            Some(2),
+        );
 
         let params = NewOrderParams {
             kind: OrderKind::Sell,
@@ -409,7 +593,7 @@ mod tests {
         .unwrap();
 
         let event = Event::from_json(&json).unwrap();
-        let unwrapped = gift_wrap::unwrap_mostro_message(&mostro_keys, &event)
+        let unwrapped = transport::unwrap_mostro_message(&mostro_keys, &event)
             .await
             .unwrap()
             .expect("message must decrypt for the recipient");
@@ -431,6 +615,15 @@ mod tests {
         let mostro_keys = Keys::generate();
         let order_id = "94486ae3-4083-4dfe-b543-53fe761025e9";
 
+        // First-contact wrapping fails closed until this node's capabilities
+        // are published — a test double for the Kind 38385 fetch.
+        let _pow = crate::mostro::pow::test_support::lock_pow();
+        crate::mostro::pow::set_pows(&mostro_keys.public_key().to_hex(), 0, None);
+        crate::mostro::protocol_version::set_protocol_version(
+            &mostro_keys.public_key().to_hex(),
+            Some(2),
+        );
+
         let json = take_sell(
             &identity_keys,
             &trade_keys,
@@ -445,7 +638,7 @@ mod tests {
         .unwrap();
 
         let event = Event::from_json(&json).unwrap();
-        let unwrapped = gift_wrap::unwrap_mostro_message(&mostro_keys, &event)
+        let unwrapped = transport::unwrap_mostro_message(&mostro_keys, &event)
             .await
             .unwrap()
             .expect("message must decrypt for the recipient");
@@ -469,7 +662,7 @@ mod tests {
         .unwrap();
 
         let event = Event::from_json(&json).unwrap();
-        let unwrapped = gift_wrap::unwrap_mostro_message(&mostro_keys, &event)
+        let unwrapped = transport::unwrap_mostro_message(&mostro_keys, &event)
             .await
             .unwrap()
             .expect("message must decrypt for the recipient");
@@ -478,6 +671,55 @@ mod tests {
         assert_eq!(kind.request_id, Some(78));
         assert!(matches!(kind.action, Action::TakeBuy));
         assert!(matches!(kind.payload, Some(Payload::Amount(100))));
+    }
+
+    /// The outgoing Dispute message must carry the caller's request_id: it is
+    /// the nonce the daemon echoes in `DisputeInitiatedByYou` and in `CantDo`,
+    /// and `open_dispute` persists nothing without a reply carrying it. A
+    /// serialization regression here would otherwise show up only as a 10 s
+    /// `NoDaemonResponse` (PR #275 review).
+    #[tokio::test]
+    async fn dispute_carries_request_id_order_id_and_no_payload() {
+        let identity_keys = Keys::generate();
+        let trade_keys = Keys::generate();
+        let mostro_keys = Keys::generate();
+        let order_id = "94486ae3-4083-4dfe-b543-53fe761025e9";
+
+        // First-contact wrapping fails closed until this node's capabilities
+        // are published — a test double for the Kind 38385 fetch.
+        let _pow = crate::mostro::pow::test_support::lock_pow();
+        crate::mostro::pow::set_pows(&mostro_keys.public_key().to_hex(), 0, None);
+        crate::mostro::protocol_version::set_protocol_version(
+            &mostro_keys.public_key().to_hex(),
+            Some(2),
+        );
+
+        let json = dispute(
+            &identity_keys,
+            &trade_keys,
+            &mostro_keys.public_key(),
+            order_id,
+            9,
+            4242,
+        )
+        .await
+        .unwrap();
+
+        let event = Event::from_json(&json).unwrap();
+        let unwrapped = transport::unwrap_mostro_message(&mostro_keys, &event)
+            .await
+            .unwrap()
+            .expect("message must decrypt for the recipient");
+
+        let kind = unwrapped.message.get_inner_message_kind();
+        assert_eq!(kind.request_id, Some(4242));
+        assert_eq!(kind.trade_index, Some(9));
+        assert_eq!(kind.id.map(|u| u.to_string()).as_deref(), Some(order_id));
+        assert!(matches!(kind.action, Action::Dispute));
+        assert!(kind.payload.is_none(), "Dispute payload must be None");
+        // The rumor is authored by the trade key: that is the pubkey the daemon
+        // addresses its reply to, and the key open_dispute correlates on.
+        assert_eq!(unwrapped.sender, trade_keys.public_key());
     }
 
     /// #215 handshake contract: a RestoreSession carries no payload (the daemon
@@ -489,11 +731,21 @@ mod tests {
         let identity_keys = Keys::generate();
         let trade_keys = Keys::generate();
         let mostro_keys = Keys::generate();
+
+        // First-contact wrapping fails closed until this node's capabilities
+        // are published — a test double for the Kind 38385 fetch.
+        let _pow = crate::mostro::pow::test_support::lock_pow();
+        crate::mostro::pow::set_pows(&mostro_keys.public_key().to_hex(), 0, None);
+        crate::mostro::protocol_version::set_protocol_version(
+            &mostro_keys.public_key().to_hex(),
+            Some(2),
+        );
+
         let json = restore_session(&identity_keys, &trade_keys, &mostro_keys.public_key())
             .await
             .unwrap();
         let event = Event::from_json(&json).unwrap();
-        let unwrapped = gift_wrap::unwrap_mostro_message(&mostro_keys, &event)
+        let unwrapped = transport::unwrap_mostro_message(&mostro_keys, &event)
             .await
             .unwrap()
             .expect("message must decrypt for the recipient");

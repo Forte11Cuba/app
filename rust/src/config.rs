@@ -6,9 +6,17 @@
 use std::sync::RwLock;
 
 /// Default relay URLs seeded on first launch.
+///
+/// These are the four relays the default Mostro node lists in its kind 10002
+/// relay list (and in the `source` tag of its Kind 38383 events). Public
+/// relays rate-limit and cap replays differently — `relay.mostro.network`
+/// stops at 300 events, `nos.lol` at 500 — so covering the node's whole set
+/// keeps the book reachable when one of them is throttling us.
 pub const DEFAULT_RELAYS: &[&str] = &[
     "wss://relay.mostro.network",
     "wss://nos.lol",
+    "wss://mostro-p2p.tech",
+    "wss://relay.shadowbip.com",
 ];
 
 /// Default Mostro daemon public key (hex, 32 bytes).
@@ -34,7 +42,7 @@ pub fn active_mostro_pubkey() -> String {
 
 /// Set (or clear) the active Mostro pubkey override.
 ///
-/// Any gift-wrapped responses still in flight from a previously active
+/// Any daemon responses still in flight from a previously active
 /// daemon will be rejected by `dispatch_mostro_message` once this changes
 /// — callers that care about clean handoff should quiesce pending trades
 /// before swapping the override.

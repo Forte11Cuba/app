@@ -25,6 +25,32 @@ pub mod settings_keys {
     /// Developer mint-URL override, pointing Cashu at a local mint instead of
     /// the one the node advertises.
     pub const CASHU_MINT_URL_OVERRIDE: &str = "cashu_mint_url_override";
+
+    /// Per-order chat `since` cursor — the `created_at` (unix seconds, decimal
+    /// string) of the newest accepted outer chat event, clamped to the local
+    /// clock. Full key is `chat_cursor:<order_id>`; build it with
+    /// [`chat_cursor`]. Bounds the chat subscription backlog so a flood is
+    /// never re-downloaded on restart (protocol chat spec, issue #246).
+    pub const CHAT_CURSOR_PREFIX: &str = "chat_cursor:";
+
+    /// Build the settings key holding the chat `since` cursor for `order_id`.
+    pub fn chat_cursor(order_id: &str) -> String {
+        format!("{CHAT_CURSOR_PREFIX}{order_id}")
+    }
+
+    /// Per-order solver pubkey (hex) for the dispute chat.
+    pub const DISPUTE_ADMIN_PREFIX: &str = "dispute_admin:";
+
+    /// Build the settings key holding the dispute solver's pubkey for
+    /// `order_id`.
+    ///
+    /// The dispute record itself stays in memory by design — status and
+    /// resolution are re-derivable from daemon events. This pubkey is not: it
+    /// arrives exactly once, in `admin-took-dispute`, and without it the
+    /// dispute chat keys cannot be derived again after a restart.
+    pub fn dispute_admin(order_id: &str) -> String {
+        format!("{DISPUTE_ADMIN_PREFIX}{order_id}")
+    }
 }
 
 /// Storage trait — implemented by both SQLite (native) and IndexedDB (WASM).
@@ -51,6 +77,15 @@ pub trait Storage: Send + Sync {
     async fn save_message(&self, msg: &crate::api::types::ChatMessage) -> Result<()>;
     async fn list_messages(&self, trade_id: &str) -> Result<Vec<crate::api::types::ChatMessage>>;
     async fn mark_messages_read(&self, trade_id: &str) -> Result<()>;
+
+    /// `true` if a message with this id was already accepted and stored.
+    ///
+    /// This is the **durable inner-event-id dedup** required by the chat spec:
+    /// both parties hold `K_sign`, so either can re-wrap a previously received
+    /// inner event inside a fresh outer one ("I sent the fiat", replayed). An
+    /// in-memory LRU is not enough — an evicted entry makes the message
+    /// replayable again — so the check must reach persisted history.
+    async fn message_exists(&self, id: &str) -> Result<bool>;
 
     async fn save_relay(&self, relay: &crate::api::types::RelayInfo) -> Result<()>;
     async fn delete_relay(&self, url: &str) -> Result<()>;
@@ -126,6 +161,13 @@ pub trait Storage: Send + Sync {
         order_id: &str,
     ) -> Result<Option<crate::api::types::TradeInfo>>;
 
+    /// Delete a persisted trade by the order ID it is associated with.
+    ///
+    /// Chat messages are keyed separately (`messages.trade_id` holds the
+    /// order id, no FK) and are deliberately NOT touched here. No-op when
+    /// no matching trade exists.
+    async fn delete_trade_by_order_id(&self, order_id: &str) -> Result<()>;
+
     /// Update the order ID inside a persisted trade (e.g. local UUID → daemon UUID).
     ///
     /// Loads the trade whose `order.id == old_order_id`, replaces `order.id`
@@ -147,4 +189,23 @@ pub trait Storage: Send + Sync {
         hold_invoice: Option<String>,
         amount_sats: Option<u64>,
     ) -> Result<()>;
+
+    /// Persist the counterparty (taker) reputation snapshot on a trade
+    /// identified by `order.id` (issue #305). No-op when no matching trade
+    /// exists. `days` saturates at `u32::MAX`; a full-privacy taker sends no
+    /// snapshot, so this is only called when one was carried.
+    async fn update_trade_peer_reputation(
+        &self,
+        order_id: &str,
+        rating: f64,
+        reviews: u32,
+        days: u32,
+    ) -> Result<()>;
+
+    /// Set the durable "local user rated this trade" marker (`rated_at`, unix
+    /// seconds) on the trade identified by `order.id` (issue #339). Written
+    /// after `submit_rating` publishes so the rated state and the
+    /// duplicate-rating guard survive a restart. No-op when no matching trade
+    /// exists.
+    async fn mark_trade_rated(&self, order_id: &str, rated_at: i64) -> Result<()>;
 }
