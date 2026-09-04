@@ -9,7 +9,6 @@ import 'package:mostro/features/chat/widgets/info_panels.dart';
 import 'package:mostro/features/chat/widgets/message_bubble.dart';
 import 'package:mostro/features/chat/widgets/message_input.dart';
 import 'package:mostro/features/chat/widgets/trade_state_header.dart';
-import 'package:mostro/features/order/providers/trade_state_provider.dart';
 import 'package:mostro/features/trades/providers/trades_providers.dart';
 import 'package:mostro/l10n/app_localizations.dart';
 import 'package:mostro/shared/widgets/bottom_nav_bar.dart';
@@ -97,7 +96,11 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
   @override
   void initState() {
     super.initState();
-    _hydrateRoom();
+    // The ref.listen in build only fires on changes; when the provider is
+    // already alive with data (pushed from a screen that watches the same
+    // family member), there is no change coming — apply the current value.
+    unawaited(_applyTradeIdentity(
+        ref.read(tradeInfoProvider(widget.orderId)).valueOrNull));
     _loadHistory();
     _markRead();
   }
@@ -155,35 +158,52 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
     }
   }
 
-  /// True while [_hydrateRoom]'s trade fetch is in flight. The retry sites
-  /// fire once per message or rebuild while the peer is unresolved; without
-  /// this bound each firing would stack another trade-DB read.
-  bool _hydrating = false;
-
-  /// Ensures this trade's room exists in [chatRoomsNotifierProvider] with a
-  /// resolved peer identity.
+  /// Upserts this trade's room into [chatRoomsNotifierProvider] with the
+  /// peer identity resolved from [trade].
   ///
   /// The chat-list screen is the only other place that hydrates the notifier,
   /// so reaching this screen directly (trade-detail chat chip, deep link)
   /// would otherwise leave [_resolveRoom] on its empty-handle placeholder and
   /// the header stuck on the localized "Unknown" fallback.
-  Future<void> _hydrateRoom() async {
-    if (_hydrating) return;
+  ///
+  /// Cheap while it cannot succeed: [tradeInfoToChatRoom] bails synchronously
+  /// on an empty counterparty (a maker before the reveal), and once the room
+  /// is resolved the guard below skips the rest — so no in-flight bookkeeping
+  /// is needed however often the provider emits.
+  Future<void> _applyTradeIdentity(rust_types.TradeInfo? trade) async {
+    if (trade == null) return;
     final rooms = ref.read(chatRoomsNotifierProvider);
     final index = rooms.indexWhere((r) => r.orderId == widget.orderId);
     if (index >= 0 && rooms[index].peerPubkey.isNotEmpty) return;
-    _hydrating = true;
     try {
-      final trade = await ref.read(tradeInfoProvider(widget.orderId).future);
-      if (trade == null || !mounted) return;
       final room = await tradeInfoToChatRoom(trade);
       if (room == null || !mounted) return;
-      ref.read(chatRoomsNotifierProvider.notifier).upsertRoom(room);
+      ref
+          .read(chatRoomsNotifierProvider.notifier)
+          .upsertRoom(_withLivePreview(room));
     } catch (e) {
-      debugPrint('[chat] hydrateRoom failed: $e');
-    } finally {
-      _hydrating = false;
+      debugPrint('[chat] applyTradeIdentity failed: $e');
     }
+  }
+
+  /// [tradeInfoToChatRoom] rebuilds the preview from the message store, which
+  /// can lag the entry [_buildRoomPreview] upserted for a message arriving
+  /// mid-hydration — and resurrect an unread count [_markRead] just zeroed.
+  /// [ChatRoomsNotifier.upsertRoom] replaces the room wholesale, so when the
+  /// live entry is at least as recent, keep its preview and take only the
+  /// resolved identity.
+  ChatRoomState _withLivePreview(ChatRoomState hydrated) {
+    final rooms = ref.read(chatRoomsNotifierProvider);
+    final index = rooms.indexWhere((r) => r.orderId == widget.orderId);
+    if (index < 0) return hydrated;
+    final live = rooms[index];
+    if (live.lastMessageAt < hydrated.lastMessageAt) return hydrated;
+    return hydrated.copyWith(
+      lastMessage: live.lastMessage,
+      lastMessageIsOwn: live.lastMessageIsOwn,
+      lastMessageAt: live.lastMessageAt,
+      unreadCount: live.unreadCount,
+    );
   }
 
   Future<void> _onSend(String text) async {
@@ -341,12 +361,6 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
     required List<ChatRoomState> rooms,
   }) {
     final room = _resolveRoom(rooms);
-    if (room.peerPubkey.isEmpty) {
-      // A message beat the initial hydration: without this retry the
-      // empty-pubkey placeholder gets upserted into the room list and its
-      // entry stays on the "Unknown" fallback until the chat list re-syncs.
-      unawaited(_hydrateRoom());
-    }
     // Use the bridge-provided isRead / isMine flags rather than recomputing
     // from local _messages, which may not yet reflect the latest markAsRead
     // call (the bridge call is async and may still be in flight).
@@ -383,23 +397,18 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
       (_, next) => next.whenData(_onIncomingMessage),
     );
 
-    // Re-hydrate when this trade changes: the daemon message that carries the
-    // peer pubkey (BuyerTookOrder / HoldInvoicePaymentAccepted) can land while
-    // this screen is already open, after initState's hydration found no
-    // counterparty. The explicit refresh makes the subsequent trade fetch
-    // bypass the pre-update cache regardless of listener ordering.
-    ref.listen<AsyncValue<rust_types.TradeUpdate>>(
-      tradeUpdatesProvider,
-      (_, next) => next.whenData((update) {
-        if (update.orderId != widget.orderId) return;
-        // Only while the peer is unresolved: once the nym is on screen there
-        // is nothing left to hydrate, and the refresh would invalidate the
-        // whole rawTradesProvider list on every later status change.
-        final room = _resolveRoom(ref.read(chatRoomsNotifierProvider));
-        if (room.peerPubkey.isNotEmpty) return;
-        refreshTrades(ref);
-        unawaited(_hydrateRoom());
-      }),
+    // Resolve the peer identity from the trade row, live. Listening (rather
+    // than a one-shot read) keeps the autoDispose provider chain alive, and
+    // rawTradesProvider refetches itself on every trade update — so the
+    // daemon reveal that fills the counterparty (BuyerTookOrder /
+    // HoldInvoicePaymentAccepted) lands here as a fresh emission even while
+    // this screen is open, with no manual refresh or retry bookkeeping. A
+    // one-shot read future would instead go stale (and never resolve) when
+    // that update invalidates the provider mid-await.
+    ref.listen<AsyncValue<rust_types.TradeInfo?>>(
+      tradeInfoProvider(widget.orderId),
+      (_, next) =>
+          next.whenData((trade) => unawaited(_applyTradeIdentity(trade))),
     );
 
     final l10n = AppLocalizations.of(context);
