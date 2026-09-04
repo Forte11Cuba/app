@@ -53,6 +53,47 @@ void main() {
     );
   });
 
+  /// PR #275 review (Catrya): both `DisputeAlreadyOpen` refusals — the record
+  /// that already exists and the single-flight guard this PR adds — reach the
+  /// UI as the same marker and must not fall through to the generic failure.
+  test('maps both DisputeAlreadyOpen refusals', () {
+    expect(
+      localizedDaemonError(
+        l10n,
+        'DisputeAlreadyOpen: dispute already exists for trade abc',
+        fallback: 'x',
+      ),
+      l10n.disputeAlreadyOpen,
+    );
+    expect(
+      localizedDaemonError(
+        l10n,
+        'DisputeAlreadyOpen: an open_dispute for trade abc is already in flight',
+        fallback: 'x',
+      ),
+      l10n.disputeAlreadyOpen,
+    );
+  });
+
+  /// mostro-core 0.14.6 adds `CantDoReason::MaintenanceMode`: the node is
+  /// draining and refuses new orders and takes. Rust emits the bare marker;
+  /// some wrappers prepend their own context, so match it by substring like
+  /// every other marker.
+  test('maps the MaintenanceMode marker to the maintenance guidance', () {
+    expect(
+      localizedDaemonError(l10n, 'MaintenanceMode', fallback: 'x'),
+      l10n.mostroMaintenanceMode,
+    );
+    expect(
+      localizedDaemonError(
+        l10n,
+        'ProtocolError: could not take order: MaintenanceMode',
+        fallback: 'x',
+      ),
+      l10n.mostroMaintenanceMode,
+    );
+  });
+
   test('maps timeout and storage markers, and falls back otherwise', () {
     expect(
       localizedDaemonError(l10n, 'NoDaemonResponse', fallback: 'x'),
