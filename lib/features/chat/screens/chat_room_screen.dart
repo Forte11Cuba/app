@@ -155,6 +155,11 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
     }
   }
 
+  /// True while [_hydrateRoom]'s trade fetch is in flight. The retry sites
+  /// fire once per message or rebuild while the peer is unresolved; without
+  /// this bound each firing would stack another trade-DB read.
+  bool _hydrating = false;
+
   /// Ensures this trade's room exists in [chatRoomsNotifierProvider] with a
   /// resolved peer identity.
   ///
@@ -163,9 +168,11 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
   /// would otherwise leave [_resolveRoom] on its empty-handle placeholder and
   /// the header stuck on the localized "Unknown" fallback.
   Future<void> _hydrateRoom() async {
+    if (_hydrating) return;
     final rooms = ref.read(chatRoomsNotifierProvider);
     final index = rooms.indexWhere((r) => r.orderId == widget.orderId);
     if (index >= 0 && rooms[index].peerPubkey.isNotEmpty) return;
+    _hydrating = true;
     try {
       final trade = await ref.read(tradeInfoProvider(widget.orderId).future);
       if (trade == null || !mounted) return;
@@ -174,6 +181,8 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
       ref.read(chatRoomsNotifierProvider.notifier).upsertRoom(room);
     } catch (e) {
       debugPrint('[chat] hydrateRoom failed: $e');
+    } finally {
+      _hydrating = false;
     }
   }
 
@@ -383,6 +392,11 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
       tradeUpdatesProvider,
       (_, next) => next.whenData((update) {
         if (update.orderId != widget.orderId) return;
+        // Only while the peer is unresolved: once the nym is on screen there
+        // is nothing left to hydrate, and the refresh would invalidate the
+        // whole rawTradesProvider list on every later status change.
+        final room = _resolveRoom(ref.read(chatRoomsNotifierProvider));
+        if (room.peerPubkey.isNotEmpty) return;
         refreshTrades(ref);
         unawaited(_hydrateRoom());
       }),
