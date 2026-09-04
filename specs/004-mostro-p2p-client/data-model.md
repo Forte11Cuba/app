@@ -155,7 +155,7 @@ disputes. Persisted locally after decryption.
 | is_read | bool | Whether user has seen this message |
 | created_at | Timestamp | When message was sent |
 | received_at | Timestamp | When message was received locally |
-| nostr_event_id | String? | Incoming event ID for dedup (Kind 14 from daemon / Kind 1059 from peer chat) |
+| nostr_event_id | String? | Incoming event ID for dedup (Kind 14 — from the daemon, or a peer-chat envelope) |
 
 **Validation rules**:
 - `content` MUST not be empty.
@@ -192,7 +192,7 @@ An exception flow on an active trade.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| id | UUID | Primary key |
+| id | UUID | Primary key — the daemon's dispute id when we opened it (see below) |
 | trade_id | UUID | FK → Trade |
 | initiated_by | Enum | `Me` or `Counterparty` |
 | reason | String? | Optional reason text |
@@ -205,6 +205,13 @@ An exception flow on an active trade.
 - A dispute can only be opened on a trade with `current_step` between
   `PaymentLocked` and `AwaitingRelease`/`AwaitingFiat`.
 - Only one open dispute per trade.
+
+**On `id`**: for a dispute we opened, this is the UUID the daemon assigned and
+returned in its acceptance — the same id its Kind 38386 dispute event and the
+solver use. A record created for a **peer-opened** dispute (built from
+`admin-took-dispute`, which is the first the counterparty hears of it) still
+gets a locally minted UUID, so the two sides currently know the same dispute
+under different ids.
 
 ---
 
@@ -235,7 +242,7 @@ Outgoing messages queued when offline.
 | Field | Type | Description |
 |-------|------|-------------|
 | id | UUID | Primary key |
-| event_json | String | Serialized outbound Nostr event (Kind 14 NIP-44 for daemon actions; Kind 1059 gift wrap for peer chat) |
+| event_json | String | Serialized outbound Nostr event (Kind 14 NIP-44 throughout: daemon actions, and the chat envelope for peer chat) |
 | target_relays | String | JSON array of relay URLs to publish to |
 | created_at | Timestamp | When queued |
 | retry_count | u32 | Number of send attempts |

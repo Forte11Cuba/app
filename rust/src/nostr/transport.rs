@@ -95,7 +95,7 @@ pub async fn unwrap_mostro_message(
 // chat spec. The caller (api/messages.rs) owns the stateful steps: outer-id
 // LRU, rate-limit budget, durable inner-id dedup, and the `since` cursor.
 //
-// mostro-core 0.14.1 still ships the superseded gift-wrap chat
+// mostro-core 0.14.6 still ships the superseded gift-wrap chat
 // (`wrap_chat_message` / `unwrap_chat_message`); this stays a local
 // implementation until the canonical one lands upstream — flagged in #246.
 
@@ -149,15 +149,10 @@ pub async fn mostro_wrap(
     // silently drop the second one.
     let nonce: [u8; 8] = rand::random();
 
-    let inner = EventBuilder::text_note(message)
-        .tag(Tag::custom(
-            TagKind::custom("u"),
-            [hex::encode(nonce)],
-        ))
+    let inner = EventBuilder::new(Kind::TextNote, message)
+        .tag(Tag::custom("u", [hex::encode(nonce)]))
         .custom_created_at(now)
-        .build(sender_trade.public_key())
-        .sign(sender_trade)
-        .await
+        .finalize(sender_trade)
         .map_err(|e| anyhow!("inner event sign failed: {e}"))?;
 
     // NIP-44 self-encryption: K_conv is both sides of the key exchange.
@@ -183,15 +178,22 @@ pub async fn mostro_wrap(
 
     // Exactly one `p` tag, ours. Anything else could hide the message from
     // the `#p` query a dispute solver uses to rebuild the transcript.
-    let builder = EventBuilder::new(Kind::PrivateDirectMessage, content)
+    let unsigned = EventBuilder::new(Kind::PrivateDirectMessage, content)
         .tag(Tag::public_key(conv.public_key()))
-        .custom_created_at(now);
+        .custom_created_at(now)
+        .finalize_unsigned(sign.public_key());
 
-    let pow = crate::mostro::pow::get_pow();
-    let builder = if pow > 0 { builder.pow(pow) } else { builder };
+    // PoW is mined on the unsigned event before signing (nostr 0.45 dropped
+    // `EventBuilder::pow`); the id is only computed once mining settles.
+    let unsigned = match core::num::NonZeroU8::new(crate::mostro::pow::get_pow()) {
+        Some(difficulty) => unsigned
+            .mine(&SingleThreadPow, difficulty)
+            .map_err(|e| anyhow!("outer event PoW failed: {e}"))?,
+        None => unsigned,
+    };
 
-    let outer = builder
-        .sign_with_keys(sign)
+    let outer = unsigned
+        .finalize(sign)
         .map_err(|e| anyhow!("outer event sign failed: {e}"))?;
 
     Ok((outer, inner))
@@ -249,7 +251,7 @@ pub fn mostro_unwrap(
     let mut p_tags = outer
         .tags
         .iter()
-        .filter(|t| t.kind() == TagKind::p());
+        .filter(|t| t.kind() == "p");
     match (p_tags.next().and_then(|t| t.content()), p_tags.next()) {
         (Some(pk), None) if pk == conv.public_key().to_hex() => {}
         _ => {
@@ -365,6 +367,62 @@ mod chat_envelope_tests {
         assert_eq!(got.content, "hola");
     }
 
+    /// The chat envelope mines its own NIP-13 PoW: nostr 0.45 removed
+    /// `EventBuilder::pow`, so `mostro_wrap` mines the *unsigned* outer event
+    /// itself, and the difficulty and the `nonce` tag it adds are this
+    /// module's responsibility rather than the SDK builder's. Unlike the
+    /// daemon path — where mining stays inside `mostro-core` and is covered by
+    /// `mostro::actions` — nothing else exercises this code, because
+    /// `get_pow()` is 0 for every other test in the suite.
+    ///
+    /// A mined envelope must also still pass every receive-side check: the
+    /// `nonce` tag is an extra tag inside `MAX_OUTER_TAGS` that the single-`p`
+    /// scan has to ignore.
+    #[tokio::test]
+    async fn a_mined_chat_envelope_meets_the_difficulty_and_still_unwraps() {
+        // Serializes against every other test touching the process-global PoW
+        // snapshot, and restores "nothing advertised" on drop.
+        let _pow = crate::mostro::pow::test_support::lock_pow();
+
+        // 8 bits: ~256 tries, so instant, while an *unmined* id would clear
+        // the assertion only 1 time in 256 — low enough that a regression
+        // shows up rather than passing by luck.
+        const DIFFICULTY: u8 = 8;
+        crate::mostro::pow::set_pows("node-under-test", DIFFICULTY, None);
+
+        let c = convo();
+        // Mining is probabilistic; cap wall time so a regression that stalls
+        // does not hang CI.
+        let (outer, inner) = crate::rt::time::timeout(
+            std::time::Duration::from_secs(30),
+            mostro_wrap(&c.alice_trade, &c.conv, &c.sign, "hola"),
+        )
+        .await
+        .expect("mined wrap timed out")
+        .expect("mined wrap failed");
+
+        assert!(
+            nip13::get_leading_zero_bits(outer.id) >= DIFFICULTY,
+            "outer id {} has {} leading zero bits, expected >= {DIFFICULTY}",
+            outer.id.to_hex(),
+            nip13::get_leading_zero_bits(outer.id),
+        );
+
+        // The nonce tag is what carries the proof; signing happens after
+        // mining, so the id the difficulty was met on is the id that ships.
+        assert!(
+            outer.tags.iter().any(|t| t.kind() == "nonce"),
+            "a mined event must carry its NIP-13 nonce tag: {:?}",
+            outer.tags
+        );
+        assert!(outer.tags.len() <= MAX_OUTER_TAGS);
+        assert!(outer.verify().is_ok(), "the mined id must be the signed id");
+
+        let got = unwrap_now(&c, &outer).expect("a mined envelope must still unwrap");
+        assert_eq!(got.id, inner.id);
+        assert_eq!(got.content, "hola");
+    }
+
     #[tokio::test]
     async fn wrong_outer_author_is_rejected() {
         let c = convo();
@@ -386,7 +444,7 @@ mod chat_envelope_tests {
         let forged = EventBuilder::new(Kind::PrivateDirectMessage, content)
             .tag(Tag::public_key(c.conv.public_key()))
             .custom_created_at(inner.created_at)
-            .sign_with_keys(&mallory)
+            .finalize(&mallory)
             .unwrap();
 
         let err = unwrap_now(&c, &forged).unwrap_err().to_string();
@@ -411,7 +469,7 @@ mod chat_envelope_tests {
         // in the #p transcript a dispute solver retrieves.
         let no_p = EventBuilder::new(Kind::PrivateDirectMessage, content.clone())
             .custom_created_at(inner.created_at)
-            .sign_with_keys(&c.sign)
+            .finalize(&c.sign)
             .unwrap();
         assert!(unwrap_now(&c, &no_p).is_err());
 
@@ -419,7 +477,7 @@ mod chat_envelope_tests {
         let foreign = EventBuilder::new(Kind::PrivateDirectMessage, content.clone())
             .tag(Tag::public_key(Keys::generate().public_key()))
             .custom_created_at(inner.created_at)
-            .sign_with_keys(&c.sign)
+            .finalize(&c.sign)
             .unwrap();
         assert!(unwrap_now(&c, &foreign).is_err());
 
@@ -428,7 +486,7 @@ mod chat_envelope_tests {
             .tag(Tag::public_key(c.conv.public_key()))
             .tag(Tag::public_key(Keys::generate().public_key()))
             .custom_created_at(inner.created_at)
-            .sign_with_keys(&c.sign)
+            .finalize(&c.sign)
             .unwrap();
         assert!(unwrap_now(&c, &two).is_err());
     }
@@ -440,11 +498,9 @@ mod chat_envelope_tests {
         // passes, only the absolute bound against our clock catches it —
         // this is the cursor-poisoning defence.
         let future = Timestamp::from_secs(Timestamp::now().as_secs() + 7 * 24 * 3600);
-        let inner = EventBuilder::text_note("poison")
+        let inner = EventBuilder::new(Kind::TextNote, "poison")
             .custom_created_at(future)
-            .build(c.alice_trade.public_key())
-            .sign(&c.alice_trade)
-            .await
+            .finalize(&c.alice_trade)
             .unwrap();
         let content = nip44::encrypt(
             c.conv.secret_key(),
@@ -456,7 +512,7 @@ mod chat_envelope_tests {
         let outer = EventBuilder::new(Kind::PrivateDirectMessage, content)
             .tag(Tag::public_key(c.conv.public_key()))
             .custom_created_at(future)
-            .sign_with_keys(&c.sign)
+            .finalize(&c.sign)
             .unwrap();
 
         let err = unwrap_now(&c, &outer).unwrap_err().to_string();
@@ -469,7 +525,7 @@ mod chat_envelope_tests {
         let big = "x".repeat(MAX_CONTENT_BYTES + 1);
         let outer = EventBuilder::new(Kind::PrivateDirectMessage, big)
             .tag(Tag::public_key(c.conv.public_key()))
-            .sign_with_keys(&c.sign)
+            .finalize(&c.sign)
             .unwrap();
 
         let err = unwrap_now(&c, &outer).unwrap_err().to_string();
@@ -511,7 +567,7 @@ mod chat_envelope_tests {
         let outer = EventBuilder::new(Kind::PrivateDirectMessage, content)
             .tag(Tag::public_key(c.conv.public_key()))
             .custom_created_at(inner.created_at)
-            .sign_with_keys(&c.sign)
+            .finalize(&c.sign)
             .unwrap();
 
         assert!(unwrap_now(&c, &outer).is_err());
@@ -537,7 +593,7 @@ mod chat_envelope_tests {
         let rewrap = EventBuilder::new(Kind::PrivateDirectMessage, content)
             .tag(Tag::public_key(c.conv.public_key()))
             .custom_created_at(later)
-            .sign_with_keys(&c.sign)
+            .finalize(&c.sign)
             .unwrap();
 
         let err = mostro_unwrap(
@@ -609,14 +665,11 @@ mod chat_envelope_tests {
         let mut builder = EventBuilder::new(Kind::PrivateDirectMessage, content)
             .tag(Tag::public_key(c.conv.public_key()));
         for i in 0..2000 {
-            builder = builder.tag(Tag::custom(
-                TagKind::custom("x"),
-                [format!("junk-{i}")],
-            ));
+            builder = builder.tag(Tag::custom("x", [format!("junk-{i}")]));
         }
         let padded = builder
             .custom_created_at(inner.created_at)
-            .sign_with_keys(&c.sign)
+            .finalize(&c.sign)
             .unwrap();
 
         let err = unwrap_now(&c, &padded).unwrap_err().to_string();
@@ -641,7 +694,7 @@ mod chat_envelope_tests {
         let signed_with_conv = EventBuilder::new(Kind::PrivateDirectMessage, content)
             .tag(Tag::public_key(c.conv.public_key()))
             .custom_created_at(inner.created_at)
-            .sign_with_keys(&c.conv)
+            .finalize(&c.conv)
             .unwrap();
 
         assert!(unwrap_now(&c, &signed_with_conv).is_err());

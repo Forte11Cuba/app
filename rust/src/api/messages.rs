@@ -270,11 +270,11 @@ fn message_store() -> &'static MessageStore {
 
 /// The chat-key material for one conversation, derived from the session.
 pub(crate) struct ChatContext {
-    trade_keys: nostr_sdk::Keys,
+    trade_keys: nostr_sdk::prelude::Keys,
     /// `K_conv` — NIP-44 encryption; `pub(K_conv)` is the `p` tag.
-    conv: nostr_sdk::Keys,
+    conv: nostr_sdk::prelude::Keys,
     /// `K_sign` — outer-event author; what relays and clients filter on.
-    sign: nostr_sdk::Keys,
+    sign: nostr_sdk::prelude::Keys,
 }
 
 /// Derive the conversation keys for a session's trade-key index and peer.
@@ -285,7 +285,7 @@ async fn chat_context(trade_key_index: u32, peer_hex: &str) -> Result<ChatContex
     let trade_keys = crate::api::identity::get_active_trade_keys(trade_key_index)
         .await
         .map_err(|e| anyhow!("key retrieval failed: {e}"))?;
-    let peer_pubkey = nostr_sdk::PublicKey::from_hex(peer_hex)
+    let peer_pubkey = nostr_sdk::prelude::PublicKey::from_hex(peer_hex)
         .map_err(|e| anyhow!("invalid peer pubkey: {e}"))?;
     let (conv, sign) = crate::crypto::chat_keys::derive_chat_keys(&trade_keys, &peer_pubkey)?;
     Ok(ChatContext {
@@ -304,7 +304,7 @@ async fn chat_context(trade_key_index: u32, peer_hex: &str) -> Result<ChatContex
 /// trade key. Derivation is identical — that is what the spec prescribes.
 pub(crate) async fn admin_chat_context(
     trade_key_index: u32,
-    admin_pubkey: &nostr_sdk::PublicKey,
+    admin_pubkey: &nostr_sdk::prelude::PublicKey,
 ) -> Result<ChatContext> {
     chat_context(trade_key_index, &admin_pubkey.to_hex()).await
 }
@@ -314,7 +314,7 @@ pub(crate) async fn admin_chat_context(
 pub(crate) async fn publish_chat_payload_for(
     ctx: &ChatContext,
     payload: &str,
-) -> Result<nostr_sdk::Event> {
+) -> Result<nostr_sdk::prelude::Event> {
     publish_chat_payload(ctx, payload).await
 }
 
@@ -325,7 +325,7 @@ pub(crate) async fn store_outgoing_admin_message(
     trade_id: &str,
     ctx: &ChatContext,
     content: &str,
-    inner: &nostr_sdk::Event,
+    inner: &nostr_sdk::prelude::Event,
 ) {
     let msg = ChatMessage {
         id: inner.id.to_hex(),
@@ -342,7 +342,7 @@ pub(crate) async fn store_outgoing_admin_message(
     let _ = message_store().add_message(msg).await;
 }
 
-async fn publish_chat_payload(ctx: &ChatContext, payload: &str) -> Result<nostr_sdk::Event> {
+async fn publish_chat_payload(ctx: &ChatContext, payload: &str) -> Result<nostr_sdk::prelude::Event> {
     let (outer, inner) =
         crate::nostr::transport::mostro_wrap(&ctx.trade_keys, &ctx.conv, &ctx.sign, payload)
             .await?;
@@ -354,7 +354,7 @@ async fn publish_chat_payload(ctx: &ChatContext, payload: &str) -> Result<nostr_
         .map_err(|e| anyhow!("publish failed: {e}"))?;
     // Envelope metadata only — chat plaintext never enters a log record.
     let eid = outer.id.to_hex();
-    for relay in &output.success {
+    for relay in output.success.keys() {
         crate::api::logging::blog_info(
             "publish",
             format!(
@@ -525,7 +525,7 @@ pub async fn send_file(
         let peer_hex = peer_pubkey_hex
             .as_deref()
             .ok_or_else(|| anyhow!("PeerUnknown: cannot encrypt attachment without peer pubkey"))?;
-        let peer_pubkey = nostr_sdk::PublicKey::from_hex(peer_hex)
+        let peer_pubkey = nostr_sdk::prelude::PublicKey::from_hex(peer_hex)
             .map_err(|e| anyhow!("invalid peer pubkey: {e}"))?;
         crate::crypto::ecdh::derive_nip04_shared_key(&sender_keys, &peer_pubkey)?
     };
@@ -650,7 +650,7 @@ pub async fn download_attachment(message_id: String) -> Result<FileDownloadResul
                     .peer_pubkey
                     .as_deref()
                     .ok_or_else(|| anyhow!("PeerUnknown: cannot derive key without peer pubkey"))?;
-                let peer_pubkey = nostr_sdk::PublicKey::from_hex(peer_hex)
+                let peer_pubkey = nostr_sdk::prelude::PublicKey::from_hex(peer_hex)
                     .map_err(|e| anyhow!("invalid peer pubkey: {e}"))?;
                 crate::crypto::ecdh::derive_nip04_shared_key(&sender_keys, &peer_pubkey)?
             }
@@ -883,8 +883,8 @@ const MAX_STORED_BYTES_PER_TRADE: usize = 5 * 1024 * 1024;
 /// Subscription id for the chat envelope of one order — explicit so every
 /// exit path can unsubscribe and a lingering relay subscription never
 /// outlives its task.
-fn chat_subscription_id(channel: ChatChannel, order_id: &str) -> nostr_sdk::SubscriptionId {
-    nostr_sdk::SubscriptionId::new(format!("mostro-chat-{}{order_id}", channel.id_prefix()))
+fn chat_subscription_id(channel: ChatChannel, order_id: &str) -> nostr_sdk::prelude::SubscriptionId {
+    nostr_sdk::prelude::SubscriptionId::new(format!("mostro-chat-{}{order_id}", channel.id_prefix()))
 }
 
 /// Which conversation an envelope subscription serves.
@@ -1092,10 +1092,10 @@ fn parse_chat_payload(payload: &str) -> (String, Option<AttachmentInfo>) {
 pub(crate) async fn subscribe_incoming_chat(
     channel: ChatChannel,
     order_id: String,
-    trade_keys: nostr_sdk::Keys,
-    peer_pubkey: nostr_sdk::PublicKey,
-    conv: nostr_sdk::Keys,
-    sign: nostr_sdk::Keys,
+    trade_keys: nostr_sdk::prelude::Keys,
+    peer_pubkey: nostr_sdk::prelude::PublicKey,
+    conv: nostr_sdk::prelude::Keys,
+    sign: nostr_sdk::prelude::Keys,
 ) {
     // Single-owner guard: a second spawn for the same order is a no-op.
     {
@@ -1113,9 +1113,14 @@ pub(crate) async fn subscribe_incoming_chat(
     active_chats().lock().await.remove(&channel.guard_key(&order_id));
     if let Ok(pool) = crate::api::nostr::get_pool() {
         let client = pool.client();
-        client
+        // Unsubscribing a subscription that already went away is not an
+        // error worth surfacing: the loop is exiting either way.
+        if let Err(e) = client
             .unsubscribe(&chat_subscription_id(channel, &order_id))
-            .await;
+            .await
+        {
+            log::debug!("[messages] unsubscribe on exit failed: {e}");
+        }
     }
     log::debug!("[messages] incoming-chat subscription exiting order={order_id}");
 }
@@ -1193,13 +1198,12 @@ impl ChatRxState {
 async fn run_chat_subscription(
     channel: ChatChannel,
     order_id: &str,
-    trade_keys: &nostr_sdk::Keys,
-    peer_pubkey: &nostr_sdk::PublicKey,
-    conv: &nostr_sdk::Keys,
-    sign: &nostr_sdk::Keys,
+    trade_keys: &nostr_sdk::prelude::Keys,
+    peer_pubkey: &nostr_sdk::prelude::PublicKey,
+    conv: &nostr_sdk::prelude::Keys,
+    sign: &nostr_sdk::prelude::Keys,
 ) {
-    use nostr_sdk::RelayPoolNotification;
-    use tokio::sync::broadcast;
+    use nostr_sdk::prelude::{ClientNotification, StreamExt};
 
     let Ok(pool) = crate::api::nostr::get_pool() else {
         log::warn!("[messages] subscribe_incoming_chat: relay pool not initialized");
@@ -1216,12 +1220,12 @@ async fn run_chat_subscription(
     let cursor = load_chat_cursor(channel, order_id).await.unwrap_or(0);
     let sub_id = chat_subscription_id(channel, order_id);
 
-    let mut filter = nostr_sdk::Filter::new()
-        .kind(nostr_sdk::Kind::PrivateDirectMessage)
+    let mut filter = nostr_sdk::prelude::Filter::new()
+        .kind(nostr_sdk::prelude::Kind::PrivateDirectMessage)
         .author(sign_pubkey)
         .limit(CHAT_BACKLOG_LIMIT);
     if cursor > 0 {
-        filter = filter.since(nostr_sdk::Timestamp::from_secs(cursor as u64));
+        filter = filter.since(nostr_sdk::prelude::Timestamp::from_secs(cursor as u64));
     }
 
     // Obtain the receiver BEFORE subscribing — same pattern as subscribe_daemon_messages.
@@ -1229,7 +1233,7 @@ async fn run_chat_subscription(
     // and would otherwise be missed.
     let mut rx = client.notifications();
 
-    if let Err(e) = client.subscribe_with_id(sub_id.clone(), filter, None).await {
+    if let Err(e) = client.subscribe(filter).with_id(sub_id.clone()).await {
         log::warn!("[messages] subscribe_incoming_chat subscribe failed: {e}");
         return;
     }
@@ -1242,8 +1246,8 @@ async fn run_chat_subscription(
     let mut state = ChatRxState::new(channel, cursor);
 
     loop {
-        match rx.recv().await {
-            Ok(RelayPoolNotification::Event {
+        match rx.next().await {
+            Some(ClientNotification::Event {
                 subscription_id,
                 event,
                 ..
@@ -1256,23 +1260,19 @@ async fn run_chat_subscription(
                     return;
                 }
             }
-            Ok(RelayPoolNotification::Message { message, .. }) => {
+            Some(ClientNotification::Message { message, .. }) => {
                 // EOSE for one of our subscriptions: stored catch-up is over,
                 // the token bucket meters everything from here on.
-                if let nostr_sdk::RelayMessage::EndOfStoredEvents(sid) = message {
+                if let nostr_sdk::prelude::RelayMessage::EndOfStoredEvents(sid) = *message {
                     if *sid == sub_id {
                         state.live = true;
                     }
                 }
             }
-            Ok(RelayPoolNotification::Shutdown) => break,
-            Err(broadcast::error::RecvError::Lagged(n)) => {
-                // The bounded notification channel dropped n events under
-                // pressure — chat data loss, never trade-traffic loss.
-                log::warn!("[messages] incoming-chat lagged by {n} messages");
-                continue;
-            }
-            Err(broadcast::error::RecvError::Closed) => break,
+            // The SDK's notification stream ends on shutdown; lag under
+            // pressure is absorbed inside the SDK since 0.45 and no longer
+            // surfaces here.
+            Some(ClientNotification::Shutdown) | None => break,
         }
     }
 }
@@ -1286,14 +1286,14 @@ async fn run_chat_subscription(
 async fn handle_chat_event(
     channel: ChatChannel,
     order_id: &str,
-    allowed_signers: &[nostr_sdk::PublicKey],
-    conv: &nostr_sdk::Keys,
-    sign_pubkey: &nostr_sdk::PublicKey,
-    my_trade_pubkey: &nostr_sdk::PublicKey,
-    event: &nostr_sdk::Event,
+    allowed_signers: &[nostr_sdk::prelude::PublicKey],
+    conv: &nostr_sdk::prelude::Keys,
+    sign_pubkey: &nostr_sdk::prelude::PublicKey,
+    my_trade_pubkey: &nostr_sdk::prelude::PublicKey,
+    event: &nostr_sdk::prelude::Event,
     state: &mut ChatRxState,
 ) {
-    if event.kind != nostr_sdk::Kind::PrivateDirectMessage {
+    if event.kind != nostr_sdk::prelude::Kind::PrivateDirectMessage {
         return;
     }
     // Step 1 — author. Kind 14 is shared with the daemon transport; a
@@ -1316,7 +1316,7 @@ async fn handle_chat_event(
         sign_pubkey,
         allowed_signers,
         event,
-        nostr_sdk::Timestamp::now(),
+        nostr_sdk::prelude::Timestamp::now(),
     ) {
         Ok(inner) => inner,
         Err(e) => {
@@ -1418,7 +1418,7 @@ pub(crate) async fn resubscribe_active_chats() {
         else {
             continue;
         };
-        let Ok(peer) = nostr_sdk::PublicKey::from_hex(&trade.counterparty_pubkey) else {
+        let Ok(peer) = nostr_sdk::prelude::PublicKey::from_hex(&trade.counterparty_pubkey) else {
             continue;
         };
         let Ok((conv, sign)) = crate::crypto::chat_keys::derive_chat_keys(&trade_keys, &peer)
@@ -1505,10 +1505,10 @@ async fn session_or_rebuild(trade_id: &str) -> Option<crate::mostro::session::Se
 /// **already populated** — the session stays a pure cache of the row.
 async fn rebuild_session(
     trade: &crate::api::types::TradeInfo,
-    trade_keys: &nostr_sdk::Keys,
+    trade_keys: &nostr_sdk::prelude::Keys,
 ) -> Option<crate::mostro::session::Session> {
     let order_id = &trade.order.id;
-    let peer_pk = match nostr_sdk::PublicKey::from_hex(&trade.counterparty_pubkey) {
+    let peer_pk = match nostr_sdk::prelude::PublicKey::from_hex(&trade.counterparty_pubkey) {
         Ok(pk) => pk,
         Err(e) => {
             log::warn!("[messages] session rebuild order={order_id}: invalid peer pubkey: {e}");
@@ -1576,7 +1576,7 @@ mod tests {
         // different string would orphan subscriptions across an app upgrade.
         assert_eq!(
             chat_subscription_id(ChatChannel::Peer, "order-1"),
-            nostr_sdk::SubscriptionId::new("mostro-chat-order-1")
+            nostr_sdk::prelude::SubscriptionId::new("mostro-chat-order-1")
         );
     }
 
@@ -1616,7 +1616,7 @@ mod tests {
         // standing between this event and the store is the kind check.
         let gift_wrap = EventBuilder::new(Kind::GiftWrap, "ciphertext")
             .tag(Tag::public_key(trade.public_key()))
-            .sign_with_keys(&sign)
+            .finalize(&sign)
             .unwrap();
 
         let mut state = ChatRxState::new(ChatChannel::Peer, 0);
@@ -2097,8 +2097,8 @@ mod tests {
     #[tokio::test]
     async fn rebuild_session_derives_from_trade_row() {
         let order_id = uuid::Uuid::new_v4().to_string();
-        let trade_keys = nostr_sdk::Keys::generate();
-        let peer_keys = nostr_sdk::Keys::generate();
+        let trade_keys = nostr_sdk::prelude::Keys::generate();
+        let peer_keys = nostr_sdk::prelude::Keys::generate();
         let trade = live_trade(&order_id, &peer_keys.public_key().to_hex(), 9);
 
         let session = rebuild_session(&trade, &trade_keys)
@@ -2118,7 +2118,7 @@ mod tests {
         // Benign race arm: a second rebuild finds the session already created
         // and returns the EXISTING one — even when called with other keys, it
         // must not overwrite the first derivation.
-        let other_keys = nostr_sdk::Keys::generate();
+        let other_keys = nostr_sdk::prelude::Keys::generate();
         let again = rebuild_session(&trade, &other_keys)
             .await
             .expect("existing session is returned, not rebuilt");
@@ -2132,7 +2132,7 @@ mod tests {
     #[tokio::test]
     async fn rebuild_session_rejects_unparseable_peer() {
         let order_id = uuid::Uuid::new_v4().to_string();
-        let trade_keys = nostr_sdk::Keys::generate();
+        let trade_keys = nostr_sdk::prelude::Keys::generate();
         let trade = live_trade(&order_id, "not-a-pubkey", 1);
         assert!(rebuild_session(&trade, &trade_keys).await.is_none());
         assert!(crate::mostro::session::session_manager().get_session(&order_id).await.is_none());
@@ -2175,7 +2175,7 @@ mod tests {
         let trade_keys = crate::api::identity::get_active_trade_keys(trade_index)
             .await
             .expect("derive trade key");
-        let peer_keys = nostr_sdk::Keys::generate();
+        let peer_keys = nostr_sdk::prelude::Keys::generate();
         let peer_hex = peer_keys.public_key().to_hex();
 
         let order_id = uuid::Uuid::new_v4().to_string();
