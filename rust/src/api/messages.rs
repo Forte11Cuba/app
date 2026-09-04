@@ -1483,7 +1483,15 @@ async fn session_or_rebuild(trade_id: &str) -> Option<crate::mostro::session::Se
         return Some(s);
     }
     let db = crate::db::app_db::db()?;
-    let trade = db.get_trade_by_order_id(trade_id).await.ok().flatten()?;
+    let trade = match db.get_trade_by_order_id(trade_id).await {
+        Ok(row) => row?,
+        Err(e) => {
+            // A corrupt DB surfacing as a bare SessionNotFound would be
+            // undiagnosable; the reveal path logs its lookup failures too.
+            log::warn!("[messages] session rebuild trade={trade_id}: row lookup failed: {e}");
+            return None;
+        }
+    };
     if !chat_still_relevant(&trade) {
         return None;
     }
@@ -2208,6 +2216,37 @@ mod tests {
             crate::crypto::ecdh::derive_nip04_shared_key(&trade_keys, &peer_keys.public_key())
                 .expect("ECDH derivation");
         assert_eq!(session.shared_key, Some(expected));
+
+        // The safety-gate leg: a poisoned pre-#334 row names the node that
+        // authored the book order as "counterparty". That pubkey is VALID,
+        // so without the `chat_still_relevant` gate the rebuild succeeds and
+        // this send encrypts chat to the node — deleting the gate from
+        // `session_or_rebuild` fails these assertions (before this leg, the
+        // gate survived every mutation).
+        let node_hex = nostr_sdk::prelude::Keys::generate().public_key().to_hex();
+        let poisoned_id = uuid::Uuid::new_v4().to_string();
+        let mut poisoned = live_trade(&poisoned_id, &node_hex, trade_index);
+        poisoned.order.creator_pubkey = node_hex.clone();
+        crate::db::app_db::db()
+            .expect("db still initialized")
+            .save_trade(&poisoned)
+            .await
+            .expect("save the poisoned row");
+
+        let msg = send_message(poisoned_id.clone(), "hola".into())
+            .await
+            .expect("poisoned row still returns Ok — but local-only");
+        assert_eq!(
+            msg.sender_pubkey, "",
+            "poisoned row must stay on the local-only path, never publish"
+        );
+        assert!(
+            crate::mostro::session::session_manager()
+                .get_session(&poisoned_id)
+                .await
+                .is_none(),
+            "no session may be rebuilt toward the node's pubkey"
+        );
 
         let _ = std::fs::remove_file(&db_path);
     }
