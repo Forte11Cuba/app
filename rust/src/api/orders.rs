@@ -5944,20 +5944,39 @@ mod restore_e2e_tests {
     //! Requires a live regtest stack: mostrod + relay on ws://localhost:7000.
     //! Run with:  cargo test --lib restore_session_roundtrip -- --ignored --nocapture
     //! Ignored by default so it never runs in CI without the stack.
+    //! Set MOSTRO_REGTEST_PUBKEY to your daemon's pubkey (from mostrod's
+    //! startup logs); MOSTRO_REGTEST_RELAY overrides the default relay,
+    //! ws://localhost:7000.
     use super::*;
 
-    #[tokio::test]
-    #[ignore = "requires live regtest daemon + relay on ws://localhost:7000"]
-    async fn restore_session_roundtrip() {
-        // Point ONLY at the local regtest relay.
-        crate::api::nostr::initialize(Some(vec!["ws://localhost:7000".to_string()]))
+    /// Shared regtest setup. Every test here ends up in `derive_trade_key`
+    /// (via `create_order`, or as `restore_session`'s reply address), which
+    /// refuses to run without durable storage — so a throwaway SQLite file
+    /// must be initialised before anything else. `init_db` is a process-wide
+    /// no-op after the first call, so tests sharing a process share the first
+    /// file; each creates a fresh identity, so that's fine.
+    async fn init_regtest() {
+        let dbp = std::env::temp_dir().join(format!("e2e-restore-{}.db", uuid::Uuid::new_v4()));
+        crate::db::app_db::init_db(dbp.to_str().expect("utf-8 temp path"))
+            .await
+            .expect("init_db");
+        // Point ONLY at the daemon's relay.
+        let relay = std::env::var("MOSTRO_REGTEST_RELAY")
+            .unwrap_or_else(|_| "ws://localhost:7000".to_string());
+        crate::api::nostr::initialize(Some(vec![relay]))
             .await
             .expect("relay pool init");
+        let mostro_pk = std::env::var("MOSTRO_REGTEST_PUBKEY").expect(
+            "MOSTRO_REGTEST_PUBKEY env var required \
+             (your regtest daemon's pubkey, from mostrod's startup logs)",
+        );
+        crate::config::set_active_mostro_pubkey(Some(mostro_pk));
+    }
 
-        // Regtest daemon pubkey (from mostrod startup logs).
-        crate::config::set_active_mostro_pubkey(Some(
-            "bae71ea2566771ed45b1d267dc0c0753028fe960a7bc4aeee08a44da0cb91520".to_string(),
-        ));
+    #[tokio::test]
+    #[ignore = "requires live regtest stack — set MOSTRO_REGTEST_PUBKEY (relay defaults to ws://localhost:7000)"]
+    async fn restore_session_roundtrip() {
+        init_regtest().await;
 
         // Fresh in-memory identity (no keyring needed — Rust never persists it).
         let id = crate::api::identity::create_identity().await.expect("create identity");
@@ -5984,14 +6003,9 @@ mod restore_e2e_tests {
     }
 
     #[tokio::test]
-    #[ignore = "requires live regtest daemon + relay on ws://localhost:7000"]
+    #[ignore = "requires live regtest stack — set MOSTRO_REGTEST_PUBKEY (relay defaults to ws://localhost:7000)"]
     async fn trade_then_restore_recovers_order() {
-        crate::api::nostr::initialize(Some(vec!["ws://localhost:7000".to_string()]))
-            .await
-            .expect("relay pool init");
-        crate::config::set_active_mostro_pubkey(Some(
-            "bae71ea2566771ed45b1d267dc0c0753028fe960a7bc4aeee08a44da0cb91520".to_string(),
-        ));
+        init_regtest().await;
         let id = crate::api::identity::create_identity().await.expect("create identity");
         println!("[test] identity A pubkey={}", id.public_key);
         tokio::time::sleep(std::time::Duration::from_secs(3)).await;
@@ -6045,14 +6059,9 @@ mod restore_e2e_tests {
     /// left the counter at 1 and the daemon refused the next order with
     /// CantDo(InvalidTradeIndex).
     #[tokio::test]
-    #[ignore = "requires live regtest daemon + relay on ws://localhost:7000"]
+    #[ignore = "requires live regtest stack — set MOSTRO_REGTEST_PUBKEY (relay defaults to ws://localhost:7000)"]
     async fn restore_with_finalized_top_index_resyncs_from_last_trade_index() {
-        crate::api::nostr::initialize(Some(vec!["ws://localhost:7000".to_string()]))
-            .await
-            .expect("relay pool init");
-        crate::config::set_active_mostro_pubkey(Some(
-            "bae71ea2566771ed45b1d267dc0c0753028fe960a7bc4aeee08a44da0cb91520".to_string(),
-        ));
+        init_regtest().await;
 
         let id = crate::api::identity::create_identity().await.expect("create identity");
         let words = id.mnemonic_words.clone();
