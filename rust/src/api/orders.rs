@@ -4079,13 +4079,13 @@ fn is_matching_cant_do_refusal(
 /// reply also reaches the global dispatch path (the trade key is in the bulk
 /// coverage), which ignores it — the restore's pending record was already
 /// consumed — while this loop correlates by its own nonce.
-async fn last_trade_index(sender_keys: &nostr_sdk::Keys) -> Result<Option<u32>> {
-    use nostr_sdk::RelayPoolNotification;
+async fn last_trade_index(sender_keys: &nostr_sdk::prelude::Keys) -> Result<Option<u32>> {
+    use nostr_sdk::prelude::{ClientNotification, StreamExt};
     use crate::rt::time::{timeout, Duration};
 
     let trade_pk = sender_keys.public_key();
     let trade_pk_hex = trade_pk.to_hex();
-    let mostro_pubkey = nostr_sdk::PublicKey::from_hex(&active_mostro_pubkey())?;
+    let mostro_pubkey = nostr_sdk::prelude::PublicKey::from_hex(&active_mostro_pubkey())?;
     let identity_keys =
         crate::api::identity::get_transport_identity_keys(sender_keys).await?;
 
@@ -4127,8 +4127,8 @@ async fn last_trade_index(sender_keys: &nostr_sdk::Keys) -> Result<Option<u32>> 
     // limit(0): live-only, same rationale as subscribe_daemon_messages — the
     // reply is published after we subscribe, and we never want a replayed
     // historical LastTradeIndex to resolve this request.
-    let filter = nostr_sdk::Filter::new()
-        .kind(nostr_sdk::Kind::PrivateDirectMessage)
+    let filter = nostr_sdk::prelude::Filter::new()
+        .kind(nostr_sdk::prelude::Kind::PrivateDirectMessage)
         .author(mostro_pubkey)
         .pubkey(trade_pk)
         .limit(0);
@@ -4148,7 +4148,7 @@ async fn last_trade_index(sender_keys: &nostr_sdk::Keys) -> Result<Option<u32>> 
             REPLY_TIMEOUT,
         ))
         .timeout(Some(REPLY_TIMEOUT));
-    if let Err(e) = client.subscribe(filter, Some(close_opts)).await {
+    if let Err(e) = client.subscribe(filter).close_on(close_opts).await {
         log::warn!("[orders] last_trade_index subscribe failed: {e}");
         return Ok(None);
     }
@@ -4167,9 +4167,9 @@ async fn last_trade_index(sender_keys: &nostr_sdk::Keys) -> Result<Option<u32>> 
         if remaining.is_zero() {
             break;
         }
-        match timeout(remaining, rx.recv()).await {
-            Ok(Ok(RelayPoolNotification::Event { event, .. })) => {
-                if event.kind != nostr_sdk::Kind::PrivateDirectMessage
+        match timeout(remaining, rx.next()).await {
+            Ok(Some(ClientNotification::Event { event, .. })) => {
+                if event.kind != nostr_sdk::prelude::Kind::PrivateDirectMessage
                     || event.pubkey != mostro_pubkey
                 {
                     continue;
@@ -4219,14 +4219,9 @@ async fn last_trade_index(sender_keys: &nostr_sdk::Keys) -> Result<Option<u32>> 
                     }
                 }
             }
-            Ok(Ok(RelayPoolNotification::Shutdown)) => break,
-            Ok(Err(broadcast::error::RecvError::Lagged(n))) => {
-                log::warn!("[orders] last_trade_index lagged by {n} messages");
-                continue;
-            }
-            Ok(Err(broadcast::error::RecvError::Closed)) => break,
+            Ok(Some(ClientNotification::Shutdown)) | Ok(None) => break,
             Err(_) => break, // timeout
-            Ok(Ok(_)) => continue,
+            Ok(Some(_)) => continue,
         }
     }
     crate::api::logging::blog_warn(
@@ -6295,10 +6290,45 @@ mod restore_e2e_tests {
         println!("[test] order B id={}", order_b.id);
 
         // Finalize the top-index trade: cancel B. cancel_order publishes and
-        // returns without waiting for the daemon, so give it time to settle —
-        // the restore below must not see B as pending.
+        // returns without waiting for the daemon, so poll B's public Kind
+        // 38383 view until the daemon's cancellation lands — the restore
+        // below must not see B as pending. (The s-tag is NIP-69's public
+        // bucket, never a trade's live status — but the pending→canceled
+        // transition is exactly the "daemon processed the cancel" proof this
+        // needs, and it is the authoritative, relay-visible one.)
         cancel_order(order_b.id.clone()).await.expect("cancel order B");
-        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+        let mostro_pk = nostr_sdk::prelude::PublicKey::from_hex(
+            &crate::config::active_mostro_pubkey(),
+        )
+        .expect("mostro pubkey");
+        let client = crate::api::nostr::get_pool().expect("pool").client();
+        let b_filter =
+            crate::nostr::order_events::trade_order_filter(&mostro_pk, &order_b.id);
+        let start = crate::rt::time::Instant::now();
+        loop {
+            let canceled = client
+                .fetch_events(b_filter.clone())
+                .timeout(std::time::Duration::from_secs(2))
+                .await
+                .ok()
+                .and_then(|events| {
+                    // Newest first: 38383 is addressable, but don't rely on
+                    // the relay's replacement — read the latest snapshot.
+                    events
+                        .iter()
+                        .max_by_key(|ev| ev.created_at)
+                        .and_then(|ev| parse_order_event(ev, None))
+                })
+                .is_some_and(|o| o.status == OrderStatus::Canceled);
+            if canceled {
+                break;
+            }
+            assert!(
+                start.elapsed() < std::time::Duration::from_secs(15),
+                "daemon did not publish order B as canceled within 15s"
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        }
 
         // Fresh install: same mnemonic, counter back to zero.
         crate::api::identity::delete_identity().await.expect("delete identity");
