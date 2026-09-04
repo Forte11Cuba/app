@@ -75,6 +75,25 @@ void main() {
     );
   });
 
+  /// mostro-core 0.14.6 adds `CantDoReason::MaintenanceMode`: the node is
+  /// draining and refuses new orders and takes. Rust emits the bare marker;
+  /// some wrappers prepend their own context, so match it by substring like
+  /// every other marker.
+  test('maps the MaintenanceMode marker to the maintenance guidance', () {
+    expect(
+      localizedDaemonError(l10n, 'MaintenanceMode', fallback: 'x'),
+      l10n.mostroMaintenanceMode,
+    );
+    expect(
+      localizedDaemonError(
+        l10n,
+        'ProtocolError: could not take order: MaintenanceMode',
+        fallback: 'x',
+      ),
+      l10n.mostroMaintenanceMode,
+    );
+  });
+
   test('maps timeout and storage markers, and falls back otherwise', () {
     expect(
       localizedDaemonError(l10n, 'NoDaemonResponse', fallback: 'x'),

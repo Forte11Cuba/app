@@ -12,7 +12,7 @@ use crate::api::types::QueuedMessageStatus;
 pub struct QueuedMessage {
     /// UUID v4 identifier.
     pub id: String,
-    /// Serialised `nostr_sdk::Event` JSON.
+    /// Serialised `nostr_sdk::prelude::Event` JSON.
     pub event_json: String,
     pub status: QueuedMessageStatus,
     pub created_at: i64,

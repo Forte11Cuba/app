@@ -5,9 +5,12 @@ import 'package:mostro/core/app_theme.dart';
 import 'package:mostro/core/automation/automation_id.dart';
 import 'package:mostro/core/automation/automation_ids.dart';
 import 'package:mostro/core/mostro_defaults.dart';
+import 'package:mostro/core/services/coalescing_loader.dart';
 import 'package:mostro/core/test_environment.dart';
+import 'package:mostro/features/settings/providers/relay_auto_sync_provider.dart';
 import 'package:mostro/l10n/app_localizations.dart';
 import 'package:mostro/src/rust/api/nostr.dart' as nostr_api;
+import 'package:mostro/src/rust/api/types.dart' show RelaySource;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -25,11 +28,15 @@ class _RelayEntry {
     required this.url,
     required this.isActive,
     required this.isDefault,
+    this.source = RelaySource.default_,
   });
 
   final String url;
   bool isActive;
   final bool isDefault;
+  final RelaySource source;
+
+  bool get isFromMostro => source == RelaySource.mostroDiscovered;
 }
 
 // ── Widget ────────────────────────────────────────────────────────────────────
@@ -37,7 +44,10 @@ class _RelayEntry {
 /// Inline relay management card shown within the Settings screen.
 ///
 /// Default relays (from config.rs) are pre-populated and cannot be removed.
-/// Users may add additional relays with a `wss://` prefix.
+/// Users may add additional relays with a `wss://` prefix. Relays the active
+/// Mostro node announces in its kind 10002 list are auto-added by the Rust
+/// core and labelled as such; removing one blacklists it so the node's list
+/// does not bring it back.
 class RelayManagementCard extends ConsumerStatefulWidget {
   const RelayManagementCard({super.key});
 
@@ -51,7 +61,11 @@ class _RelayManagementCardState extends ConsumerState<RelayManagementCard> {
   static const _defaultRelays = defaultMostroRelays;
 
   late List<_RelayEntry> _relays;
-  bool _loading = false;
+  /// Serialises reloads and keeps the one an auto-sync asks for while another
+  /// is in flight — that load may have read its snapshot before the new relay
+  /// existed, so dropping the request would hide it until a screen re-entry.
+  late final CoalescingLoader _loader = CoalescingLoader(_readRelays);
+  ProviderSubscription<AsyncValue<List<String>>>? _autoSyncSub;
 
   @override
   void initState() {
@@ -59,12 +73,33 @@ class _RelayManagementCardState extends ConsumerState<RelayManagementCard> {
     _relays = _defaultRelays
         .map((url) => _RelayEntry(url: url, isActive: true, isDefault: true))
         .toList();
-    _loadRelays();
+    // The initial load is driven by this subscription, not started here:
+    // `relayAutoSyncProvider` emits once the Rust-side receiver exists, so
+    // the first snapshot is taken with nothing able to slip past it. Every
+    // later emission is a node-announced relay to fold into the list.
+    _autoSyncSub = ref.listenManual<AsyncValue<List<String>>>(
+      relayAutoSyncProvider,
+      (_, next) => next.whenData((added) {
+        if (added.isNotEmpty) {
+          debugPrint('[RelayManagement] auto-synced relays: $added');
+        }
+        _loadRelays();
+      }),
+      onError: (e, _) =>
+          debugPrint('[RelayManagement] auto-sync watch failed: $e'),
+      fireImmediately: true,
+    );
   }
 
-  Future<void> _loadRelays() async {
-    if (_loading) return;
-    _loading = true;
+  @override
+  void dispose() {
+    _autoSyncSub?.close();
+    super.dispose();
+  }
+
+  Future<void> _loadRelays() => _loader.run();
+
+  Future<void> _readRelays() async {
     try {
       final relays = await nostr_api.getRelays();
       if (!mounted) return;
@@ -73,12 +108,11 @@ class _RelayManagementCardState extends ConsumerState<RelayManagementCard> {
           url: r.url,
           isActive: r.isActive,
           isDefault: r.isDefault,
+          source: r.source,
         )).toList();
       });
     } catch (e) {
       debugPrint('[RelayManagement] failed to load relays: $e');
-    } finally {
-      _loading = false;
     }
   }
 
@@ -247,14 +281,26 @@ class _RelayManagementCardState extends ConsumerState<RelayManagementCard> {
                   ),
                 ),
                 const SizedBox(width: AppSpacing.sm),
-                // Relay URL
+                // Relay URL, plus where it came from when a node added it
                 Expanded(
-                  child: Text(
-                    relay.url,
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          fontFamily: 'monospace',
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        relay.url,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              fontFamily: 'monospace',
+                            ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      if (relay.isFromMostro)
+                        Text(
+                          l10n.relayFromMostroLabel,
+                          style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                                color: colors.textDisabled,
+                              ),
                         ),
-                    overflow: TextOverflow.ellipsis,
+                    ],
                   ),
                 ),
                 // Active toggle
@@ -268,7 +314,7 @@ class _RelayManagementCardState extends ConsumerState<RelayManagementCard> {
                     activeThumbColor: colors.mostroGreen,
                   ),
                 ),
-                // Remove button (user-added relays only)
+                // Remove button (user-added and node-announced relays)
                 if (!relay.isDefault)
                   IconButton(
                     icon: Icon(Icons.delete_outline, color: colors.destructiveRed),

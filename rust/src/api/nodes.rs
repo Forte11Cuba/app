@@ -69,7 +69,8 @@ fn parse_node_pubkey(input: &str) -> Result<String> {
         bail!("PrivateKeyNotAllowed: expected a public key, got an nsec");
     }
     let pk =
-        nostr_sdk::PublicKey::parse(trimmed).map_err(|e| anyhow::anyhow!("InvalidPubkey: {e}"))?;
+        nostr_sdk::prelude::PublicKey::parse(trimmed)
+            .map_err(|e| anyhow::anyhow!("InvalidPubkey: {e}"))?;
     Ok(pk.to_hex())
 }
 
@@ -336,7 +337,8 @@ pub async fn refresh_mostro_node_metadata() -> Result<Vec<MostroNodeEntry>> {
 
     let filter = Filter::new().kind(Kind::Metadata).authors(authors);
     let events = client
-        .fetch_events(filter, Duration::from_secs(10))
+        .fetch_events(filter)
+        .timeout(Duration::from_secs(10))
         .await
         .map_err(|e| anyhow::anyhow!("fetch_events failed: {e}"))?;
 
@@ -390,8 +392,8 @@ mod tests {
 
     #[test]
     fn parse_accepts_npub() {
-        use nostr_sdk::ToBech32;
-        let npub = nostr_sdk::PublicKey::from_hex(HEX)
+        use nostr_sdk::prelude::ToBech32;
+        let npub = nostr_sdk::prelude::PublicKey::from_hex(HEX)
             .unwrap()
             .to_bech32()
             .unwrap();
@@ -482,7 +484,7 @@ mod tests {
         let mut seen = std::collections::HashSet::new();
         for n in nodes {
             assert!(
-                nostr_sdk::PublicKey::from_hex(n.pubkey).is_ok(),
+                nostr_sdk::prelude::PublicKey::from_hex(n.pubkey).is_ok(),
                 "invalid pubkey in trusted registry: {}",
                 n.pubkey
             );

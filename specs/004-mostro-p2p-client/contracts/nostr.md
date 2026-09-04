@@ -65,15 +65,40 @@ Emits when any individual relay's status changes.
 
 ## Auto-Sync Functions
 
-### enable_relay_auto_sync(mostro_pubkey: String) → ()
-Subscribe to Mostro daemon's kind 10002 relay list events. When the
-daemon publishes updated relays, auto-add them locally (additive only —
-never disconnects existing relays during sync).
+### Relay auto-sync from the node's kind 10002 list (implicit)
+There is no separate `enable_relay_auto_sync` call: the kind 10002 (NIP-65)
+relay list of the **active** Mostro node is subscribed together with the
+order-book and Mostro-reply filters (stable subscription id
+`mostro-relay-list`), on pool start-up and again on every node switch, so
+an operator adding a relay reaches running clients live.
 
-**Side effects**: Creates Nostr subscription for kind 10002 from the
-specified pubkey.
+Every `r` tag is taken regardless of its read/write marker (the daemon
+writes where we read and reads where we write). URLs are normalised
+(scheme/host lower-cased, trailing slash stripped; only `ws://`/`wss://`).
 
-**Errors**: `NotConnected`.
+Applying a list is **additive only**: relays already configured (whatever
+their source) are left alone, nothing is ever disconnected, and a relay the
+node stops announcing is not removed. Only the newest generation per node is
+applied (older/replayed events from other relays are ignored); a generation is
+`(created_at, event id)` and is ordered the way NIP-01 orders revisions of a
+replaceable event — newer `created_at` wins, and on a same-second tie the lower
+event id does. Added relays get `RelaySource::MostroDiscovered` and are
+persisted.
+
+Removing a `MostroDiscovered` relay through `remove_relay` **blacklists**
+it (persisted as `is_blacklisted = true`, `is_active = false`), so neither a
+later list nor the next start brings it back; `add_relay` of the same URL
+lifts the blacklist. Removing a default or user-added relay does not
+blacklist it.
+
+`initialize(None)` restores the persisted relay set (active, non-blacklisted
+rows) and the blacklist; only a store with no rows falls back to the
+compiled-in defaults, which are then seeded.
+
+Persistence here is the **native** (SQLite) story. On web the IndexedDB relay
+store is still a stub (#233): discovery and the blacklist work for the life of
+the session, every write is logged and ignored, and a reload starts from the
+compiled-in defaults again.
 
 ---
 
@@ -193,4 +218,5 @@ is transmitted.
 
 ### on_relay_auto_synced() → Stream<Vec<String>>
 Emits when new relays are auto-synced from daemon's kind 10002 events.
-Payload is the list of newly added relay URLs.
+Payload is the list of newly added relay URLs, in announcement order. Lists
+that add nothing new do not emit.

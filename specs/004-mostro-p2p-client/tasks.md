@@ -47,7 +47,7 @@
 - [x] T009 Implement storage trait in `rust/src/db/mod.rs` defining async CRUD interface for all entities (Identity, Order, Trade, Message, Relay, Dispute, Settings, MessageQueue, NwcWallet, FileAttachment, Rating). Implement SQLite backend in `rust/src/db/sqlite.rs` using `sqlx` with full schema migrations for all 11 entities per `data-model.md`.
 - [x] T010 [P] Implement IndexedDB storage backend in `rust/src/db/indexeddb.rs` using `indexed_db_futures`, feature-gated with `#[cfg(target_arch = "wasm32")]`. Must implement the same trait as `sqlite.rs` and support all 11 entities.
 
-> **Transport v2 note**: T011/T012/T039/T040/T049/T066/T085/T137 below describe the original NIP-59 gift-wrap (Kind 1059) transport implemented in 004. Messages to the Mostro daemon were later migrated to transport v2 (NIP-44, signed Kind 14); peer chat (NIP-17) stays on NIP-59 gift wrap (Kind 1059). These task records are kept as-is for history.
+> **Transport v2 note**: T011/T012/T039/T040/T049/T066/T071/T085/T137 below describe the original NIP-59 gift-wrap (Kind 1059) transport implemented in 004. Messages to the Mostro daemon were later migrated to transport v2 (NIP-44, signed Kind 14), and peer/dispute chat followed in #246, moving to the Kind 14 chat envelope. Kind 1059 is gone from both directions, so these task descriptions are a record of what 004 built, not of what ships. These task records are kept as-is for history.
 
 - [x] T011 [P] Implement NIP-59 Gift Wrap encode/decode in `rust/src/nostr/gift_wrap.rs` using `nostr-sdk`: create unsigned rumor event, encrypt into Seal (Kind 13, NIP-44), wrap into Gift Wrap (Kind 1059, ephemeral key). Export `wrap_message(content, recipient_pubkey, sender_key)` and `unwrap_message(gift_wrap_event, recipient_key)`.
 - [x] T012 [P] Implement relay pool with Kind 1059 + Kind 38383 subscriptions in `rust/src/nostr/relay_pool.rs` using `nostr-sdk`. Multi-relay connection manager: connect, disconnect, add/remove relays, subscribe to order events (Kind 38383) and gift-wrap DMs (Kind 1059 targeting user's trade keys), emit events via channels.
@@ -70,7 +70,9 @@ configuration.
 **Blocks**: T012 (relay pool initialization), T029 (Nostr relay API)
 
 - [x] T012b Create `rust/src/config.rs` with hardcoded seed constants:
-  - `DEFAULT_RELAYS: &[&str]` = `["wss://relay.mostro.network", "wss://nos.lol"]`
+  - `DEFAULT_RELAYS: &[&str]` = `["wss://relay.mostro.network", "wss://nos.lol",
+    "wss://mostro-p2p.tech", "wss://relay.shadowbip.com"]` — the default node's
+    own kind 10002 relay list; see `contracts/settings.md` → Default Relays
   - `DEFAULT_MOSTRO_PUBKEY: &str` = `"82fa8cb978b43c79b2156585bac2c011176a21d2aead6d9f7c575c005be88390"`
   - `DEFAULT_MOSTRO_NAME: &str` = `"Mostro"`
   - Export from `lib.rs`

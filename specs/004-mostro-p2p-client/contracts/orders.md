@@ -423,7 +423,7 @@ Invariants:
 
 ### Stale-state sweep
 
-Covers cancellations whose gift wrap the app never received (closed or
+Covers cancellations whose daemon message the app never received (closed or
 offline when the daemon's waiting window expired). Runs 60s after the
 order subscription starts, then every 30 minutes: waiting trades past
 their window (`timeout_at`, else `started_at + 900`) are checked against

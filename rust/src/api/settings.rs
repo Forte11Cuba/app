@@ -201,7 +201,7 @@ pub async fn set_active_mostro_node(pubkey: String) -> Result<()> {
     // lowercase hex, and an uppercase active key would read as unknown there
     // (auto-imported duplicate, never flagged active, undeletable).
     let pubkey = pubkey.to_lowercase();
-    nostr_sdk::PublicKey::from_hex(&pubkey)
+    nostr_sdk::prelude::PublicKey::from_hex(&pubkey)
         .map_err(|e| anyhow::anyhow!("InvalidPubkey: {e}"))?;
 
     {
