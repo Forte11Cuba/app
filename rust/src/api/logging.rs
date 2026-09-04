@@ -6,7 +6,7 @@
 //! buffer readable with [`recent_logs`], and to the live [`on_log_entry`]
 //! stream.
 //!
-//! Dependency logs arrive here too: `nostr-sdk`, `nostr-relay-pool` and `sqlx`
+//! Dependency logs arrive here too: `nostr-sdk` and `sqlx`
 //! emit through `tracing`, which the crate wires into `log` — see the comment
 //! on that dependency in `Cargo.toml`.
 
@@ -81,12 +81,23 @@ pub(crate) fn set_verbose_logging(enabled: bool) {
     });
 }
 
-/// Dependency targets dropped at every level: `nostr-relay-pool` logs raw relay
-/// messages verbatim at `Debug` (`relay/inner.rs:818`, `:1092`) *and* at `Error`
-/// (`:1073`, `:1915`), so no level ceiling separates its diagnostics from its
+/// Dependency targets dropped at every level: the SDK's relay module logs raw
+/// relay messages verbatim at `Debug` — every message sent and received, in
+/// full (`nostr-sdk` 0.45.2 `relay/inner.rs:884`, `:1156`) — *and* logs relay
+/// text at `Error`, so no level ceiling separates its diagnostics from its
 /// payloads. Per-relay lifecycle is instrumented from our own pool wrapper
 /// instead, where the message text is ours (#241).
-const EXCLUDED_TARGETS: &[&str] = &["nostr_relay_pool"];
+///
+/// These are crate/module paths, and they move when the SDK is restructured:
+/// the relay code lived in its own `nostr-relay-pool` crate up to 0.44 and was
+/// folded into `nostr-sdk` in 0.45, which renamed the target from
+/// `nostr_relay_pool` to `nostr_sdk::relay::*`. A stale entry fails **open** —
+/// the filter simply matches nothing and the payloads come back — so
+/// `excluded_targets_never_reach_any_sink` pins the current path. The
+/// exclusion is deliberately the relay subtree and not all of `nostr_sdk`:
+/// wire traffic is handled there, and nothing else in the SDK we build logs
+/// event content.
+const EXCLUDED_TARGETS: &[&str] = &["nostr_sdk::relay"];
 
 /// Per-target ceiling, never above the global filter.
 fn max_level_for(target: &str) -> log::LevelFilter {
@@ -530,12 +541,24 @@ mod tests {
     /// Raw relay traffic must not reach the console or the retained buffer,
     /// where sharing, screenshots and logcat would expose it unredacted. The
     /// payload rides on `Error` records too, so every level has to be covered.
+    ///
+    /// `TARGET` is deliberately a literal and not read out of
+    /// `EXCLUDED_TARGETS`: it stands in for what the SDK actually emits, so
+    /// deriving it from the constant would make this test pass for any
+    /// constant, including a stale one. It has to be re-checked against the
+    /// SDK on every bump — the relay code moved from the `nostr-relay-pool`
+    /// crate into `nostr-sdk` in 0.45, which renamed the target from
+    /// `nostr_relay_pool::*` to `nostr_sdk::relay::*`, and a target that no
+    /// longer matches fails **open**: the filter drops nothing and the
+    /// payloads are logged in full again.
     #[test]
     fn excluded_targets_never_reach_any_sink() {
         use log::Log as _;
 
         install_log_bridge();
-        const TARGET: &str = "nostr_relay_pool::relay::inner";
+        // nostr-sdk 0.45.2 `relay/inner.rs`: `:884` logs every message sent
+        // and `:1156` every message received, both verbatim at Debug.
+        const TARGET: &str = "nostr_sdk::relay::inner";
         const PAYLOAD: &str = "traffic-probe-payload";
 
         log::debug!(target: TARGET, "Received '{PAYLOAD}'");
