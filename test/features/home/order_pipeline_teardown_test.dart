@@ -28,7 +28,7 @@ void main() {
       // (`context.go`), not the pushed Settings/About that keep it mounted.
       list.close();
       reasons.close();
-      await Future<void>.delayed(Duration.zero);
+      await container.pump();
 
       expect(
         bookDisposed,
