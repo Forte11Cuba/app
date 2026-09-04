@@ -167,7 +167,9 @@ pub async fn load_identity_from_mnemonic(
     privacy_mode: bool,
     created_at: Option<i64>,
 ) -> Result<IdentityInfo> {
-    key_ops::validate_mnemonic(&words)?;
+    // Deriving is the validation: it parses the phrase and fails on a bad word
+    // or checksum with the same `invalid mnemonic` error the explicit check
+    // used to produce.
     let keys = key_ops::derive_master_key(&words)?;
     let public_key = keys.public_key().to_hex();
 
@@ -280,6 +282,37 @@ pub async fn import_from_nsec(nsec: String) -> Result<IdentityInfo> {
 pub async fn get_identity() -> Result<Option<IdentityInfo>> {
     let guard = identity_lock().read().await;
     Ok(guard.as_ref().map(|s| s.identity_info.clone()))
+}
+
+/// The BIP-39 seed of the loaded identity.
+///
+/// Crate-internal on purpose — it is *not* part of the bridge surface, and FRB
+/// skips it because it is not `pub`. The Cashu wallet (phase C2) needs a
+/// 64-byte seed to derive its blinding secrets, and reusing this one is what
+/// makes the ecash recoverable from the words the user already backed up.
+///
+/// **Errors** (stable markers): `NoIdentity` when none is loaded,
+/// `CashuNoMnemonic` for an nsec-imported identity, `CashuSeedUnavailable` when
+/// derivation fails.
+pub(crate) async fn current_bip39_seed() -> Result<zeroize::Zeroizing<[u8; 64]>> {
+    let guard = identity_lock().read().await;
+    let state = guard.as_ref().ok_or_else(|| anyhow!("NoIdentity"))?;
+
+    // An nsec import stores no mnemonic (see `import_from_nsec`), so there is
+    // no seed to derive — and no recoverable ecash to be had either. Its own
+    // marker, because "no identity" would send the user to log in again, which
+    // is not the problem and would not fix it. The other mnemonic-only paths in
+    // this file refuse the same way.
+    if state.mnemonic_words.is_empty() {
+        bail!("CashuNoMnemonic");
+    }
+
+    key_ops::derive_bip39_seed(&state.mnemonic_words).map_err(|e| {
+        // The mnemonic was validated on the way in, so this is a bug rather
+        // than a user state — the cause goes to the log, the marker to Dart.
+        log::error!("[identity] seed derivation failed for a loaded identity: {e}");
+        anyhow!("CashuSeedUnavailable")
+    })
 }
 
 /// Delete the in-memory identity state. Flutter must also clear
