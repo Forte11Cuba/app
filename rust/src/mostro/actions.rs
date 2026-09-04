@@ -792,5 +792,66 @@ mod tests {
         // locate the user's trades. Both halves of the key split matter.
         assert_eq!(unwrapped.identity, identity_keys.public_key());
     }
+
+    /// #328 wire contract — and the regression guard for this PR's own
+    /// history: the first version of `last_trade_index` signed the rumor with
+    /// the identity keys, publishing a permanent identity→Mostro link as the
+    /// kind-14 author on every relay (review round 1, Major). The suite
+    /// stayed green with that leak in place, so pin the key split here: the
+    /// rumor must be authored by the ephemeral trade key, with the identity
+    /// only inside the encrypted proof the daemon resolves the account from.
+    #[tokio::test]
+    async fn last_trade_index_payload_none_rumor_by_trade_key() {
+        let identity_keys = Keys::generate();
+        let trade_keys = Keys::generate();
+        let mostro_keys = Keys::generate();
+
+        // First-contact wrapping fails closed until this node's capabilities
+        // are published — a test double for the Kind 38385 fetch.
+        let _pow = crate::mostro::pow::test_support::lock_pow();
+        crate::mostro::pow::set_pows(&mostro_keys.public_key().to_hex(), 0, None);
+        crate::mostro::protocol_version::set_protocol_version(
+            &mostro_keys.public_key().to_hex(),
+            Some(2),
+        );
+
+        let json = last_trade_index(
+            &identity_keys,
+            &trade_keys,
+            &mostro_keys.public_key(),
+            4242,
+        )
+        .await
+        .unwrap();
+        let event = Event::from_json(&json).unwrap();
+        assert_eq!(
+            event.pubkey,
+            trade_keys.public_key(),
+            "the outer kind-14 author must be the trade key — an identity-\
+             authored event is the relay-visible leak this guards against"
+        );
+        let unwrapped = transport::unwrap_mostro_message(&mostro_keys, &event)
+            .await
+            .unwrap()
+            .expect("message must decrypt for the recipient");
+        let kind = unwrapped.message.get_inner_message_kind();
+        assert!(matches!(kind.action, Action::LastTradeIndex));
+        assert!(kind.payload.is_none(), "LastTradeIndex payload must be None");
+        assert_eq!(
+            kind.trade_index, None,
+            "the request consumes no trade index — the counter only travels \
+             in the reply"
+        );
+        // The correlation nonce the daemon echoes; the caller rejects replies
+        // that do not carry it back.
+        assert_eq!(kind.request_id, Some(4242));
+        // The rumor is authored by the trade key: the daemon replies to
+        // event.sender, and the reply loop correlates on that pubkey.
+        assert_eq!(unwrapped.sender, trade_keys.public_key());
+        // The identity travels only inside the encrypted proof — it is what
+        // the daemon looks the account up by (event.identity), never the
+        // public author.
+        assert_eq!(unwrapped.identity, identity_keys.public_key());
+    }
 }
 
