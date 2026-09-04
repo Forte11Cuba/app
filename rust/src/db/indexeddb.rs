@@ -299,15 +299,6 @@ impl Storage for IndexedDbStorage {
         Ok(())
     }
 
-    async fn update_trade_counterparty(
-        &self,
-        _order_id: &str,
-        _counterparty_pubkey: &str,
-    ) -> Result<()> {
-        log::warn!("update_trade_counterparty: IndexedDB backend not implemented — peer pubkey will not persist");
-        Ok(())
-    }
-
     async fn update_trade_peer_reputation(
         &self,
         _order_id: &str,

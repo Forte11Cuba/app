@@ -1048,21 +1048,15 @@ pub async fn take_order(
     // success / canceled at the end); the fine-grained states only ever arrive
     // as daemon messages.
     subscribe_single_order(&order_id).await;
-    // Create a session so the chat API can look up keys immediately. A
-    // SessionAlreadyExists here is benign only if the reveal's upsert won a
-    // race this per-order lock is supposed to make impossible — log it so a
-    // future lock-scope regression is visible instead of silent.
-    if let Err(e) = crate::mostro::session::session_manager()
+    // Create a session so the chat API can look up keys immediately.
+    let _ = crate::mostro::session::session_manager()
         .create_session(
             order_id.clone(),
             trade.role.clone(),
             trade_index,
             trade.order.clone(),
         )
-        .await
-    {
-        log::debug!("[orders] take_order: create_session skipped: {e}");
-    }
+        .await;
 
     Ok(trade)
 }
@@ -2512,16 +2506,6 @@ async fn on_peer_pubkey_received(order_id: &str, peer_pubkey_hex: &str) {
         "[orders] on_peer_pubkey_received: order={order_id}          peer={peer_pubkey_hex} shared_pubkey={}",
         shared_pubkey.to_hex()
     );
-    // Persist the peer pubkey on the trade row. The session below is
-    // in-memory only, so without this write the maker's trade keeps the
-    // empty counterparty_pubkey it was created with — the chat UI can never
-    // resolve the peer's nym and `resubscribe_active_chats` skips the trade
-    // after a restart. Idempotent on daemon replays.
-    if let Some(db) = crate::db::app_db::db() {
-        if let Err(e) = db.update_trade_counterparty(order_id, peer_pubkey_hex).await {
-            log::warn!("[orders] on_peer_pubkey_received: counterparty persist failed for order={order_id}: {e}");
-        }
-    }
     // Update or create the session with peer + shared key.
     let mgr = crate::mostro::session::session_manager();
     if let Some(mut session) = mgr.get_session(order_id).await {
@@ -2531,29 +2515,11 @@ async fn on_peer_pubkey_received(order_id: &str, peer_pubkey_hex: &str) {
             log::warn!("[orders] on_peer_pubkey_received: session update failed: {e}");
         }
     } else {
-        // Not a rare race: the maker never passes through `take_order`'s
-        // create_session, so its first reveal always lands here. Without a
-        // session, `send_message` silently stores local-only and the
-        // attachment paths bail with SessionNotFound (ermeme review,
-        // PR #347) — rebuild it from the trade row persisted above.
-        let trade = match crate::db::app_db::db() {
-            Some(db) => db.get_trade_by_order_id(order_id).await.unwrap_or_else(|e| {
-                log::warn!(
-                    "[orders] on_peer_pubkey_received: trade lookup failed for order={order_id}: {e}"
-                );
-                None
-            }),
-            None => None,
-        };
-        match trade {
-            Some(trade) => {
-                mgr.upsert_peer_session(&trade, peer_pubkey_hex, shared_key_bytes)
-                    .await;
-            }
-            None => log::warn!(
-                "[orders] on_peer_pubkey_received: no session and no persisted trade for order={order_id} — outgoing chat stays local-only; incoming subscription still spawned"
-            ),
-        }
+        // Session may not exist if we received the event after a restart but
+        // before create_session ran (rare race). Create it now best-effort.
+        log::warn!(
+            "[orders] on_peer_pubkey_received: session not found for order={order_id}, skipping session update — incoming subscription still spawned"
+        );
     }
     // Derive the chat conversation keys (K_conv / K_sign — HKDF split of the
     // trade-key ECDH secret, protocol chat spec) and spawn the incoming-chat

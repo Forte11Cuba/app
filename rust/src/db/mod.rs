@@ -201,21 +201,6 @@ pub trait Storage: Send + Sync {
         amount_sats: Option<u64>,
     ) -> Result<()>;
 
-    /// Persist the counterparty's trade pubkey on a trade identified by
-    /// `order.id`. No-op when no matching trade exists.
-    ///
-    /// The maker creates its trade row before any taker exists, so the field
-    /// starts empty and is filled in when the daemon's BuyerTookOrder /
-    /// HoldInvoicePaymentAccepted payload carries the peer pubkey. Without
-    /// this write the pubkey lives only in the in-memory session: the chat
-    /// room UI never resolves the peer's nym and `resubscribe_active_chats`
-    /// skips the trade after a restart.
-    async fn update_trade_counterparty(
-        &self,
-        order_id: &str,
-        counterparty_pubkey: &str,
-    ) -> Result<()>;
-
     /// Persist the counterparty (taker) reputation snapshot on a trade
     /// identified by `order.id` (issue #305). No-op when no matching trade
     /// exists. `days` saturates at `u32::MAX`; a full-privacy taker sends no

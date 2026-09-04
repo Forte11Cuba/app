@@ -1427,21 +1427,6 @@ pub(crate) async fn resubscribe_active_chats() {
         else {
             continue;
         };
-        // Sessions are as memory-only as the subscriptions: rebuild them here
-        // too, or after a restart `send_message` silently degrades to a
-        // local-only store and the attachment paths bail with SessionNotFound
-        // even though this row holds everything needed (ermeme review,
-        // PR #347).
-        match crate::crypto::ecdh::derive_nip04_shared_key(&trade_keys, &peer) {
-            Ok(shared_key) => {
-                crate::mostro::session::session_manager()
-                    .upsert_peer_session(&trade, &trade.counterparty_pubkey, shared_key)
-                    .await;
-            }
-            Err(e) => log::warn!(
-                "[messages] resubscribe: shared-key derivation failed for order={order_id}: {e}"
-            ),
-        }
         log::info!("[messages] resubscribing chat order={order_id}");
         crate::rt::spawn(subscribe_incoming_chat(
             ChatChannel::Peer, order_id, trade_keys, peer, conv, sign,
