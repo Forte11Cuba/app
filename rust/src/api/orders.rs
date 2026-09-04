@@ -4025,9 +4025,11 @@ fn resync_floor(
 /// none: mostro-cli sends this action with `request_id: None`
 /// (`src/cli/last_trade_index.rs`), so nonce-less replies for the same account
 /// exist in the wild wherever the user also runs the CLI. Accepting `None`
-/// would readmit exactly those replays. Strict matching means a daemon that
-/// does not echo falls back to the restore-payload maximum, the same designed
-/// path as a silent daemon.
+/// would readmit exactly those replays. This is deliberately stricter than
+/// the spec — <https://mostro.network/protocol/last_trade_index.html>
+/// documents no `request_id` on either side — so a conforming daemon that
+/// never echoes one falls back to the restore-payload maximum, the same
+/// designed path as a silent daemon.
 fn is_matching_last_trade_index_reply(
     kind: &mostro_core::message::MessageKind,
     request_id: u64,
@@ -4038,12 +4040,14 @@ fn is_matching_last_trade_index_reply(
 
 /// True for the daemon's refusal of THIS request: `CantDo` echoing our nonce.
 ///
-/// The daemon answers `LastTradeIndex` with `CantDo(NotFound)` when the
-/// account is unknown — an identity with no trade history on this node, and
-/// every privacy-mode request, since without an identity proof there is no
+/// The daemon currently answers `LastTradeIndex` with `CantDo(NotFound)` when
+/// the account is unknown — an identity with no trade history on this node,
+/// and every privacy-mode request, since without an identity proof there is no
 /// account to look up — and `CantDo(InvalidTradeIndex)` when the stored
-/// counter is 0. Both echo `request_id` (`mostro/src/app.rs` routes
-/// `MostroCantDo` through `enqueue_cant_do_msg` with the request's id).
+/// counter is 0 (where the spec instead says the counter comes back as 1;
+/// either way the caller ends at the payload fallback). Both echo
+/// `request_id` (`mostro/src/app.rs` routes `MostroCantDo` through
+/// `enqueue_cant_do_msg` with the request's id).
 /// Treating them as terminal turns a full REPLY_TIMEOUT stall on those paths
 /// into an immediate, logged fallback.
 fn is_matching_cant_do_refusal(
