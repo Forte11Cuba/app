@@ -31,9 +31,10 @@ const _dark = OrderDetailPalette.dark;
 const _book = OrderBookPalette.dark;
 
 /// Pumps the take-order screen over a book fed by [books], with the node's
-/// rate stubbed and the user's trade rows being [trades] (none by default).
-/// 1 000 ARS is 1 000 sats at the stubbed rate, so the estimates are easy to
-/// read.
+/// rate stubbed and the user's trade rows being [trades] (none by default),
+/// or whatever [readTrades] answers — the screen reads them through the real
+/// `tradeRoleLookupProvider`. 1 000 ARS is 1 000 sats at the stubbed rate, so
+/// the estimates are easy to read.
 typedef _Take =
     Future<TradeInfo> Function({
       required String orderId,
@@ -48,6 +49,7 @@ Future<StreamController<List<OrderItem>>> _pump(
   double? rate = 100000000,
   _Take? take,
   List<TradeInfo> trades = const [],
+  Future<List<TradeInfo>> Function()? readTrades,
   instance.MostroInstance? node,
   int? bondEstimate,
 }) async {
@@ -62,8 +64,8 @@ Future<StreamController<List<OrderItem>>> _pump(
         yield [order];
         yield* books.stream;
       }),
-      tradeRoleLookupProvider.overrideWithValue(
-        (orderId) async => participatingRole(trades, orderId),
+      tradeListReaderProvider.overrideWithValue(
+        readTrades ?? () async => trades,
       ),
       if (take != null) takeOrderActionProvider.overrideWithValue(take),
       exchangeRateProvider.overrideWith((ref, code) async => rate),
@@ -480,6 +482,35 @@ void main() {
 
         expect(taken, [_id]);
         expect(find.text('trade'), findsNothing);
+      });
+    });
+
+    testWidgets('an unreadable trade store still lets the take go out', (
+      tester,
+    ) async {
+      // Reading the rows can fail where the bridge call it replaced could
+      // not: unawaited in initState, and before the button leaves idle. An
+      // unreadable store is no proof of participation, and a take the user
+      // does hold is refused by the daemon and reported.
+      await withClock(Clock.fixed(kFakeNow), () async {
+        final taken = <String>[];
+        await _pump(
+          tester,
+          order: _order(),
+          readTrades: () async => throw Exception('storage is unreadable'),
+          take: ({required orderId, required role, fiatAmount}) {
+            taken.add(orderId);
+            return Completer<TradeInfo>().future;
+          },
+        );
+        expect(find.byType(TakeOrderScreen), findsOneWidget);
+
+        await tester.tap(find.text('Take order'));
+        await tester.pump();
+        await tester.pump();
+
+        expect(taken, [_id]);
+        expect(find.text('Taking…'), findsOneWidget);
       });
     });
   });

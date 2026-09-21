@@ -132,14 +132,29 @@ final tradeStatusLookupProvider =
     );
 
 /// The local user's role in an order they still take part in
-/// ([participatingRole]), read through the bridge; injectable so screens that
-/// must know whether they already participate can be tested without the Rust
-/// side.
-final tradeRoleLookupProvider = Provider<Future<TradeRole?> Function(String)>(
-  (ref) =>
-      (orderId) async =>
-          participatingRole(await orders_api.listTrades(), orderId),
-);
+/// ([participatingRole]), over the rows [tradeListReaderProvider] reads.
+/// Screens that must know whether they already participate override that
+/// reader, so this composition is what their tests exercise.
+///
+/// Null when the rows cannot be read at all, as the `get_trade_role` bridge
+/// call this replaced did with a database error: an unreadable store is no
+/// proof of participation, and the take screen calls this where a thrown
+/// future would strand it — unawaited in `initState`, and before the Take
+/// button leaves its idle state. A take the user does hold is still refused
+/// by the daemon, which the screen reports.
+final tradeRoleLookupProvider = Provider<Future<TradeRole?> Function(String)>((
+  ref,
+) {
+  final readTrades = ref.watch(tradeListReaderProvider);
+  return (orderId) async {
+    try {
+      return participatingRole(await readTrades(), orderId);
+    } catch (e, st) {
+      debugPrint('[tradeRoleLookup] reading the trades failed: $e\n$st');
+      return null;
+    }
+  };
+});
 
 /// The role of the user's trade on [orderId] among [trades], or null when
 /// they no longer take part in it: no row at all, or only a take that has
