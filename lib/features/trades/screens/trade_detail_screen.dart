@@ -475,8 +475,20 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen> {
       debugPrint('[TradeDetailScreen] trade status failed: ${live.error}');
     }
     if (!live.hasValue) return TradeStatus.loading;
-    final trade = ref.watch(tradeInfoProvider(widget.orderId)).valueOrNull;
-    final status = tradeStatusFromOrderStatus(_shown(live.value!, trade));
+    final tradeAsync = ref.watch(tradeInfoProvider(widget.orderId));
+    // A public `pending` may be a take's leftover, and only the row tells
+    // them apart (#434). Until it answers, hold `loading` rather than offer
+    // the maker's view with a Cancel the daemon refuses. First read only: a
+    // refresh keeps the previous row, and the trades cache is invalidated on
+    // every trade update, so waiting for those would flash `loading`.
+    if (live.value == OrderStatus.pending &&
+        tradeAsync.isLoading &&
+        !tradeAsync.hasValue) {
+      return TradeStatus.loading;
+    }
+    final status = tradeStatusFromOrderStatus(
+      _shown(live.value!, tradeAsync.valueOrNull),
+    );
     if (status != TradeStatus.pendingRating) return status;
     final rating = ref.watch(tradeRatingProvider(widget.orderId));
     if (rating.isLoading && !rating.hasValue) return TradeStatus.loading;
@@ -516,7 +528,11 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen> {
       previous,
       next,
     ) {
-      final trade = ref.read(tradeInfoProvider(widget.orderId)).valueOrNull;
+      final row = ref.read(tradeInfoProvider(widget.orderId));
+      // Without the row a public `pending` cannot be told from the trade's
+      // own status, so a change into or out of it says nothing yet.
+      if (row.isLoading && !row.hasValue) return;
+      final trade = row.valueOrNull;
       final before = previous?.valueOrNull;
       final after = next.valueOrNull;
       if (before != null &&

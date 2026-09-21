@@ -1376,6 +1376,69 @@ void main() {
       expect(_cancelButton(), findsNothing);
     });
 
+    testWidgets('a public pending waits for the row before it is shown', (
+      tester,
+    ) async {
+      // The row is a full trades read, while the role comes from an indexed
+      // lookup, so opening a leftover take cold (a notification, the chat
+      // header, a restart) resolves the role first. Shown as is, the book's
+      // `pending` offered the maker's view with a Cancel the daemon refuses.
+      final trades = Completer<List<TradeInfo>>();
+      await _pumpRoutedTradeDetail(
+        tester,
+        orderId: orderId,
+        status: OrderStatus.pending,
+        loadTrades: () => trades.future,
+        book: [fakeOrder(id: orderId)],
+      );
+      await _finishPageTransition(tester);
+
+      expect(find.text(_en.tradeHeadlinePending), findsNothing);
+      expect(_cancelButton(), findsNothing);
+
+      trades.complete([fakeTrade(id: 'row', status: OrderStatus.canceled)]);
+      await _finishPageTransition(tester);
+
+      expect(find.text(_en.tradeHeadlineCancelled), findsOneWidget);
+      expect(_cancelButton(), findsNothing);
+    });
+
+    testWidgets('no nudge either while the row is still loading', (
+      tester,
+    ) async {
+      final nudges = <String>[];
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        (call) async {
+          if (call.method == 'HapticFeedback.vibrate') nudges.add('$call');
+          return null;
+        },
+      );
+      addTearDown(
+        () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          SystemChannels.platform,
+          null,
+        ),
+      );
+      final book = StreamController<OrderStatus>();
+      addTearDown(() => unawaited(book.close()));
+      book.add(OrderStatus.pending);
+      await _pumpRoutedTradeDetail(
+        tester,
+        orderId: orderId,
+        status: OrderStatus.pending,
+        statusUpdates: book.stream,
+        loadTrades: () => Completer<List<TradeInfo>>().future,
+      );
+      await _finishPageTransition(tester);
+
+      book.add(OrderStatus.inProgress);
+      await tester.pump();
+      await tester.pump();
+
+      expect(nudges, isEmpty);
+    });
+
     testWidgets('an ended take stays ended when someone else completes it', (
       tester,
     ) async {
