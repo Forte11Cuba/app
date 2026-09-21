@@ -23,7 +23,7 @@ use web_sys::wasm_bindgen::JsValue;
 use crate::api::types::{
     ChatMessage, IdentityInfo, OrderInfo, QueuedMessageStatus, RelayInfo, TradeInfo,
 };
-use crate::db::{trade_json, web_lock, Storage};
+use crate::db::{settings_keys, trade_json, web_lock, Storage};
 use crate::queue::outbox::QueuedMessage;
 
 /// Bumped when a store is added; `open_db` creates whatever is missing.
@@ -495,6 +495,73 @@ impl Storage for IndexedDbStorage {
 
     async fn clear_trade_keys(&self) -> Result<()> {
         self.clear_store(TRADE_KEYS_STORE).await
+    }
+
+    async fn clear_identity_data(&self) -> Result<()> {
+        let db = self.open_db().await?;
+
+        // Pass 1, read-only: which settings keys are the identity's. The
+        // store is shared with device preferences, so it cannot be cleared.
+        let scoped_keys: Vec<String> = {
+            let tx = db
+                .transaction_on_one_with_mode(SETTINGS_STORE, IdbTransactionMode::Readonly)
+                .map_err(|e| js_err("tx open", e))?;
+            let store = tx
+                .object_store(SETTINGS_STORE)
+                .map_err(|e| js_err("store open", e))?;
+            store
+                .get_all_keys()
+                .map_err(|e| js_err("get_all_keys", e))?
+                .await
+                .map_err(|e| js_err("get_all_keys await", e))?
+                .iter()
+                .filter_map(|k| k.as_string())
+                .filter(|key| {
+                    settings_keys::IDENTITY_SCOPED_PREFIXES
+                        .iter()
+                        .any(|prefix| key.starts_with(prefix))
+                        || key == settings_keys::BOND_CLAIM_RETAINED_NODES
+                })
+                .collect()
+        };
+
+        // Pass 2, one read-write transaction over every store: all of it
+        // commits or none does. A half-wiped database would show the new
+        // user some of the old one's rows, which is the bug this closes.
+        //
+        // Every request is queued before the first `await`. A transaction is
+        // only active while its own callbacks run, and a Rust future resumes
+        // from a later task — so awaiting between requests would make the
+        // next one hit an inactive transaction (see `patch_serial`). That is
+        // also why the keys are read in a transaction of their own.
+        const WIPED: [&str; 5] = [
+            TRADES_STORE,
+            MESSAGES_STORE,
+            BOND_CLAIMS_STORE,
+            OUTBOX_STORE,
+            ORDERS_STORE,
+        ];
+        let mut stores = WIPED.to_vec();
+        stores.push(SETTINGS_STORE);
+        let tx = db
+            .transaction_on_multi_with_mode(&stores, IdbTransactionMode::Readwrite)
+            .map_err(|e| js_err("tx open", e))?;
+        for name in WIPED {
+            tx.object_store(name)
+                .map_err(|e| js_err("store open", e))?
+                .clear()
+                .map_err(|e| js_err("clear", e))?;
+        }
+        let settings = tx
+            .object_store(SETTINGS_STORE)
+            .map_err(|e| js_err("store open", e))?;
+        for key in &scoped_keys {
+            settings
+                .delete_owned(key.as_str())
+                .map_err(|e| js_err("delete", e))?;
+        }
+        tx.await.into_result().map_err(|e| js_err("tx commit", e))?;
+        Ok(())
     }
 
     // ── Settings KV — fully implemented (chat cursor + preferences, #246) ───

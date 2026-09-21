@@ -11,13 +11,13 @@ import 'package:mostro/core/app_theme.dart';
 import 'package:mostro/core/automation/automation_id.dart';
 import 'package:mostro/core/automation/automation_ids.dart';
 import 'package:mostro/core/backup_palette.dart';
+import 'package:mostro/core/services/identity_scoped_state.dart';
 import 'package:mostro/core/services/identity_service.dart';
 import 'package:mostro/features/account/providers/backup_reminder_provider.dart';
 import 'package:mostro/features/account/providers/privacy_mode_provider.dart';
 import 'package:mostro/features/account/widgets/backup_trigger_sheet.dart';
 import 'package:mostro/features/account/widgets/backup_widgets.dart';
 import 'package:mostro/l10n/app_localizations.dart';
-import 'package:mostro/shared/providers/session_provider.dart';
 import 'package:mostro/shared/widgets/mostro_modal.dart';
 import 'package:mostro/shared/widgets/redesign_app_bar.dart';
 import 'package:mostro/src/rust/api/identity.dart' as identity_api;
@@ -265,7 +265,6 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
       _words = null;
       _copied = false;
     });
-    ref.read(sessionProvider.notifier).clearSession();
     final reminder = ref.read(backupReminderProvider.notifier);
     final completed = ref.read(backupCompletedProvider.notifier);
 
@@ -291,6 +290,19 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
       );
     }
     context.go(AppRoute.home);
+  }
+
+  /// Empty the Dart-side state of the identity that was just replaced, so
+  /// the new one starts as a fresh install would (issue #533). Rust already
+  /// wiped the rows in `delete_identity`. Never throws: the swap has
+  /// happened, and stale state on screen must not be reported as a failed
+  /// generation or import.
+  Future<void> _forgetPreviousIdentity() async {
+    try {
+      await resetIdentityScopedState(ref);
+    } catch (e) {
+      debugPrint('[account] identity-scoped reset error: $e');
+    }
   }
 
   void _confirmGenerateNewUser(BuildContext context) {
@@ -333,6 +345,7 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
                     return;
                   }
                   // Only reset and navigate once the new identity exists.
+                  await _forgetPreviousIdentity();
                   if (!context.mounted) return;
                   await _finishIdentitySwap(context, alreadyBackedUp: false);
               },
@@ -368,6 +381,9 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
       );
       return;
     }
+    // Before the recovery below, not after: what it brings back belongs to
+    // the imported identity and must survive.
+    await _forgetPreviousIdentity();
     if (!context.mounted) return;
     // A seed that already traded must learn its trades and trade index from
     // the daemon before its first new order (InvalidTradeIndex otherwise).

@@ -7817,6 +7817,55 @@ fn trade_is_over(row: Option<&crate::api::types::TradeInfo>) -> bool {
     row.is_none_or(|trade| crate::mostro::status::is_hard_terminal(&trade.order.status))
 }
 
+/// Give back every relay subscription that belongs to the identity being
+/// deleted, and forget the keys they were opened for (issue #533).
+///
+/// Runs **before** the identity is cleared and the rows are wiped. Left
+/// open, the previous user's d-tag watchers, daemon-message watchers, chats
+/// and the bulk kind-14 feed would keep delivering that user's events into
+/// the new user's session for the rest of the process, and count against the
+/// relays' REQ caps. Offline there is nothing to close, and the in-memory
+/// state goes all the same.
+pub(crate) async fn release_identity_subscriptions() {
+    let watched_orders: Vec<String> = single_order_tasks()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .drain()
+        .map(|(order_id, _)| order_id)
+        .collect();
+    // Every trade key the bulk feed covers — a superset of the keys with a
+    // per-trade watcher, since each of those joins the coverage when derived.
+    let covered_keys: Vec<String> = global_dm_keys()
+        .write()
+        .await
+        .drain()
+        .map(|(hex, _)| hex)
+        .collect();
+
+    if let Ok(pool) = crate::api::nostr::get_pool() {
+        let client = pool.client();
+        let subs = crate::nostr::live_subs::live_subs();
+        for order_id in &watched_orders {
+            subs.close(&client, &single_order_subscription_id(order_id))
+                .await;
+        }
+        for trade_pubkey in &covered_keys {
+            crate::nostr::subscriptions::teardown(&client, trade_pubkey).await;
+        }
+        // With no key left `replace_global_dm_filter` is a no-op, so the old
+        // filter would stay; the next key derived re-opens the feed.
+        subs.close(&client, &mostro_dm_subscription_id()).await;
+    }
+    crate::api::messages::forget_identity_chats().await;
+
+    if let Ok(mut map) = trade_key_map().write() {
+        map.clear();
+    }
+    if let Ok(mut misses) = trade_key_misses().write() {
+        misses.clear();
+    }
+}
+
 /// Give back the per-trade relay subscriptions of a trade that ended (#523):
 /// its `mostro-order-<id>` d-tag watcher, its daemon-message watcher and its
 /// chat REQs. They used to linger until a 30-minute idle, or the whole
