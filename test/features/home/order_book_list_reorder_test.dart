@@ -130,6 +130,49 @@ void main() {
         });
       }
     }
+
+    testWidgets('a press that spans a book shift never opens another order', (
+      tester,
+    ) async {
+      // Nothing moves by key here, so a card whose order moved is torn down
+      // rather than reused: the press dies with it. Unkeyed, the element
+      // stays and its InkWell reports the tap of whatever order took its
+      // slot, sending the user to an order they never picked.
+      tester.view.physicalSize = const Size(1000, 2400);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+      await withClock(Clock.fixed(kFakeNow), () async {
+        final taps = <String>[];
+        Future<void> pumpBook(List<int> book) => tester.pumpWidget(
+          MaterialApp(
+            theme: buildDarkTheme(),
+            localizationsDelegates: AppLocalizations.localizationsDelegates,
+            supportedLocales: AppLocalizations.supportedLocales,
+            home: Scaffold(
+              body: OrderBookList(
+                orders: _book(book),
+                currencyFlags: const {'USD': '🇺🇸'},
+                reasons: const {},
+                columns: 2,
+                onOrderTap: taps.add,
+              ),
+            ),
+          ),
+        );
+
+        await pumpBook([10, 20, 30, 40]);
+        final press = await tester.startGesture(
+          tester.getCenter(find.byType(OrderListItem).at(1)), // order-20
+        );
+        await tester.pump(const Duration(milliseconds: 50));
+        // A newer order arrives: every card shifts one slot.
+        await pumpBook([5, 10, 20, 30, 40]);
+        await press.up();
+        await tester.pumpAndSettle();
+
+        expect(taps, anyOf(isEmpty, equals(['order-20'])));
+      });
+    });
   });
 
   group('OrderBookList grid fits long cards at 200% text', () {

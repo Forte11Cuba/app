@@ -8,7 +8,8 @@ import 'package:mostro/features/home/widgets/order_list_item.dart';
 /// The order book's rows — one column as a list, two or three as a grid.
 ///
 /// Lifted out of `HomeScreen` so the list's keyed reorder, and the grid's
-/// lack of one, can be tested against the delegates the app actually builds.
+/// keys without one, can be tested against the delegates the app actually
+/// builds.
 /// Inline in the screen the only reachable test is a replica of the list,
 /// which would keep passing after the real one regressed.
 class OrderBookList extends StatelessWidget {
@@ -75,7 +76,7 @@ class OrderBookList extends StatelessWidget {
           final index = indexOfKey(key);
           return index == null ? null : index * 2;
         },
-        itemBuilder: (context, index) => _card(orders[index], keyed: true),
+        itemBuilder: (context, index) => _card(orders[index]),
       );
     }
 
@@ -84,14 +85,24 @@ class OrderBookList extends StatelessWidget {
     // methods), so a fixed tile ratio overflows on long localized copy or
     // large text.
     //
-    // Unlike the list, the grid neither keys its cards nor moves them by key:
-    // `SliverMasonryGrid` (flutter_staggered_grid_view 0.7.0, its latest
-    // release) cannot lay out a child moved by `findChildIndexCallback`. Once
-    // an order that had left the book comes back, `performLayout` hits a null
-    // layout offset and throws on every frame, blanking the whole grid until a
-    // later update lays it out again. So a card shifted by an arriving order
-    // or a re-sort is rebuilt in place; without the callback a key would only
-    // make that worse (see the list above).
+    // The cards are keyed here as well, but the grid does not move them by
+    // key: `SliverMasonryGrid` cannot lay out a child moved by
+    // `findChildIndexCallback` (#453, flutter_staggered_grid_view 0.7.0).
+    // Once an order that had left the book comes back, `performLayout` hits a
+    // null layout offset and throws on every frame, blanking the whole grid
+    // until a later update lays it out again.
+    //
+    // The key still earns its place without the callback, for correctness
+    // rather than cost: a card whose order moved fails `Widget.canUpdate`, so
+    // it is torn down instead of being reused for whatever order landed at
+    // its index. A press, hover or focus in progress is cancelled rather than
+    // carried over to an order the user never picked — the book shifts on its
+    // own as relays deliver, and this is the layout desktop, web and tablets
+    // get. The cost is a re-inflate instead of a rebuild per shifted card.
+    //
+    // TODO(#453): give the delegate the index callback again once the package
+    // lays out children moved by it. The regression group in
+    // `order_book_list_reorder_test.dart` says whether a version does.
     return CustomScrollView(
       slivers: [
         SliverPadding(
@@ -103,7 +114,7 @@ class OrderBookList extends StatelessWidget {
             mainAxisSpacing: _gap,
             crossAxisSpacing: _gap,
             delegate: SliverChildBuilderDelegate(
-              (context, index) => _card(orders[index], keyed: false),
+              (context, index) => _card(orders[index]),
               childCount: orders.length,
             ),
           ),
@@ -112,12 +123,13 @@ class OrderBookList extends StatelessWidget {
     );
   }
 
-  /// [keyed] only where the index callback can move the card by its key —
-  /// see `indexOfKey`, without which the key is a pessimisation.
-  Widget _card(OrderItem order, {required bool keyed}) => OrderListItem(
-    // Keyed by order id so an arriving order moves the rows below it instead
-    // of leaving each element with a different order's content.
-    key: keyed ? ValueKey(order.id) : null,
+  /// Keyed by order id: in the list, where the index callback can find the
+  /// key again, an arriving order moves the rows below it instead of leaving
+  /// each element with a different order's content; in the grid, where
+  /// nothing moves by key, the key is what keeps an element from being reused
+  /// for another order.
+  Widget _card(OrderItem order) => OrderListItem(
+    key: ValueKey(order.id),
     order: order,
     currencyFlags: currencyFlags,
     reason: reasons[order.id],
