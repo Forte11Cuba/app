@@ -449,6 +449,10 @@ class NotificationsNotifier extends StateNotifier<List<NotificationModel>> {
   Future<void> wipeForIdentityChange() => _mutate(() async {
     if (_loadsInFlight > 0) _wipedDuringLoad = true;
     state = [];
+    // The in-memory half of the ledger: this notifier outlives the identity,
+    // and a same-seed import replays chat messages under the ids it already
+    // holds — they would be dropped as seen, with the card just wiped.
+    _processedMessages.clear();
     try {
       await store?.wipe();
     } catch (e) {

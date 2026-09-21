@@ -1868,12 +1868,19 @@ mod tests {
         store
             .add_message(notification_test_message(&trade_id, 1))
             .await;
-        assert_eq!(store.get_messages(&trade_id).await.len(), 1);
+        assert_eq!(store.messages.read().await.len(), 1);
+        assert!(store.hydrated.read().await.contains(&trade_id));
         assert_eq!(store.unread_count_inner().await, 1);
 
         store.clear().await;
 
-        assert!(store.get_messages(&trade_id).await.is_empty());
+        // Asserted on the maps `clear` owns, not through `get_messages`: that
+        // read re-hydrates from the process-wide database, where a parallel
+        // test may have had this message persisted. In the app the rows are
+        // wiped first, so the re-hydration `clear` allows finds nothing.
+        assert!(store.messages.read().await.is_empty());
+        assert!(store.hydrated.read().await.is_empty());
+        assert!(store.non_durable.read().await.is_empty());
         assert_eq!(store.unread_count_inner().await, 0);
         // The badge is pushed, not polled: the last value published is zero.
         let mut last = None;
