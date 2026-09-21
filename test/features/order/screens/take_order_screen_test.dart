@@ -4,6 +4,8 @@ import 'package:clock/clock.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
+import 'package:mostro/core/app_routes.dart';
 import 'package:mostro/core/app_theme.dart';
 import 'package:mostro/core/automation/automation_id.dart';
 import 'package:mostro/core/automation/automation_ids.dart';
@@ -21,6 +23,7 @@ import 'package:mostro/src/rust/api/types.dart';
 import 'package:mostro/shared/utils/fiat_currencies.dart';
 
 import '../../../support/fake_orders.dart';
+import '../../../support/fake_trades.dart';
 import '../../../support/provider_harness.dart';
 
 const _id = '09150348-1a2b-4c3d-8e9f-0a1b2c3d99b5';
@@ -92,6 +95,7 @@ OrderItem _order({
   double? fiatAmountMax,
   double premium = 0,
   BigInt? amountSats,
+  OrderStatus status = OrderStatus.pending,
   double rating = 4.8,
   int tradeCount = 16,
   int daysActive = 219,
@@ -106,6 +110,7 @@ OrderItem _order({
   paymentMethod: 'Mercado Pago',
   premium: premium,
   amountSats: amountSats,
+  status: status,
   rating: rating,
   tradeCount: tradeCount,
   daysActive: daysActive,
@@ -323,6 +328,145 @@ void main() {
 
         expect(find.text('Taking…'), findsNothing);
         expect(find.text('No longer available'), findsOneWidget);
+      });
+    });
+
+    testWidgets('a take that succeeds never reads unavailable on the way out', (
+      tester,
+    ) async {
+      // `context.go` leaves this screen mounted while the next route animates
+      // in, so the frames after a successful take are the screen's too. Its
+      // own take is already in the book by then (#454).
+      //
+      // Routed on its own rather than through `_pump`, whose harness gains a
+      // router in #448; once that lands this can use it.
+      tester.view.physicalSize = const Size(360, 760);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+      await withClock(Clock.fixed(kFakeNow), () async {
+        final reply = Completer<TradeInfo>();
+        final books = StreamController<List<OrderItem>>.broadcast();
+        addTearDown(books.close);
+        final sold = _order(kind: 'buy'); // the seller path: no settings read
+        final container = createContainer(
+          overrides: [
+            orderBookProvider.overrideWith((ref) async* {
+              yield [sold];
+              yield* books.stream;
+            }),
+            tradeRoleLookupProvider.overrideWithValue((_) async => null),
+            takeOrderActionProvider.overrideWithValue(
+              ({required orderId, required role, fiatAmount}) => reply.future,
+            ),
+            exchangeRateProvider.overrideWith((ref, code) async => 100000000),
+            fiatCurrenciesProvider.overrideWith(
+              (ref) async => const [
+                FiatCurrency(code: 'ARS', name: 'Argentine Peso', flag: '🇦🇷'),
+              ],
+            ),
+          ],
+        );
+        final router = GoRouter(
+          initialLocation: AppRoute.takeBuyPath(_id),
+          routes: [
+            GoRoute(
+              path: AppRoute.takeBuy,
+              builder:
+                  (_, __) =>
+                      const TakeOrderScreen(orderId: _id, isBuying: false),
+            ),
+            GoRoute(
+              path: AppRoute.tradeDetail,
+              builder: (_, __) => const Scaffold(body: Text('trade')),
+            ),
+            GoRoute(
+              path: AppRoute.payInvoice,
+              builder: (_, __) => const Scaffold(body: Text('pay')),
+            ),
+          ],
+        );
+        addTearDown(router.dispose);
+        await tester.pumpWidget(
+          UncontrolledProviderScope(
+            container: container,
+            child: MaterialApp.router(
+              theme: buildDarkTheme(),
+              locale: const Locale('en'),
+              localizationsDelegates: AppLocalizations.localizationsDelegates,
+              supportedLocales: AppLocalizations.supportedLocales,
+              routerConfig: router,
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.text('Take order'));
+        await tester.pump();
+        // The daemon's answer reaches the book first, as it does in Rust.
+        books.add([_order(kind: 'buy', status: OrderStatus.waitingPayment)]);
+        await tester.pump();
+        reply.complete(
+          fakeTrade(id: 'taken', status: OrderStatus.waitingPayment),
+        );
+
+        for (var frame = 0; frame < 60; frame++) {
+          await tester.pump(const Duration(milliseconds: 16));
+          if (find.byType(TakeOrderScreen).evaluate().isEmpty) continue;
+          expect(
+            find.text('No longer available'),
+            findsNothing,
+            reason: 'frame $frame, with the screen still mounted',
+          );
+        }
+        expect(find.text('pay'), findsOneWidget);
+      });
+    });
+
+    testWidgets('an order expiring mid-take keeps Taking…', (tester) async {
+      var now = kFakeNow;
+      await withClock(Clock(() => now), () async {
+        await _pump(
+          tester,
+          order: _order(expiresIn: const Duration(seconds: 2)),
+          take:
+              ({required orderId, required role, fiatAmount}) =>
+                  Completer<TradeInfo>().future,
+        );
+
+        await tester.tap(find.text('Take order'));
+        await tester.pump();
+        now = kFakeNow.add(const Duration(seconds: 5));
+        await tester.pump(const Duration(seconds: 3));
+
+        expect(find.text('Taking…'), findsOneWidget);
+        expect(find.text('No longer available'), findsNothing);
+      });
+    });
+
+    testWidgets('an order that expired mid-take dies once the take fails', (
+      tester,
+    ) async {
+      // The countdown held its fire for the take, so the expiry it saw is
+      // applied when the take comes back empty-handed: the book still calls
+      // the order pending until the daemon publishes its end.
+      var now = kFakeNow;
+      await withClock(Clock(() => now), () async {
+        final reply = Completer<TradeInfo>();
+        await _pump(
+          tester,
+          order: _order(expiresIn: const Duration(seconds: 2)),
+          take: ({required orderId, required role, fiatAmount}) => reply.future,
+        );
+
+        await tester.tap(find.text('Take order'));
+        await tester.pump();
+        now = kFakeNow.add(const Duration(seconds: 5));
+        await tester.pump(const Duration(seconds: 3));
+        reply.completeError(Exception('AnyhowException(NoDaemonResponse)'));
+        await tester.pumpAndSettle();
+
+        expect(find.text('No longer available'), findsOneWidget);
+        expect(find.text('Take order'), findsNothing);
       });
     });
 

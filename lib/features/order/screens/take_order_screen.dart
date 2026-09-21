@@ -71,6 +71,11 @@ class _TakeOrderScreenState extends ConsumerState<TakeOrderScreen> {
   Timer? _rateTimer;
   TakeOrderCta _cta = TakeOrderCta.idle;
 
+  /// The order's clock ran out while this screen was open. Kept apart from
+  /// [_cta] because a take in flight owns the button until the daemon
+  /// answers, and the expiry still has to be applied when it fails.
+  bool _expired = false;
+
   /// The order as last seen in the book, kept so the screen can show it
   /// unavailable in place once the relay drops it.
   OrderItem? _lastOrder;
@@ -113,11 +118,16 @@ class _TakeOrderScreenState extends ConsumerState<TakeOrderScreen> {
     final left = expiresAt.difference(clock.now());
     if (left <= Duration.zero) {
       _remaining.value = Duration.zero;
-      if (_cta != TakeOrderCta.unavailable) {
+      _expired = true;
+      // Only an idle button: a take in flight is settled by the daemon's
+      // answer, and `_onTakeOrder`'s `finally` applies this expiry if the
+      // take fails (#454).
+      if (_cta == TakeOrderCta.idle) {
         setState(() => _cta = TakeOrderCta.unavailable);
       }
       return;
     }
+    _expired = false;
     _remaining.value = left;
     _countdown = Timer(countdownTick(left), () {
       if (mounted) _syncCountdown(order);
@@ -151,6 +161,12 @@ class _TakeOrderScreenState extends ConsumerState<TakeOrderScreen> {
     }
 
     setState(() => _cta = TakeOrderCta.loading);
+    // `context.go` does not unmount this screen at once: it stays in the tree
+    // while the next route animates in, long enough for the `finally` below
+    // to hand the button back to the book — which by then holds the status of
+    // this very take (#454). Once the screen is on its way out, nothing here
+    // decides what it shows any more.
+    var navigated = false;
     try {
       final trade = await ref.read(takeOrderActionProvider)(
         orderId: widget.orderId,
@@ -172,6 +188,7 @@ class _TakeOrderScreenState extends ConsumerState<TakeOrderScreen> {
       // The node asks for an anti-abuse bond first: the Lightning step of
       // the trade only opens once it locks (docs/ANTI_ABUSE_BOND.md §6.1).
       if (trade.order.status == OrderStatus.waitingTakerBond) {
+        navigated = true;
         context.go(AppRoute.tradeDetailPath(widget.orderId));
         context.push(AppRoute.payBondPath(widget.orderId));
       } else if (widget.isBuying) {
@@ -179,11 +196,15 @@ class _TakeOrderScreenState extends ConsumerState<TakeOrderScreen> {
         // skips the add-invoice step.
         final settings = await settings_api.getSettings();
         if (!mounted) return;
+        // Set past that await: a settings read that throws leaves the screen
+        // here, and the button has to come back rather than stay on Taking…
+        navigated = true;
         context.go(AppRoute.tradeDetailPath(widget.orderId));
         if (settings.defaultLightningAddress == null) {
           context.push(AppRoute.addInvoicePath(widget.orderId));
         }
       } else {
+        navigated = true;
         context.go(AppRoute.tradeDetailPath(widget.orderId));
         context.push(AppRoute.payInvoicePath(widget.orderId));
       }
@@ -191,8 +212,13 @@ class _TakeOrderScreenState extends ConsumerState<TakeOrderScreen> {
       if (!mounted) return;
       _showTakeError(e);
     } finally {
-      if (mounted && _cta == TakeOrderCta.loading) {
-        setState(() => _cta = TakeOrderCta.idle);
+      // The countdown holds its fire while a take is in flight, so an expiry
+      // that fell inside it is applied here instead: the button must not come
+      // back to life on an order whose clock ran out.
+      if (mounted && !navigated && _cta == TakeOrderCta.loading) {
+        setState(
+          () => _cta = _expired ? TakeOrderCta.unavailable : TakeOrderCta.idle,
+        );
       }
     }
   }
