@@ -4556,6 +4556,263 @@ async fn persist_restored_bond_rows(info: &mostro_core::message::RestoreSessionI
     }
 }
 
+/// Orders asked for per `Orders` request: mostrod's default
+/// `max_orders_per_response`, above which it refuses the whole request.
+const OWN_ORDERS_PER_REQUEST: usize = 10;
+
+/// The restored orders whose row the restore has to build itself, with their
+/// trade index: everything but the ones parked on a bond, which
+/// [`persist_restored_bond_rows`] owns.
+fn restored_rows_to_fetch(
+    info: &mostro_core::message::RestoreSessionInfo,
+) -> Vec<(uuid::Uuid, u32)> {
+    info.restore_orders
+        .iter()
+        .filter(|o| {
+            !matches!(
+                o.status.as_str(),
+                "waiting-taker-bond" | "waiting-maker-bond"
+            )
+        })
+        .filter_map(|o| Some((o.order_id, sanitize_trade_index(o.trade_index)?)))
+        .collect()
+}
+
+/// True for the daemon's answer to THIS `Orders` request.
+fn is_matching_orders_reply(kind: &mostro_core::message::MessageKind, request_id: u64) -> bool {
+    kind.action == mostro_core::message::Action::Orders && kind.request_id == Some(request_id)
+}
+
+/// The row of a restored trade, from the daemon's own record of the order.
+///
+/// The side comes from which of the order's two trade pubkeys is ours, the
+/// status is the daemon's, and a maker is the side the order's kind names.
+/// `None` when the order does not name `own_trade_pubkey`, is parked on a
+/// bond ([`persist_restored_bond_rows`] builds those) or is already over.
+/// The peer is left empty: it goes through [`apply_restored_peers`], the one
+/// gate a restored peer passes.
+fn restored_trade_row(
+    order: &mostro_core::order::SmallOrder,
+    own_trade_pubkey: &str,
+    trade_index: u32,
+) -> Option<crate::api::types::TradeInfo> {
+    let is_own = |key: &Option<String>| {
+        key.as_deref()
+            .is_some_and(|k| k.eq_ignore_ascii_case(own_trade_pubkey))
+    };
+    let role = if is_own(&order.seller_trade_pubkey) {
+        TradeRole::Seller
+    } else if is_own(&order.buyer_trade_pubkey) {
+        TradeRole::Buyer
+    } else {
+        return None;
+    };
+    let status = order
+        .status
+        .and_then(crate::mostro::status::map_core_status)?;
+    if matches!(
+        status,
+        OrderStatus::WaitingTakerBond | OrderStatus::WaitingMakerBond
+    ) || !crate::mostro::restore_history::reads_in_progress(&status)
+    {
+        return None;
+    }
+    let is_mine = matches!(
+        (order.kind?, &role),
+        (mostro_core::order::Kind::Sell, TradeRole::Seller)
+            | (mostro_core::order::Kind::Buy, TradeRole::Buyer)
+    );
+    trade_row_from_small_order(
+        &order.id?.to_string(),
+        order,
+        role,
+        is_mine,
+        trade_index,
+        String::new(),
+        // The node the restore answered from: the issuing node of the row.
+        &active_mostro_pubkey(),
+        status,
+    )
+}
+
+/// Ask the daemon for its record of this identity's orders `ids` (at most
+/// [`OWN_ORDERS_PER_REQUEST`]), with the node's timestamp on the reply. Empty
+/// when it refuses or does not answer.
+async fn fetch_own_orders(
+    sender_keys: &nostr_sdk::prelude::Keys,
+    ids: Vec<uuid::Uuid>,
+) -> Result<(Vec<mostro_core::order::SmallOrder>, i64)> {
+    let mostro_pubkey = nostr_sdk::prelude::PublicKey::from_hex(&active_mostro_pubkey())?;
+    let identity_keys = crate::api::identity::get_transport_identity_keys(sender_keys).await?;
+    let request_id = fresh_request_id();
+    let event_json =
+        actions::own_orders(&identity_keys, sender_keys, &mostro_pubkey, request_id, ids).await?;
+    let answer = ask_daemon(
+        sender_keys,
+        &mostro_pubkey,
+        request_id,
+        &event_json,
+        "Orders",
+        is_matching_orders_reply,
+    )
+    .await?;
+    match answer {
+        DaemonAnswer::Reply(kind, sent_at) => match kind.payload {
+            Some(mostro_core::message::Payload::Orders(orders)) => Ok((orders, sent_at)),
+            _ => Ok((vec![], sent_at)),
+        },
+        DaemonAnswer::Refused(reason) => {
+            crate::api::logging::blog_warn(
+                "restore",
+                format!("Orders refused: CantDo({reason}) — rows left to the replay"),
+            );
+            Ok((vec![], 0))
+        }
+        DaemonAnswer::Silent => {
+            crate::api::logging::blog_warn(
+                "restore",
+                "Orders: no daemon reply — rows left to the replay".to_string(),
+            );
+            Ok((vec![], 0))
+        }
+    }
+}
+
+/// Build a row for every restored trade that has none, from the daemon's own
+/// record of the order.
+///
+/// The replay rebuilds the same rows from the daemon messages the relays
+/// still hold, but those age out: a trade whose messages are gone would come
+/// back as nothing, its chat with it, although the daemon still lists it. A
+/// row the replay did rebuild — it can beat the restore reply — may stop short
+/// of the daemon's status for the same reason, and is brought up to it
+/// ([`apply_restored_status`]); nothing else of an existing row is touched.
+/// Best-effort: on any failure the replay is what it was.
+async fn persist_restored_trade_rows(
+    info: &mostro_core::message::RestoreSessionInfo,
+    sender_keys: &nostr_sdk::prelude::Keys,
+) {
+    let Some(db) = crate::db::app_db::db() else {
+        return;
+    };
+    let wanted: std::collections::HashMap<uuid::Uuid, u32> =
+        restored_rows_to_fetch(info).into_iter().collect();
+    let ids: Vec<uuid::Uuid> = wanted.keys().copied().collect();
+    for chunk in ids.chunks(OWN_ORDERS_PER_REQUEST) {
+        let (orders, sent_at) = match fetch_own_orders(sender_keys, chunk.to_vec()).await {
+            Ok(reply) => reply,
+            Err(e) => {
+                crate::api::logging::blog_warn("restore", format!("Orders request failed: {e}"));
+                return;
+            }
+        };
+        for order in orders {
+            let Some(trade_index) = order.id.and_then(|id| wanted.get(&id).copied()) else {
+                continue;
+            };
+            let own = match crate::api::identity::get_active_trade_keys(trade_index).await {
+                Ok(keys) => keys.public_key().to_hex(),
+                Err(e) => {
+                    log::warn!("[orders] restored row: key load failed index={trade_index}: {e}");
+                    continue;
+                }
+            };
+            persist_restored_trade_row(db, &order, &own, trade_index, sent_at).await;
+        }
+    }
+}
+
+/// [`persist_restored_trade_rows`] for one order, under the order's guard: a
+/// daemon message rebuilding the row meanwhile must not be written over.
+/// `own_trade_pubkey` is the key at `trade_index`, injected so tests need no
+/// process-global identity. Returns whether a row was written.
+async fn persist_restored_trade_row(
+    db: &impl crate::db::Storage,
+    order: &mostro_core::order::SmallOrder,
+    own_trade_pubkey: &str,
+    trade_index: u32,
+    sent_at: i64,
+) -> bool {
+    let Some(row) = restored_trade_row(order, own_trade_pubkey, trade_index) else {
+        return false;
+    };
+    let order_id = row.order.id.clone();
+    let _guard = lock_order(&order_id).await;
+    if let Ok(Some(existing)) = db.get_trade_by_order_id(&order_id).await {
+        return apply_restored_status(db, &existing, row.order.status, sent_at).await;
+    }
+    // Before the write it dates, like every status write (`status_write_blocked`):
+    // the replay that follows is older and must not walk this status back.
+    record_status_event(&order_id, sent_at).await;
+    store_trade_key_index(&order_id, trade_index).await;
+    if let Err(e) = persist_trade_row(db, &row).await {
+        crate::api::logging::blog_warn(
+            "restore",
+            format!("restored row not persisted for order={order_id}: {e}"),
+        );
+        return false;
+    }
+    crate::api::logging::blog_info(
+        "restore",
+        format!(
+            "restored {:?} row for order={} trade_index={trade_index}",
+            row.order.status,
+            crate::api::logging::short_id(&order_id),
+        ),
+    );
+    emit_trade_update(&order_id, row.order.status);
+    true
+}
+
+/// Whether the daemon's status for a restored order, dated `sent_at`, may
+/// replace the one its row holds: the same rule as any daemon message
+/// ([`status_write_blocked`]) — never over a finished trade, never older than
+/// a status already applied.
+fn restored_status_applies(
+    local: &OrderStatus,
+    daemon: &OrderStatus,
+    cursor: Option<i64>,
+    sent_at: i64,
+) -> bool {
+    local != daemon && !is_hard_terminal(local) && cursor.is_none_or(|c| sent_at >= c)
+}
+
+/// Bring an existing row up to the status the daemon reported in a restore.
+/// Returns whether it was written. Runs under the order's guard.
+async fn apply_restored_status(
+    db: &impl crate::db::Storage,
+    existing: &crate::api::types::TradeInfo,
+    status: OrderStatus,
+    sent_at: i64,
+) -> bool {
+    let order_id = &existing.order.id;
+    let cursor = load_status_cursor(order_id).await;
+    if !restored_status_applies(&existing.order.status, &status, cursor, sent_at) {
+        return false;
+    }
+    record_status_event(order_id, sent_at).await;
+    if let Err(e) = db
+        .update_trade_fields(order_id, Some(status.clone()), None, None)
+        .await
+    {
+        log::warn!("[orders] restored status not persisted for {order_id}: {e}");
+        return false;
+    }
+    order_book()
+        .update_order_status(order_id, status.clone())
+        .await;
+    crate::api::logging::blog_info(
+        "orders",
+        format!(
+            "status order={} {:?}→{status:?} src=restore",
+            crate::api::logging::short_id(order_id),
+            existing.order.status,
+        ),
+    );
+    emit_trade_update(order_id, status);
+    true
+}
+
 /// Whether an unpaid bond's window has lapsed (see [`bond_deadline`]).
 fn bond_expired(trade: &crate::api::types::TradeInfo, now: i64) -> bool {
     bond_deadline(trade).is_some_and(|at| now > at)
@@ -8338,34 +8595,91 @@ fn is_matching_cant_do_refusal(kind: &mostro_core::message::MessageKind, request
 /// coverage), which ignores it — the restore's pending record was already
 /// consumed — while this loop correlates by its own nonce.
 async fn last_trade_index(sender_keys: &nostr_sdk::prelude::Keys) -> Result<Option<u32>> {
+    let mostro_pubkey = nostr_sdk::prelude::PublicKey::from_hex(&active_mostro_pubkey())?;
+    let identity_keys = crate::api::identity::get_transport_identity_keys(sender_keys).await?;
+    let request_id = fresh_request_id();
+    let event_json =
+        actions::last_trade_index(&identity_keys, sender_keys, &mostro_pubkey, request_id).await?;
+    let answer = ask_daemon(
+        sender_keys,
+        &mostro_pubkey,
+        request_id,
+        &event_json,
+        "LastTradeIndex",
+        is_matching_last_trade_index_reply,
+    )
+    .await?;
+    match answer {
+        DaemonAnswer::Reply(kind, _) => {
+            let idx = kind.trade_index.and_then(sanitize_trade_index);
+            crate::api::logging::blog_info(
+                "restore",
+                format!(
+                    "LastTradeIndex reply: trade_index={:?} -> floor={idx:?}",
+                    kind.trade_index
+                ),
+            );
+            Ok(idx)
+        }
+        DaemonAnswer::Refused(reason) => {
+            crate::api::logging::blog_warn(
+                "restore",
+                format!(
+                    "LastTradeIndex refused: CantDo({reason}) — \
+                     falling back to restore payload max"
+                ),
+            );
+            Ok(None)
+        }
+        DaemonAnswer::Silent => {
+            crate::api::logging::blog_warn(
+                "restore",
+                "LastTradeIndex: no usable daemon reply — falling back to restore payload max"
+                    .to_string(),
+            );
+            Ok(None)
+        }
+    }
+}
+
+/// A correlation nonce the daemon echoes in its reply. Random, not
+/// time-derived, so a replayed reply from an earlier request cannot match;
+/// never 0, which is indistinguishable from "unset".
+fn fresh_request_id() -> u64 {
+    use rand::RngCore;
+    rand::rngs::OsRng.next_u64().max(1)
+}
+
+/// How the daemon answered a self-contained request (see [`ask_daemon`]).
+enum DaemonAnswer {
+    /// The reply `is_reply` recognised, echoing the request's nonce, and the
+    /// node's timestamp on it.
+    Reply(Box<mostro_core::message::MessageKind>, i64),
+    /// `CantDo` echoing the nonce, with its reason.
+    Refused(String),
+    /// Nothing usable within the timeout.
+    Silent,
+}
+
+/// Publish `event_json` and wait for the daemon's answer to it, correlated by
+/// `request_id`: own subscription plus an inline wait (like mostro-cli's
+/// `wait_for_dm`), not a `pending_requests` record. The reply is a kind 14
+/// authored by the node and addressed to `sender_keys`; the subscription is
+/// live before the publish so the reply cannot be missed.
+async fn ask_daemon(
+    sender_keys: &nostr_sdk::prelude::Keys,
+    mostro_pubkey: &nostr_sdk::prelude::PublicKey,
+    request_id: u64,
+    event_json: &str,
+    label: &str,
+    is_reply: fn(&mostro_core::message::MessageKind, u64) -> bool,
+) -> Result<DaemonAnswer> {
     use crate::rt::time::{timeout, Duration};
     use nostr_sdk::prelude::{ClientNotification, StreamExt};
 
+    let mostro_pubkey = *mostro_pubkey;
     let trade_pk = sender_keys.public_key();
     let trade_pk_hex = trade_pk.to_hex();
-    let mostro_pubkey = nostr_sdk::prelude::PublicKey::from_hex(&active_mostro_pubkey())?;
-    let identity_keys = crate::api::identity::get_transport_identity_keys(sender_keys).await?;
-
-    // Correlation nonce, echoed by the daemon in its reply. Without it any
-    // authenticated LastTradeIndex reply resolves this request, so a malicious
-    // relay could replay an old one. Monotonicity caps the damage (the max in
-    // resync_floor means a stale counter degrades to the payload fallback, the
-    // same as a silent daemon) — but the daemon echoes request_id, so binding
-    // the reply to this request costs nothing.
-    let request_id: u64 = {
-        use rand::RngCore;
-        rand::rngs::OsRng.next_u64().max(1) // 0 is indistinguishable from "unset"
-    };
-
-    // Build the event BEFORE subscribing: wrap_message_first_contact awaits the
-    // PoW capability snapshot and mines the PoW synchronously, so building
-    // after subscribe would start the relay-side auto-close early and shrink
-    // the usable reply window by the PoW + publish cost — at a high
-    // pow_first_contact on a slow device the relay could CLOSE before the
-    // request is even published.
-    let event_json =
-        actions::last_trade_index(&identity_keys, sender_keys, &mostro_pubkey, request_id).await?;
-
     let pool = crate::api::nostr::get_pool()?;
     let client = pool.client();
 
@@ -8405,18 +8719,15 @@ async fn last_trade_index(sender_keys: &nostr_sdk::prelude::Keys) -> Result<Opti
         ))
         .timeout(Some(REPLY_TIMEOUT));
     if let Err(e) = client.subscribe(filter).close_on(close_opts).await {
-        log::warn!("[orders] last_trade_index subscribe failed: {e}");
-        return Ok(None);
+        log::warn!("[orders] {label} subscribe failed: {e}");
+        return Ok(DaemonAnswer::Silent);
     }
     // Client-side deadline, started at subscribe time — the same instant the
     // relay-side auto-close starts — so both give up together.
     let start = crate::rt::time::Instant::now();
 
-    publish_event_json(&event_json).await?;
-    crate::api::logging::blog_info(
-        "restore",
-        "LastTradeIndex published — waiting for daemon".to_string(),
-    );
+    publish_event_json(event_json).await?;
+    crate::api::logging::blog_info("restore", format!("{label} published — waiting for daemon"));
 
     loop {
         let remaining = REPLY_TIMEOUT.saturating_sub(start.elapsed());
@@ -8445,16 +8756,9 @@ async fn last_trade_index(sender_keys: &nostr_sdk::prelude::Keys) -> Result<Opti
                             continue;
                         }
                         let kind = unwrapped.message.get_inner_message_kind();
-                        if is_matching_last_trade_index_reply(kind, request_id) {
-                            let idx = kind.trade_index.and_then(sanitize_trade_index);
-                            crate::api::logging::blog_info(
-                                "restore",
-                                format!(
-                                    "LastTradeIndex reply: trade_index={:?} -> floor={idx:?}",
-                                    kind.trade_index
-                                ),
-                            );
-                            return Ok(idx);
+                        if is_reply(kind, request_id) {
+                            let sent_at = unwrapped.created_at.as_secs() as i64;
+                            return Ok(DaemonAnswer::Reply(Box::new(kind.clone()), sent_at));
                         }
                         if is_matching_cant_do_refusal(kind, request_id) {
                             let reason = match &kind.payload {
@@ -8463,20 +8767,13 @@ async fn last_trade_index(sender_keys: &nostr_sdk::prelude::Keys) -> Result<Opti
                                 }
                                 _ => "unspecified".to_string(),
                             };
-                            crate::api::logging::blog_warn(
-                                "restore",
-                                format!(
-                                    "LastTradeIndex refused: CantDo({reason}) — \
-                                 falling back to restore payload max"
-                                ),
-                            );
-                            return Ok(None);
+                            return Ok(DaemonAnswer::Refused(reason));
                         }
                         continue;
                     }
                     Ok(None) => continue,
                     Err(e) => {
-                        log::warn!("[orders] last_trade_index decrypt failed: {e}");
+                        log::warn!("[orders] {label} decrypt failed: {e}");
                         continue;
                     }
                 }
@@ -8486,11 +8783,7 @@ async fn last_trade_index(sender_keys: &nostr_sdk::prelude::Keys) -> Result<Opti
             Ok(Some(_)) => continue,
         }
     }
-    crate::api::logging::blog_warn(
-        "restore",
-        "LastTradeIndex: no usable daemon reply — falling back to restore payload max".to_string(),
-    );
-    Ok(None)
+    Ok(DaemonAnswer::Silent)
 }
 
 /// Raise the local trade-key counter to the daemon's `LastTradeIndex` (#328).
@@ -8623,6 +8916,8 @@ pub async fn restore_session() -> Result<mostro_core::message::RestoreSessionInf
                     None
                 }
             };
+            // Before the snapshot: its first pass gives these rows their peer.
+            persist_restored_trade_rows(&info, &sender_keys).await;
             if let Some(floor) = resync_floor(daemon_counter, &info) {
                 crate::api::identity::ensure_trade_key_index_at_least(floor).await?;
                 // What is still in progress, so the history the replay below
@@ -10099,6 +10394,175 @@ mod tests {
         let stored = db.get_trade_by_order_id(&order_id).await.unwrap().unwrap();
         assert!(stored.counterparty_pubkey.is_empty());
         assert!(session_manager().get_session(&order_id).await.is_none());
+    }
+
+    // ── rows rebuilt from the restore itself ──────────────────────────────────
+    fn own_order(
+        kind: mostro_core::order::Kind,
+        status: mostro_core::order::Status,
+        buyer: Option<&str>,
+        seller: Option<&str>,
+    ) -> mostro_core::order::SmallOrder {
+        let mut order = mostro_core::order::SmallOrder::new(
+            Some(uuid::Uuid::new_v4()),
+            Some(kind),
+            Some(status),
+            1000,
+            "USD".to_string(),
+            None,
+            None,
+            5,
+            "cash".to_string(),
+            0,
+            buyer.map(str::to_string),
+            seller.map(str::to_string),
+            None,
+            Some(1_790_000_000),
+            None,
+        );
+        order.buyer_invoice = None;
+        order
+    }
+
+    #[test]
+    fn a_restored_row_takes_its_side_and_status_from_the_daemons_order() {
+        use mostro_core::order::{Kind, Status};
+        let own = nostr_sdk::prelude::Keys::generate().public_key().to_hex();
+        let peer = nostr_sdk::prelude::Keys::generate().public_key().to_hex();
+
+        // Maker of a sell order, taken and active.
+        let order = own_order(Kind::Sell, Status::Active, Some(&peer), Some(&own));
+        let row = restored_trade_row(&order, &own, 7).expect("maker row");
+        assert_eq!(row.role, TradeRole::Seller);
+        assert!(row.order.is_mine);
+        assert_eq!(row.order.status, OrderStatus::Active);
+        assert_eq!(row.order.kind, OrderKind::Sell);
+        assert_eq!(row.trade_key_index, 7);
+        assert_eq!(row.order.fiat_code, "USD");
+        assert_eq!(row.started_at, 1_790_000_000);
+        // The peer goes through the restored-peer gate, not around it.
+        assert!(row.counterparty_pubkey.is_empty());
+
+        // Taker of the same order: the other side, and not its maker. The
+        // daemon's hex may come in another case.
+        let order = own_order(
+            Kind::Sell,
+            Status::FiatSent,
+            Some(&own.to_uppercase()),
+            Some(&peer),
+        );
+        let row = restored_trade_row(&order, &own, 8).expect("taker row");
+        assert_eq!(row.role, TradeRole::Buyer);
+        assert!(!row.order.is_mine);
+        assert_eq!(row.order.status, OrderStatus::FiatSent);
+
+        // Maker of an order nobody took yet.
+        let order = own_order(Kind::Buy, Status::Pending, Some(&own), None);
+        let row = restored_trade_row(&order, &own, 9).expect("pending maker row");
+        assert_eq!(row.role, TradeRole::Buyer);
+        assert!(row.order.is_mine);
+    }
+
+    #[test]
+    fn no_row_is_rebuilt_without_a_side_or_for_what_other_paths_own() {
+        use mostro_core::order::{Kind, Status};
+        let own = nostr_sdk::prelude::Keys::generate().public_key().to_hex();
+        let a = nostr_sdk::prelude::Keys::generate().public_key().to_hex();
+        let b = nostr_sdk::prelude::Keys::generate().public_key().to_hex();
+
+        // Names two other parties: not this trade key's order.
+        let order = own_order(Kind::Sell, Status::Active, Some(&a), Some(&b));
+        assert!(restored_trade_row(&order, &own, 1).is_none());
+        // Parked on a bond: `persist_restored_bond_rows` builds those.
+        let order = own_order(Kind::Sell, Status::WaitingTakerBond, Some(&own), Some(&a));
+        assert!(restored_trade_row(&order, &own, 1).is_none());
+        // Already over: history, not a trade to bring back.
+        let order = own_order(Kind::Sell, Status::Success, Some(&own), Some(&a));
+        assert!(restored_trade_row(&order, &own, 1).is_none());
+    }
+
+    #[tokio::test]
+    async fn a_restored_row_is_written_once_then_only_its_status_moves() {
+        use mostro_core::order::{Kind, Status};
+        let db = bond_test_db().await;
+        let own = nostr_sdk::prelude::Keys::generate().public_key().to_hex();
+        let peer = nostr_sdk::prelude::Keys::generate().public_key().to_hex();
+        let order = own_order(Kind::Sell, Status::Active, Some(&peer), Some(&own));
+        let order_id = order.id.unwrap().to_string();
+
+        assert!(persist_restored_trade_row(db, &order, &own, 11, 2000).await);
+        let row = db
+            .get_trade_by_order_id(&order_id)
+            .await
+            .unwrap()
+            .expect("row");
+        assert_eq!(row.order.status, OrderStatus::Active);
+        assert_eq!(row.role, TradeRole::Seller);
+        assert_eq!(get_trade_key_index(&order_id).await, Some(11));
+
+        // An older replay must not walk the restored status back.
+        assert!(
+            status_write_blocked(&order_id, &mostro_core::message::Action::NewOrder, 1999).await
+        );
+
+        // A later restore moves the status on and leaves the rest alone...
+        db.update_trade_counterparty(&order_id, &peer)
+            .await
+            .unwrap();
+        let mut later = own_order(Kind::Sell, Status::FiatSent, Some(&peer), Some(&own));
+        later.id = order.id;
+        assert!(persist_restored_trade_row(db, &later, &own, 11, 3000).await);
+        let row = db.get_trade_by_order_id(&order_id).await.unwrap().unwrap();
+        assert_eq!(row.order.status, OrderStatus::FiatSent);
+        assert_eq!(row.counterparty_pubkey, peer);
+        // ...and one older than what the row already reflects does nothing.
+        let mut stale = own_order(Kind::Sell, Status::Active, Some(&peer), Some(&own));
+        stale.id = order.id;
+        assert!(!persist_restored_trade_row(db, &stale, &own, 11, 2500).await);
+        let row = db.get_trade_by_order_id(&order_id).await.unwrap().unwrap();
+        assert_eq!(row.order.status, OrderStatus::FiatSent);
+    }
+
+    #[test]
+    fn a_restored_status_follows_the_rule_of_any_daemon_message() {
+        use OrderStatus::*;
+        assert!(restored_status_applies(&Pending, &Active, None, 10));
+        assert!(restored_status_applies(&Pending, &Active, Some(10), 10));
+        assert!(!restored_status_applies(&Pending, &Active, Some(11), 10));
+        assert!(!restored_status_applies(&Active, &Active, None, 10));
+        assert!(!restored_status_applies(&Success, &Active, None, 10));
+    }
+
+    #[test]
+    fn only_orders_the_bond_path_does_not_own_are_asked_for() {
+        let ask = uuid::Uuid::new_v4();
+        let restored = |id, index: i64, status: &str| mostro_core::message::RestoredOrdersInfo {
+            order_id: id,
+            trade_index: index,
+            status: status.to_string(),
+            counterparty_trade_pubkey: None,
+        };
+        let info = mostro_core::message::RestoreSessionInfo {
+            restore_orders: vec![
+                restored(ask, 3, "active"),
+                restored(uuid::Uuid::new_v4(), 4, "waiting-taker-bond"),
+                restored(uuid::Uuid::new_v4(), 5, "waiting-maker-bond"),
+                restored(uuid::Uuid::new_v4(), -1, "active"),
+            ],
+            restore_disputes: vec![],
+        };
+        assert_eq!(restored_rows_to_fetch(&info), vec![(ask, 3)]);
+    }
+
+    #[test]
+    fn an_orders_reply_is_matched_by_action_and_nonce() {
+        use mostro_core::message::{Action, MessageKind, Payload};
+        let reply = |action, id| {
+            MessageKind::new(None, Some(id), None, action, Some(Payload::Orders(vec![])))
+        };
+        assert!(is_matching_orders_reply(&reply(Action::Orders, 9), 9));
+        assert!(!is_matching_orders_reply(&reply(Action::Orders, 8), 9));
+        assert!(!is_matching_orders_reply(&reply(Action::NewOrder, 9), 9));
     }
 
     // ── #217 recovered_max_trade_index ────────────────────────────────────────
