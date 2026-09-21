@@ -15,9 +15,9 @@
 //! seller learns of its own completion only there (the daemon sends
 //! `PurchaseCompleted` to the buyer alone).
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
-use crate::api::types::OrderStatus;
+use crate::api::types::{OrderStatus, TradeInfo};
 
 /// Settings key the snapshot of the last restore is stored under.
 pub const SNAPSHOT_KEY: &str = "restore_snapshot";
@@ -30,6 +30,11 @@ pub struct RestoreSnapshot {
     pub floor: u32,
     /// Order ids the daemon returned, from its orders and open disputes.
     pub live: HashSet<String>,
+    /// The other party's trade pubkey per order id, where the daemon sent one
+    /// (mostro-core 0.15). Absent in snapshots stored before the field
+    /// existed, and for orders nobody has taken.
+    #[serde(default)]
+    pub peers: HashMap<String, String>,
 }
 
 impl RestoreSnapshot {
@@ -38,6 +43,63 @@ impl RestoreSnapshot {
     pub fn is_history(&self, order_id: &str, trade_index: u32) -> bool {
         trade_index <= self.floor && !self.live.contains(order_id)
     }
+
+    /// The peer the restore named for the trade on [order_id], if that trade
+    /// predates the restore.
+    ///
+    /// A trade started afterwards (an index above the floor) is a new take of
+    /// the order, possibly by someone else: its peer comes from its own
+    /// reveal, never from what the daemon said about the earlier one.
+    pub fn peer_of(&self, order_id: &str, trade_index: u32) -> Option<&str> {
+        (trade_index <= self.floor)
+            .then(|| self.peers.get(order_id))
+            .flatten()
+            .map(String::as_str)
+    }
+}
+
+/// The other party's trade pubkey for each restored order that names one.
+///
+/// An empty string counts as absent, as it does in a peer reveal.
+pub fn restored_peers(info: &mostro_core::message::RestoreSessionInfo) -> HashMap<String, String> {
+    info.restore_orders
+        .iter()
+        .filter_map(|o| {
+            let peer = o.counterparty_trade_pubkey.as_deref()?.trim();
+            (!peer.is_empty()).then(|| (o.order_id.to_string(), peer.to_string()))
+        })
+        .collect()
+}
+
+/// The peer to record on [trade] from a restore, as lowercase hex, or `None`
+/// when the restore has nothing to add.
+///
+/// The restore is a fallback for the peer reveal, which rebuilds the same
+/// value from the replayed daemon messages when the relays still hold them:
+/// it only fills a row that has no peer, and never one that has ended. A
+/// value that is not a public key, or that names this client, the Mostro node
+/// or the order's publisher, would derive chat keys for a conversation that
+/// does not exist and hold the order's single chat subscription with them
+/// (#334), so it is dropped.
+pub fn restored_peer_for(
+    trade: &TradeInfo,
+    peer_hex: &str,
+    own_trade_pubkey: &str,
+    mostro_pubkey: &str,
+) -> Option<String> {
+    if !trade.counterparty_pubkey.is_empty()
+        || trade.outcome.is_some()
+        || !reads_in_progress(&trade.order.status)
+    {
+        return None;
+    }
+    let peer = nostr_sdk::prelude::PublicKey::from_hex(peer_hex.trim())
+        .ok()?
+        .to_hex();
+    let named_elsewhere = [own_trade_pubkey, mostro_pubkey, &trade.order.creator_pubkey]
+        .iter()
+        .any(|other| other.eq_ignore_ascii_case(&peer));
+    (!named_elsewhere).then_some(peer)
 }
 
 /// What to do with a history row, given its order's public status.
@@ -84,6 +146,7 @@ mod tests {
         RestoreSnapshot {
             floor: 97,
             live: ["disputed-order".to_string()].into_iter().collect(),
+            peers: HashMap::new(),
         }
     }
 
@@ -102,6 +165,17 @@ mod tests {
     fn a_trade_started_after_the_restore_is_not_history() {
         // Its index is above the floor, whatever the daemon returned.
         assert!(!snapshot().is_history("new-order", 98));
+    }
+
+    #[test]
+    fn a_restored_peer_belongs_to_the_trade_that_predates_the_restore() {
+        let mut snapshot = snapshot();
+        snapshot.peers.insert("taken-order".into(), "peer".into());
+
+        assert_eq!(snapshot.peer_of("taken-order", 97), Some("peer"));
+        // A retake after the restore: a new trade, maybe a new peer.
+        assert_eq!(snapshot.peer_of("taken-order", 98), None);
+        assert_eq!(snapshot.peer_of("untaken-order", 40), None);
     }
 
     #[test]
