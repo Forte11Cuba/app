@@ -11,6 +11,10 @@ import 'package:mostro/core/services/identity_service.dart';
 import 'package:mostro/features/account/providers/backup_reminder_provider.dart';
 import 'package:mostro/features/account/providers/privacy_mode_provider.dart';
 import 'package:mostro/features/account/screens/account_screen.dart';
+import 'package:mostro/features/chat/providers/chat_providers.dart';
+import 'package:mostro/features/notifications/models/notification_model.dart';
+import 'package:mostro/features/notifications/providers/notifications_provider.dart';
+import 'package:mostro/features/order/providers/trade_state_provider.dart';
 import 'package:mostro/l10n/app_localizations.dart';
 
 /// What the backup state is after an identity swap: generating a mnemonic
@@ -28,6 +32,7 @@ Future<ProviderContainer> _pumpAccount(
   required bool backedUp,
   Future<void> Function()? onRegenerate,
   Future<void> Function(List<String> words)? onImport,
+  Future<RecoveryOutcome> Function(ProviderContainer container)? onRecover,
 }) async {
   tester.view.physicalSize = const Size(360, 760);
   tester.view.devicePixelRatio = 1.0;
@@ -44,6 +49,9 @@ Future<ProviderContainer> _pumpAccount(
       privacyModeProvider.overrideWith(
         (ref) => PrivacyModeNotifier(initialValue: false),
       ),
+      // Memory-only: the sembast store does real I/O, which never completes
+      // under the widget tester's fake clock.
+      notificationsProvider.overrideWith((ref) => NotificationsNotifier()),
     ],
   );
   addTearDown(container.dispose);
@@ -63,7 +71,10 @@ Future<ProviderContainer> _pumpAccount(
               debugPublicKey: () async => null,
               debugRegenerate: onRegenerate ?? () async {},
               debugImport: onImport ?? (_) async {},
-              debugRecover: () async => const RecoveryOutcome.skipped(),
+              debugRecover:
+                  () async =>
+                      await onRecover?.call(container) ??
+                      const RecoveryOutcome.skipped(),
             ),
       ),
     ],
@@ -84,6 +95,20 @@ Future<ProviderContainer> _pumpAccount(
   );
   await tester.pumpAndSettle();
   return container;
+}
+
+NotificationModel _notice(String orderId) => NotificationModel.tradeStatus(
+  orderId: orderId,
+  status: 'active',
+  at: DateTime.utc(2026),
+);
+
+/// Leave behind what a user who traded leaves: a notice, a per-order role
+/// and a chat read mark.
+Future<void> _seedPreviousUser(ProviderContainer container) async {
+  await container.read(notificationsProvider.notifier).add(_notice('old'));
+  container.read(tradeRoleProvider.notifier).state = {'old': true};
+  container.read(chatReadStatusProvider.notifier).state = {'old': 1};
 }
 
 Future<void> _import(WidgetTester tester, AppLocalizations l10n) async {
@@ -160,6 +185,68 @@ void main() {
 
       expect(container.read(backupReminderProvider), isTrue);
       expect(container.read(backupCompletedProvider), isFalse);
+    });
+  });
+
+  // Issue #533: the next user must find the app as a fresh install leaves it.
+  group('the previous identity\'s state', () {
+    testWidgets('is gone after generating a new user', (tester) async {
+      final container = await _pumpAccount(
+        tester,
+        reminderArmed: false,
+        backedUp: true,
+      );
+      await _seedPreviousUser(container);
+
+      await _generate(tester);
+
+      expect(container.read(notificationsProvider), isEmpty);
+      expect(container.read(tradeRoleProvider), isEmpty);
+      expect(container.read(chatReadStatusProvider), isEmpty);
+      expect(find.text('home'), findsOneWidget);
+    });
+
+    testWidgets('is kept when the generation fails', (tester) async {
+      final container = await _pumpAccount(
+        tester,
+        reminderArmed: false,
+        backedUp: true,
+        onRegenerate: () async => throw StateError('no entropy'),
+      );
+      await _seedPreviousUser(container);
+
+      await _generate(tester);
+
+      // Nothing was swapped, so nothing may be forgotten.
+      expect(container.read(notificationsProvider), hasLength(1));
+      expect(container.read(tradeRoleProvider), {'old': true});
+    });
+
+    testWidgets('is gone before an import recovers the new one\'s trades', (
+      tester,
+    ) async {
+      var sawAtRecovery = -1;
+      final container = await _pumpAccount(
+        tester,
+        reminderArmed: true,
+        backedUp: false,
+        onRecover: (container) async {
+          sawAtRecovery = container.read(notificationsProvider).length;
+          // What the recovery replay brings back is the imported identity's.
+          await container
+              .read(notificationsProvider.notifier)
+              .add(_notice('recovered'));
+          return const RecoveryOutcome.recovered(1);
+        },
+      );
+      await _seedPreviousUser(container);
+
+      await _import(tester, l10n);
+
+      expect(sawAtRecovery, 0, reason: 'the wipe must run before recovery');
+      final left = container.read(notificationsProvider);
+      expect(left, hasLength(1), reason: 'recovered notices must survive');
+      expect(container.read(tradeRoleProvider), isEmpty);
     });
   });
 

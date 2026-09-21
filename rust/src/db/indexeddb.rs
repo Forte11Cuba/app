@@ -23,7 +23,7 @@ use web_sys::wasm_bindgen::JsValue;
 use crate::api::types::{
     ChatMessage, IdentityInfo, OrderInfo, QueuedMessageStatus, RelayInfo, TradeInfo,
 };
-use crate::db::{trade_json, web_lock, Storage};
+use crate::db::{settings_keys, trade_json, web_lock, Storage};
 use crate::queue::outbox::QueuedMessage;
 
 /// Bumped when a store is added; `open_db` creates whatever is missing.
@@ -495,6 +495,42 @@ impl Storage for IndexedDbStorage {
 
     async fn clear_trade_keys(&self) -> Result<()> {
         self.clear_store(TRADE_KEYS_STORE).await
+    }
+
+    async fn clear_identity_data(&self) -> Result<()> {
+        for store in [
+            TRADES_STORE,
+            MESSAGES_STORE,
+            BOND_CLAIMS_STORE,
+            OUTBOX_STORE,
+            ORDERS_STORE,
+        ] {
+            self.clear_store(store).await?;
+        }
+        // The settings store is shared with device preferences, so only the
+        // identity-scoped keys go.
+        let db = self.open_db().await?;
+        let tx = db
+            .transaction_on_one_with_mode(SETTINGS_STORE, IdbTransactionMode::Readonly)
+            .map_err(|e| js_err("tx open", e))?;
+        let store = tx
+            .object_store(SETTINGS_STORE)
+            .map_err(|e| js_err("store open", e))?;
+        let keys = store
+            .get_all_keys()
+            .map_err(|e| js_err("get_all_keys", e))?
+            .await
+            .map_err(|e| js_err("get_all_keys await", e))?;
+        for key in keys.iter().filter_map(|k| k.as_string()) {
+            let scoped = settings_keys::IDENTITY_SCOPED_PREFIXES
+                .iter()
+                .any(|prefix| key.starts_with(prefix))
+                || key == settings_keys::BOND_CLAIM_RETAINED_NODES;
+            if scoped {
+                self.delete_key(SETTINGS_STORE, &key).await?;
+            }
+        }
+        Ok(())
     }
 
     // ── Settings KV — fully implemented (chat cursor + preferences, #246) ───
