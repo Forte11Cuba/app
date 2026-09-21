@@ -3614,4 +3614,33 @@ class AppLocalizationsNl extends AppLocalizations {
 
   @override
   String get paymentMethodsKeepEditing => 'Verder bewerken';
+
+  @override
+  String get fundsAtRiskTitle => 'Deze gebruiker heeft nog sats in het spel';
+
+  @override
+  String get fundsAtRiskBody =>
+      'Als je doorgaat, worden de sleutels van deze gebruiker vervangen en kan niets van wat hier staat nog vanaf dit apparaat worden afgerond of hersteld. Dit wordt afgeraden: je kunt deze sats kwijtraken.';
+
+  @override
+  String get fundsAtRiskSellerEscrow =>
+      'Sats vastgezet in escrow voor een verkoop';
+
+  @override
+  String get fundsAtRiskBondLocked => 'Borg vastgezet';
+
+  @override
+  String get fundsAtRiskPayoutClaim => 'Borguitbetaling nog niet geïnd';
+
+  @override
+  String get fundsAtRiskTradeInProgress => 'Trade bezig';
+
+  @override
+  String get fundsAtRiskBondInvoicePending => 'Borgfactuur nog te betalen';
+
+  @override
+  String get fundsAtRiskKeep => 'Deze gebruiker houden';
+
+  @override
+  String get fundsAtRiskContinue => 'Toch doorgaan';
 }

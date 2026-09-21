@@ -1119,5 +1119,14 @@
   "paymentMethodAddCustom": "Eigene Zahlungsmethode hinzufügen",
   "paymentMethodsDiscardTitle": "Änderungen verwerfen?",
   "paymentMethodsDiscardConfirm": "Verwerfen",
-  "paymentMethodsKeepEditing": "Weiter bearbeiten"
+  "paymentMethodsKeepEditing": "Weiter bearbeiten",
+  "fundsAtRiskTitle": "Dieser Benutzer hat noch Sats im Spiel",
+  "fundsAtRiskBody": "Wenn du fortfährst, werden die Schlüssel dieses Benutzers ersetzt, und nichts von dem hier Aufgeführten kann von diesem Gerät aus abgeschlossen oder wiederhergestellt werden. Das wird nicht empfohlen: Du kannst diese Sats verlieren.",
+  "fundsAtRiskSellerEscrow": "Sats für einen Verkauf treuhänderisch gesperrt",
+  "fundsAtRiskBondLocked": "Kaution gesperrt",
+  "fundsAtRiskPayoutClaim": "Kautionsauszahlung noch nicht abgeholt",
+  "fundsAtRiskTradeInProgress": "Handel läuft",
+  "fundsAtRiskBondInvoicePending": "Kautionsrechnung noch zahlbar",
+  "fundsAtRiskKeep": "Diesen Benutzer behalten",
+  "fundsAtRiskContinue": "Trotzdem fortfahren"
 }

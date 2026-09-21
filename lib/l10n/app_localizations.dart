@@ -6033,6 +6033,60 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Keep editing'**
   String get paymentMethodsKeepEditing;
+
+  /// Title of the warning shown before generating a new user or importing a seed while the current identity has escrow, bonds, payout claims or trades in flight
+  ///
+  /// In en, this message translates to:
+  /// **'This user still has sats in play'**
+  String get fundsAtRiskTitle;
+
+  /// Body of the funds-at-risk warning, above the list of what is still in flight
+  ///
+  /// In en, this message translates to:
+  /// **'If you continue, this user\'s keys are replaced and nothing listed here can be finished or recovered from this device. This is not recommended: you can lose these sats.'**
+  String get fundsAtRiskBody;
+
+  /// Funds-at-risk list entry: the user is the seller and the hold invoice is paid and held
+  ///
+  /// In en, this message translates to:
+  /// **'Sats locked in escrow for a sale'**
+  String get fundsAtRiskSellerEscrow;
+
+  /// Funds-at-risk list entry: an anti-abuse bond is locked until its trade ends
+  ///
+  /// In en, this message translates to:
+  /// **'Bond locked'**
+  String get fundsAtRiskBondLocked;
+
+  /// Funds-at-risk list entry: the user won a share of a slashed bond and has not been paid yet
+  ///
+  /// In en, this message translates to:
+  /// **'Bond payout not collected yet'**
+  String get fundsAtRiskPayoutClaim;
+
+  /// Funds-at-risk list entry: a live trade with none of the user's sats locked
+  ///
+  /// In en, this message translates to:
+  /// **'Trade in progress'**
+  String get fundsAtRiskTradeInProgress;
+
+  /// Funds-at-risk list entry: a bond invoice that has not been paid and has not expired
+  ///
+  /// In en, this message translates to:
+  /// **'Bond invoice still payable'**
+  String get fundsAtRiskBondInvoicePending;
+
+  /// Safe, primary action of the funds-at-risk warning: abandon the generation or import
+  ///
+  /// In en, this message translates to:
+  /// **'Keep this user'**
+  String get fundsAtRiskKeep;
+
+  /// Destructive action of the funds-at-risk warning: go on with the generation or import
+  ///
+  /// In en, this message translates to:
+  /// **'Continue anyway'**
+  String get fundsAtRiskContinue;
 }
 
 class _AppLocalizationsDelegate

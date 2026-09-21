@@ -1119,5 +1119,14 @@
   "paymentMethodAddCustom": "Eigen betaalmethode toevoegen",
   "paymentMethodsDiscardTitle": "De wijzigingen weggooien?",
   "paymentMethodsDiscardConfirm": "Weggooien",
-  "paymentMethodsKeepEditing": "Verder bewerken"
+  "paymentMethodsKeepEditing": "Verder bewerken",
+  "fundsAtRiskTitle": "Deze gebruiker heeft nog sats in het spel",
+  "fundsAtRiskBody": "Als je doorgaat, worden de sleutels van deze gebruiker vervangen en kan niets van wat hier staat nog vanaf dit apparaat worden afgerond of hersteld. Dit wordt afgeraden: je kunt deze sats kwijtraken.",
+  "fundsAtRiskSellerEscrow": "Sats vastgezet in escrow voor een verkoop",
+  "fundsAtRiskBondLocked": "Borg vastgezet",
+  "fundsAtRiskPayoutClaim": "Borguitbetaling nog niet geïnd",
+  "fundsAtRiskTradeInProgress": "Trade bezig",
+  "fundsAtRiskBondInvoicePending": "Borgfactuur nog te betalen",
+  "fundsAtRiskKeep": "Deze gebruiker houden",
+  "fundsAtRiskContinue": "Toch doorgaan"
 }

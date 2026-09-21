@@ -17,11 +17,13 @@ import 'package:mostro/features/account/providers/backup_reminder_provider.dart'
 import 'package:mostro/features/account/providers/privacy_mode_provider.dart';
 import 'package:mostro/features/account/widgets/backup_trigger_sheet.dart';
 import 'package:mostro/features/account/widgets/backup_widgets.dart';
+import 'package:mostro/features/account/widgets/funds_at_risk_dialog.dart';
 import 'package:mostro/l10n/app_localizations.dart';
 import 'package:mostro/shared/widgets/mostro_modal.dart';
 import 'package:mostro/shared/widgets/redesign_app_bar.dart';
 import 'package:mostro/src/rust/api/identity.dart' as identity_api;
 import 'package:mostro/src/rust/api/orders.dart' as orders_api;
+import 'package:mostro/src/rust/api/types.dart' show FundsAtRisk;
 
 /// Account — Route `/key_management` (`design_handoff_cuenta_respaldo`,
 /// 15a not backed up · 15b backed up).
@@ -39,6 +41,7 @@ class AccountScreen extends ConsumerStatefulWidget {
     @visibleForTesting this.debugRegenerate,
     @visibleForTesting this.debugImport,
     @visibleForTesting this.debugRecover,
+    @visibleForTesting this.debugFundsAtRisk,
   });
 
   /// Test-only word source for `Show words`, so widget tests do not reach the
@@ -53,6 +56,7 @@ class AccountScreen extends ConsumerStatefulWidget {
   final Future<void> Function()? debugRegenerate;
   final Future<void> Function(List<String> words)? debugImport;
   final Future<RecoveryOutcome> Function()? debugRecover;
+  final Future<List<FundsAtRisk>> Function()? debugFundsAtRisk;
 
   @override
   ConsumerState<AccountScreen> createState() => _AccountScreenState();
@@ -206,8 +210,16 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
                 ),
               ],
               footer: _AccountActions(
-                onGenerate: () => _confirmGenerateNewUser(context),
-                onImport: () => _showImportDialog(context),
+                onGenerate:
+                    () => _guardedIdentitySwap(
+                      context,
+                      () => _confirmGenerateNewUser(context),
+                    ),
+                onImport:
+                    () => _guardedIdentitySwap(
+                      context,
+                      () => _showImportDialog(context),
+                    ),
                 onRefresh: () => _confirmRefresh(context),
               ),
             ),
@@ -290,6 +302,34 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
       );
     }
     context.go(AppRoute.home);
+  }
+
+  /// Run [proceed] — the generate or import flow — unless the current
+  /// identity still has something in flight and the user backs out of the
+  /// warning (issue #533). Asked before anything is written: before the new
+  /// mnemonic, before `delete_identity`.
+  ///
+  /// A check that fails must not lock the user out of rotating a possibly
+  /// compromised identity, so it reads as "nothing found" and is logged.
+  Future<void> _guardedIdentitySwap(
+    BuildContext context,
+    VoidCallback proceed,
+  ) async {
+    var risks = const <FundsAtRisk>[];
+    try {
+      risks =
+          await (widget.debugFundsAtRisk?.call() ??
+              identity_api.fundsAtRisk());
+    } catch (e) {
+      debugPrint('[account] fundsAtRisk error: $e');
+    }
+    if (!context.mounted) return;
+    if (risks.isNotEmpty &&
+        !await confirmIdentitySwapDespiteRisk(context, risks)) {
+      return;
+    }
+    if (!context.mounted) return;
+    proceed();
   }
 
   /// Empty the Dart-side state of the identity that was just replaced, so

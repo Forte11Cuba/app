@@ -78,6 +78,31 @@ Export identity as encrypted backup string.
 
 ---
 
+### funds_at_risk() → Vec<FundsAtRisk>
+What the current identity would lose if it were replaced now, most serious
+first; empty when it is safe to go ahead (issue #533). Local rows only — no
+relay round trip.
+
+`FundsAtRisk { order_id, reason, amount_sats? }`, where `reason` is a marker
+Dart localizes:
+
+| `reason` | When |
+|---|---|
+| `SellerEscrowLocked` | the user is the seller and the trade is `active`, `fiat-sent` or `dispute` — decided on the status, so a restored row with no bolt11 counts too |
+| `BondLocked` | the trade's bond is `Locked` |
+| `PayoutClaimOpen` | a `bond_claims` row in a non-terminal phase, inside its window |
+| `TradeInProgress` | a live trade with none of the user's sats locked (a buyer mid-trade, either side before the escrow is funded) |
+| `BondInvoicePending` | a `Requested` bond whose invoice has not expired |
+
+The Account screen calls it **before** generating a user or importing a
+seed — before anything is written — and shows a warning that lists the
+entries. It warns, it does not block: the safe action is the primary one, a
+dismissal counts as it, and going on still leads to the usual confirmation.
+A check that fails reads as empty, so it cannot lock the user out of
+rotating a compromised identity.
+
+---
+
 ### delete_identity() → ()
 Delete identity from device. Irreversible.
 

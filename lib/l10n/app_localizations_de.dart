@@ -3626,4 +3626,33 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get paymentMethodsKeepEditing => 'Weiter bearbeiten';
+
+  @override
+  String get fundsAtRiskTitle => 'Dieser Benutzer hat noch Sats im Spiel';
+
+  @override
+  String get fundsAtRiskBody =>
+      'Wenn du fortfährst, werden die Schlüssel dieses Benutzers ersetzt, und nichts von dem hier Aufgeführten kann von diesem Gerät aus abgeschlossen oder wiederhergestellt werden. Das wird nicht empfohlen: Du kannst diese Sats verlieren.';
+
+  @override
+  String get fundsAtRiskSellerEscrow =>
+      'Sats für einen Verkauf treuhänderisch gesperrt';
+
+  @override
+  String get fundsAtRiskBondLocked => 'Kaution gesperrt';
+
+  @override
+  String get fundsAtRiskPayoutClaim => 'Kautionsauszahlung noch nicht abgeholt';
+
+  @override
+  String get fundsAtRiskTradeInProgress => 'Handel läuft';
+
+  @override
+  String get fundsAtRiskBondInvoicePending => 'Kautionsrechnung noch zahlbar';
+
+  @override
+  String get fundsAtRiskKeep => 'Diesen Benutzer behalten';
+
+  @override
+  String get fundsAtRiskContinue => 'Trotzdem fortfahren';
 }
