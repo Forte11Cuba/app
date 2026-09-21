@@ -284,6 +284,16 @@ impl MessageStore {
         let _ = self.unread_tx.send(unread);
     }
 
+    /// Drop every conversation held in memory and publish an unread count
+    /// of zero. `hydrated` goes too, so a later read of the same trade id
+    /// goes back to the database instead of trusting an emptied cache.
+    async fn clear(&self) {
+        self.messages.write().await.clear();
+        self.hydrated.write().await.clear();
+        self.non_durable.write().await.clear();
+        let _ = self.unread_tx.send(0);
+    }
+
     async fn unread_count_inner(&self) -> u32 {
         let store = self.messages.read().await;
         store
@@ -1162,6 +1172,31 @@ pub(crate) async fn stop_chat_subscriptions(order_id: &str) -> Vec<ChatChannel> 
     stopped
 }
 
+/// Forget every conversation of the identity being deleted (issue #533):
+/// release each live chat task's claim, close its REQ, and empty the
+/// in-memory store, so the next user starts with no chats and an unread
+/// count of zero. The persisted rows go with `clear_identity_data`; a task
+/// still running sees its claim gone at its next wake and exits.
+pub(crate) async fn forget_identity_chats() {
+    let guard_keys: Vec<String> = active_chats()
+        .lock()
+        .await
+        .drain()
+        .map(|(key, _)| key)
+        .collect();
+    if let Ok(pool) = crate::api::nostr::get_pool() {
+        let client = pool.client();
+        for key in &guard_keys {
+            // Same shape as `chat_subscription_id`, whose suffix is the guard key.
+            let id = nostr_sdk::prelude::SubscriptionId::new(format!("mostro-chat-{key}"));
+            crate::nostr::live_subs::live_subs()
+                .close(&client, &id)
+                .await;
+        }
+    }
+    message_store().clear().await;
+}
+
 /// Bounded insert-only id set with FIFO eviction (outer-id LRU, step 5).
 struct BoundedIdSet {
     set: std::collections::HashSet<String>,
@@ -1821,6 +1856,38 @@ mod tests {
             attachment: None,
             created_at: index,
         }
+    }
+
+    /// Issue #533: a new user starts with no conversations and no unread
+    /// badge, whatever the previous one left in memory.
+    #[tokio::test]
+    async fn clearing_the_store_leaves_no_chats_and_no_unread_count() {
+        let store = MessageStore::new();
+        let trade_id = uuid::Uuid::new_v4().to_string();
+        let mut unread = store.unread_tx.subscribe();
+        store
+            .add_message(notification_test_message(&trade_id, 1))
+            .await;
+        assert_eq!(store.messages.read().await.len(), 1);
+        assert!(store.hydrated.read().await.contains(&trade_id));
+        assert_eq!(store.unread_count_inner().await, 1);
+
+        store.clear().await;
+
+        // Asserted on the maps `clear` owns, not through `get_messages`: that
+        // read re-hydrates from the process-wide database, where a parallel
+        // test may have had this message persisted. In the app the rows are
+        // wiped first, so the re-hydration `clear` allows finds nothing.
+        assert!(store.messages.read().await.is_empty());
+        assert!(store.hydrated.read().await.is_empty());
+        assert!(store.non_durable.read().await.is_empty());
+        assert_eq!(store.unread_count_inner().await, 0);
+        // The badge is pushed, not polled: the last value published is zero.
+        let mut last = None;
+        while let Ok(count) = unread.try_recv() {
+            last = Some(count);
+        }
+        assert_eq!(last, Some(0));
     }
 
     #[tokio::test]

@@ -215,6 +215,16 @@ bridged by flutter_rust_bridge.
   before the capabilities are known, so a receive-path reader of them must wait — today only a
   fresh payout claim's deadline, via `bond_policy::get_for_once_settled`, and whoever opens
   subscriptions ahead of a capability fetch holds a `bond_policy::fetch_pending()` guard.
+- **A new identity starts from zero — and every new store must say which side it is on.**
+  `delete_identity` (generate *and* import go through it) wipes what the identity produced:
+  rows via `Storage::clear_identity_data`, Rust's in-memory stores via `forget_identity_state`,
+  relay subscriptions via `release_identity_subscriptions`, and the Dart caches via
+  `resetIdentityScopedState` (issue #533). Device preferences stay (relays, node choice,
+  push token, overrides). Anything new that holds per-trade or per-identity data — a table, a
+  `settings` key family (add its prefix to `IDENTITY_SCOPED_PREFIXES`), a process-wide store,
+  a non-`autoDispose` provider — must be added to the matching one, or it leaks into the next
+  user's session. The stores are process-wide and tests run in parallel, which is why the
+  identity lifecycle test calls `delete_identity_inner(false)`.
 - **Order book is sourced only from daemon Kind 38383 events.** `create_order` waits for daemon
   confirmation; on timeout it returns an error and **persists nothing** (no phantom order).
 - **The Kind 38383 `s` tag is never a trade's status.** It is NIP-69's four-bucket public view
