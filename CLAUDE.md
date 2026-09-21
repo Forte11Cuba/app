@@ -231,6 +231,11 @@ bridged by flutter_rust_bridge.
   a non-`autoDispose` provider — must be added to the matching one, or it leaks into the next
   user's session. The stores are process-wide and tests run in parallel, which is why the
   identity lifecycle test calls `delete_identity_inner(false)`.
+- **`OrderInfo::created_at` is when the order was created, not the event's time.** It comes from
+  the NIP-69 `created_at` tag (mostro#971), capped at the event's time and falling back to it on
+  older nodes. The event's own `created_at` moves on every revision of the addressable event, so
+  anything that must pick the **newest revision** has to read the event, not the order —
+  `node_stats::dedup_latest` carries it alongside as `Revision`.
 - **Order book is sourced only from daemon Kind 38383 events.** `create_order` waits for daemon
   confirmation; on timeout it returns an error and **persists nothing** (no phantom order).
 - **The Kind 38383 `s` tag is never a trade's status.** It is NIP-69's four-bucket public view
