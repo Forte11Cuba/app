@@ -78,8 +78,8 @@ Future<StreamController<List<OrderItem>>> _pump(
       ),
     ],
   );
-  // Under a router, so a redirect to the trade is observable: it lands on a
-  // stand-in reading `trade`.
+  // Under a router, so where the screen sends the user is observable: each
+  // destination lands on a stand-in reading its own name.
   final router = GoRouter(
     initialLocation:
         isBuying ? AppRoute.takeSellPath(_id) : AppRoute.takeBuyPath(_id),
@@ -91,6 +91,14 @@ Future<StreamController<List<OrderItem>>> _pump(
       GoRoute(
         path: AppRoute.tradeDetail,
         builder: (_, __) => const Scaffold(body: Text('trade')),
+      ),
+      GoRoute(
+        path: AppRoute.payInvoice,
+        builder: (_, __) => const Scaffold(body: Text('pay')),
+      ),
+      GoRoute(
+        path: AppRoute.addInvoice,
+        builder: (_, __) => const Scaffold(body: Text('add invoice')),
       ),
     ],
   );
@@ -354,96 +362,72 @@ void main() {
       });
     });
 
-    testWidgets('a take that succeeds never reads unavailable on the way out', (
-      tester,
-    ) async {
-      // `context.go` leaves this screen mounted while the next route animates
-      // in, so the frames after a successful take are the screen's too. Its
-      // own take is already in the book by then (#454).
-      //
-      // Routed on its own rather than through `_pump`, whose harness gains a
-      // router in #448; once that lands this can use it.
-      tester.view.physicalSize = const Size(360, 760);
-      tester.view.devicePixelRatio = 1.0;
-      addTearDown(tester.view.reset);
-      await withClock(Clock.fixed(kFakeNow), () async {
-        final reply = Completer<TradeInfo>();
-        final books = StreamController<List<OrderItem>>.broadcast();
-        addTearDown(books.close);
-        final sold = _order(kind: 'buy'); // the seller path: no settings read
-        final container = createContainer(
-          overrides: [
-            orderBookProvider.overrideWith((ref) async* {
-              yield [sold];
-              yield* books.stream;
-            }),
-            tradeRoleLookupProvider.overrideWithValue((_) async => null),
-            takeOrderActionProvider.overrideWithValue(
-              ({required orderId, required role, fiatAmount}) => reply.future,
-            ),
-            exchangeRateProvider.overrideWith((ref, code) async => 100000000),
-            fiatCurrenciesProvider.overrideWith(
-              (ref) async => const [
-                FiatCurrency(code: 'ARS', name: 'Argentine Peso', flag: '🇦🇷'),
-              ],
-            ),
-          ],
-        );
-        final router = GoRouter(
-          initialLocation: AppRoute.takeBuyPath(_id),
-          routes: [
-            GoRoute(
-              path: AppRoute.takeBuy,
-              builder:
-                  (_, __) =>
-                      const TakeOrderScreen(orderId: _id, isBuying: false),
-            ),
-            GoRoute(
-              path: AppRoute.tradeDetail,
-              builder: (_, __) => const Scaffold(body: Text('trade')),
-            ),
-            GoRoute(
-              path: AppRoute.payInvoice,
-              builder: (_, __) => const Scaffold(body: Text('pay')),
-            ),
-          ],
-        );
-        addTearDown(router.dispose);
-        await tester.pumpWidget(
-          UncontrolledProviderScope(
-            container: container,
-            child: MaterialApp.router(
-              theme: buildDarkTheme(),
-              locale: const Locale('en'),
-              localizationsDelegates: AppLocalizations.localizationsDelegates,
-              supportedLocales: AppLocalizations.supportedLocales,
-              routerConfig: router,
-            ),
-          ),
-        );
-        await tester.pumpAndSettle();
-
-        await tester.tap(find.text('Take order'));
-        await tester.pump();
-        // The daemon's answer reaches the book first, as it does in Rust.
-        books.add([_order(kind: 'buy', status: OrderStatus.waitingPayment)]);
-        await tester.pump();
-        reply.complete(
-          fakeTrade(id: 'taken', status: OrderStatus.waitingPayment),
-        );
-
-        for (var frame = 0; frame < 60; frame++) {
-          await tester.pump(const Duration(milliseconds: 16));
-          if (find.byType(TakeOrderScreen).evaluate().isEmpty) continue;
-          expect(
-            find.text('No longer available'),
-            findsNothing,
-            reason: 'frame $frame, with the screen still mounted',
+    for (final (side, isBuying, lands) in [
+      ('seller', false, 'pay'),
+      ('buyer', true, 'trade'),
+    ]) {
+      testWidgets('a $side take that succeeds never reads unavailable on the '
+          'way out', (tester) async {
+        // `context.go` leaves this screen mounted while the next route
+        // animates in, so the frames after a successful take are the screen's
+        // too, and its own take is already in the book by then (#454).
+        //
+        // The buyer path reads the default Lightning address before it
+        // navigates, and that bridge call throws in a widget test — which is
+        // the unreadable-settings path itself: the take stands, the error
+        // never reaches `_showTakeError`, and the trade screen is where the
+        // user lands, offering the invoice step it owns.
+        await withClock(Clock.fixed(kFakeNow), () async {
+          final reply = Completer<TradeInfo>();
+          final books = await _pump(
+            tester,
+            order: _order(kind: isBuying ? 'sell' : 'buy'),
+            isBuying: isBuying,
+            take:
+                ({required orderId, required role, fiatAmount}) => reply.future,
           );
-        }
-        expect(find.text('pay'), findsOneWidget);
+
+          await tester.tap(find.text('Take order'));
+          await tester.pump();
+          // The daemon's answer reaches the book first, as it does in Rust.
+          books.add([
+            _order(
+              kind: isBuying ? 'sell' : 'buy',
+              status:
+                  isBuying
+                      ? OrderStatus.waitingBuyerInvoice
+                      : OrderStatus.waitingPayment,
+            ),
+          ]);
+          await tester.pump();
+          reply.complete(
+            fakeTrade(
+              id: 'taken',
+              status:
+                  isBuying
+                      ? OrderStatus.waitingBuyerInvoice
+                      : OrderStatus.waitingPayment,
+            ),
+          );
+
+          for (var frame = 0; frame < 60; frame++) {
+            await tester.pump(const Duration(milliseconds: 16));
+            if (find.byType(TakeOrderScreen).evaluate().isEmpty) continue;
+            expect(
+              find.text('No longer available'),
+              findsNothing,
+              reason: '$side, frame $frame, with the screen still mounted',
+            );
+          }
+          expect(find.text(lands), findsOneWidget);
+          // A take that stands is never reported as a failure, and an
+          // unreadable setting does not send the buyer to a step the daemon
+          // may not be waiting for.
+          expect(find.byType(SnackBar), findsNothing);
+          if (isBuying) expect(find.text('add invoice'), findsNothing);
+        });
       });
-    });
+    }
 
     testWidgets('an order expiring mid-take keeps Taking…', (tester) async {
       var now = kFakeNow;

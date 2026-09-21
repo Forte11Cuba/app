@@ -192,15 +192,26 @@ class _TakeOrderScreenState extends ConsumerState<TakeOrderScreen> {
         context.go(AppRoute.tradeDetailPath(widget.orderId));
         context.push(AppRoute.payBondPath(widget.orderId));
       } else if (widget.isBuying) {
-        // With a default LN address Mostro pays it directly and the buyer
-        // skips the add-invoice step.
-        final settings = await settings_api.getSettings();
-        if (!mounted) return;
-        // Set past that await: a settings read that throws leaves the screen
-        // here, and the button has to come back rather than stay on Taking…
+        // The take is done, so this screen is leaving either way: what is
+        // read next only decides where it lands.
         navigated = true;
+        // With a default LN address Mostro pays it directly and the buyer
+        // skips the add-invoice step. An unreadable setting is not a failed
+        // take — it reached this line — so it must not reach `_showTakeError`,
+        // whose errors mean no trade was created. The trade screen offers the
+        // invoice step itself for a buyer waiting on it, so landing there is
+        // right whichever way the setting would have read.
+        String? payTo;
+        var settingsRead = true;
+        try {
+          payTo = (await settings_api.getSettings()).defaultLightningAddress;
+        } catch (e, st) {
+          settingsRead = false;
+          debugPrint('[TakeOrderScreen] settings read failed: $e\n$st');
+        }
+        if (!mounted) return;
         context.go(AppRoute.tradeDetailPath(widget.orderId));
-        if (settings.defaultLightningAddress == null) {
+        if (settingsRead && payTo == null) {
           context.push(AppRoute.addInvoicePath(widget.orderId));
         }
       } else {
