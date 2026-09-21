@@ -31,8 +31,10 @@ const _dark = OrderDetailPalette.dark;
 const _book = OrderBookPalette.dark;
 
 /// Pumps the take-order screen over a book fed by [books], with the node's
-/// rate and the (absent) trade role stubbed. 1 000 ARS is 1 000 sats at
-/// the stubbed rate, so the estimates are easy to read.
+/// rate stubbed and the user's trade rows being [trades] (none by default),
+/// or whatever [readTrades] answers — the screen reads them through the real
+/// `tradeRoleLookupProvider`. 1 000 ARS is 1 000 sats at the stubbed rate, so
+/// the estimates are easy to read.
 typedef _Take =
     Future<TradeInfo> Function({
       required String orderId,
@@ -46,6 +48,8 @@ Future<StreamController<List<OrderItem>>> _pump(
   bool isBuying = true,
   double? rate = 100000000,
   _Take? take,
+  List<TradeInfo> trades = const [],
+  Future<List<TradeInfo>> Function()? readTrades,
   instance.MostroInstance? node,
   int? bondEstimate,
 }) async {
@@ -60,7 +64,9 @@ Future<StreamController<List<OrderItem>>> _pump(
         yield [order];
         yield* books.stream;
       }),
-      tradeRoleLookupProvider.overrideWithValue((_) async => null),
+      tradeListReaderProvider.overrideWithValue(
+        readTrades ?? () async => trades,
+      ),
       if (take != null) takeOrderActionProvider.overrideWithValue(take),
       exchangeRateProvider.overrideWith((ref, code) async => rate),
       mostroNodeProvider.overrideWith((ref) async => node),
@@ -72,15 +78,32 @@ Future<StreamController<List<OrderItem>>> _pump(
       ),
     ],
   );
+  // Under a router, so a redirect to the trade is observable: it lands on a
+  // stand-in reading `trade`.
+  final router = GoRouter(
+    initialLocation:
+        isBuying ? AppRoute.takeSellPath(_id) : AppRoute.takeBuyPath(_id),
+    routes: [
+      GoRoute(
+        path: isBuying ? AppRoute.takeSell : AppRoute.takeBuy,
+        builder: (_, __) => TakeOrderScreen(orderId: _id, isBuying: isBuying),
+      ),
+      GoRoute(
+        path: AppRoute.tradeDetail,
+        builder: (_, __) => const Scaffold(body: Text('trade')),
+      ),
+    ],
+  );
+  addTearDown(router.dispose);
   await tester.pumpWidget(
     UncontrolledProviderScope(
       container: container,
-      child: MaterialApp(
+      child: MaterialApp.router(
         theme: buildDarkTheme(),
         locale: const Locale('en'),
         localizationsDelegates: AppLocalizations.localizationsDelegates,
         supportedLocales: AppLocalizations.supportedLocales,
-        home: TakeOrderScreen(orderId: _id, isBuying: isBuying),
+        routerConfig: router,
       ),
     ),
   );
@@ -599,6 +622,89 @@ void main() {
 
         expect(find.text('No longer available'), findsOneWidget);
         expect(find.text('Closed'), findsOneWidget);
+      });
+    });
+  });
+
+  group('TakeOrderScreen and a trade the user already has on the order', () {
+    testWidgets('a take still open on the order lands on its trade', (
+      tester,
+    ) async {
+      await withClock(Clock.fixed(kFakeNow), () async {
+        await _pump(
+          tester,
+          order: _order(),
+          trades: [
+            fakeTrade(
+              id: 'open',
+              orderId: _id,
+              status: OrderStatus.waitingBuyerInvoice,
+            ),
+          ],
+        );
+
+        expect(find.byType(TakeOrderScreen), findsNothing);
+        expect(find.text('trade'), findsOneWidget);
+      });
+    });
+
+    testWidgets('a take that already ended leaves the order takeable', (
+      tester,
+    ) async {
+      // What older builds left behind: a take cancelled before it went
+      // active, marked Canceled, its order since back in the book. Sent to
+      // that dead trade, the user could never take the order again (#434).
+      await withClock(Clock.fixed(kFakeNow), () async {
+        final taken = <String>[];
+        await _pump(
+          tester,
+          order: _order(),
+          trades: [
+            fakeTrade(id: 'ended', orderId: _id, status: OrderStatus.canceled),
+          ],
+          take: ({required orderId, required role, fiatAmount}) {
+            taken.add(orderId);
+            // Left unanswered: only the dispatch is under test.
+            return Completer<TradeInfo>().future;
+          },
+        );
+        expect(find.byType(TakeOrderScreen), findsOneWidget);
+
+        await tester.tap(find.text('Take order'));
+        await tester.pump();
+        await tester.pump();
+
+        expect(taken, [_id]);
+        expect(find.text('trade'), findsNothing);
+      });
+    });
+
+    testWidgets('an unreadable trade store still lets the take go out', (
+      tester,
+    ) async {
+      // Reading the rows can fail where the bridge call it replaced could
+      // not: unawaited in initState, and before the button leaves idle. An
+      // unreadable store is no proof of participation, and a take the user
+      // does hold is refused by the daemon and reported.
+      await withClock(Clock.fixed(kFakeNow), () async {
+        final taken = <String>[];
+        await _pump(
+          tester,
+          order: _order(),
+          readTrades: () async => throw Exception('storage is unreadable'),
+          take: ({required orderId, required role, fiatAmount}) {
+            taken.add(orderId);
+            return Completer<TradeInfo>().future;
+          },
+        );
+        expect(find.byType(TakeOrderScreen), findsOneWidget);
+
+        await tester.tap(find.text('Take order'));
+        await tester.pump();
+        await tester.pump();
+
+        expect(taken, [_id]);
+        expect(find.text('Taking…'), findsOneWidget);
       });
     });
   });
