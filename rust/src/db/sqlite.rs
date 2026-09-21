@@ -517,6 +517,35 @@ impl Storage for SqliteStorage {
         Ok(())
     }
 
+    async fn clear_identity_data(&self) -> Result<()> {
+        // One transaction: a half-wiped database would show the new user
+        // some of the old one's rows, which is the bug this exists to close.
+        let mut tx = self.pool.begin().await?;
+        for delete in [
+            "DELETE FROM trades",
+            "DELETE FROM messages",
+            "DELETE FROM bond_claims",
+            "DELETE FROM queued_messages",
+            "DELETE FROM orders",
+        ] {
+            sqlx::query(delete).execute(&mut *tx).await?;
+        }
+        for prefix in settings_keys::IDENTITY_SCOPED_PREFIXES {
+            // `substr`, not LIKE: `_` in a prefix is a LIKE wildcard.
+            sqlx::query("DELETE FROM settings WHERE substr(key, 1, ?) = ?")
+                .bind(prefix.len() as i64)
+                .bind(prefix)
+                .execute(&mut *tx)
+                .await?;
+        }
+        sqlx::query("DELETE FROM settings WHERE key = ?")
+            .bind(settings_keys::BOND_CLAIM_RETAINED_NODES)
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
     async fn get_setting(&self, key: &str) -> Result<Option<String>> {
         let row: Option<(String,)> =
             sqlx::query_as("SELECT value FROM settings WHERE key = ?")
@@ -1961,6 +1990,165 @@ mod tests {
         // Deleting again on empty tables is a no-op, not an error.
         storage.delete_identity().await.unwrap();
         storage.clear_trade_keys().await.unwrap();
+
+        drop(storage);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// Issue #533: a new user must find the app as a fresh install leaves it.
+    /// Everything the identity produced goes; what belongs to the device —
+    /// relays, the node choice, preferences — stays.
+    #[tokio::test]
+    async fn clear_identity_data_wipes_the_identity_and_keeps_the_device() {
+        use crate::api::types::{
+            BuyerStep, MessageType, OrderKind, OrderStatus, TradeRole, TradeStep,
+        };
+        let path = temp_db_path();
+        let path_str = path.to_str().unwrap().to_string();
+        let storage = SqliteStorage::open(&path_str).await.unwrap();
+
+        let order = OrderInfo {
+            id: "order-a".into(),
+            kind: OrderKind::Sell,
+            status: OrderStatus::Active,
+            amount_sats: None,
+            fiat_amount: Some(100.0),
+            fiat_amount_min: None,
+            fiat_amount_max: None,
+            fiat_code: "CUP".into(),
+            payment_method: "bank".into(),
+            premium: 0.0,
+            creator_pubkey: "maker".into(),
+            created_at: 1,
+            expires_at: None,
+            is_mine: true,
+            rating: 0.0,
+            total_reviews: 0,
+            days_active: 0,
+        };
+        storage.save_order(&order).await.unwrap();
+        storage
+            .save_trade(&TradeInfo {
+                id: "row-a".into(),
+                order: order.clone(),
+                role: TradeRole::Buyer,
+                counterparty_pubkey: String::new(),
+                current_step: TradeStep::Buyer(BuyerStep::OrderTaken),
+                hold_invoice: None,
+                buyer_invoice: None,
+                trade_key_index: 1,
+                cooperative_cancel_state: None,
+                timeout_at: None,
+                started_at: 1,
+                completed_at: None,
+                outcome: None,
+                peer_rating: None,
+                peer_reviews: None,
+                peer_days: None,
+                rated_at: None,
+                bond: None,
+            })
+            .await
+            .unwrap();
+        storage
+            .save_message(&ChatMessage {
+                id: "3f".repeat(32),
+                trade_id: "order-a".into(),
+                sender_pubkey: "peer".into(),
+                content: "hola".into(),
+                message_type: MessageType::Peer,
+                is_mine: false,
+                is_read: false,
+                has_attachment: false,
+                attachment: None,
+                created_at: 2,
+            })
+            .await
+            .unwrap();
+        storage
+            .save_bond_claim(&claim(
+                "node-a",
+                "order-a",
+                crate::api::types::BondClaimPhase::Pending,
+                10,
+            ))
+            .await
+            .unwrap();
+        storage
+            .save_queued_message(&QueuedMessage::new("{}".into(), 3))
+            .await
+            .unwrap();
+        for key in [
+            settings_keys::chat_cursor("order-a"),
+            settings_keys::dispute_admin("order-a"),
+            settings_keys::dispute_mine("order-a"),
+            settings_keys::status_cursor("order-a"),
+            settings_keys::invoice_step_start("order-a"),
+            settings_keys::trade_wiped("order-a"),
+            settings_keys::BOND_CLAIM_RETAINED_NODES.to_string(),
+        ] {
+            storage.set_setting(&key, "1").await.unwrap();
+        }
+        // The device's own.
+        storage
+            .save_active_mostro_pubkey("node-pubkey")
+            .await
+            .unwrap();
+        storage
+            .set_setting(settings_keys::CUSTOM_MOSTRO_NODES, "[]")
+            .await
+            .unwrap();
+        storage
+            .set_setting(settings_keys::PUSH_ENABLED, "false")
+            .await
+            .unwrap();
+
+        storage.clear_identity_data().await.unwrap();
+
+        assert!(storage.list_trades().await.unwrap().is_empty());
+        assert!(storage.list_orders().await.unwrap().is_empty());
+        assert!(storage.list_messages("order-a").await.unwrap().is_empty());
+        assert!(storage.list_bond_claims().await.unwrap().is_empty());
+        assert!(storage.list_queued_messages().await.unwrap().is_empty());
+        for key in [
+            settings_keys::chat_cursor("order-a"),
+            settings_keys::dispute_admin("order-a"),
+            settings_keys::dispute_mine("order-a"),
+            settings_keys::status_cursor("order-a"),
+            settings_keys::invoice_step_start("order-a"),
+            settings_keys::trade_wiped("order-a"),
+            settings_keys::BOND_CLAIM_RETAINED_NODES.to_string(),
+        ] {
+            assert_eq!(
+                storage.get_setting(&key).await.unwrap(),
+                None,
+                "{key} survived the wipe"
+            );
+        }
+
+        assert_eq!(
+            storage.get_active_mostro_pubkey().await.unwrap().as_deref(),
+            Some("node-pubkey")
+        );
+        assert_eq!(
+            storage
+                .get_setting(settings_keys::CUSTOM_MOSTRO_NODES)
+                .await
+                .unwrap()
+                .as_deref(),
+            Some("[]")
+        );
+        assert_eq!(
+            storage
+                .get_setting(settings_keys::PUSH_ENABLED)
+                .await
+                .unwrap()
+                .as_deref(),
+            Some("false")
+        );
+
+        // Wiping an already empty database is a no-op, not an error.
+        storage.clear_identity_data().await.unwrap();
 
         drop(storage);
         let _ = std::fs::remove_file(&path);

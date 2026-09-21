@@ -81,7 +81,31 @@ Export identity as encrypted backup string.
 ### delete_identity() → ()
 Delete identity from device. Irreversible.
 
-**Side effects**: Clears all local data (orders, messages, trades, settings).
+**Side effects**: the next identity finds the app as a fresh install leaves
+it (issue #533).
+
+- Gives back the identity's relay subscriptions first — d-tag watchers,
+  daemon-message watchers, chats and the bulk kind-14 feed — so nothing of
+  the old user's keeps arriving.
+- Unregisters every push registration.
+- Wipes what the identity produced: the identity row, trade keys, trades,
+  chat messages, payout claims, the outbound queue, the cached order book
+  (its `is_mine` marks) and the per-order settings (chat and status cursors,
+  dispute markers, invoice-step starts, wipe tombstones, retained claim
+  nodes). `Storage::clear_identity_data`, one transaction on native.
+- Empties the in-memory stores: disputes, ratings, sessions, chats (unread
+  count published as zero), trade-key caches; then re-issues the public
+  subscriptions so the book refills with no order marked as own.
+- Clears the log buffer.
+
+**Kept**: device preferences — relays, the active and custom nodes, node
+caches, the push token and toggle, developer overrides. They belong to the
+device, not to the identity.
+
+A failed wipe is logged, never turned into a failed deletion: by then the
+identity is already gone. The Dart half — cached providers and the
+notifications store — is `resetIdentityScopedState`, run by the Account
+screen after a generate and, on import, **before** the recovery.
 
 **Errors**: `NoIdentity`.
 

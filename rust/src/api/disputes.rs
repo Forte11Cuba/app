@@ -183,6 +183,16 @@ fn dispute_store() -> &'static DisputeStore {
     DISPUTE_STORE.get_or_init(DisputeStore::new)
 }
 
+/// Forget every dispute of the identity being deleted (issue #533). The
+/// store is in memory by design, so without this the next user keeps seeing
+/// the previous one's disputes until the process restarts.
+pub(crate) async fn forget_identity_disputes() {
+    dispute_store().disputes.write().await.clear();
+    if let Ok(mut opens) = pending_opens().lock() {
+        opens.clear();
+    }
+}
+
 /// Whether `dispute` is the record `handle_admin_took_dispute` writes when it
 /// is the first thing this side hears about the dispute: InReview, not ours,
 /// no reason, solver known, and an id minted locally because the peer path
