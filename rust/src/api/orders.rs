@@ -17545,6 +17545,199 @@ mod restore_e2e_tests {
         }
     }
 
+    // ── chat restore E2E (mostro#966) ─────────────────────────────────────────
+    fn chat_e2e_file(name: &str) -> std::path::PathBuf {
+        std::path::PathBuf::from(std::env::var("CHAT_E2E_DIR").expect("CHAT_E2E_DIR")).join(name)
+    }
+
+    async fn chat_e2e_wait_file(name: &str, secs: u64) -> String {
+        for _ in 0..secs * 2 {
+            if let Ok(s) = std::fs::read_to_string(chat_e2e_file(name)) {
+                if !s.trim().is_empty() {
+                    return s.trim().to_string();
+                }
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        }
+        panic!("timed out waiting for {name}");
+    }
+
+    async fn chat_e2e_wait_row<F>(
+        order_id: &str,
+        secs: u64,
+        what: &str,
+        ready: F,
+    ) -> crate::api::types::TradeInfo
+    where
+        F: Fn(&crate::api::types::TradeInfo) -> bool,
+    {
+        let db = crate::db::app_db::db().expect("store");
+        for _ in 0..secs * 2 {
+            if let Ok(Some(row)) = db.get_trade_by_order_id(order_id).await {
+                if ready(&row) {
+                    return row;
+                }
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        }
+        let row = db.get_trade_by_order_id(order_id).await.ok().flatten();
+        panic!("timed out waiting for {what}; row={row:?}");
+    }
+
+    async fn chat_e2e_wait_messages(order_id: &str, want: usize, secs: u64) -> Vec<String> {
+        let mut seen = vec![];
+        for _ in 0..secs * 2 {
+            seen = crate::api::messages::get_messages(order_id.to_string())
+                .await
+                .unwrap_or_default()
+                .into_iter()
+                .map(|m| format!("{}:{}", if m.is_mine { "mine" } else { "peer" }, m.content))
+                .collect();
+            if seen.len() >= want {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        }
+        seen
+    }
+
+    /// Chat restore E2E. Three phases, each its own process (identity and
+    /// `app_db` are process-wide), coordinated through files in
+    /// `CHAT_E2E_DIR`; `CHAT_E2E_PHASE` = `maker` | `taker` | `restore`.
+    /// An outside script pays `hold.invoice` (the seller's node) and writes
+    /// `buyer.invoice` (an amountless invoice from the buyer's node).
+    ///
+    ///   CHAT_E2E_PHASE=maker cargo test --lib chat_restore_e2e -- --ignored --nocapture
+    ///
+    /// `maker` and `taker` run side by side until both hold both messages;
+    /// `restore` then starts from a clean database, imports the maker's words
+    /// and prints what came back and which path named the peer. To stand in
+    /// for daemon messages that aged out, delete them from the local relay
+    /// between `taker` and `restore`.
+    #[tokio::test]
+    #[ignore = "requires live regtest stack — MOSTRO_REGTEST_PUBKEY, CHAT_E2E_DIR, CHAT_E2E_PHASE"]
+    async fn chat_restore_e2e() {
+        let phase = std::env::var("CHAT_E2E_PHASE").expect("CHAT_E2E_PHASE");
+        crate::api::logging::install_log_bridge();
+        init_regtest().await;
+        match phase.as_str() {
+            "maker" => {
+                let id = crate::api::identity::create_identity()
+                    .await
+                    .expect("identity");
+                std::fs::write(chat_e2e_file("maker.words"), id.mnemonic_words.join(" ")).unwrap();
+                tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                let order = create_order(crate::api::types::NewOrderParams {
+                    kind: crate::api::types::OrderKind::Sell,
+                    fiat_amount: Some(1.0),
+                    fiat_amount_min: None,
+                    fiat_amount_max: None,
+                    fiat_code: "USD".to_string(),
+                    payment_method: "cash".to_string(),
+                    premium: 0.0,
+                    amount_sats: Some(1000),
+                })
+                .await
+                .expect("create_order");
+                std::fs::write(chat_e2e_file("order.id"), &order.id).unwrap();
+                println!("[maker] order={}", order.id);
+                let row =
+                    chat_e2e_wait_row(&order.id, 180, "hold invoice", |r| r.hold_invoice.is_some())
+                        .await;
+                std::fs::write(chat_e2e_file("hold.invoice"), row.hold_invoice.unwrap()).unwrap();
+                let row = chat_e2e_wait_row(&order.id, 180, "active + peer", |r| {
+                    r.order.status == OrderStatus::Active && !r.counterparty_pubkey.is_empty()
+                })
+                .await;
+                println!("[maker] active peer={}", row.counterparty_pubkey);
+                crate::api::messages::send_message(order.id.clone(), "hello from maker".into())
+                    .await
+                    .expect("maker send");
+                let msgs = chat_e2e_wait_messages(&order.id, 2, 120).await;
+                println!("[maker] messages={msgs:?}");
+                assert_eq!(
+                    msgs.len(),
+                    2,
+                    "maker must hold both messages before the wipe"
+                );
+                std::fs::write(chat_e2e_file("maker.done"), row.counterparty_pubkey).unwrap();
+            }
+            "taker" => {
+                let order_id = chat_e2e_wait_file("order.id", 120).await;
+                crate::api::identity::create_identity()
+                    .await
+                    .expect("identity");
+                tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                subscribe_orders().await;
+                assert!(wait_for_book_status(&order_id, OrderStatus::Pending, 60).await);
+                let trade = take_order(order_id.clone(), TradeRole::Buyer, None)
+                    .await
+                    .expect("take");
+                println!("[taker] took idx={}", trade.trade_key_index);
+                let invoice = chat_e2e_wait_file("buyer.invoice", 120).await;
+                send_invoice(order_id.clone(), invoice, 0)
+                    .await
+                    .expect("send_invoice");
+                let row = chat_e2e_wait_row(&order_id, 240, "active + peer", |r| {
+                    r.order.status == OrderStatus::Active && !r.counterparty_pubkey.is_empty()
+                })
+                .await;
+                println!("[taker] active peer={}", row.counterparty_pubkey);
+                crate::api::messages::send_message(order_id.clone(), "hello from taker".into())
+                    .await
+                    .expect("taker send");
+                let msgs = chat_e2e_wait_messages(&order_id, 2, 120).await;
+                println!("[taker] messages={msgs:?}");
+                // Stay up until the maker has both, so the relay holds them.
+                chat_e2e_wait_file("maker.done", 180).await;
+            }
+            "restore" => {
+                let order_id = chat_e2e_wait_file("order.id", 5).await;
+                let expected_peer = chat_e2e_wait_file("maker.done", 5).await;
+                let words: Vec<String> = chat_e2e_wait_file("maker.words", 5)
+                    .await
+                    .split(' ')
+                    .map(str::to_string)
+                    .collect();
+                let db = crate::db::app_db::db().expect("store");
+                assert!(
+                    db.list_trades().await.unwrap().is_empty(),
+                    "a clean database"
+                );
+                crate::api::identity::import_from_mnemonic(words, true)
+                    .await
+                    .expect("import + restore");
+                // Past the last history pass (15s + 45s).
+                let secs: u64 = std::env::var("CHAT_E2E_SETTLE_SECS")
+                    .ok()
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(75);
+                tokio::time::sleep(std::time::Duration::from_secs(secs)).await;
+                let row = db.get_trade_by_order_id(&order_id).await.unwrap();
+                let msgs = chat_e2e_wait_messages(&order_id, 2, 30).await;
+                let logs: Vec<String> = crate::api::logging::recent_logs()
+                    .into_iter()
+                    .map(|l| format!("{l:?}"))
+                    .filter(|l| l.contains("peer-reveal") || l.contains("restored the peer"))
+                    .collect();
+                println!("[restore] RESULT row_exists={}", row.is_some());
+                println!(
+                    "[restore] RESULT peer={:?} expected={expected_peer}",
+                    row.as_ref().map(|r| r.counterparty_pubkey.clone())
+                );
+                println!(
+                    "[restore] RESULT status={:?}",
+                    row.as_ref().map(|r| r.order.status.clone())
+                );
+                println!("[restore] RESULT messages={msgs:?}");
+                for l in logs {
+                    println!("[restore] LOG {l}");
+                }
+            }
+            other => panic!("unknown CHAT_E2E_PHASE {other}"),
+        }
+    }
+
     /// Retake E2E, phase 1 of 2: a maker publishes a sell order and prints its
     /// id for phase 2, which must run in its own process — the identity and
     /// `app_db` are process-wide, and the taker needs a different identity.
