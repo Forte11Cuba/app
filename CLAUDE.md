@@ -110,6 +110,12 @@ bridged by flutter_rust_bridge.
   a mismatched CLI yields bindings that fail to compile, with an error that never mentions
   versions (see issue #205). `--check` verifies without generating.
 - FRB scans only `crate::api` → changes in `nostr/`, `crypto/`, `mostro/`, etc. need no regen.
+- **Even a private item in `rust/src/api/` needs a regen**: the generated Dart lists every
+  non-`pub` function and type in its header comments. `frb-generate.sh --check` does **not**
+  catch that — it only compares version pins. `scripts/check-generated.sh` does (regenerates and
+  diffs, like CI), and runs as a Claude Code `PreToolUse` hook on `git commit`
+  (`.claude/settings.json`): it blocks a stale commit and leaves the files regenerated to stage.
+  Skip once with `SKIP_GENERATED_CHECK=1` in the command.
 - **Generated code is committed:** `lib/src/rust/`, `rust/src/frb_generated.rs` and
   `lib/l10n/app_localizations*.dart`. A pull or branch switch builds as-is. Regenerate in the
   **same commit** as the `rust/src/api/` or `.arb` change that caused it. Never hand-edit or
