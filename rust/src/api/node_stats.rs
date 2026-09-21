@@ -175,11 +175,28 @@ fn apply_info_tags(stats: &mut MostroNodeStats, tags: &[Vec<String>], seen_at: i
     stats.bond_pct = stats.bond.amount_pct.map(|f| f * 100.0);
 }
 
-/// An order paired with the `created_at` of the event it was parsed from: the
-/// time of that *revision*. `OrderInfo::created_at` is the order's creation
-/// time (the NIP-69 tag), the same on every revision, so it cannot tell two
-/// revisions apart.
-type Revision = (i64, OrderInfo);
+/// An order paired with the event it was parsed from. `OrderInfo::created_at`
+/// is the order's creation time (the NIP-69 tag), the same on every revision,
+/// so it cannot tell two revisions apart; the event's `created_at` and id can.
+struct Revision {
+    /// The event's `created_at`: when this revision was published.
+    at: i64,
+    /// The event id, which settles two revisions published in the same second.
+    event_id: String,
+    order: OrderInfo,
+}
+
+impl Revision {
+    /// Whether this revision replaces `held`, the way NIP-01 orders revisions
+    /// of an addressable event: the newer `created_at` wins, and within one
+    /// second the **lowest** id — the one relays retain. Without the id a tie
+    /// went to whichever relay answered first. Same rule as
+    /// [`CachedNodeInfo::supersedes`].
+    fn supersedes(&self, held: &Self) -> bool {
+        // Ids are lowercase hex of equal length: string order is byte order.
+        (self.at, std::cmp::Reverse(&self.event_id)) > (held.at, std::cmp::Reverse(&held.event_id))
+    }
+}
 
 /// Keep only the newest version of each addressable order (`author` + `d`).
 ///
@@ -187,16 +204,22 @@ type Revision = (i64, OrderInfo);
 /// (one per status transition); counting all of them would inflate liquidity.
 fn dedup_latest(orders: Vec<Revision>) -> Vec<OrderInfo> {
     let mut latest: HashMap<(String, String), Revision> = HashMap::new();
-    for (revision_at, order) in orders {
-        let key = (order.creator_pubkey.clone(), order.id.clone());
-        match latest.get(&key) {
-            Some((existing_at, _)) if *existing_at >= revision_at => {}
-            _ => {
-                latest.insert(key, (revision_at, order));
-            }
+    for revision in orders {
+        let key = (
+            revision.order.creator_pubkey.clone(),
+            revision.order.id.clone(),
+        );
+        if latest
+            .get(&key)
+            .is_none_or(|held| revision.supersedes(held))
+        {
+            latest.insert(key, revision);
         }
     }
-    latest.into_values().map(|(_, order)| order).collect()
+    latest
+        .into_values()
+        .map(|revision| revision.order)
+        .collect()
 }
 
 /// Is this order open right now? `pending` and not past its `expiration`.
@@ -364,7 +387,13 @@ fn summarize(
 
     let orders: Vec<Revision> = order_events
         .iter()
-        .filter_map(|e| Some((e.created_at.as_secs() as i64, parse_order_event(e, None)?)))
+        .filter_map(|e| {
+            Some(Revision {
+                at: e.created_at.as_secs() as i64,
+                event_id: e.id.to_hex(),
+                order: parse_order_event(e, None)?,
+            })
+        })
         .collect();
     for (pubkey, liquidity) in count_open_orders(orders, now) {
         if let Some(&i) = index.get(pubkey.as_str()) {
@@ -584,7 +613,19 @@ mod tests {
     /// An order revision published at `created_at`, which the fixture also uses
     /// as the order's creation time — as a node without the NIP-69 tag would.
     fn order(node: &str, id: &str, fiat: &str, status: OrderStatus, created_at: i64) -> Revision {
-        (created_at, order_info(node, id, fiat, status, created_at))
+        revision(
+            created_at,
+            &format!("{id}-{status:?}-{created_at}"),
+            order_info(node, id, fiat, status, created_at),
+        )
+    }
+
+    fn revision(at: i64, event_id: &str, order: OrderInfo) -> Revision {
+        Revision {
+            at,
+            event_id: event_id.into(),
+            order,
+        }
     }
 
     fn order_info(
@@ -775,19 +816,51 @@ mod tests {
     /// `OrderInfo::created_at` would tie and keep whichever arrived first.
     #[test]
     fn revisions_sharing_a_creation_time_are_told_apart_by_the_event_time() {
-        let pending = (10, order_info(NODE_A, "o1", "ARS", OrderStatus::Pending, 5));
-        let canceled = (
-            20,
-            order_info(NODE_A, "o1", "ARS", OrderStatus::Canceled, 5),
-        );
-        for orders in [
-            vec![pending.clone(), canceled.clone()],
-            vec![canceled.clone(), pending.clone()],
-        ] {
+        let pending = || {
+            revision(
+                10,
+                "bb",
+                order_info(NODE_A, "o1", "ARS", OrderStatus::Pending, 5),
+            )
+        };
+        let canceled = || {
+            revision(
+                20,
+                "aa",
+                order_info(NODE_A, "o1", "ARS", OrderStatus::Canceled, 5),
+            )
+        };
+        for orders in [vec![pending(), canceled()], vec![canceled(), pending()]] {
             let per_node = count_open_orders(orders, 1_000);
             assert!(
                 !per_node.contains_key(NODE_A),
                 "the canceled revision is newer"
+            );
+        }
+    }
+
+    #[test]
+    fn revisions_sharing_a_second_are_settled_by_the_lower_event_id() {
+        // The canceled revision has the lower id, so it is the one relays keep.
+        let pending = || {
+            revision(
+                10,
+                "bb",
+                order_info(NODE_A, "o1", "ARS", OrderStatus::Pending, 5),
+            )
+        };
+        let canceled = || {
+            revision(
+                10,
+                "aa",
+                order_info(NODE_A, "o1", "ARS", OrderStatus::Canceled, 5),
+            )
+        };
+        for orders in [vec![pending(), canceled()], vec![canceled(), pending()]] {
+            let per_node = count_open_orders(orders, 1_000);
+            assert!(
+                !per_node.contains_key(NODE_A),
+                "the lower id wins a same-second tie, whatever the arrival order"
             );
         }
     }
