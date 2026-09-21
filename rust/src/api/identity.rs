@@ -385,6 +385,27 @@ async fn delete_identity_inner(wipe_data: bool) -> Result<()> {
     Ok(())
 }
 
+/// What the current identity would lose if it were replaced now: locked
+/// escrow, locked or payable bonds, open payout claims, live trades — most
+/// serious first, empty when it is safe to go ahead (issue #533).
+///
+/// The Account screen calls this before generating a new user or importing a
+/// seed, and warns. It reads the local rows only: no relay round trip sits
+/// between the user and the dialog. With no database there is nothing to
+/// lose track of, so that reads as empty.
+pub async fn funds_at_risk() -> Result<Vec<crate::api::types::FundsAtRisk>> {
+    let Some(db) = crate::db::app_db::db() else {
+        return Ok(Vec::new());
+    };
+    let trades = db.list_trades().await?;
+    let claims = db.list_bond_claims().await?;
+    Ok(crate::mostro::funds_at_risk::funds_at_risk(
+        &trades,
+        &claims,
+        unix_now(),
+    ))
+}
+
 /// Empty what the process holds in memory about the deleted identity, and
 /// point the public subscriptions at a clean book (issue #533).
 ///

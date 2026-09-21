@@ -3624,4 +3624,35 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get paymentMethodsKeepEditing => 'Continuer à modifier';
+
+  @override
+  String get fundsAtRiskTitle => 'Cet utilisateur a encore des sats en jeu';
+
+  @override
+  String get fundsAtRiskBody =>
+      'Si tu continues, les clés de cet utilisateur sont remplacées et rien de ce qui figure ici ne pourra être terminé ni récupéré depuis cet appareil. Ce n\'est pas recommandé : tu peux perdre ces sats.';
+
+  @override
+  String get fundsAtRiskSellerEscrow =>
+      'Sats bloqués en séquestre pour une vente';
+
+  @override
+  String get fundsAtRiskBondLocked => 'Caution bloquée';
+
+  @override
+  String get fundsAtRiskPayoutClaim =>
+      'Paiement de caution pas encore encaissé';
+
+  @override
+  String get fundsAtRiskTradeInProgress => 'Échange en cours';
+
+  @override
+  String get fundsAtRiskBondInvoicePending =>
+      'Facture de caution encore payable';
+
+  @override
+  String get fundsAtRiskKeep => 'Garder cet utilisateur';
+
+  @override
+  String get fundsAtRiskContinue => 'Continuer quand même';
 }

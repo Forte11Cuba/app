@@ -16,6 +16,8 @@ import 'package:mostro/features/notifications/models/notification_model.dart';
 import 'package:mostro/features/notifications/providers/notifications_provider.dart';
 import 'package:mostro/features/order/providers/trade_state_provider.dart';
 import 'package:mostro/l10n/app_localizations.dart';
+import 'package:mostro/src/rust/api/types.dart'
+    show FundsAtRisk, FundsAtRiskReason;
 
 /// What the backup state is after an identity swap: generating a mnemonic
 /// arms the reminder, importing one the user already holds must not (#530).
@@ -33,6 +35,7 @@ Future<ProviderContainer> _pumpAccount(
   Future<void> Function()? onRegenerate,
   Future<void> Function(List<String> words)? onImport,
   Future<RecoveryOutcome> Function(ProviderContainer container)? onRecover,
+  Future<List<FundsAtRisk>> Function()? fundsAtRisk,
 }) async {
   tester.view.physicalSize = const Size(360, 760);
   tester.view.devicePixelRatio = 1.0;
@@ -71,6 +74,7 @@ Future<ProviderContainer> _pumpAccount(
               debugPublicKey: () async => null,
               debugRegenerate: onRegenerate ?? () async {},
               debugImport: onImport ?? (_) async {},
+              debugFundsAtRisk: fundsAtRisk ?? () async => const [],
               debugRecover:
                   () async =>
                       await onRecover?.call(container) ??
@@ -119,9 +123,15 @@ Future<void> _import(WidgetTester tester, AppLocalizations l10n) async {
   await tester.pumpAndSettle();
 }
 
-Future<void> _generate(WidgetTester tester) async {
+/// Tap `Generate`, up to whatever opens first: the funds-at-risk warning or
+/// the usual confirmation.
+Future<void> _tapGenerate(WidgetTester tester) async {
   await tester.tap(find.bySemanticsIdentifier(AutomationIds.keysGenerate));
   await tester.pumpAndSettle();
+}
+
+Future<void> _generate(WidgetTester tester) async {
+  await _tapGenerate(tester);
   await tester.tap(
     find.bySemanticsIdentifier(AutomationIds.keysGenerateConfirm),
   );
@@ -247,6 +257,138 @@ void main() {
       final left = container.read(notificationsProvider);
       expect(left, hasLength(1), reason: 'recovered notices must survive');
       expect(container.read(tradeRoleProvider), isEmpty);
+    });
+  });
+
+  // Issue #533: replacing an identity with sats in play must be warned about
+  // before anything is written.
+  group('with funds at risk', () {
+    final risks = [
+      FundsAtRisk(
+        orderId: '308e1272-d5f4-47e6-bd97-3504baea9c23',
+        reason: FundsAtRiskReason.sellerEscrowLocked,
+        amountSats: BigInt.from(50000),
+      ),
+      const FundsAtRisk(
+        orderId: '408e1272-d5f4-47e6-bd97-3504baea9c24',
+        reason: FundsAtRiskReason.tradeInProgress,
+      ),
+    ];
+
+    testWidgets('generate warns first, naming what is in play', (tester) async {
+      var generated = false;
+      await _pumpAccount(
+        tester,
+        reminderArmed: false,
+        backedUp: true,
+        fundsAtRisk: () async => risks,
+        onRegenerate: () async => generated = true,
+      );
+
+      await _tapGenerate(tester);
+
+      expect(find.text(l10n.fundsAtRiskTitle), findsOneWidget);
+      expect(find.text(l10n.fundsAtRiskSellerEscrow), findsOneWidget);
+      expect(find.text(l10n.fundsAtRiskTradeInProgress), findsOneWidget);
+      expect(find.text(l10n.satsAmount('50,000')), findsOneWidget);
+      // The usual confirmation has not opened, and nothing was written.
+      expect(
+        find.bySemanticsIdentifier(AutomationIds.keysGenerateConfirm),
+        findsNothing,
+      );
+      expect(generated, isFalse);
+    });
+
+    testWidgets('keeping the user abandons the generation', (tester) async {
+      var generated = false;
+      final container = await _pumpAccount(
+        tester,
+        reminderArmed: false,
+        backedUp: true,
+        fundsAtRisk: () async => risks,
+        onRegenerate: () async => generated = true,
+      );
+      await _seedPreviousUser(container);
+
+      await _tapGenerate(tester);
+      await tester.tap(
+        find.bySemanticsIdentifier(AutomationIds.keysFundsAtRiskKeep),
+      );
+      await tester.pumpAndSettle();
+
+      expect(generated, isFalse);
+      expect(
+        find.bySemanticsIdentifier(AutomationIds.keysGenerateConfirm),
+        findsNothing,
+      );
+      expect(container.read(notificationsProvider), hasLength(1));
+    });
+
+    testWidgets('continuing anyway goes on to the usual confirmation', (
+      tester,
+    ) async {
+      var generated = false;
+      await _pumpAccount(
+        tester,
+        reminderArmed: false,
+        backedUp: true,
+        fundsAtRisk: () async => risks,
+        onRegenerate: () async => generated = true,
+      );
+
+      await _tapGenerate(tester);
+      await tester.tap(
+        find.bySemanticsIdentifier(AutomationIds.keysFundsAtRiskContinue),
+      );
+      await tester.pumpAndSettle();
+      // Still one more explicit step before the identity is replaced.
+      expect(generated, isFalse);
+      await tester.tap(
+        find.bySemanticsIdentifier(AutomationIds.keysGenerateConfirm),
+      );
+      await tester.pumpAndSettle();
+
+      expect(generated, isTrue);
+      expect(find.text('home'), findsOneWidget);
+    });
+
+    testWidgets('import warns before the seed dialog opens', (tester) async {
+      await _pumpAccount(
+        tester,
+        reminderArmed: true,
+        backedUp: false,
+        fundsAtRisk: () async => risks,
+      );
+
+      await tester.tap(find.bySemanticsIdentifier(AutomationIds.keysImport));
+      await tester.pumpAndSettle();
+
+      expect(find.text(l10n.fundsAtRiskTitle), findsOneWidget);
+      expect(find.byType(TextField), findsNothing);
+
+      await tester.tap(
+        find.bySemanticsIdentifier(AutomationIds.keysFundsAtRiskContinue),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byType(TextField), findsOneWidget);
+    });
+
+    testWidgets('a check that fails does not lock the user out', (
+      tester,
+    ) async {
+      var generated = false;
+      await _pumpAccount(
+        tester,
+        reminderArmed: false,
+        backedUp: true,
+        fundsAtRisk: () async => throw StateError('db closed'),
+        onRegenerate: () async => generated = true,
+      );
+
+      await _generate(tester);
+
+      expect(find.text(l10n.fundsAtRiskTitle), findsNothing);
+      expect(generated, isTrue);
     });
   });
 

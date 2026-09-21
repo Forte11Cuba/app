@@ -70,6 +70,17 @@ Future<IdentityInfo?> getIdentity() =>
 Future<void> deleteIdentity() =>
     RustLib.instance.api.crateApiIdentityDeleteIdentity();
 
+/// What the current identity would lose if it were replaced now: locked
+/// escrow, locked or payable bonds, open payout claims, live trades — most
+/// serious first, empty when it is safe to go ahead (issue #533).
+///
+/// The Account screen calls this before generating a new user or importing a
+/// seed, and warns. It reads the local rows only: no relay round trip sits
+/// between the user and the dialog. With no database there is nothing to
+/// lose track of, so that reads as empty.
+Future<List<FundsAtRisk>> fundsAtRisk() =>
+    RustLib.instance.api.crateApiIdentityFundsAtRisk();
+
 /// Derive a new trade key, auto-incrementing the index.
 /// Returns the new key's info and updates the stored `trade_key_index`.
 Future<TradeKeyInfo> deriveTradeKey() =>

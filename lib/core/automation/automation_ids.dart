@@ -43,6 +43,10 @@ class AutomationIds {
   static const String keysGenerateConfirm = 'keys.generate.confirm';
   static const String keysGenerateCancel = 'keys.generate.cancel';
   static const String keysImport = 'keys.import';
+  // The warning shown before a generate or an import while the current
+  // identity still has escrow, bonds or trades in flight (issue #533).
+  static const String keysFundsAtRiskKeep = 'keys.funds_at_risk.keep';
+  static const String keysFundsAtRiskContinue = 'keys.funds_at_risk.continue';
 
   /// Readout: the identity's full public key, for a driver to prove the
   /// identity it onboarded is the one the app still holds.

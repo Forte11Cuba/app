@@ -1119,5 +1119,14 @@
   "paymentMethodAddCustom": "Ajouter une méthode personnalisée",
   "paymentMethodsDiscardTitle": "Abandonner les modifications ?",
   "paymentMethodsDiscardConfirm": "Abandonner",
-  "paymentMethodsKeepEditing": "Continuer à modifier"
+  "paymentMethodsKeepEditing": "Continuer à modifier",
+  "fundsAtRiskTitle": "Cet utilisateur a encore des sats en jeu",
+  "fundsAtRiskBody": "Si tu continues, les clés de cet utilisateur sont remplacées et rien de ce qui figure ici ne pourra être terminé ni récupéré depuis cet appareil. Ce n'est pas recommandé : tu peux perdre ces sats.",
+  "fundsAtRiskSellerEscrow": "Sats bloqués en séquestre pour une vente",
+  "fundsAtRiskBondLocked": "Caution bloquée",
+  "fundsAtRiskPayoutClaim": "Paiement de caution pas encore encaissé",
+  "fundsAtRiskTradeInProgress": "Échange en cours",
+  "fundsAtRiskBondInvoicePending": "Facture de caution encore payable",
+  "fundsAtRiskKeep": "Garder cet utilisateur",
+  "fundsAtRiskContinue": "Continuer quand même"
 }

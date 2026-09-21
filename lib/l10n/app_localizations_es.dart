@@ -3610,4 +3610,33 @@ class AppLocalizationsEs extends AppLocalizations {
 
   @override
   String get paymentMethodsKeepEditing => 'Seguir editando';
+
+  @override
+  String get fundsAtRiskTitle => 'Este usuario todavía tiene sats en juego';
+
+  @override
+  String get fundsAtRiskBody =>
+      'Si continúas, las llaves de este usuario se reemplazan y nada de lo que aparece aquí podrá terminarse ni recuperarse desde este dispositivo. No se recomienda: puedes perder estos sats.';
+
+  @override
+  String get fundsAtRiskSellerEscrow =>
+      'Sats retenidos en garantía por una venta';
+
+  @override
+  String get fundsAtRiskBondLocked => 'Fianza retenida';
+
+  @override
+  String get fundsAtRiskPayoutClaim => 'Pago de fianza aún sin cobrar';
+
+  @override
+  String get fundsAtRiskTradeInProgress => 'Operación en curso';
+
+  @override
+  String get fundsAtRiskBondInvoicePending => 'Factura de fianza aún pagable';
+
+  @override
+  String get fundsAtRiskKeep => 'Conservar este usuario';
+
+  @override
+  String get fundsAtRiskContinue => 'Continuar de todos modos';
 }

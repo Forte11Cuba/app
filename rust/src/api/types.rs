@@ -931,6 +931,34 @@ pub struct BondClaim {
     pub updated_at: i64,
 }
 
+/// Why replacing the identity now would cost the user something (issue
+/// #533). A marker, not prose: Dart localizes it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FundsAtRiskReason {
+    /// The user is the seller and the hold invoice is paid and held; only a
+    /// `release` signed with this trade's key moves those sats.
+    SellerEscrowLocked,
+    /// An anti-abuse bond is locked; it is given back when its trade ends.
+    BondLocked,
+    /// A slashed-bond payout the user won and has not been paid yet.
+    PayoutClaimOpen,
+    /// A live trade with none of the user's sats locked — a buyer mid-trade,
+    /// or either side before the escrow is funded.
+    TradeInProgress,
+    /// A bond invoice that can still be paid: nothing is locked yet.
+    BondInvoicePending,
+}
+
+/// One thing the current identity still has in flight, as listed by
+/// `funds_at_risk()` before a new user is generated or a seed imported.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FundsAtRisk {
+    pub order_id: String,
+    pub reason: FundsAtRiskReason,
+    /// The sats concerned, when known: the escrow, the bond or the payout.
+    pub amount_sats: Option<u64>,
+}
+
 impl BondClaim {
     /// The storage key: `<node_pubkey>:<order_id>`.
     pub fn storage_id(&self) -> String {

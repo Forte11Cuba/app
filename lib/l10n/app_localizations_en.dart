@@ -3581,4 +3581,32 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get paymentMethodsKeepEditing => 'Keep editing';
+
+  @override
+  String get fundsAtRiskTitle => 'This user still has sats in play';
+
+  @override
+  String get fundsAtRiskBody =>
+      'If you continue, this user\'s keys are replaced and nothing listed here can be finished or recovered from this device. This is not recommended: you can lose these sats.';
+
+  @override
+  String get fundsAtRiskSellerEscrow => 'Sats locked in escrow for a sale';
+
+  @override
+  String get fundsAtRiskBondLocked => 'Bond locked';
+
+  @override
+  String get fundsAtRiskPayoutClaim => 'Bond payout not collected yet';
+
+  @override
+  String get fundsAtRiskTradeInProgress => 'Trade in progress';
+
+  @override
+  String get fundsAtRiskBondInvoicePending => 'Bond invoice still payable';
+
+  @override
+  String get fundsAtRiskKeep => 'Keep this user';
+
+  @override
+  String get fundsAtRiskContinue => 'Continue anyway';
 }

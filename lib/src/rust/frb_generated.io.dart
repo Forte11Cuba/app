@@ -733,6 +733,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   FileType dco_decode_file_type(dynamic raw);
 
   @protected
+  FundsAtRisk dco_decode_funds_at_risk(dynamic raw);
+
+  @protected
+  FundsAtRiskReason dco_decode_funds_at_risk_reason(dynamic raw);
+
+  @protected
   int dco_decode_i_32(dynamic raw);
 
   @protected
@@ -761,6 +767,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<FiatOrderCount> dco_decode_list_fiat_order_count(dynamic raw);
+
+  @protected
+  List<FundsAtRisk> dco_decode_list_funds_at_risk(dynamic raw);
 
   @protected
   List<List<String>> dco_decode_list_list_String(dynamic raw);
@@ -1670,6 +1679,14 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   FileType sse_decode_file_type(SseDeserializer deserializer);
 
   @protected
+  FundsAtRisk sse_decode_funds_at_risk(SseDeserializer deserializer);
+
+  @protected
+  FundsAtRiskReason sse_decode_funds_at_risk_reason(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   int sse_decode_i_32(SseDeserializer deserializer);
 
   @protected
@@ -1702,6 +1719,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<FiatOrderCount> sse_decode_list_fiat_order_count(
     SseDeserializer deserializer,
   );
+
+  @protected
+  List<FundsAtRisk> sse_decode_list_funds_at_risk(SseDeserializer deserializer);
 
   @protected
   List<List<String>> sse_decode_list_list_String(SseDeserializer deserializer);
@@ -2828,6 +2848,15 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_file_type(FileType self, SseSerializer serializer);
 
   @protected
+  void sse_encode_funds_at_risk(FundsAtRisk self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_funds_at_risk_reason(
+    FundsAtRiskReason self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_i_32(int self, SseSerializer serializer);
 
   @protected
@@ -2872,6 +2901,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_list_fiat_order_count(
     List<FiatOrderCount> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_funds_at_risk(
+    List<FundsAtRisk> self,
     SseSerializer serializer,
   );
 
