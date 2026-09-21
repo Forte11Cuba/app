@@ -844,3 +844,24 @@ The seller pay-invoice flow uses two complementary providers from
   advancing past the pay-invoice screen; the NWC widget's local
   `onPaymentSuccess` callback only flips a spinner flag and does not
   navigate.
+
+`tradeStatusProvider` reads the order book first, and the book holds the
+order's public view. So the My Trades list and `TradeDetailScreen` show a
+trade through `shownTradeStatus`, where the trade row wins in two cases:
+
+- **The row has ended** (success or a cancelled family): whatever the book
+  says about the order afterwards is no longer this trade.
+- **A take, and the book says `pending`**: a public `pending` means nobody
+  holds the order, so it is never a take's status. That covers a take left
+  `Canceled` by builds that wrote the status before the daemon answered
+  (the daemon later put the order back in the book), and a take parked at
+  `WaitingTakerBond`, whose order is still `pending` in public.
+
+Every other live status wins over an open row.
+
+The take screen sends a user who already takes part in the order to the
+trade instead of offering to take it again (`tradeRoleLookupProvider`,
+`participatingRole`). A take whose row has ended does not count: once its
+order can be taken again, such a row can only be what a take that never
+went active left behind, and `take_order` replaces it with the new take's
+row. A maker's row always counts, and so does any row still open.

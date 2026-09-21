@@ -131,12 +131,61 @@ final tradeStatusLookupProvider =
       },
     );
 
-/// Reads the local user's role in a trade through the bridge; injectable so
-/// screens that must know whether they already participate can be tested
-/// without the Rust side.
-final tradeRoleLookupProvider = Provider<Future<TradeRole?> Function(String)>(
-  (ref) => (orderId) => orders_api.getTradeRole(orderId: orderId),
-);
+/// The local user's role in an order they still take part in
+/// ([participatingRole]), over the rows [tradeListReaderProvider] reads.
+/// Screens that must know whether they already participate override that
+/// reader, so this composition is what their tests exercise.
+///
+/// Null when the rows cannot be read at all, as the `get_trade_role` bridge
+/// call this replaced did with a database error: an unreadable store is no
+/// proof of participation, and the take screen calls this where a thrown
+/// future would strand it — unawaited in `initState`, and before the Take
+/// button leaves its idle state. A take the user does hold is still refused
+/// by the daemon, which the screen reports.
+final tradeRoleLookupProvider = Provider<Future<TradeRole?> Function(String)>((
+  ref,
+) {
+  final readTrades = ref.watch(tradeListReaderProvider);
+  return (orderId) async {
+    try {
+      return participatingRole(await readTrades(), orderId);
+    } catch (e, st) {
+      debugPrint('[tradeRoleLookup] reading the trades failed: $e\n$st');
+      return null;
+    }
+  };
+});
+
+/// The role of the user's trade on [orderId] among [trades], or null when
+/// they no longer take part in it: no row at all, or only a take that has
+/// ended ([isEndedTake]).
+///
+/// Every row for the order is read, not just one: a database from before
+/// takes replaced their order's earlier row can hold two, and a live one
+/// among them still makes the user a participant.
+TradeRole? participatingRole(Iterable<TradeInfo> trades, String orderId) {
+  for (final trade in trades) {
+    if (trade.order.id == orderId && !isEndedTake(trade)) return trade.role;
+  }
+  return null;
+}
+
+/// Whether [trade] is a take whose row has ended, which leaves the user
+/// nothing to follow on its order.
+///
+/// A trade that truly ended leaves its order in a status mostrod never takes
+/// it out of: a take needs `Pending`, and only a waiting state goes back to
+/// it. So once the order can be taken again, such a row is what a take that
+/// never went active left behind: older builds marked it `Canceled` as soon
+/// as its cancel went out. Holding on to it sent the user to that dead trade
+/// instead of letting them take the order again (#434). Rust already takes
+/// over such a row: the confirmed take replaces every earlier row of its
+/// order.
+///
+/// Never a maker's row: its order is theirs, and the take screen is not
+/// where they manage it.
+bool isEndedTake(TradeInfo trade) =>
+    !trade.order.isMine && isTerminalTradeStatus(trade.order.status);
 
 /// Takes an order through the bridge; injectable so the take screen's
 /// outcomes (loading, already taken, rejected) can be tested without Rust.
@@ -184,7 +233,7 @@ final tradeStatusProvider = StreamProvider.family
         ref,
         orderId,
         read: () => lookup(orderId),
-        isFinal: (status) => status != null && _isTerminal(status),
+        isFinal: (status) => status != null && isTerminalTradeStatus(status),
       ).where((status) => status != null).cast<OrderStatus>();
     });
 
@@ -205,8 +254,9 @@ final tradeUpdatesProvider = StreamProvider.autoDispose<TradeUpdate>((
   }
 });
 
-/// Whether the UI can stop polling. Escrow settlement still awaits payout.
-bool _isTerminal(OrderStatus s) => const {
+/// Whether a trade in [s] has ended: nothing moves it out again, so the UI
+/// can stop polling. Escrow settlement still awaits payout.
+bool isTerminalTradeStatus(OrderStatus s) => const {
   OrderStatus.success,
   OrderStatus.settledByAdmin,
   OrderStatus.completedByAdmin,
@@ -215,6 +265,33 @@ bool _isTerminal(OrderStatus s) => const {
   OrderStatus.cooperativelyCanceled,
   OrderStatus.canceledByAdmin,
 }.contains(s);
+
+/// The status a trade shows: its [row]'s persisted one, or the [live] one
+/// from [tradeStatusProvider], which reads the order book first.
+///
+/// The row wins in two cases:
+/// * **It has ended** ([isTerminalTradeStatus]). Whatever the book says about
+///   the order later is no longer this trade. The one way such a row can be
+///   wrong is the cancel's optimistic write on an active trade: a cooperative
+///   cancel the peer never accepts, on a trade that then completes.
+/// * **It is a take ([isTake]) and the book says `pending`.** A public
+///   `pending` means nobody holds the order, so it is never a take's status.
+///   Older builds marked a take `Canceled` as soon as its cancel went out,
+///   even before it went active; once the daemon put the order back in the
+///   book, that `pending` read as the user's own order, with a Cancel the
+///   daemon refuses (`IsNotYourOrder`). A take parked at `WaitingTakerBond`
+///   is another: publicly its order is still `pending`.
+///
+/// Otherwise the live status, or the row's while there is none yet.
+OrderStatus shownTradeStatus({
+  required OrderStatus row,
+  required OrderStatus? live,
+  required bool isTake,
+}) {
+  if (live == null || isTerminalTradeStatus(row)) return row;
+  if (isTake && live == OrderStatus.pending) return row;
+  return live;
+}
 
 /// Loads the buyer/seller role for a trade from the persistent DB.
 ///
