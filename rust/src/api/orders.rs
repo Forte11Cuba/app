@@ -519,6 +519,36 @@ impl OrderBook {
         self.delta_tx.subscribe()
     }
 
+    /// Set `is_mine = true` on an existing cached order and notify listeners,
+    /// atomically — read-modify-write under one write lock, like
+    /// [`Self::update_order_status`], so a concurrent ingest's newer entry is
+    /// never overwritten by a stale clone (#552 review).
+    ///
+    /// No-op when the order is absent or already marked: never inserts — the
+    /// public book is fed only by the daemon's Kind 38383 events (see
+    /// `create_order`), and an entry the wire has not produced yet needs no
+    /// correction; when it arrives, the ingest restore finds binding and row
+    /// and raises the flag itself. The snapshot goes out at once, ahead of
+    /// any batched refetch emission in flight, but a refetch ingests with
+    /// binding and row long since present, so only the live create race ever
+    /// reaches here with an entry to fix. No `touch_trade`: the row's own
+    /// write rings it (`persist_trade_row`), and Home reads this snapshot.
+    pub(crate) async fn mark_mine(&self, order_id: &str) {
+        let snapshot = {
+            let mut book = self.orders.write().await;
+            let Some(mut order) = book.orders.get(order_id).cloned() else {
+                return;
+            };
+            if order.is_mine {
+                return;
+            }
+            order.is_mine = true;
+            book.upsert(order, &self.delta_tx);
+            book.snapshot()
+        };
+        let _ = self.tx.send(snapshot);
+    }
+
     /// Update the status of an existing cached order and notify listeners.
     ///
     /// No-op when the order is not in the cache (e.g. already removed).
@@ -5799,25 +5829,6 @@ async fn wipe_trade_row(
     Ok(())
 }
 
-/// Set `is_mine = true` on the order's existing book entry (#552).
-///
-/// Never inserts: the public book is fed only by the daemon's Kind 38383
-/// events (see `create_order`), and an entry the wire has not produced yet
-/// needs no correction — when it arrives, the ingest restore finds binding
-/// and row and raises the flag itself. The `upsert_order` publishes a
-/// snapshot at once, ahead of any batched refetch emission in flight, but a
-/// refetch ingests with binding and row long since present, so only the live
-/// create race ever reaches here with an entry to fix.
-async fn remark_book_entry_mine(order_id: &str) {
-    let book = order_book();
-    if let Some(mut entry) = book.get_order(order_id).await {
-        if !entry.is_mine {
-            entry.is_mine = true;
-            book.upsert_order(entry).await;
-        }
-    }
-}
-
 /// The one way to (re)create a trade row: lifts any wipe tombstone left on the
 /// order id — a canceled order can be legitimately re-taken — before saving.
 /// A direct `save_trade` for a *new* row would leave a stale tombstone
@@ -5845,7 +5856,7 @@ async fn persist_trade_row(db: &impl Storage, trade: &crate::api::types::TradeIn
     // touch below: the ingest restore reads this row, so a failed save is
     // exactly when the in-memory correction is the only one left.
     if trade.order.is_mine {
-        remark_book_entry_mine(&trade.order.id).await;
+        order_book().mark_mine(&trade.order.id).await;
     }
     crate::api::trade_touch::touch_trade(&trade.order.id);
     crate::api::push::request_reconcile();
@@ -7778,7 +7789,7 @@ async fn recheck_ingested_ownership(order_id: &str) {
         return;
     };
     if trade.order.is_mine {
-        remark_book_entry_mine(order_id).await;
+        order_book().mark_mine(order_id).await;
     }
 }
 
