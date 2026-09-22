@@ -282,6 +282,16 @@ pub fn trade_order_filter(mostro_pubkey: &PublicKey, order_id: &str) -> Filter {
         .custom_tag(SingleLetterTag::LOWERCASE_D, order_id)
 }
 
+/// [`trade_order_filter`] for several orders at once: one REQ follows every
+/// order we created or took. Relays cap concurrent REQs per connection
+/// (nos.lol: "too many concurrent REQs"), and one per order filled the cap.
+pub fn watched_orders_filter(mostro_pubkey: &PublicKey, order_ids: &[String]) -> Filter {
+    Filter::new()
+        .kind(Kind::from(KIND_ORDER))
+        .author(*mostro_pubkey)
+        .custom_tags(SingleLetterTag::LOWERCASE_D, order_ids.iter().cloned())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -620,6 +630,33 @@ mod tests {
             .get(&SingleLetterTag::LOWERCASE_D)
             .expect("filter must carry a `d` tag");
         assert_eq!(d_values.iter().cloned().collect::<Vec<_>>(), vec!["order-1".to_string()]);
+    }
+
+    /// One REQ follows every order we created or took — a REQ per order
+    /// filled nos.lol's per-connection cap — and, like the single-order
+    /// filter, it is unwindowed so each order's latest revision is replayed.
+    #[test]
+    fn watched_orders_filter_follows_every_order_unwindowed() {
+        // Arrange
+        let mostro = Keys::generate().public_key();
+        let ids = ["order-1".to_string(), "order-2".to_string()];
+
+        // Act
+        let filter = watched_orders_filter(&mostro, &ids);
+
+        // Assert
+        assert_eq!(filter.kinds, Some([Kind::from(KIND_ORDER)].into_iter().collect()));
+        assert_eq!(filter.authors, Some([mostro].into_iter().collect()));
+        assert_eq!(filter.since, None);
+        assert_eq!(filter.limit, None);
+        let d_values = filter
+            .generic_tags
+            .get(&SingleLetterTag::LOWERCASE_D)
+            .expect("filter must carry a `d` tag");
+        assert_eq!(
+            d_values.iter().cloned().collect::<Vec<_>>(),
+            vec!["order-1".to_string(), "order-2".to_string()]
+        );
     }
 
     #[test]
