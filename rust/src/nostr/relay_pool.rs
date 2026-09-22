@@ -373,14 +373,14 @@ impl RelayPool {
         });
     }
 
-    /// Ask a quiet `Connected` relay whether it is still there, and say so in
-    /// the log when it is not.
+    /// Ask a quiet `Connected` relay whether it is still there, and bounce
+    /// its connection when it does not answer.
     ///
-    /// Detection only: acting on the answer is deliberately separate, so this
-    /// can be read — and shipped — as "make the failure visible" before it is
-    /// "recover from it". Today a socket that answers the protocol while
-    /// delivering nothing leaves no trace at all: measured, the app went deaf
-    /// for six minutes without logging a line.
+    /// The reconnect is the point: it produces the `→Connected` transition
+    /// `live_subs` already repairs on, and that repair re-REQs — which is
+    /// what replays what was missed. Measured, without it the client stayed
+    /// deaf for six minutes without logging a line, and the five events it
+    /// missed were never requested again.
     fn spawn_probe_monitor(self: &Arc<Self>) {
         let client = self.client.clone();
         let relays = self.relays.clone();
@@ -409,21 +409,18 @@ impl RelayPool {
                     // never answers must not be re-asked on the next tick.
                     liveness.write().await.record_probe(&url, now);
 
-                    let answered = sdk_relay
-                        .fetch_events(relay_probe::probe_filter())
-                        .timeout(relay_probe::PROBE_TIMEOUT)
-                        .await
-                        .is_ok();
-                    if !answered {
-                        crate::api::logging::blog_warn(
-                            "relay",
-                            format!(
-                                "liveness probe unanswered relay={} — Connected but not \
-                                 delivering; subscriptions on it are dead (#291)",
-                                crate::api::logging::display_relay(&url)
-                            ),
-                        );
+                    if relay_probe::probe_once(&sdk_relay).await {
+                        continue;
                     }
+                    crate::api::logging::blog_warn(
+                        "relay",
+                        format!(
+                            "liveness probe unanswered relay={} — Connected but not \
+                             delivering; reconnecting it (#291)",
+                            crate::api::logging::display_relay(&url)
+                        ),
+                    );
+                    relay_probe::force_reconnect(&client, &url).await;
                 }
             }
         });

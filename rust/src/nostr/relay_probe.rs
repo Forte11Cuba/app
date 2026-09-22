@@ -26,7 +26,7 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
-use nostr_sdk::prelude::{EventId, Filter, RelayStatus};
+use nostr_sdk::prelude::{Client, EventId, Filter, Relay, RelayStatus};
 
 /// How long a relay may stay quiet before it is asked whether it is alive.
 pub(crate) const PROBE_INTERVAL: Duration = Duration::from_secs(120);
@@ -39,6 +39,18 @@ pub(crate) const PROBE_TIMEOUT: Duration = Duration::from_secs(15);
 /// Traffic newer than this makes a probe pointless: something arrived, so the
 /// socket delivers.
 pub(crate) const FRESH_TRAFFIC_WINDOW: Duration = Duration::from_secs(120);
+
+/// How long [`force_reconnect`] leaves between dropping a socket and asking
+/// for it back.
+///
+/// It cannot be keyed on the status: `disconnect_relay` reports `Terminated`
+/// immediately while the teardown is still in flight, so waiting for the
+/// status to move returns at once and achieves nothing. Measured against a
+/// MockRelay — reconnecting with no grace leaves the relay stuck in
+/// `Disconnected`/`Connecting` past five seconds; 250 ms of grace has it
+/// `Connected` again. (#324 carried a 200 ms sleep here for the same reason,
+/// undocumented.)
+const RECONNECT_GRACE: Duration = Duration::from_millis(250);
 
 /// The probe's filter: one event id of 32 zero bytes, which nothing can match,
 /// so a healthy relay answers EOSE with no events at all.
@@ -120,11 +132,205 @@ fn within(stamp: Option<i64>, now: i64, window: Duration) -> bool {
     stamp.is_some_and(|at| now.saturating_sub(at) < window.as_secs() as i64)
 }
 
+/// Ask `relay` whether it is still delivering, and wait [`PROBE_TIMEOUT`]
+/// for the answer. `true` means it answered.
+///
+/// A one-shot fetch, not a long-lived subscription: it opens its own REQ,
+/// exits on EOSE and is gone, so it stays out of [`crate::nostr::live_subs`]
+/// and costs a relay's per-connection cap only for as long as it runs.
+pub(crate) async fn probe_once(relay: &Relay) -> bool {
+    probe_within(relay, PROBE_TIMEOUT).await
+}
+
+/// [`probe_once`] with the deadline spelled out, so a test can use one short
+/// enough to wait for.
+///
+/// The deadline is **ours**, not `FetchEvents::timeout`: measured, the SDK's
+/// own timeout is not a failure but the end of collection, so a fetch against
+/// a relay that answered nothing at all still returns `Ok` with an empty set.
+/// Reading that as "the relay answered" would have made the probe incapable
+/// of ever detecting the thing it exists to detect.
+async fn probe_within(relay: &Relay, limit: Duration) -> bool {
+    crate::rt::time::timeout(
+        limit,
+        std::future::IntoFuture::into_future(relay.fetch_events(probe_filter())),
+    )
+    .await
+    .is_ok()
+}
+
+/// Bounce `url`'s connection so the reconnect re-issues its subscriptions.
+///
+/// The recovery is deliberately indirect: dropping and restoring the socket
+/// is what produces the `→Connected` transition that `live_subs::repair_relay`
+/// already listens for, and that repair is what re-REQs — which is what
+/// actually replays the backlog. Merely noticing would leave the client where
+/// the measurement found it: deaf, with the missed events never asked for
+/// again. It is the one part of #324 that was right.
+pub(crate) async fn force_reconnect(client: &Client, url: &str) {
+    if let Err(e) = client.disconnect_relay(url).await {
+        crate::api::logging::blog_warn(
+            "relay",
+            format!(
+                "liveness probe: disconnect of {} failed: {}",
+                crate::api::logging::display_relay(url),
+                crate::api::logging::sanitize_relay_text(&e.to_string()),
+            ),
+        );
+    }
+    crate::rt::time::sleep(RECONNECT_GRACE).await;
+    if let Err(e) = client.connect_relay(url).await {
+        crate::api::logging::blog_warn(
+            "relay",
+            format!(
+                "liveness probe: reconnect of {} not started: {}",
+                crate::api::logging::display_relay(url),
+                crate::api::logging::sanitize_relay_text(&e.to_string()),
+            ),
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use nostr_sdk::prelude::MockRelay;
 
     const NOW: i64 = 1_800_000_000;
+
+    /// The property #324 could not hold: a healthy relay must never be
+    /// reconnected, however quiet it is. Asking a real relay is what makes
+    /// that safe — it answers whether or not it has anything to send.
+    #[tokio::test]
+    async fn a_healthy_relay_answers_the_probe() {
+        // Arrange: a relay with no traffic at all, which under a silence
+        // timer is exactly the false positive that sank the previous attempt.
+        let relay = MockRelay::run().await.expect("mock relay");
+        let url = relay.url().await;
+        let client = Client::new();
+        client.add_relay(&url).await.expect("add relay");
+        client
+            .try_connect_relay(&url, Duration::from_secs(5))
+            .await
+            .expect("connect");
+        let sdk_relay = client
+            .relay(&url)
+            .await
+            .expect("relay")
+            .expect("known relay");
+
+        // Act
+        let answered = probe_once(&sdk_relay).await;
+
+        // Assert
+        assert!(answered, "a silent but healthy relay still answers EOSE");
+    }
+
+    /// The probe must not leave its REQ behind: it is a one-shot fetch, and a
+    /// subscription that outlived it would consume the per-connection cap the
+    /// app already fights over (`req_census`).
+    #[tokio::test]
+    async fn the_probe_leaves_no_subscription_behind() {
+        // Arrange
+        let relay = MockRelay::run().await.expect("mock relay");
+        let url = relay.url().await;
+        let client = Client::new();
+        client.add_relay(&url).await.expect("add relay");
+        client
+            .try_connect_relay(&url, Duration::from_secs(5))
+            .await
+            .expect("connect");
+        let sdk_relay = client
+            .relay(&url)
+            .await
+            .expect("relay")
+            .expect("known relay");
+
+        // Act
+        assert!(probe_once(&sdk_relay).await);
+
+        // Assert
+        assert!(
+            sdk_relay.subscriptions().await.is_empty(),
+            "the probe's REQ must be closed by the time it returns"
+        );
+    }
+
+    /// The detection path, which nothing covered until a measurement showed
+    /// the first implementation could not detect anything: a relay that
+    /// answers nothing must read as unanswered.
+    #[tokio::test]
+    async fn a_relay_that_answers_nothing_fails_the_probe() {
+        // Arrange: connect, then drop the socket so nothing can reply.
+        let relay = MockRelay::run().await.expect("mock relay");
+        let url = relay.url().await;
+        let client = Client::new();
+        client.add_relay(&url).await.expect("add relay");
+        client
+            .try_connect_relay(&url, Duration::from_secs(5))
+            .await
+            .expect("connect");
+        let sdk_relay = client
+            .relay(&url)
+            .await
+            .expect("relay")
+            .expect("known relay");
+        client.disconnect_relay(&url).await.expect("disconnect");
+        tokio::time::sleep(Duration::from_millis(300)).await;
+
+        // Act
+        let answered = probe_within(&sdk_relay, Duration::from_millis(800)).await;
+
+        // Assert
+        assert!(
+            !answered,
+            "an unanswered probe must not read as a healthy relay"
+        );
+    }
+
+    /// The recovery itself: the connection is dropped and restored, which is
+    /// the transition `live_subs::repair_relay` re-issues subscriptions on.
+    #[tokio::test]
+    async fn forcing_a_reconnect_brings_the_relay_back_connected() {
+        // Arrange
+        let relay = MockRelay::run().await.expect("mock relay");
+        let url = relay.url().await;
+        let client = Client::new();
+        client.add_relay(&url).await.expect("add relay");
+        client
+            .try_connect_relay(&url, Duration::from_secs(5))
+            .await
+            .expect("connect");
+        let sdk_relay = client
+            .relay(&url)
+            .await
+            .expect("relay")
+            .expect("known relay");
+        assert_eq!(sdk_relay.status(), RelayStatus::Connected);
+
+        // Act
+        force_reconnect(&client, url.as_str()).await;
+
+        // Assert: `connect_relay` only starts the attempt, so the transition
+        // the repair listens for lands shortly after, not inline.
+        assert!(
+            settles_connected(&sdk_relay, Duration::from_secs(5)).await,
+            "the bounce must end with the relay connected again, got {:?}",
+            sdk_relay.status()
+        );
+    }
+
+    /// Wait up to `limit` for the relay to report `Connected`.
+    async fn settles_connected(relay: &Relay, limit: Duration) -> bool {
+        let deadline = tokio::time::Instant::now() + limit;
+        while tokio::time::Instant::now() < deadline {
+            if relay.status() == RelayStatus::Connected {
+                return true;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        false
+    }
 
     #[test]
     fn a_quiet_connected_relay_is_asked() {
