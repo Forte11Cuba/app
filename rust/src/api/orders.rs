@@ -397,6 +397,35 @@ impl OrderBook {
         let _ = self.tx.send(Vec::new());
     }
 
+    /// Hand every entry back to its public view, for an identity that is
+    /// going (issue #533).
+    ///
+    /// The book is public and the same for any identity: only the `is_mine`
+    /// marks and the local trade statuses the old user's trades wrote on it
+    /// were theirs. An entry takes its noted wire view when there is one,
+    /// keeps itself when its status is one the wire publishes, and is
+    /// dropped otherwise — a private phase with nothing public to fall back
+    /// to, or a maker's order parked on its bond, which only its maker ever
+    /// saw (docs/ANTI_ABUSE_BOND.md §2.8). Whatever is public about a dropped
+    /// entry comes back with its next Kind 38383 event.
+    ///
+    /// No network: re-fetching the book instead waits for EOSE from every
+    /// relay, and one slow relay held a new user's generation for 20 s.
+    pub(crate) async fn forget_ownership(&self) {
+        let notes = std::mem::take(&mut *self.wire_notes());
+        let snapshot = {
+            let mut book = self.orders.write().await;
+            let orders = book
+                .orders
+                .values()
+                .filter_map(|entry| public_view(entry, notes.get(&entry.id)))
+                .collect();
+            book.replace_all(orders, &self.delta_tx);
+            book.snapshot()
+        };
+        let _ = self.tx.send(snapshot);
+    }
+
     /// Insert or update a single order and notify listeners.
     pub async fn upsert_order(&self, order: OrderInfo) {
         let snapshot = {
@@ -832,6 +861,29 @@ fn forget_processed_daemon_messages() {
             guard.clear();
         }
     }
+}
+
+/// What a book entry is to somebody who holds none of its trades: its
+/// noted wire view, or itself when its status is one the wire publishes —
+/// never marked as theirs. See [`OrderBook::forget_ownership`].
+fn public_view(entry: &OrderInfo, noted: Option<&OrderInfo>) -> Option<OrderInfo> {
+    use crate::api::types::OrderStatus;
+    let mut order = match noted {
+        Some(wire) => wire.clone(),
+        None if matches!(entry.status, OrderStatus::Pending | OrderStatus::InProgress)
+            || crate::mostro::status::is_hard_terminal(&entry.status) =>
+        {
+            entry.clone()
+        }
+        None => return None,
+    };
+    order.is_mine = false;
+    Some(order)
+}
+
+/// Forget which orders of the book were the old identity's (issue #533).
+pub(crate) async fn forget_book_ownership() {
+    order_book().forget_ownership().await;
 }
 
 static ORDER_BOOK: OnceCell<OrderBook> = OnceCell::const_new();
@@ -13932,6 +13984,75 @@ mod tests {
     }
 
     // ── Helper ────────────────────────────────────────────────────────────────
+
+    /// Every entry of the book the next identity inherits, by id — not
+    /// `get_orders`, which lists `pending` ones only.
+    async fn book_by_id(book: &OrderBook) -> HashMap<String, crate::api::types::OrderInfo> {
+        book.orders.read().await.orders.clone()
+    }
+
+    #[tokio::test]
+    async fn forgetting_ownership_keeps_the_public_book_and_drops_the_marks() {
+        // Arrange: one order of the old user's, one of somebody else's.
+        use crate::api::types::OrderStatus;
+        let book = OrderBook::new();
+        let mut mine = dummy_order_info("mine");
+        mine.is_mine = true;
+        book.upsert_order(mine).await;
+        book.upsert_order(dummy_order_info("theirs")).await;
+        let mut deltas = book.subscribe_deltas();
+
+        // Act
+        book.forget_ownership().await;
+
+        // Assert
+        let after = book_by_id(&book).await;
+        assert_eq!(after.len(), 2, "the public book is the same for any identity");
+        assert!(after.values().all(|o| !o.is_mine));
+        assert_eq!(after["mine"].status, OrderStatus::Pending);
+        assert!(matches!(deltas.try_recv(), Ok(OrderBookDelta::Reset)));
+    }
+
+    #[tokio::test]
+    async fn forgetting_ownership_hands_a_local_status_back_to_the_wire() {
+        // Arrange: the old user's take carries its private `active`; the wire
+        // last said `in-progress`.
+        use crate::api::types::OrderStatus;
+        let book = OrderBook::new();
+        let mut public = dummy_order_info("taken");
+        public.status = OrderStatus::InProgress;
+        book.note_wire_order(&public);
+        let mut local = public.clone();
+        local.status = OrderStatus::Active;
+        book.upsert_order(local).await;
+
+        // Act
+        book.forget_ownership().await;
+
+        // Assert
+        assert_eq!(book_by_id(&book).await["taken"].status, OrderStatus::InProgress);
+        assert!(!book.has_wire_note("taken"), "the note belonged to the old trade");
+    }
+
+    #[tokio::test]
+    async fn forgetting_ownership_drops_what_only_the_old_user_could_see() {
+        // A maker's order parked on its bond is never published (§2.8), and
+        // a private phase with no public view noted has nothing to fall back
+        // to: the next Kind 38383 event re-adds whatever is public.
+        use crate::api::types::OrderStatus;
+        let book = OrderBook::new();
+        let mut parked = dummy_order_info("parked");
+        parked.status = OrderStatus::WaitingMakerBond;
+        parked.is_mine = true;
+        book.upsert_order(parked).await;
+        let mut active = dummy_order_info("active");
+        active.status = OrderStatus::FiatSent;
+        book.upsert_order(active).await;
+
+        book.forget_ownership().await;
+
+        assert!(book_by_id(&book).await.is_empty());
+    }
 
     fn dummy_order_info(id: &str) -> crate::api::types::OrderInfo {
         crate::api::types::OrderInfo {

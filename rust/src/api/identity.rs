@@ -418,9 +418,11 @@ async fn forget_identity_state() {
     crate::mostro::session::session_manager().clear().await;
     crate::mostro::bond_claims::set_claim_nodes(std::iter::empty());
     crate::mostro::bond_claims::clear_retained();
-    // Clears the cached book — whose own-order marks were the old identity's
-    // — and replays it from the node, now with no trade key to claim any.
-    crate::api::orders::refresh_subscriptions_for_active_node().await;
+    // The book's own-order marks and local trade statuses were the old
+    // identity's. Handed back to the public view in memory: re-fetching the
+    // book from the relays waits for EOSE from every one of them, and a
+    // single slow relay held a new user's generation for 20 s.
+    crate::api::orders::forget_book_ownership().await;
 }
 
 /// Derive a new trade key, auto-incrementing the index.
@@ -771,6 +773,22 @@ pub(crate) async fn get_transport_identity_keys(trade_keys: &Keys) -> Result<Key
 
 #[cfg(test)]
 mod tests {
+    /// The book is public and the same for any identity; only its `is_mine`
+    /// marks were the old user's. Re-fetching it from the relays instead
+    /// waits for EOSE from every relay, twice: a single slow one held the
+    /// generation of a new user for 20 s.
+    #[test]
+    fn forgetting_the_identity_never_waits_on_the_relays_for_the_book() {
+        let source = include_str!("identity.rs");
+        let start = source
+            .find("async fn forget_identity_state()")
+            .expect("the identity reset exists");
+        let body = &source[start..start + source[start..].find("\n}\n").expect("it ends")];
+
+        assert!(body.contains("forget_book_ownership()"));
+        assert!(!body.contains("refresh_subscriptions_for_active_node"));
+    }
+
     use super::*;
 
     /// A throwaway SQLite store, named per test so parallel runs never collide.
