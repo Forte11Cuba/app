@@ -9023,6 +9023,13 @@ pub async fn restore_session() -> Result<mostro_core::message::RestoreSessionInf
             reply: DaemonReply::Restored(info),
             ..
         })) => {
+            // The restore sheet's next stage needs only the answer: reported
+            // before the LastTradeIndex round trip below, which can take its
+            // own timeout.
+            crate::api::restore_progress::emit(crate::api::restore_progress::found(
+                &info,
+                restored_rows_to_fetch(&info).len(),
+            ));
             // #217: raise trade_key_index before returning, so the next
             // derive_trade_key() can't reuse a key a recovered trade already
             // owns. Monotonic and idempotent. A persist failure fails the
@@ -9048,10 +9055,6 @@ pub async fn restore_session() -> Result<mostro_core::message::RestoreSessionInf
                     None
                 }
             };
-            crate::api::restore_progress::emit(crate::api::restore_progress::found(
-                &info,
-                restored_rows_to_fetch(&info).len(),
-            ));
             // Before the snapshot: its first pass gives these rows their peer.
             persist_restored_trade_rows(&info, &sender_keys).await;
             if let Some(floor) = resync_floor(daemon_counter, &info) {
@@ -10372,6 +10375,13 @@ mod tests {
             .expect("loads the details");
         assert!(published < connected, "Connected only once a relay took the request");
         assert!(found < rows, "the total is known before the first order loads");
+        let counter = session
+            .find("last_trade_index(&sender_keys)")
+            .expect("asks for the trade-key counter");
+        assert!(
+            found < counter,
+            "the answer is reported before the unrelated LastTradeIndex round trip"
+        );
 
         assert!(
             fn_body("async fn persist_restored_trade_rows(").contains("RestoreProgress::Loaded"),

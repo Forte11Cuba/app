@@ -130,6 +130,22 @@ void main() {
     );
   });
 
+  testWidgets('the counter reads as a count of orders, not as 2/3', (
+    tester,
+  ) async {
+    final semantics = tester.ensureSemantics();
+    await open(tester);
+    await send(tester, const [
+      RestoreProgress.connected(),
+      RestoreProgress.found(found: 3, toLoad: 3),
+      RestoreProgress.loaded(done: 2, toLoad: 3),
+    ]);
+
+    expect(find.bySemanticsLabel('2 de 3 órdenes'), findsOneWidget);
+    expect(find.bySemanticsLabel('2/3'), findsNothing);
+    semantics.dispose();
+  });
+
   testWidgets('a tap outside does not close it; Cancelar does', (
     tester,
   ) async {

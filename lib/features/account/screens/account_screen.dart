@@ -478,6 +478,18 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
     await _openRestoreSheet();
   }
 
+  /// Whether `Actualizar` should run the restore after the book refreshed:
+  /// not in privacy mode, and not when that cannot be told — a failed check
+  /// must not turn the refresh that already succeeded into a failure.
+  Future<bool> _refreshRestores() async {
+    try {
+      return !await _privacyMode();
+    } catch (e) {
+      debugPrint('[account] privacy mode unavailable: $e');
+      return false;
+    }
+  }
+
   Future<bool> _privacyMode() =>
       widget.debugPrivacyMode?.call() ?? reputation_api.getPrivacyMode();
 
@@ -530,7 +542,7 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
                     // failed restore (20c) sends the user here to retry: the
                     // same restore sheet, unless privacy mode has no account
                     // on the node to restore.
-                    if (!await _privacyMode() && mounted) {
+                    if (await _refreshRestores() && mounted) {
                       await _openRestoreSheet();
                       return;
                     }

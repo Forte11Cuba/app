@@ -3663,7 +3663,13 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String restoreSheetLoading(int done, int total) {
-    return '$done commandes récupérées sur $total';
+    String _temp0 = intl.Intl.pluralLogic(
+      done,
+      locale: localeName,
+      other: '$done commandes récupérées sur $total',
+      one: '$done commande récupérée sur $total',
+    );
+    return '$_temp0';
   }
 
   @override
@@ -3681,7 +3687,7 @@ class AppLocalizationsFr extends AppLocalizations {
       count,
       locale: localeName,
       other: '$count commandes trouvées',
-      one: '1 commande trouvée',
+      one: '$count commande trouvée',
     );
     return '$_temp0';
   }
@@ -3694,7 +3700,13 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String restoreLoadingCountSemantics(int done, int total) {
-    return '$done commandes sur $total';
+    String _temp0 = intl.Intl.pluralLogic(
+      done,
+      locale: localeName,
+      other: '$done commandes sur $total',
+      one: '$done commande sur $total',
+    );
+    return '$_temp0';
   }
 
   @override
@@ -3735,13 +3747,19 @@ class AppLocalizationsFr extends AppLocalizations {
       count,
       locale: localeName,
       other: 'Vous avez $count commandes actives qui attendent votre action',
-      one: 'Vous avez 1 commande active qui attend votre action',
+      one: 'Vous avez $count commande active qui attend votre action',
     );
     return '$_temp0';
   }
 
   @override
   String restorePartialNotice(int missing, int total) {
-    return '$missing commandes sur $total n\'ont pas pu être chargées';
+    String _temp0 = intl.Intl.pluralLogic(
+      missing,
+      locale: localeName,
+      other: '$missing commandes sur $total n\'ont pas pu être chargées',
+      one: '$missing commande sur $total n\'a pas pu être chargée',
+    );
+    return '$_temp0';
   }
 }

@@ -1131,14 +1131,14 @@
   "fundsAtRiskContinue": "Continuer quand même",
   "restoreSheetTitle": "Restauration de votre compte",
   "restoreSheetWaiting": "Cela peut prendre quelques secondes",
-  "restoreSheetLoading": "{done} commandes récupérées sur {total}",
+  "restoreSheetLoading": "{done, plural, one{{done} commande récupérée sur {total}} other{{done} commandes récupérées sur {total}}}",
   "restoreStageConnecting": "Connexion au nœud Mostro",
   "restoreStageConnected": "Connecté au nœud Mostro",
   "restoreStageRequesting": "Demande de vos commandes",
-  "restoreStageFound": "{count, plural, =1{1 commande trouvée} other{{count} commandes trouvées}}",
+  "restoreStageFound": "{count, plural, one{{count} commande trouvée} other{{count} commandes trouvées}}",
   "restoreStageLoading": "Chargement des détails",
   "restoreStageNoResponse": "Pas de réponse",
-  "restoreLoadingCountSemantics": "{done} commandes sur {total}",
+  "restoreLoadingCountSemantics": "{done, plural, one{{done} commande sur {total}} other{{done} commandes sur {total}}}",
   "restoreFailedTitle": "Nous n'avons pas pu restaurer vos commandes",
   "restoreFailedSubtitle": "Votre compte a bien été importé",
   "restoreFailedBody": "Vérifiez votre connexion et réessayez. Vous pouvez réessayer quand vous voulez depuis {place}.",
@@ -1148,6 +1148,6 @@
   "restoreDoneEmptySubtitle": "Ce compte n'avait aucune commande sur le nœud",
   "restoreSummaryOrders": "Commandes",
   "restoreSummaryInProgress": "En cours",
-  "restoreActionNotice": "{count, plural, =1{Vous avez 1 commande active qui attend votre action} other{Vous avez {count} commandes actives qui attendent votre action}}",
-  "restorePartialNotice": "{missing} commandes sur {total} n'ont pas pu être chargées"
+  "restoreActionNotice": "{count, plural, one{Vous avez {count} commande active qui attend votre action} other{Vous avez {count} commandes actives qui attendent votre action}}",
+  "restorePartialNotice": "{missing, plural, one{{missing} commande sur {total} n'a pas pu être chargée} other{{missing} commandes sur {total} n'ont pas pu être chargées}}"
 }

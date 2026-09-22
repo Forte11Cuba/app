@@ -45,6 +45,7 @@ Future<ProviderContainer> _pumpAccount(
   Future<RecoveryOutcome> Function(ProviderContainer container)? onRecover,
   Future<List<FundsAtRisk>> Function()? fundsAtRisk,
   bool privacyMode = false,
+  Object? privacyError,
 }) async {
   tester.view.physicalSize = const Size(360, 760);
   tester.view.devicePixelRatio = 1.0;
@@ -92,7 +93,10 @@ Future<ProviderContainer> _pumpAccount(
                   () async =>
                       await onRecover?.call(container) ??
                       const RecoveryOutcome.skipped(),
-              debugPrivacyMode: () async => privacyMode,
+              debugPrivacyMode: () async {
+                if (privacyError != null) throw privacyError;
+                return privacyMode;
+              },
               debugRestartOrders: () async {},
               // The restore sheet runs the same recovery: its count on
               // success, an error when it failed.
@@ -290,6 +294,28 @@ void main() {
       expect(recoveries, 0);
       expect(find.text(l10n.restoreSheetTitle), findsNothing);
       expect(find.text('home'), findsOneWidget);
+    });
+
+    testWidgets('a privacy check that fails does not undo a refresh', (
+      tester,
+    ) async {
+      await _pumpAccount(
+        tester,
+        reminderArmed: false,
+        backedUp: true,
+        privacyError: StateError('bridge busy'),
+      );
+
+      final refresh = find.byIcon(Icons.refresh_rounded);
+      await tester.ensureVisible(refresh);
+      await tester.pumpAndSettle();
+      await tester.tap(refresh);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(l10n.refreshButtonLabel).last);
+      await tester.pumpAndSettle();
+
+      expect(find.text(l10n.orderBookRefreshedMessage), findsOneWidget);
+      expect(find.text(l10n.refreshFailedMessage), findsNothing);
     });
 
     testWidgets('Actualizar runs the same restore', (tester) async {
