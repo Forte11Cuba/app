@@ -24,13 +24,14 @@ a stale replay:
 - **create**: reconciled — the daemon UUID is bound to the attempt's trade
   index, and the maker row is persisted from the echoed order itself (#394;
   the payload is the published order, min/max included).
-- **take**: the nonce-correlated late reply itself is consumed by the waiter
-  interception and dropped whole — it never reaches the per-action arms. The
-  row it failed to establish is rebuilt by the NEXT daemon message carrying an
-  order, or by the next start's replay, where no in-memory record remains to
-  intercept (#394: role from the payload's trade pubkeys, or
-  AddInvoice ⇒ buyer / PayInvoice ⇒ seller where mostrod omits them; never
-  guessed).
+- **take**: reconciled — the nonce-correlated late reply is consumed as the
+  take's (so a stale replay still touches nothing) and then falls through to
+  the normal dispatch, which rebuilds the row from the message itself and
+  pushes the UI, with no restart (#566; #394: role from the payload's trade
+  pubkeys, or AddInvoice ⇒ buyer / PayInvoice ⇒ seller where mostrod omits
+  them; never guessed). A late `pay-bond-invoice` is the exception: the
+  rebuild excludes it on purpose (its amount is the bond, not the order) and
+  the daemon's idempotent re-send owns that recovery.
 - **add-invoice**: acknowledged and passed through — the reply doubles as a
   status update, which the per-action arms process as usual.
 - **dispute**: reconciled — `record_late_acceptance` persists the accepted
