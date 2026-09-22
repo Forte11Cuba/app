@@ -5799,6 +5799,25 @@ async fn wipe_trade_row(
     Ok(())
 }
 
+/// Set `is_mine = true` on the order's existing book entry (#552).
+///
+/// Never inserts: the public book is fed only by the daemon's Kind 38383
+/// events (see `create_order`), and an entry the wire has not produced yet
+/// needs no correction — when it arrives, the ingest restore finds binding
+/// and row and raises the flag itself. The `upsert_order` publishes a
+/// snapshot at once, ahead of any batched refetch emission in flight, but a
+/// refetch ingests with binding and row long since present, so only the live
+/// create race ever reaches here with an entry to fix.
+async fn remark_book_entry_mine(order_id: &str) {
+    let book = order_book();
+    if let Some(mut entry) = book.get_order(order_id).await {
+        if !entry.is_mine {
+            entry.is_mine = true;
+            book.upsert_order(entry).await;
+        }
+    }
+}
+
 /// The one way to (re)create a trade row: lifts any wipe tombstone left on the
 /// order id — a canceled order can be legitimately re-taken — before saving.
 /// A direct `save_trade` for a *new* row would leave a stale tombstone
@@ -5818,6 +5837,16 @@ async fn persist_trade_row(db: &impl Storage, trade: &crate::api::types::TradeIn
         );
     }
     let saved = db.save_trade(trade).await;
+    // A maker row's book entry can predate the row itself: the order's Kind
+    // 38383 usually outruns the daemon confirmation that binds the UUID and
+    // persists this row, so the ingest wrote `is_mine = false` and nostr-sdk
+    // never redelivers the event (#552). Corrected here, on the funnel every
+    // row creation passes through — and regardless of `saved`, like the
+    // touch below: the ingest restore reads this row, so a failed save is
+    // exactly when the in-memory correction is the only one left.
+    if trade.order.is_mine {
+        remark_book_entry_mine(&trade.order.id).await;
+    }
     crate::api::trade_touch::touch_trade(&trade.order.id);
     crate::api::push::request_reconcile();
     saved
@@ -7732,6 +7761,27 @@ async fn ingest_order_event(event: &nostr_sdk::prelude::Event) {
     ingest_order_event_with(event, Publish::Coalesced).await;
 }
 
+/// Re-run the maker restore after an ingest wrote its book entry (#552).
+///
+/// Same proof as the pre-upsert restore in [`ingest_order_event_with`] —
+/// binding first, row only on a hit, maker-ness from the row — applied when
+/// that restore ran too early to see either. See the call site for the
+/// interleaving this closes and why it cannot be forced from the seam.
+async fn recheck_ingested_ownership(order_id: &str) {
+    if lookup_trade_key_index(order_id).await.is_none() {
+        return;
+    }
+    let Some(db) = crate::db::app_db::db() else {
+        return;
+    };
+    let Ok(Some(trade)) = db.get_trade_by_order_id(order_id).await else {
+        return;
+    };
+    if trade.order.is_mine {
+        remark_book_entry_mine(order_id).await;
+    }
+}
+
 async fn ingest_order_event_with(event: &nostr_sdk::prelude::Event, publish: Publish) {
     log::debug!(
         "[orders] event kind={} author={}",
@@ -7843,7 +7893,26 @@ async fn ingest_order_event_with(event: &nostr_sdk::prelude::Event, publish: Pub
             let ours = info.is_mine
                 || (is_hard_terminal(&info.status)
                     && lookup_trade_key_index(&info.id).await.is_some());
+            let order_id = info.id.clone();
+            let was_mine = info.is_mine;
             order_book().apply_ingested_order(info, ours, publish).await;
+            // The residual half of the #552 race. The maker restore above
+            // read binding and row BEFORE this upsert; a create confirmation
+            // landing in between binds, persists and re-marks (see
+            // `persist_trade_row`) an entry that does not exist yet — and
+            // this upsert then writes `is_mine = false` over nothing. Asking
+            // again after the upsert closes every interleaving: one side
+            // must see the other's write. Free for strangers' orders: the
+            // restore's miss is in the negative cache, which answers this
+            // lookup too, and `store_trade_key_index` lifts that entry when
+            // it binds, so a stale "absent" cannot be read here. The call
+            // site itself is not seam-testable — forcing the interleaving
+            // needs an injection point between the restore and the upsert —
+            // so the helper is tested on the interleaving's end state
+            // instead, and this wiring is covered by review only.
+            if !was_mine {
+                recheck_ingested_ownership(&order_id).await;
+            }
         }
         None => {
             log::warn!(
@@ -11786,6 +11855,114 @@ mod tests {
                 .expect("book entry")
                 .is_mine,
             "a binding alone must never claim maker-ness",
+        );
+    }
+
+    /// #552: the fresh-create race. The order's Kind 38383 lands before the
+    /// daemon confirmation binds the UUID and persists the maker row, so the
+    /// ingest writes `is_mine = false` — and nostr-sdk never redelivers the
+    /// event to correct it. The confirmation's row persist must re-mark the
+    /// book entry itself.
+    #[tokio::test]
+    async fn late_binding_remarks_the_book_entry_as_mine() {
+        let path = std::env::temp_dir().join(format!("mostro_remark_{}.db", std::process::id()));
+        let _ = crate::db::app_db::init_db(path.to_str().unwrap()).await;
+        let db = crate::db::app_db::db().expect("store initialised");
+
+        // The 38383 first: no binding yet, the entry lands as a stranger's.
+        let order_id = uuid::Uuid::new_v4().to_string();
+        ingest_order_event_with(&book_event(&order_id, "pending"), Publish::WhenBatchEnds).await;
+        assert!(
+            !order_book()
+                .get_order(&order_id)
+                .await
+                .expect("book entry")
+                .is_mine,
+            "before the binding the ingest cannot know the order is ours",
+        );
+
+        // The confirmation, as the dispatcher and create_order leave it:
+        // binding, then the maker row through the production funnel.
+        store_trade_key_index(&order_id, 60).await;
+        persist_trade_row(
+            db,
+            &seam_trade_row(&order_id, crate::api::types::OrderStatus::Pending),
+        )
+        .await
+        .expect("persist maker row");
+        assert!(
+            order_book()
+                .get_order(&order_id)
+                .await
+                .expect("book entry")
+                .is_mine,
+            "persisting the maker row must re-mark the book entry (#552)",
+        );
+
+        // The other half of the hook's contract: a take goes through the
+        // same funnel with `is_mine = false` and must mark nothing.
+        let taken_id = uuid::Uuid::new_v4().to_string();
+        ingest_order_event_with(&book_event(&taken_id, "pending"), Publish::WhenBatchEnds).await;
+        store_trade_key_index(&taken_id, 61).await;
+        let mut taken = seam_trade_row(&taken_id, crate::api::types::OrderStatus::Active);
+        taken.order.is_mine = false;
+        persist_trade_row(db, &taken).await.expect("persist take row");
+        assert!(
+            !order_book()
+                .get_order(&taken_id)
+                .await
+                .expect("book entry")
+                .is_mine,
+            "a taker row must never mark the book entry as the maker's",
+        );
+    }
+
+    /// #552, the residual interleaving: the ingest read binding and row
+    /// before the confirmation wrote them, and the confirmation's re-mark ran
+    /// before the ingest's upsert — entry `false`, binding and maker row
+    /// present, and neither side left to correct it. The post-upsert re-check
+    /// is what fixes that end state; the interleaving itself cannot be forced
+    /// without an injection point mid-ingest, so the helper is tested on the
+    /// state it must repair.
+    #[tokio::test]
+    async fn ownership_recheck_repairs_the_residual_interleaving() {
+        let path = std::env::temp_dir().join(format!("mostro_recheck_{}.db", std::process::id()));
+        let _ = crate::db::app_db::init_db(path.to_str().unwrap()).await;
+        let db = crate::db::app_db::db().expect("store initialised");
+
+        // The end state the interleaving leaves behind.
+        let order_id = uuid::Uuid::new_v4().to_string();
+        order_book().upsert_order(dummy_order_info(&order_id)).await;
+        db.save_trade(&seam_trade_row(
+            &order_id,
+            crate::api::types::OrderStatus::Pending,
+        ))
+        .await
+        .expect("save maker row");
+        store_trade_key_index(&order_id, 62).await;
+
+        recheck_ingested_ownership(&order_id).await;
+        assert!(
+            order_book()
+                .get_order(&order_id)
+                .await
+                .expect("book entry")
+                .is_mine,
+            "binding + maker row must repair the entry post-upsert (#552)",
+        );
+
+        // A stranger's order: no binding, the re-check must touch nothing.
+        let stranger_id = uuid::Uuid::new_v4().to_string();
+        order_book()
+            .upsert_order(dummy_order_info(&stranger_id))
+            .await;
+        recheck_ingested_ownership(&stranger_id).await;
+        assert!(
+            !order_book()
+                .get_order(&stranger_id)
+                .await
+                .expect("book entry")
+                .is_mine,
         );
     }
 

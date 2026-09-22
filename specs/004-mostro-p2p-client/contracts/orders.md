@@ -106,6 +106,17 @@ off, which the protocol allows.
 
 **Side effects**: Sends the new-order message to the Mostro daemon and waits for its confirmation. The order is created only once the daemon confirms it; the public order book is populated exclusively from the daemon's Kind 38383 event (the order is **not** inserted optimistically). On no confirmation within the timeout the order is treated as not created — nothing is persisted to My Trades and nothing is added to the book.
 
+**Book ownership on a fresh create (#552).** The order's Kind 38383 usually
+outruns the confirmation that binds the daemon UUID and persists the maker
+row, so the ingest writes the entry with `is_mine = false` — and the live
+stream never redelivers the event to correct it. Persisting a maker row
+(`persist_trade_row`, the funnel every row creation passes through) therefore
+re-marks the order's **existing** book entry `is_mine = true`; it never
+inserts one, keeping the book fed by Kind 38383 alone. An ingest completing
+*around* the persist re-checks binding and row once more after its own
+upsert, so every interleaving leaves the entry marked. A taker's row
+(`is_mine = false`) marks nothing.
+
 **Errors**: `NoIdentity`, `Offline` (queued), `NoDaemonResponse` (daemon did not confirm within the timeout), `ProtocolError`.
 
 **Anti-abuse bond (maker).** A node that requires a maker bond answers the
