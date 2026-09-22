@@ -10,14 +10,37 @@ import 'package:mostro/shared/widgets/mostro_modal.dart';
 
 typedef _LangEntry = ({String code, String name, String native});
 
-const List<_LangEntry> _languages = [
-  (code: 'en', name: 'English', native: 'English'),
-  (code: 'es', name: 'Spanish', native: 'Español'),
-  (code: 'it', name: 'Italian', native: 'Italiano'),
-  (code: 'fr', name: 'French', native: 'Français'),
-  (code: 'de', name: 'German', native: 'Deutsch'),
-  (code: 'nl', name: 'Dutch', native: 'Nederlands'),
-];
+/// English and native name of every language the app ships, in picker order.
+///
+/// Only the names live here: which languages the picker lists comes from
+/// [AppLocalizations.supportedLocales], i.e. from the `lib/l10n/app_*.arb`
+/// files. A new ARB file therefore shows up in the picker (under its code)
+/// even before it gets a row here, and `locale_lists_test.dart` fails until
+/// it does.
+const Map<String, ({String name, String native})> languageNames = {
+  'en': (name: 'English', native: 'English'),
+  'es': (name: 'Spanish', native: 'Español'),
+  'it': (name: 'Italian', native: 'Italiano'),
+  'fr': (name: 'French', native: 'Français'),
+  'de': (name: 'German', native: 'Deutsch'),
+  'nl': (name: 'Dutch', native: 'Nederlands'),
+};
+
+/// The picker rows: every supported locale, in [languageNames] order, with
+/// any locale that has no names yet appended under its code.
+final List<_LangEntry> _languages = () {
+  final supported = {
+    for (final l in AppLocalizations.supportedLocales) l.languageCode,
+  };
+  return [
+    for (final MapEntry(key: code, value: n) in languageNames.entries)
+      if (supported.contains(code))
+        (code: code, name: n.name, native: n.native),
+    for (final code in supported)
+      if (!languageNames.containsKey(code))
+        (code: code, name: code, native: code),
+  ];
+}();
 
 // ── Widget ────────────────────────────────────────────────────────────────────
 
