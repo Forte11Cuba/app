@@ -124,7 +124,23 @@ class _TakeOrderScreenState extends ConsumerState<TakeOrderScreen> {
     });
   }
 
+  /// Held from the tap until its take settles, however it ends. `_cta` only
+  /// turns `loading` once the take is dispatched, after the role lookup and
+  /// the amount modal, so on its own it let a second tap start a second take
+  /// in that window (#551).
+  bool _taking = false;
+
   Future<void> _onTakeOrder() async {
+    if (_taking) return;
+    _taking = true;
+    try {
+      await _takeOrder();
+    } finally {
+      _taking = false;
+    }
+  }
+
+  Future<void> _takeOrder() async {
     final order = _lastOrder;
     if (order == null || _cta != TakeOrderCta.idle) return;
 
