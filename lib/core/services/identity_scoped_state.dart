@@ -21,14 +21,18 @@ import 'package:mostro/shared/providers/session_provider.dart';
 ///
 /// New identity-scoped state must be added here, or it leaks into the next
 /// user's session.
-Future<void> resetIdentityScopedState(WidgetRef ref) async {
-  ref.read(sessionProvider.notifier).clearSession();
-  ref.invalidate(adminSharedKeyProvider);
-  ref.invalidate(tradeRoleProvider);
-  ref.invalidate(rawTradesProvider);
-  ref.invalidate(chatRoomsNotifierProvider);
-  ref.invalidate(chatReadStatusProvider);
-  ref.invalidate(disputeNotifierProvider);
+///
+/// Takes the app's [ProviderContainer], not a widget's `ref`: the swap runs
+/// across bridge calls long enough for the screen that started it to be
+/// disposed, and a disposed widget's `ref` throws.
+Future<void> resetIdentityScopedState(ProviderContainer container) async {
+  container.read(sessionProvider.notifier).clearSession();
+  container.invalidate(adminSharedKeyProvider);
+  container.invalidate(tradeRoleProvider);
+  container.invalidate(rawTradesProvider);
+  container.invalidate(chatRoomsNotifierProvider);
+  container.invalidate(chatReadStatusProvider);
+  container.invalidate(disputeNotifierProvider);
   // Persisted (sembast), so it needs a real wipe, not just an invalidation.
-  await ref.read(notificationsProvider.notifier).wipeForIdentityChange();
+  await container.read(notificationsProvider.notifier).wipeForIdentityChange();
 }
