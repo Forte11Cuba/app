@@ -6923,10 +6923,24 @@ async fn apply_restored_peer(
         trade_keys,
         trade.trade_key_index,
         trade.role.clone(),
-        crate::api::messages::chat_still_relevant(trade),
+        restored_chat_relevant(trade, &peer),
     )
     .await;
     true
+}
+
+/// Whether the trade the restore just filled still warrants a chat REQ.
+///
+/// [`crate::api::messages::chat_still_relevant`] reads the row's
+/// `counterparty_pubkey`, and the row in hand still carries the empty one the
+/// restore is replacing — asked as it stands it always answers no, and a live
+/// restored trade would get its peer back and never subscribe to incoming
+/// chat. So it is asked about the row as it will be.
+fn restored_chat_relevant(trade: &crate::api::types::TradeInfo, peer: &str) -> bool {
+    crate::api::messages::chat_still_relevant(&crate::api::types::TradeInfo {
+        counterparty_pubkey: peer.to_string(),
+        ..trade.clone()
+    })
 }
 
 /// [`reconcile_restored_history`] with the public-status lookup injected.
@@ -10705,6 +10719,23 @@ mod tests {
         let mut published = row.clone();
         published.order.creator_pubkey = peer.clone();
         assert_eq!(restored_peer_for(&published, &peer, &own, &mostro), None);
+    }
+
+    /// The row the restore reads still carries the empty peer it is about to
+    /// fill, and `chat_still_relevant` reads that field: asked about the row
+    /// as it stands, it always says no, and a live restored trade would take
+    /// its peer back without ever subscribing to incoming chat.
+    #[test]
+    fn a_restored_live_trade_still_warrants_its_chat() {
+        let order_id = uuid::Uuid::new_v4().to_string();
+        let peer = nostr_sdk::prelude::Keys::generate().public_key().to_hex();
+
+        let live = seam_trade_row(&order_id, OrderStatus::Active);
+        assert!(live.counterparty_pubkey.is_empty(), "the restore fills it");
+        assert!(restored_chat_relevant(&live, &peer));
+
+        let ended = seam_trade_row(&order_id, OrderStatus::Success);
+        assert!(!restored_chat_relevant(&ended, &peer));
     }
 
     #[tokio::test]
