@@ -43,7 +43,12 @@ daemon's `add-invoice`, because the feed that would have replayed it existed on 
    REQ, `mostro-orders-watched`, rebuilt by `sync_watched_orders` whenever the set of d-tag
    tasks changes: one REQ per order filled nos.lol's per-connection cap. strfry relays refuse a
    REQ past that cap with a `NOTICE` that names no subscription, so unlike a `CLOSED` there is
-   nothing to repair until the relay reconnects.
+   nothing to repair until the relay reconnects. **A chat REQ belongs to a trade that can still
+   chat**: a start replays the node's whole kind-14 history, and every replayed peer reveal used
+   to open one (35 of them on one start). `apply_peer_reveal` now opens a chat only for a row
+   that passes `chat_still_relevant` — the rule `resubscribe_active_chats` has always used — or,
+   when no row exists yet, for a reveal younger than `FRESH_REVEAL_SECS` (a take's first reply
+   reveals the peer before its row is written). The durable capture happens either way.
 3. **Never treat "issued" as "live".** The repair task (`spawn_repair`) attempts to re-issue
    what a relay lacks when the status monitor reports it `Connected` (it can fail or time out,
    and says so in the log); `resync()` runs the same repair for the relays that are already up.

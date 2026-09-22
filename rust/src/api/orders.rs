@@ -3083,6 +3083,7 @@ async fn dispatch_mostro_message(
                 &kind.action,
                 kind.payload.as_ref(),
                 trade_index,
+                event_age_secs,
             )
             .await;
         }
@@ -5987,6 +5988,7 @@ async fn maybe_capture_peer_reveal(
     action: &mostro_core::message::Action,
     payload: Option<&mostro_core::message::Payload>,
     trade_index: u32,
+    event_age_secs: i64,
 ) {
     let Some((buyer_hex, seller_hex)) = peer_reveal_pubkeys(payload) else {
         return;
@@ -6050,7 +6052,18 @@ async fn maybe_capture_peer_reveal(
         }
         crate::api::trade_touch::touch_trade(order_id);
     }
-    apply_peer_reveal(order_id, &peer_hex, &trade_keys, trade_index, role).await;
+    // A replayed reveal of a trade that can no longer chat still heals the
+    // row above; what it must not do is open a chat REQ (#560).
+    let with_chat = reveal_warrants_chat(order_id, event_age_secs).await;
+    apply_peer_reveal(
+        order_id,
+        &peer_hex,
+        &trade_keys,
+        trade_index,
+        role,
+        with_chat,
+    )
+    .await;
 }
 
 /// Pure payload side of the reveal: the two trade pubkeys a daemon payload
@@ -6106,12 +6119,51 @@ fn resolve_peer_side(
 /// the capture so tests can exercise the session logic with generated keys
 /// instead of mutating the process-global identity (shared with every other
 /// test in the binary).
+/// A reveal older than this, with no trade row to judge it by, is history
+/// the global kind-14 feed replayed, not a trade starting.
+const FRESH_REVEAL_SECS: i64 = 120;
+
+/// Whether this reveal warrants a **live chat REQ**, given the trade's row
+/// (`None` when it has none yet) and the age of the event that carried it.
+///
+/// Every start replays the node's whole kind-14 history, and every replayed
+/// reveal used to open one: 35 peer-chat REQs on a single start, which is
+/// what filled nos.lol's per-connection cap (#560). The chat of a trade that
+/// can no longer chat is history — already persisted, and re-read from the
+/// `messages` table — so only a trade that is still live gets a REQ. This is
+/// `resubscribe_active_chats`' rule (`chat_still_relevant`), which the
+/// restart path has always applied and the replay path never did.
+///
+/// With no row the age decides: a take's first reply reveals the peer before
+/// `persist_confirmed_take` writes the row, so a fresh reveal must still open
+/// the chat. A row that shows up later through the #394 rebuild does not
+/// reopen it — the next start does (its chat is then persisted and relevant).
+fn reveal_warrants_chat_with(
+    row: Option<&crate::api::types::TradeInfo>,
+    event_age_secs: i64,
+) -> bool {
+    match row {
+        Some(row) => crate::api::messages::chat_still_relevant(row),
+        None => event_age_secs < FRESH_REVEAL_SECS,
+    }
+}
+
+/// [`reveal_warrants_chat_with`] against the persisted row.
+async fn reveal_warrants_chat(order_id: &str, event_age_secs: i64) -> bool {
+    let row = match crate::db::app_db::db() {
+        Some(db) => db.get_trade_by_order_id(order_id).await.ok().flatten(),
+        None => None,
+    };
+    reveal_warrants_chat_with(row.as_ref(), event_age_secs)
+}
+
 async fn apply_peer_reveal(
     order_id: &str,
     peer_pubkey_hex: &str,
     trade_keys: &nostr_sdk::prelude::Keys,
     trade_index: u32,
     role: TradeRole,
+    with_chat: bool,
 ) {
     let peer_pubkey = match nostr_sdk::prelude::PublicKey::from_hex(peer_pubkey_hex) {
         Ok(pk) => pk,
@@ -6193,6 +6245,18 @@ async fn apply_peer_reveal(
         log::warn!(
             "[orders] peer-reveal: no session and none creatable for order={order_id} — incoming subscription still spawned"
         );
+    }
+    // The durable capture above happens either way; only the live REQ is
+    // gated (#560).
+    if !with_chat {
+        crate::api::logging::blog_debug(
+            "orders",
+            format!(
+                "peer-reveal order={}: no chat subscription — the trade can no longer chat",
+                crate::api::logging::short_id(order_id),
+            ),
+        );
+        return;
     }
     // Derive the chat conversation keys (K_conv / K_sign — HKDF split of the
     // trade-key ECDH secret, protocol chat spec) and spawn the incoming-chat
@@ -6851,12 +6915,15 @@ async fn apply_restored_peer(
         ),
     );
     crate::api::trade_touch::touch_trade(order_id);
+    // The row is in hand here: a restored trade that can no longer chat gets
+    // its peer back without a chat REQ (#560).
     apply_peer_reveal(
         order_id,
         &peer,
         trade_keys,
         trade.trade_key_index,
         trade.role.clone(),
+        crate::api::messages::chat_still_relevant(trade),
     )
     .await;
     true
@@ -9220,6 +9287,40 @@ mod tests {
                 "subscription id {id} is {len} chars; NIP-01 relays reject anything over 64"
             );
         }
+    }
+
+    /// #560: a start replays the node's whole kind-14 history, and every
+    /// replayed reveal used to open a peer-chat REQ — 35 of them on one
+    /// start, which is what filled nos.lol's cap. A live chat belongs to a
+    /// trade that can still chat; the rest is history, already persisted.
+    #[test]
+    fn only_a_live_trade_gets_a_chat_req() {
+        use crate::api::types::OrderStatus;
+
+        let row = |status: OrderStatus, outcome| crate::api::types::TradeInfo {
+            counterparty_pubkey: "ab".repeat(32),
+            order: crate::api::types::OrderInfo {
+                creator_pubkey: "cd".repeat(32),
+                ..wire_order("order-1", status.clone())
+            },
+            outcome,
+            ..cancel_test_row(wire_order("order-1", status))
+        };
+        let live = row(OrderStatus::Active, None);
+        let finished = row(
+            OrderStatus::Success,
+            Some(crate::api::types::TradeOutcome::Success),
+        );
+
+        // A row decides on its own: its age says nothing (a long trade's
+        // reveal is replayed old and still needs its chat).
+        assert!(reveal_warrants_chat_with(Some(&live), 2_512_438));
+        assert!(!reveal_warrants_chat_with(Some(&finished), 0));
+        // No row yet: a take's first reply reveals the peer before
+        // `persist_confirmed_take` writes it, so a fresh reveal still opens
+        // the chat — a replayed one does not.
+        assert!(reveal_warrants_chat_with(None, 5));
+        assert!(!reveal_warrants_chat_with(None, 2_512_438));
     }
 
     /// Every order we follow shares one REQ instead of one each — a REQ per
@@ -14497,6 +14598,7 @@ mod tests {
             &trade_keys,
             0,
             TradeRole::Buyer,
+            true,
         )
         .await;
         // If we reach here without panicking the test passes.
@@ -14517,7 +14619,7 @@ mod tests {
 
         order_book().upsert_order(dummy_order_info(&order_id)).await;
 
-        apply_peer_reveal(&order_id, &peer_hex, &trade_keys, 7, TradeRole::Seller).await;
+        apply_peer_reveal(&order_id, &peer_hex, &trade_keys, 7, TradeRole::Seller, true).await;
 
         let session = session_manager()
             .get_session(&order_id)

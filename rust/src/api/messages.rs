@@ -1729,7 +1729,7 @@ pub(crate) async fn resubscribe_active_chats() {
 /// catches the poison whichever node published the event — the trades table
 /// is not scoped per node, and this iterates rows from every node the user
 /// has pointed at. The active-pubkey check stays as defense in depth.
-fn chat_still_relevant(trade: &crate::api::types::TradeInfo) -> bool {
+pub(crate) fn chat_still_relevant(trade: &crate::api::types::TradeInfo) -> bool {
     use crate::api::types::OrderStatus::*;
     trade.outcome.is_none()
         && !trade.counterparty_pubkey.is_empty()
