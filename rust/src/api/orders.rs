@@ -6349,7 +6349,7 @@ async fn subscribe_single_order(order_id: &str) {
     let order_id = order_id.to_string();
     // Claimed before the spawn, so a retake that calls this again supersedes
     // the earlier take's task at once rather than after it gets scheduled.
-    let (generation, replaced) = claim_single_order_task(&order_id);
+    let (generation, _) = claim_single_order_task(&order_id);
     crate::rt::spawn(async move {
         let Ok(pool) = crate::api::nostr::get_pool() else {
             log::warn!("[orders] subscribe_single_order: relay pool not initialized");
@@ -6368,26 +6368,18 @@ async fn subscribe_single_order(order_id: &str) {
             };
 
         let mut rx = client.notifications();
-        let filter = crate::nostr::order_events::trade_order_filter(&mostro_pubkey, &order_id);
-        let sub_id = single_order_subscription_id(&order_id);
-        // A retake: the earlier take's REQ is still open under this same id,
-        // and nostr-sdk refuses a subscribe whose id exists (it keeps the old
-        // filter and reports that per relay, not as an error). `replace` drops
-        // it and issues this one in a single critical section, so the
-        // superseded task cannot slot its own subscribe in between; the relay
-        // replays the order's latest event on the new REQ, so nothing is
-        // missed.
-        let subscribed = if replaced {
-            replace_subscription(&client, sub_id.clone(), filter).await
-        } else {
-            subscribe_accepted(&client, sub_id.clone(), filter).await
-        };
-        if let Err(e) = subscribed {
-            release_single_order_task(&order_id, generation);
+        // The order joins the one REQ every watched order shares, which
+        // replays its latest revision. A retake re-issues it the same way.
+        // With the pool offline the REQ is deferred to each relay's connect
+        // rather than failed, so the task keeps watching.
+        if let Err(e) = sync_watched_orders(&client).await {
+            if release_single_order_task(&order_id, generation) {
+                resync_watched_orders(&client).await;
+            }
             log::warn!("[orders] subscribe_single_order subscribe failed: {e}");
             return;
         }
-        log::info!("[orders] subscribed to d-tag updates for order={order_id}");
+        log::info!("[orders] watching d-tag updates for order={order_id}");
 
         use crate::rt::time::{timeout, Duration};
         use nostr_sdk::prelude::{ClientNotification, StreamExt};
@@ -6433,13 +6425,11 @@ async fn subscribe_single_order(order_id: &str) {
             }
         }
 
-        // Drop the relay-side REQ; see subscribe_daemon_messages. Only while
-        // this task still owns it: a superseded task leaves the REQ to the
-        // retake's task, which re-opened it under the same id.
+        // Take the order out of the shared REQ; see subscribe_daemon_messages.
+        // Only while this task still owns it: a superseded task leaves the
+        // order to the retake's task.
         if release_single_order_task(&order_id, generation) {
-            crate::nostr::live_subs::live_subs()
-                .close(&client, &sub_id)
-                .await;
+            resync_watched_orders(&client).await;
         } else {
             crate::api::logging::blog_debug(
                 "orders",
@@ -6453,7 +6443,7 @@ async fn subscribe_single_order(order_id: &str) {
 }
 
 /// Live single-order tasks, by order id: the generation of the task that owns
-/// the order's `mostro-order-<id>` subscription.
+/// the order's place in the shared `mostro-orders-watched` subscription.
 ///
 /// A retake calls [`subscribe_single_order`] again while the first take's
 /// task may still be running — it stops only on a 30-minute idle, a shutdown
@@ -7306,9 +7296,51 @@ fn orders_subscription_id() -> nostr_sdk::prelude::SubscriptionId {
     nostr_sdk::prelude::SubscriptionId::new("mostro-orders")
 }
 
-/// Stable id for a single order's d-tag update subscription.
-fn single_order_subscription_id(order_id: &str) -> nostr_sdk::prelude::SubscriptionId {
-    nostr_sdk::prelude::SubscriptionId::new(format!("mostro-order-{order_id}"))
+/// Stable id of the one d-tag subscription every watched order shares.
+fn watched_orders_subscription_id() -> nostr_sdk::prelude::SubscriptionId {
+    nostr_sdk::prelude::SubscriptionId::new("mostro-orders-watched")
+}
+
+/// Point `mostro-orders-watched` at the orders the d-tag tasks hold now, or
+/// close it when they hold none. Every change to [`single_order_tasks`] is
+/// followed by a call.
+///
+/// Serialized, and both the set and the active node are read inside the
+/// critical section: two tasks that claim and release at once cannot leave
+/// the older set on the relays, and a task that captured the previous node
+/// before a switch cannot pin every watched order to it. The REQ replays
+/// each order's latest revision; the tasks match events by order id and a
+/// revision the row already holds writes nothing.
+async fn sync_watched_orders(client: &nostr_sdk::prelude::Client) -> Result<()> {
+    static SYNC: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
+    let _serial = SYNC.get_or_init(Default::default).lock().await;
+    let mostro_pubkey =
+        nostr_sdk::prelude::PublicKey::from_hex(&crate::config::active_mostro_pubkey())
+            .map_err(|e| anyhow::anyhow!("invalid mostro pubkey: {e}"))?;
+    let mut ids: Vec<String> = single_order_tasks()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .keys()
+        .cloned()
+        .collect();
+    ids.sort();
+    let subs = crate::nostr::live_subs::live_subs();
+    if ids.is_empty() {
+        subs.close(client, &watched_orders_subscription_id()).await;
+        return Ok(());
+    }
+    let filter = crate::nostr::order_events::watched_orders_filter(&mostro_pubkey, &ids);
+    subs.replace(client, watched_orders_subscription_id(), filter)
+        .await
+        .map(|_| ())
+}
+
+/// [`sync_watched_orders`], logged instead of returned: for the callers that
+/// have nothing to undo when it fails.
+async fn resync_watched_orders(client: &nostr_sdk::prelude::Client) {
+    if let Err(e) = sync_watched_orders(client).await {
+        log::warn!("[orders] watched-orders subscription not updated: {e}");
+    }
 }
 
 /// Stable subscription ID for the windowed any-status Kind 38383 feed that
@@ -7552,6 +7584,9 @@ pub(crate) async fn refresh_subscriptions_for_active_node() {
         log::error!("[orders] node switch: re-subscribe failed: {e}");
         return;
     }
+    // The shared d-tag REQ is author-pinned too: one stale node there
+    // silences every watched order, not just one.
+    resync_watched_orders(&client).await;
 
     // Repopulate the cleared book with the new node's current orders (the live
     // stream won't redeliver already-seen events — see refetch_active_node_orders).
@@ -8106,6 +8141,15 @@ async fn _run_order_subscription() {
                                 crate::api::logging::sanitize_relay_text(&msg),
                             ),
                         );
+                        // It names no subscription, so there is nothing to
+                        // repair — only a record of what filled the cap.
+                        if crate::nostr::req_census::is_req_cap_notice(&msg) {
+                            crate::nostr::req_census::report_req_cap(
+                                &client,
+                                &relay_url.to_string(),
+                            )
+                            .await;
+                        }
                     }
                     RelayMessage::Auth { .. } => {
                         crate::api::logging::blog_debug(
@@ -8238,12 +8282,10 @@ fn trade_is_over(row: Option<&crate::api::types::TradeInfo>) -> bool {
 /// relays' REQ caps. Offline there is nothing to close, and the in-memory
 /// state goes all the same.
 pub(crate) async fn release_identity_subscriptions() {
-    let watched_orders: Vec<String> = single_order_tasks()
+    single_order_tasks()
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .drain()
-        .map(|(order_id, _)| order_id)
-        .collect();
+        .clear();
     // Every trade key the bulk feed covers — a superset of the keys with a
     // per-trade watcher, since each of those joins the coverage when derived.
     let covered_keys: Vec<String> = global_dm_keys()
@@ -8256,10 +8298,7 @@ pub(crate) async fn release_identity_subscriptions() {
     if let Ok(pool) = crate::api::nostr::get_pool() {
         let client = pool.client();
         let subs = crate::nostr::live_subs::live_subs();
-        for order_id in &watched_orders {
-            subs.close(&client, &single_order_subscription_id(order_id))
-                .await;
-        }
+        subs.close(&client, &watched_orders_subscription_id()).await;
         for trade_pubkey in &covered_keys {
             crate::nostr::subscriptions::teardown(&client, trade_pubkey).await;
         }
@@ -8279,7 +8318,7 @@ pub(crate) async fn release_identity_subscriptions() {
 }
 
 /// Give back the per-trade relay subscriptions of a trade that ended (#523):
-/// its `mostro-order-<id>` d-tag watcher, its daemon-message watcher and its
+/// its place in the shared d-tag REQ, its daemon-message watcher and its
 /// chat REQs. They used to linger until a 30-minute idle, or the whole
 /// session for chats, and relays cap concurrent REQs (nos.lol, and
 /// relay.mostro.network's `CLOSED: exceeds limit`). The bulk kind-14 feed
@@ -8302,14 +8341,14 @@ fn release_finished_trade_subscriptions(order_id: &str, known_index: Option<u32>
             return;
         };
         let client = pool.client();
-        // Still under the order lock: these REQs are keyed by the order id,
-        // and a retake re-opens them under the same ids. A CLOSE sent after
-        // the lock would land on the retake's subscriptions. It only sends
-        // frames — no daemon reply is awaited, as `lock_order` requires.
+        // Still under the order lock: the chat REQs are keyed by the order
+        // id, and a retake re-opens them under the same ids. A CLOSE sent
+        // after the lock would land on the retake's subscriptions. It only
+        // sends frames — no daemon reply is awaited, as `lock_order` requires.
+        // The shared d-tag REQ is rebuilt from the task set, which a retake
+        // re-joins, so it is safe either side of the lock.
         if release.owned_d_tag {
-            crate::nostr::live_subs::live_subs()
-                .close(&client, &single_order_subscription_id(&order_id))
-                .await;
+            resync_watched_orders(&client).await;
         }
         let chats = crate::api::messages::stop_chat_subscriptions(&order_id).await;
         drop(release.order_lock);
@@ -9144,8 +9183,7 @@ mod tests {
         let ids = [
             daemon_message_subscription_id(&a),
             daemon_message_subscription_id(&b),
-            single_order_subscription_id(&a),
-            single_order_subscription_id(&b),
+            watched_orders_subscription_id(),
             orders_subscription_id(),
             recent_orders_subscription_id(),
             relay_list_subscription_id(),
@@ -9167,11 +9205,10 @@ mod tests {
     fn subscription_ids_fit_nip01() {
         const NIP01_MAX_SUBSCRIPTION_ID_LEN: usize = 64;
         let trade_pubkey_hex = "ab".repeat(32);
-        let order_id = "3f2504e0-4f89-11d3-9a0c-0305e82c3301";
 
         for id in [
             daemon_message_subscription_id(&trade_pubkey_hex),
-            single_order_subscription_id(order_id),
+            watched_orders_subscription_id(),
             orders_subscription_id(),
             recent_orders_subscription_id(),
             relay_list_subscription_id(),
@@ -9183,6 +9220,64 @@ mod tests {
                 "subscription id {id} is {len} chars; NIP-01 relays reject anything over 64"
             );
         }
+    }
+
+    /// Every order we follow shares one REQ instead of one each — a REQ per
+    /// order filled nos.lol's cap ("too many concurrent REQs"). The REQ
+    /// follows the set of live d-tag tasks as they claim and release orders.
+    #[tokio::test]
+    async fn watched_orders_share_one_subscription_that_follows_the_task_set() {
+        use nostr_sdk::local_relay::MockRelay;
+        use nostr_sdk::prelude::{Client, SingleLetterTag};
+
+        // Arrange
+        let relay = MockRelay::run().await.expect("mock relay");
+        let url = relay.url().await;
+        let client = Client::new();
+        client.add_relay(&url).await.expect("add relay");
+        client
+            .try_connect_relay(url, std::time::Duration::from_secs(3))
+            .await
+            .expect("connect");
+        let (a, b) = (
+            uuid::Uuid::new_v4().to_string(),
+            uuid::Uuid::new_v4().to_string(),
+        );
+        // Other tests claim orders concurrently: check ours, not the whole set.
+        let watched = || async {
+            client
+                .subscription(&watched_orders_subscription_id())
+                .await
+                .values()
+                .flatten()
+                .flat_map(|f| {
+                    f.generic_tags
+                        .get(&SingleLetterTag::LOWERCASE_D)
+                        .cloned()
+                        .unwrap_or_default()
+                })
+                .collect::<std::collections::BTreeSet<String>>()
+        };
+
+        // Act + Assert
+        let (gen_a, _) = claim_single_order_task(&a);
+        let (gen_b, _) = claim_single_order_task(&b);
+        sync_watched_orders(&client).await.expect("sync");
+        let both = watched().await;
+        assert!(
+            both.contains(&a) && both.contains(&b),
+            "one REQ follows both: {both:?}"
+        );
+
+        assert!(release_single_order_task(&a, gen_a));
+        sync_watched_orders(&client).await.expect("sync");
+        let only_b = watched().await;
+        assert!(!only_b.contains(&a), "a released order leaves the REQ");
+        assert!(only_b.contains(&b), "the others stay followed");
+
+        assert!(release_single_order_task(&b, gen_b));
+        sync_watched_orders(&client).await.expect("sync");
+        assert!(!watched().await.contains(&b));
     }
 
     /// A node switch re-runs `subscribe_node_filters` under the same stable
