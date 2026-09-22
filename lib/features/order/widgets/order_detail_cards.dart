@@ -415,7 +415,12 @@ class OrderPrimaryButton extends StatelessWidget {
             fontWeight: FontWeight.w600,
           ),
         ),
-        child: Text(label),
+        // One line, shrunk to fit at large text sizes, rather than
+        // breaking the word.
+        child: FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Text(label, maxLines: 1),
+        ),
       ),
     );
   }

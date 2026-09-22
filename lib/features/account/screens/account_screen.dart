@@ -267,18 +267,21 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
   /// The identity has already been replaced when this runs, so a write that
   /// fails is reported as a backup-status failure, not as a failed generation
   /// or import, and never keeps the other write from running.
+  ///
+  /// Runs through [swap], not this screen: the screen may be gone by now.
   Future<void> _finishIdentitySwap(
-    BuildContext context, {
+    _IdentitySwap swap, {
     required bool alreadyBackedUp,
   }) async {
-    final l10n = AppLocalizations.of(context);
     _copiedTimer?.cancel();
-    setState(() {
-      _words = null;
-      _copied = false;
-    });
-    final reminder = ref.read(backupReminderProvider.notifier);
-    final completed = ref.read(backupCompletedProvider.notifier);
+    if (mounted) {
+      setState(() {
+        _words = null;
+        _copied = false;
+      });
+    }
+    final reminder = swap.container.read(backupReminderProvider.notifier);
+    final completed = swap.container.read(backupCompletedProvider.notifier);
 
     final writes =
         alreadyBackedUp
@@ -295,13 +298,12 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
       }
     }
 
-    if (!context.mounted) return;
     if (resetFailed) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(l10n.failedToSaveBackupStatusMessage)),
+      swap.messenger.showSnackBar(
+        SnackBar(content: Text(swap.l10n.failedToSaveBackupStatusMessage)),
       );
     }
-    context.go(AppRoute.home);
+    swap.router.go(AppRoute.home);
   }
 
   /// Run [proceed] — the generate or import flow — unless the current
@@ -337,9 +339,14 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
   /// wiped the rows in `delete_identity`. Never throws: the swap has
   /// happened, and stale state on screen must not be reported as a failed
   /// generation or import.
-  Future<void> _forgetPreviousIdentity() async {
+  ///
+  /// Through the app's container, never this screen's `ref`: the screen can
+  /// be disposed while the bridge call runs, and the reset then failed with
+  /// "Cannot use ref after the widget was disposed", leaving the previous
+  /// user on screen until a restart.
+  Future<void> _forgetPreviousIdentity(_IdentitySwap swap) async {
     try {
-      await resetIdentityScopedState(ref);
+      await resetIdentityScopedState(swap.container);
     } catch (e) {
       debugPrint('[account] identity-scoped reset error: $e');
     }
@@ -363,6 +370,7 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
               tone: ModalTone.destructive,
               automationId: AutomationIds.keysGenerateConfirm,
               onPressed: () async {
+                  final swap = _IdentitySwap.of(context);
                   Navigator.pop(dialogContext);
                   try {
                     // Atomically replaces the stored identity: new mnemonic is
@@ -372,22 +380,20 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
                         IdentityService.regenerate());
                   } catch (e) {
                     debugPrint('[account] generateNewUser error: $e');
-                    if (!context.mounted) return;
-                    ScaffoldMessenger.of(context).showSnackBar(
+                    swap.messenger.showSnackBar(
                       SnackBar(
                         content: Text(
                           kDebugMode
                               ? 'Failed to generate identity: $e'
-                              : l10n.failedToGenerateIdentityMessage,
+                              : swap.l10n.failedToGenerateIdentityMessage,
                         ),
                       ),
                     );
                     return;
                   }
                   // Only reset and navigate once the new identity exists.
-                  await _forgetPreviousIdentity();
-                  if (!context.mounted) return;
-                  await _finishIdentitySwap(context, alreadyBackedUp: false);
+                  await _forgetPreviousIdentity(swap);
+                  await _finishIdentitySwap(swap, alreadyBackedUp: false);
               },
             ),
           ),
@@ -405,14 +411,14 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
   }
 
   Future<void> _importIdentity(BuildContext context, List<String> words) async {
-    final l10n = AppLocalizations.of(context);
+    final swap = _IdentitySwap.of(context);
+    final l10n = swap.l10n;
     try {
       await (widget.debugImport?.call(words) ??
           IdentityService.importAndStore(words));
     } catch (e) {
       debugPrint('[account] importIdentity error: $e');
-      if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
+      swap.messenger.showSnackBar(
         SnackBar(
           content: Text(
             kDebugMode ? 'Import failed: $e' : l10n.invalidMnemonicMessage,
@@ -423,11 +429,10 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
     }
     // Before the recovery below, not after: what it brings back belongs to
     // the imported identity and must survive.
-    await _forgetPreviousIdentity();
-    if (!context.mounted) return;
+    await _forgetPreviousIdentity(swap);
     // A seed that already traded must learn its trades and trade index from
     // the daemon before its first new order (InvalidTradeIndex otherwise).
-    final messenger = ScaffoldMessenger.of(context);
+    final messenger = swap.messenger;
     messenger.showSnackBar(
       SnackBar(content: Text(l10n.recoveringTradesMessage)),
     );
@@ -444,9 +449,8 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
         SnackBar(content: Text(l10n.recoverTradesFailedMessage)),
       );
     }
-    if (!context.mounted) return;
     // The user restored from words they already had: nothing to back up.
-    await _finishIdentitySwap(context, alreadyBackedUp: true);
+    await _finishIdentitySwap(swap, alreadyBackedUp: true);
   }
 
   void _confirmRefresh(BuildContext context) {
@@ -489,6 +493,26 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
           ),
     );
   }
+}
+
+/// What an identity swap needs from the app once it has started, taken from
+/// the Account screen's context before the first await (issue #533).
+///
+/// The swap outlives the screen: the bridge calls take long enough for the
+/// screen to be disposed underneath them, and its `ref` and `context` die
+/// with it. The container, the router and the root messenger belong to the
+/// app, so the reset, the backup state and the trip home still happen.
+class _IdentitySwap {
+  _IdentitySwap.of(BuildContext context)
+    : container = ProviderScope.containerOf(context, listen: false),
+      router = GoRouter.of(context),
+      messenger = ScaffoldMessenger.of(context),
+      l10n = AppLocalizations.of(context);
+
+  final ProviderContainer container;
+  final GoRouter router;
+  final ScaffoldMessengerState messenger;
+  final AppLocalizations l10n;
 }
 
 // ── 15a · Banner ──────────────────────────────────────────────────────────────

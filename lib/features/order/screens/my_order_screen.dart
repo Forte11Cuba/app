@@ -290,14 +290,23 @@ class _AmountBlock extends StatelessWidget {
         children: [
           Row(
             children: [
-              _SideChip(
-                label:
-                    isSelling ? l10n.orderSideChipSell : l10n.orderSideChipBuy,
-                color: isSelling ? pal.sellInk : pal.buyInk,
-                fill: isSelling ? pal.sellChipBg : pal.buyChipBg,
-                border: isSelling ? pal.sellChipBorder : pal.buyChipBorder,
+              // Takes the room the currency chip leaves, so a long label at a
+              // large text size ellipsizes instead of overflowing the card.
+              Expanded(
+                child: Align(
+                  alignment: AlignmentDirectional.centerStart,
+                  child: _SideChip(
+                    label: isSelling
+                        ? l10n.orderSideChipSell
+                        : l10n.orderSideChipBuy,
+                    color: isSelling ? pal.sellInk : pal.buyInk,
+                    fill: isSelling ? pal.sellChipBg : pal.buyChipBg,
+                    border:
+                        isSelling ? pal.sellChipBorder : pal.buyChipBorder,
+                  ),
+                ),
               ),
-              const Spacer(),
+              const SizedBox(width: 8),
               OrderCurrencyChip(flag: flag, code: order.fiatCode),
             ],
           ),
@@ -379,6 +388,8 @@ class _SideChip extends StatelessWidget {
       child: Text(
         label.toUpperCase(),
         semanticsLabel: label,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
         style: TextStyle(
           fontSize: 10,
           fontWeight: FontWeight.w600,
@@ -427,7 +438,12 @@ class _CancelButton extends StatelessWidget {
                   color: pal.danger,
                 ),
               )
-              : Text(l10n.cancel),
+              // One line, shrunk to fit at large text sizes, rather than
+              // breaking the word ("Annulere/n").
+              : FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text(l10n.cancel, maxLines: 1),
+              ),
     ).withAutomationId(AutomationIds.tradeCancel);
   }
 }
