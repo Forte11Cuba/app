@@ -277,10 +277,10 @@ class AppLocalizationsEn extends AppLocalizations {
   String get continueButtonLabel => 'Continue';
 
   @override
-  String get importMnemonicDialogTitle => 'Import Mnemonic';
+  String get importMnemonicDialogTitle => 'Import secret words';
 
   @override
-  String get importMnemonicHintText => 'Enter your 12 or 24 word phrase…';
+  String get importMnemonicHintText => 'Enter your 12 secret words';
 
   @override
   String get importButtonLabel => 'Import';
@@ -1019,10 +1019,10 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get invalidMnemonicMessage =>
-      'Invalid mnemonic. Please check your words and try again.';
+      'Invalid secret words. Please check your words and try again.';
 
   @override
-  String get enterValidMnemonicError => 'Enter a valid 12 or 24 word phrase.';
+  String get enterValidMnemonicError => 'Enter your 12 secret words.';
 
   @override
   String get orderBookRefreshedMessage => 'Order book refreshed';
@@ -3609,4 +3609,95 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get fundsAtRiskContinue => 'Continue anyway';
+
+  @override
+  String get restoreSheetTitle => 'Restoring your account';
+
+  @override
+  String get restoreSheetWaiting => 'This may take a few seconds';
+
+  @override
+  String restoreSheetLoading(int done, int total) {
+    return '$done of $total orders recovered';
+  }
+
+  @override
+  String get restoreStageConnecting => 'Connecting to the Mostro node';
+
+  @override
+  String get restoreStageConnected => 'Connected to the Mostro node';
+
+  @override
+  String get restoreStageRequesting => 'Requesting your orders';
+
+  @override
+  String restoreStageFound(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count orders found',
+      one: '1 order found',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get restoreStageLoading => 'Loading details';
+
+  @override
+  String get restoreStageNoResponse => 'No response';
+
+  @override
+  String restoreLoadingCountSemantics(int done, int total) {
+    return '$done of $total orders';
+  }
+
+  @override
+  String get restoreFailedTitle => 'We couldn\'t restore your orders';
+
+  @override
+  String get restoreFailedSubtitle => 'Your account was imported';
+
+  @override
+  String restoreFailedBody(String place) {
+    return 'Check your connection and try again. You can retry any time from $place.';
+  }
+
+  @override
+  String get restoreContinueWithout => 'Continue without restoring';
+
+  @override
+  String get restoreDoneTitle => 'Account restored';
+
+  @override
+  String get restoreDoneSubtitle => 'We recovered everything the node had';
+
+  @override
+  String get restoreDoneEmptySubtitle =>
+      'This account had no orders on the node';
+
+  @override
+  String get restoreSummaryOrders => 'Orders';
+
+  @override
+  String get restoreSummaryInProgress => 'In progress';
+
+  @override
+  String get restoreSummaryReputation => 'Reputation';
+
+  @override
+  String restoreActionNotice(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'You have $count active orders waiting for you',
+      one: 'You have 1 active order waiting for you',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String restorePartialNotice(int missing, int total) {
+    return '$missing of $total orders couldn\'t be loaded';
+  }
 }

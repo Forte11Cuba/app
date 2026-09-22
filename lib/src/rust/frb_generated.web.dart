@@ -22,6 +22,7 @@ import 'api/nwc.dart';
 import 'api/orders.dart';
 import 'api/push.dart';
 import 'api/reputation.dart';
+import 'api/restore_progress.dart';
 import 'api/settings.dart';
 import 'api/trade_touch.dart';
 import 'api/types.dart';
@@ -104,6 +105,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   CrossPlatformFinalizerArg
   get rust_arc_decrement_strong_count_RelayStatusStreamPtr =>
       wire.rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRelayStatusStream;
+
+  CrossPlatformFinalizerArg
+  get rust_arc_decrement_strong_count_RestoreProgressStreamPtr =>
+      wire.rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRestoreProgressStream;
 
   CrossPlatformFinalizerArg
   get rust_arc_decrement_strong_count_SettingsStreamPtr =>
@@ -231,6 +236,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   RelayStatusStream
   dco_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRelayStatusStream(
+    dynamic raw,
+  );
+
+  @protected
+  RestoreProgressStream
+  dco_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRestoreProgressStream(
     dynamic raw,
   );
 
@@ -363,6 +374,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   RelayStatusStream
   dco_decode_Auto_RefMut_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRelayStatusStream(
+    dynamic raw,
+  );
+
+  @protected
+  RestoreProgressStream
+  dco_decode_Auto_RefMut_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRestoreProgressStream(
     dynamic raw,
   );
 
@@ -507,6 +524,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   RelayStatusStream
   dco_decode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRelayStatusStream(
+    dynamic raw,
+  );
+
+  @protected
+  RestoreProgressStream
+  dco_decode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRestoreProgressStream(
     dynamic raw,
   );
 
@@ -670,6 +693,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   RelayInfo dco_decode_box_autoadd_relay_info(dynamic raw);
+
+  @protected
+  RestoreProgress dco_decode_box_autoadd_restore_progress(dynamic raw);
 
   @protected
   TradeOutcome dco_decode_box_autoadd_trade_outcome(dynamic raw);
@@ -908,6 +934,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   RelayInfo? dco_decode_opt_box_autoadd_relay_info(dynamic raw);
 
   @protected
+  RestoreProgress? dco_decode_opt_box_autoadd_restore_progress(dynamic raw);
+
+  @protected
   TradeOutcome? dco_decode_opt_box_autoadd_trade_outcome(dynamic raw);
 
   @protected
@@ -983,6 +1012,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   RelayStatus dco_decode_relay_status(dynamic raw);
+
+  @protected
+  RestoreProgress dco_decode_restore_progress(dynamic raw);
 
   @protected
   ResyncOutcome dco_decode_resync_outcome(dynamic raw);
@@ -1147,6 +1179,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  RestoreProgressStream
+  sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRestoreProgressStream(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   SettingsStream
   sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerSettingsStream(
     SseDeserializer deserializer,
@@ -1275,6 +1313,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   RelayStatusStream
   sse_decode_Auto_RefMut_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRelayStatusStream(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  RestoreProgressStream
+  sse_decode_Auto_RefMut_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRestoreProgressStream(
     SseDeserializer deserializer,
   );
 
@@ -1419,6 +1463,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   RelayStatusStream
   sse_decode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRelayStatusStream(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  RestoreProgressStream
+  sse_decode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRestoreProgressStream(
     SseDeserializer deserializer,
   );
 
@@ -1606,6 +1656,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   RelayInfo sse_decode_box_autoadd_relay_info(SseDeserializer deserializer);
+
+  @protected
+  RestoreProgress sse_decode_box_autoadd_restore_progress(
+    SseDeserializer deserializer,
+  );
 
   @protected
   TradeOutcome sse_decode_box_autoadd_trade_outcome(
@@ -1900,6 +1955,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  RestoreProgress? sse_decode_opt_box_autoadd_restore_progress(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   TradeOutcome? sse_decode_opt_box_autoadd_trade_outcome(
     SseDeserializer deserializer,
   );
@@ -1991,6 +2051,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   RelayStatus sse_decode_relay_status(SseDeserializer deserializer);
+
+  @protected
+  RestoreProgress sse_decode_restore_progress(SseDeserializer deserializer);
 
   @protected
   ResyncOutcome sse_decode_resync_outcome(SseDeserializer deserializer);
@@ -2178,6 +2241,13 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void
+  sse_encode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRestoreProgressStream(
+    RestoreProgressStream self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void
   sse_encode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerSettingsStream(
     SettingsStream self,
     SseSerializer serializer,
@@ -2327,6 +2397,13 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void
   sse_encode_Auto_RefMut_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRelayStatusStream(
     RelayStatusStream self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void
+  sse_encode_Auto_RefMut_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRestoreProgressStream(
+    RestoreProgressStream self,
     SseSerializer serializer,
   );
 
@@ -2495,6 +2572,13 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void
   sse_encode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRelayStatusStream(
     RelayStatusStream self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void
+  sse_encode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRestoreProgressStream(
+    RestoreProgressStream self,
     SseSerializer serializer,
   );
 
@@ -2744,6 +2828,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_box_autoadd_relay_info(
     RelayInfo self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_restore_progress(
+    RestoreProgress self,
     SseSerializer serializer,
   );
 
@@ -3144,6 +3234,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_opt_box_autoadd_restore_progress(
+    RestoreProgress? self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_opt_box_autoadd_trade_outcome(
     TradeOutcome? self,
     SseSerializer serializer,
@@ -3247,6 +3343,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_relay_status(RelayStatus self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_restore_progress(
+    RestoreProgress self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_resync_outcome(ResyncOutcome self, SseSerializer serializer);
@@ -3587,6 +3689,22 @@ class RustLibWire implements BaseWire {
       );
 
   void
+  rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRestoreProgressStream(
+    int ptr,
+  ) => wasmModule
+      .rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRestoreProgressStream(
+        ptr,
+      );
+
+  void
+  rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRestoreProgressStream(
+    int ptr,
+  ) => wasmModule
+      .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRestoreProgressStream(
+        ptr,
+      );
+
+  void
   rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerSettingsStream(
     int ptr,
   ) => wasmModule
@@ -3856,6 +3974,16 @@ extension type RustLibWasmModule._(JSObject _) implements JSObject {
 
   external void
   rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRelayStatusStream(
+    int ptr,
+  );
+
+  external void
+  rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRestoreProgressStream(
+    int ptr,
+  );
+
+  external void
+  rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerRestoreProgressStream(
     int ptr,
   );
 

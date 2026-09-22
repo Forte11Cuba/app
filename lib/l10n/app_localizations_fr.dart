@@ -282,10 +282,10 @@ class AppLocalizationsFr extends AppLocalizations {
   String get continueButtonLabel => 'Continuer';
 
   @override
-  String get importMnemonicDialogTitle => 'Importer le mnémonique';
+  String get importMnemonicDialogTitle => 'Importer les mots secrets';
 
   @override
-  String get importMnemonicHintText => 'Entrez votre phrase de 12 ou 24 mots…';
+  String get importMnemonicHintText => 'Entrez vos 12 mots secrets';
 
   @override
   String get importButtonLabel => 'Importer';
@@ -1034,11 +1034,10 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get invalidMnemonicMessage =>
-      'Phrase mnémonique invalide. Veuillez vérifier vos mots et réessayer.';
+      'Mots secrets invalides. Veuillez vérifier vos mots et réessayer.';
 
   @override
-  String get enterValidMnemonicError =>
-      'Entrez une phrase valide de 12 ou 24 mots.';
+  String get enterValidMnemonicError => 'Entrez vos 12 mots secrets.';
 
   @override
   String get orderBookRefreshedMessage => 'Carnet d\'ordres actualisé';
@@ -3655,4 +3654,97 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get fundsAtRiskContinue => 'Continuer quand même';
+
+  @override
+  String get restoreSheetTitle => 'Restauration de votre compte';
+
+  @override
+  String get restoreSheetWaiting => 'Cela peut prendre quelques secondes';
+
+  @override
+  String restoreSheetLoading(int done, int total) {
+    return '$done commandes récupérées sur $total';
+  }
+
+  @override
+  String get restoreStageConnecting => 'Connexion au nœud Mostro';
+
+  @override
+  String get restoreStageConnected => 'Connecté au nœud Mostro';
+
+  @override
+  String get restoreStageRequesting => 'Demande de vos commandes';
+
+  @override
+  String restoreStageFound(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count commandes trouvées',
+      one: '1 commande trouvée',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get restoreStageLoading => 'Chargement des détails';
+
+  @override
+  String get restoreStageNoResponse => 'Pas de réponse';
+
+  @override
+  String restoreLoadingCountSemantics(int done, int total) {
+    return '$done commandes sur $total';
+  }
+
+  @override
+  String get restoreFailedTitle =>
+      'Nous n\'avons pas pu restaurer vos commandes';
+
+  @override
+  String get restoreFailedSubtitle => 'Votre compte a bien été importé';
+
+  @override
+  String restoreFailedBody(String place) {
+    return 'Vérifiez votre connexion et réessayez. Vous pouvez réessayer quand vous voulez depuis $place.';
+  }
+
+  @override
+  String get restoreContinueWithout => 'Continuer sans restaurer';
+
+  @override
+  String get restoreDoneTitle => 'Compte restauré';
+
+  @override
+  String get restoreDoneSubtitle =>
+      'Nous avons récupéré tout ce que le nœud avait';
+
+  @override
+  String get restoreDoneEmptySubtitle =>
+      'Ce compte n\'avait aucune commande sur le nœud';
+
+  @override
+  String get restoreSummaryOrders => 'Commandes';
+
+  @override
+  String get restoreSummaryInProgress => 'En cours';
+
+  @override
+  String get restoreSummaryReputation => 'Réputation';
+
+  @override
+  String restoreActionNotice(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Vous avez $count commandes actives qui attendent votre action',
+      one: 'Vous avez 1 commande active qui attend votre action',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String restorePartialNotice(int missing, int total) {
+    return '$missing commandes sur $total n\'ont pas pu être chargées';
+  }
 }
