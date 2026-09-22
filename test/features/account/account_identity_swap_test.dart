@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -24,6 +26,10 @@ import 'package:mostro/src/rust/api/types.dart'
 const _seed =
     'prefer olympic float negative alarm mechanic '
     'capital because sausage struggle travel trade';
+
+/// The router of the last [_pumpAccount], for the tests that leave the
+/// screen while a swap is in flight.
+late GoRouter _router;
 
 /// The screen under test, at `/key_management`, with the bridge-backed
 /// identity work replaced by the seams and every other provider it reads
@@ -84,6 +90,7 @@ Future<ProviderContainer> _pumpAccount(
     ],
   );
   addTearDown(router.dispose);
+  _router = router;
 
   await tester.pumpWidget(
     UncontrolledProviderScope(
@@ -200,6 +207,63 @@ void main() {
 
   // Issue #533: the next user must find the app as a fresh install leaves it.
   group('the previous identity\'s state', () {
+    // The swap outlives the screen: on a real device the Account screen can
+    // be gone by the time the bridge call returns, and the reset used to go
+    // through its `ref` — "Cannot use ref after the widget was disposed",
+    // logged and swallowed, and the old user stayed on screen until a
+    // restart.
+    testWidgets('is gone after a generation the screen did not outlive', (
+      tester,
+    ) async {
+      final generated = Completer<void>();
+      final container = await _pumpAccount(
+        tester,
+        reminderArmed: false,
+        backedUp: true,
+        onRegenerate: () => generated.future,
+      );
+      await _seedPreviousUser(container);
+      await _generate(tester);
+
+      _router.go(AppRoute.home);
+      await tester.pumpAndSettle();
+      expect(find.byType(AccountScreen), findsNothing);
+      generated.complete();
+      await tester.pumpAndSettle();
+
+      expect(container.read(notificationsProvider), isEmpty);
+      expect(container.read(tradeRoleProvider), isEmpty);
+      expect(container.read(chatReadStatusProvider), isEmpty);
+      expect(container.read(backupReminderProvider), isTrue);
+      expect(container.read(backupCompletedProvider), isFalse);
+    });
+
+    testWidgets('is gone after an import the screen did not outlive', (
+      tester,
+    ) async {
+      final imported = Completer<void>();
+      final container = await _pumpAccount(
+        tester,
+        reminderArmed: true,
+        backedUp: false,
+        onImport: (_) => imported.future,
+      );
+      await _seedPreviousUser(container);
+      await _import(tester, l10n);
+
+      _router.go(AppRoute.home);
+      await tester.pumpAndSettle();
+      expect(find.byType(AccountScreen), findsNothing);
+      imported.complete();
+      await tester.pumpAndSettle();
+
+      expect(container.read(notificationsProvider), isEmpty);
+      expect(container.read(tradeRoleProvider), isEmpty);
+      expect(container.read(chatReadStatusProvider), isEmpty);
+      expect(container.read(backupReminderProvider), isFalse);
+      expect(container.read(backupCompletedProvider), isTrue);
+    });
+
     testWidgets('is gone after generating a new user', (tester) async {
       final container = await _pumpAccount(
         tester,

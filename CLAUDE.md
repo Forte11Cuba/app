@@ -274,8 +274,9 @@ bridged by flutter_rust_bridge.
   `push_wake_pending` and may show the content-free chat-wake notice. Every write happens on
   resume, once, in the foreground core.
 - **Trade screens are pushed, not polled — so every trade write must ring.** Rust's
-  `api::trade_touch::touch_trade(order_id)` is the doorbell behind `tradeStatusProvider` and the
-  invoice providers (`trade_state_provider.dart`): it says "read this order again", carries no
+  `api::trade_touch::touch_trade(order_id)` is the doorbell behind `tradeStatusProvider`, the
+  invoice providers (`trade_state_provider.dart`) and the trade list (`rawTradesProvider`, which
+  coalesces a burst into one read — a restore files its replayed history with touches only): it says "read this order again", carries no
   status and drives no notice — that is `TradeUpdate`'s job, and the two are separate on purpose
   (a Kind 38383 update changes what a screen shows without being a lifecycle step). The
   providers re-read on a touch and otherwise only every 30 s, so a new code path that writes a
