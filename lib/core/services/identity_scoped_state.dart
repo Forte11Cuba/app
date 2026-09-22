@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:mostro/features/chat/providers/chat_providers.dart';
@@ -34,5 +35,10 @@ Future<void> resetIdentityScopedState(ProviderContainer container) async {
   container.invalidate(chatReadStatusProvider);
   container.invalidate(disputeNotifierProvider);
   // Persisted (sembast), so it needs a real wipe, not just an invalidation.
+  final notices = container.read(notificationsProvider).length;
   await container.read(notificationsProvider.notifier).wipeForIdentityChange();
+  debugPrint(
+    '[identity] identity-scoped state reset: $notices notification(s) wiped, '
+    '${container.read(notificationsProvider).length} left',
+  );
 }

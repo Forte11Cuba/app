@@ -801,6 +801,11 @@ impl DedupWindow {
         }
         false
     }
+
+    fn clear(&mut self) {
+        self.seen.clear();
+        self.order.clear();
+    }
 }
 
 static PROCESSED_GW: OnceLock<std::sync::Mutex<DedupWindow>> = OnceLock::new();
@@ -812,6 +817,20 @@ fn is_duplicate_daemon_message(event_id: &str) -> bool {
     match window.lock() {
         Ok(mut guard) => guard.record(event_id),
         Err(_) => false,
+    }
+}
+
+/// Empty the dedup window when the identity that filled it goes (issue #533).
+///
+/// The ids it holds were handled for that identity. A same-seed import makes
+/// the relays replay the same history, and each replayed event would be
+/// dropped as already seen — the imported user's trades were only rebuilt by
+/// the next restart, which starts with an empty window.
+fn forget_processed_daemon_messages() {
+    if let Some(window) = PROCESSED_GW.get() {
+        if let Ok(mut guard) = window.lock() {
+            guard.clear();
+        }
     }
 }
 
@@ -8204,6 +8223,7 @@ pub(crate) async fn release_identity_subscriptions() {
     if let Ok(mut misses) = trade_key_misses().write() {
         misses.clear();
     }
+    forget_processed_daemon_messages();
 }
 
 /// Give back the per-trade relay subscriptions of a trade that ended (#523):
@@ -10258,6 +10278,39 @@ mod tests {
     /// that one shares a process-global static with every other test in this
     /// binary, so asserting on it would both depend on and destroy state the
     /// rest of the suite may touch.
+    /// A same-seed import replays the whole kind-14 history under ids this
+    /// process already handled for the identity it replaced. Left in the
+    /// window, every one of them was dropped as a duplicate: the imported
+    /// user's trades were never rebuilt until a restart emptied it.
+    #[test]
+    fn a_cleared_dedup_window_lets_a_replayed_message_through() {
+        // Arrange
+        let mut window = DedupWindow::default();
+        let id = format!("{:064x}", 7);
+        assert!(!window.record(&id));
+
+        // Act
+        window.clear();
+
+        // Assert
+        assert!(!window.record(&id), "a replay after the swap must be handled");
+        assert_eq!(window.seen.len(), window.order.len());
+    }
+
+    #[test]
+    fn releasing_the_identity_forgets_the_daemon_messages_it_handled() {
+        let source = include_str!("orders.rs");
+        let start = source
+            .find("pub(crate) async fn release_identity_subscriptions()")
+            .expect("the identity release exists");
+        let end = start + source[start..].find("\n}\n").expect("the function ends");
+
+        assert!(
+            source[start..end].contains("forget_processed_daemon_messages()"),
+            "the dedup window must not outlive the identity it was filled for"
+        );
+    }
+
     #[test]
     fn daemon_message_dedup_recognizes_repeats_and_evicts_oldest() {
         let mut window = DedupWindow::default();
