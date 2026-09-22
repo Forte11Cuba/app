@@ -3362,7 +3362,7 @@ dependencies = [
 
 [[package]]
 name = "rust"
-version = "2.0.4"
+version = "2.0.5"
 dependencies = [
  "android_logger 0.14.1",
  "anyhow",
