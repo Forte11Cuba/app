@@ -280,11 +280,10 @@ class AppLocalizationsIt extends AppLocalizations {
   String get continueButtonLabel => 'Continua';
 
   @override
-  String get importMnemonicDialogTitle => 'Importa Mnemonica';
+  String get importMnemonicDialogTitle => 'Importa parole segrete';
 
   @override
-  String get importMnemonicHintText =>
-      'Inserisci la tua frase da 12 o 24 parole…';
+  String get importMnemonicHintText => 'Inserisci le tue 12 parole segrete';
 
   @override
   String get importButtonLabel => 'Importa';
@@ -1033,11 +1032,10 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get invalidMnemonicMessage =>
-      'Mnemonico non valido. Controlla le tue parole e riprova.';
+      'Parole segrete non valide. Controlla le tue parole e riprova.';
 
   @override
-  String get enterValidMnemonicError =>
-      'Inserisci una frase valida da 12 o 24 parole.';
+  String get enterValidMnemonicError => 'Inserisci le tue 12 parole segrete.';
 
   @override
   String get orderBookRefreshedMessage => 'Book ordini aggiornato';
@@ -3649,4 +3647,95 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get fundsAtRiskContinue => 'Continua comunque';
+
+  @override
+  String get restoreSheetTitle => 'Ripristino del tuo account';
+
+  @override
+  String get restoreSheetWaiting => 'Può richiedere qualche secondo';
+
+  @override
+  String restoreSheetLoading(int done, int total) {
+    return '$done di $total ordini recuperati';
+  }
+
+  @override
+  String get restoreStageConnecting => 'Connessione al nodo Mostro';
+
+  @override
+  String get restoreStageConnected => 'Connesso al nodo Mostro';
+
+  @override
+  String get restoreStageRequesting => 'Richiesta dei tuoi ordini';
+
+  @override
+  String restoreStageFound(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count ordini trovati',
+      one: '1 ordine trovato',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get restoreStageLoading => 'Caricamento dei dettagli';
+
+  @override
+  String get restoreStageNoResponse => 'Nessuna risposta';
+
+  @override
+  String restoreLoadingCountSemantics(int done, int total) {
+    return '$done di $total ordini';
+  }
+
+  @override
+  String get restoreFailedTitle =>
+      'Non siamo riusciti a ripristinare i tuoi ordini';
+
+  @override
+  String get restoreFailedSubtitle =>
+      'Il tuo account è stato comunque importato';
+
+  @override
+  String restoreFailedBody(String place) {
+    return 'Controlla la connessione e riprova. Puoi riprovare quando vuoi da $place.';
+  }
+
+  @override
+  String get restoreContinueWithout => 'Continua senza ripristinare';
+
+  @override
+  String get restoreDoneTitle => 'Account ripristinato';
+
+  @override
+  String get restoreDoneSubtitle =>
+      'Abbiamo recuperato tutto ciò che il nodo aveva';
+
+  @override
+  String get restoreDoneEmptySubtitle =>
+      'Questo account non aveva ordini sul nodo';
+
+  @override
+  String get restoreSummaryOrders => 'Ordini';
+
+  @override
+  String get restoreSummaryInProgress => 'In corso';
+
+  @override
+  String restoreActionNotice(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Hai $count ordini attivi in attesa di una tua azione',
+      one: 'Hai 1 ordine attivo in attesa di una tua azione',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String restorePartialNotice(int missing, int total) {
+    return '$missing di $total ordini non sono stati caricati';
+  }
 }

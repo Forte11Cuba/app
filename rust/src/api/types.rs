@@ -521,6 +521,21 @@ pub struct OrderBookSnapshot {
     pub loaded: bool,
 }
 
+/// A step of an account restore, pushed by `api::restore_progress` while
+/// `recover_trades` runs, so the restore sheet can show which stage is in
+/// flight. The outcome itself is `recover_trades`' result, not an event here.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RestoreProgress {
+    /// The restore request reached at least one relay.
+    Connected,
+    /// The node answered. `found` is every order and dispute it returned;
+    /// `to_load` is how many of them the app fetches the details of.
+    Found { found: u32, to_load: u32 },
+    /// `done` of the `to_load` orders have their details. A restore that
+    /// ends with `done < to_load` recovered only part of them.
+    Loaded { done: u32, to_load: u32 },
+}
+
 /// "Read this trade again" — the doorbell of `api::trade_touch`. Unlike a
 /// [`TradeUpdate`] it says nothing about what changed and drives no
 /// notification; it only tells a screen its copy may be stale.

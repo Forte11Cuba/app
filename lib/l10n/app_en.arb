@@ -347,11 +347,11 @@
   "@continueButtonLabel": {
     "description": "Continue button label"
   },
-  "importMnemonicDialogTitle": "Import Mnemonic",
+  "importMnemonicDialogTitle": "Import secret words",
   "@importMnemonicDialogTitle": {
     "description": "Dialog title for importing a mnemonic phrase"
   },
-  "importMnemonicHintText": "Enter your 12 or 24 word phrase…",
+  "importMnemonicHintText": "Enter your 12 secret words",
   "@importMnemonicHintText": {
     "description": "Hint text in the mnemonic import text field"
   },
@@ -1315,11 +1315,11 @@
   "@failedToGenerateIdentityMessage": {
     "description": "Snackbar shown when generating a new identity fails on the Account screen"
   },
-  "invalidMnemonicMessage": "Invalid mnemonic. Please check your words and try again.",
+  "invalidMnemonicMessage": "Invalid secret words. Please check your words and try again.",
   "@invalidMnemonicMessage": {
     "description": "Snackbar shown when an imported mnemonic is invalid on the Account screen"
   },
-  "enterValidMnemonicError": "Enter a valid 12 or 24 word phrase.",
+  "enterValidMnemonicError": "Enter your 12 secret words.",
   "@enterValidMnemonicError": {
     "description": "Validation error shown in the import mnemonic dialog when the phrase is not 12 or 24 words"
   },
@@ -4038,5 +4038,47 @@
   "fundsAtRiskKeep": "Keep this user",
   "@fundsAtRiskKeep": {"description": "Safe, primary action of the funds-at-risk warning: abandon the generation or import"},
   "fundsAtRiskContinue": "Continue anyway",
-  "@fundsAtRiskContinue": {"description": "Destructive action of the funds-at-risk warning: go on with the generation or import"}
+  "@fundsAtRiskContinue": {"description": "Destructive action of the funds-at-risk warning: go on with the generation or import"},
+  "restoreSheetTitle": "Restoring your account",
+  "@restoreSheetTitle": {"description": "Restore sheet (design 20a/20b) title while an imported account asks its node for its orders"},
+  "restoreSheetWaiting": "This may take a few seconds",
+  "@restoreSheetWaiting": {"description": "Restore sheet subtitle before the node answered (20a)"},
+  "restoreSheetLoading": "{done} of {total} orders recovered",
+  "@restoreSheetLoading": {"description": "Restore sheet subtitle while order details load (20b); done and total are order counts", "placeholders": {"done": {"type": "int"}, "total": {"type": "int"}}},
+  "restoreStageConnecting": "Connecting to the Mostro node",
+  "@restoreStageConnecting": {"description": "Restore stage 1 while the request has not reached a relay yet"},
+  "restoreStageConnected": "Connected to the Mostro node",
+  "@restoreStageConnected": {"description": "Restore stage 1 once the request reached a relay"},
+  "restoreStageRequesting": "Requesting your orders",
+  "@restoreStageRequesting": {"description": "Restore stage 2 while waiting for the node to answer"},
+  "restoreStageFound": "{count, plural, =1{1 order found} other{{count} orders found}}",
+  "@restoreStageFound": {"description": "Restore stage 2 once the node answered; count is every order and dispute it returned", "placeholders": {"count": {"type": "int"}}},
+  "restoreStageLoading": "Loading details",
+  "@restoreStageLoading": {"description": "Restore stage 3: loading each order's details"},
+  "restoreStageNoResponse": "No response",
+  "@restoreStageNoResponse": {"description": "Tag on the restore stage that failed (20c)"},
+  "restoreLoadingCountSemantics": "{done} of {total} orders",
+  "@restoreLoadingCountSemantics": {"description": "Screen-reader form of the n/N counter of restore stage 3", "placeholders": {"done": {"type": "int"}, "total": {"type": "int"}}},
+  "restoreFailedTitle": "We couldn't restore your orders",
+  "@restoreFailedTitle": {"description": "Restore sheet title when the restore failed (20c)"},
+  "restoreFailedSubtitle": "Your account was imported",
+  "@restoreFailedSubtitle": {"description": "Restore sheet subtitle when it failed: the account import itself is kept"},
+  "restoreFailedBody": "Check your connection and try again. You can retry any time from {place}.",
+  "@restoreFailedBody": {"description": "Restore failure paragraph; place is the Account screen name, shown in bold", "placeholders": {"place": {"type": "String"}}},
+  "restoreContinueWithout": "Continue without restoring",
+  "@restoreContinueWithout": {"description": "Secondary action of the failed restore: close and keep the imported account without orders"},
+  "restoreDoneTitle": "Account restored",
+  "@restoreDoneTitle": {"description": "Restore sheet title once it finished (20d)"},
+  "restoreDoneSubtitle": "We recovered everything the node had",
+  "@restoreDoneSubtitle": {"description": "Restore sheet subtitle once it finished with orders"},
+  "restoreDoneEmptySubtitle": "This account had no orders on the node",
+  "@restoreDoneEmptySubtitle": {"description": "Restore sheet subtitle once it finished and the node had no orders for the account"},
+  "restoreSummaryOrders": "Orders",
+  "@restoreSummaryOrders": {"description": "Label of the restored-orders count in the restore summary"},
+  "restoreSummaryInProgress": "In progress",
+  "@restoreSummaryInProgress": {"description": "Label of the trades-in-progress count in the restore summary"},
+  "restoreActionNotice": "{count, plural, =1{You have 1 active order waiting for you} other{You have {count} active orders waiting for you}}",
+  "@restoreActionNotice": {"description": "Restore summary notice: trades waiting for the user's next step", "placeholders": {"count": {"type": "int"}}},
+  "restorePartialNotice": "{missing} of {total} orders couldn't be loaded",
+  "@restorePartialNotice": {"description": "Restore summary warning when some orders' details did not load; missing and total are counts", "placeholders": {"missing": {"type": "int"}, "total": {"type": "int"}}}
 }

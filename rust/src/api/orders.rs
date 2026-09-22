@@ -4769,6 +4769,11 @@ async fn persist_restored_trade_rows(
     let wanted: std::collections::HashMap<uuid::Uuid, u32> =
         restored_rows_to_fetch(info).into_iter().collect();
     let ids: Vec<uuid::Uuid> = wanted.keys().copied().collect();
+    // For the restore sheet: how many of `to_load` have their details. An
+    // order the node did not send back, or a chunk that failed, leaves the
+    // count short, which the sheet reports as a partial restore.
+    let to_load = ids.len() as u32;
+    let mut done = 0u32;
     for chunk in ids.chunks(OWN_ORDERS_PER_REQUEST) {
         let (orders, sent_at) = match fetch_own_orders(sender_keys, chunk.to_vec()).await {
             Ok(reply) => reply,
@@ -4789,6 +4794,11 @@ async fn persist_restored_trade_rows(
                 }
             };
             persist_restored_trade_row(db, &order, &own, trade_index, sent_at).await;
+            done += 1;
+            crate::api::restore_progress::emit(crate::api::types::RestoreProgress::Loaded {
+                done,
+                to_load,
+            });
         }
     }
 }
@@ -8996,6 +9006,7 @@ pub async fn restore_session() -> Result<mostro_core::message::RestoreSessionInf
         remove_pending_request(&trade_pk_hex, 0);
         return Err(e);
     }
+    crate::api::restore_progress::emit(crate::api::types::RestoreProgress::Connected);
     crate::api::logging::blog_info(
         "restore",
         format!("RestoreSession published trade_index={trade_index} — waiting for daemon"),
@@ -9012,6 +9023,13 @@ pub async fn restore_session() -> Result<mostro_core::message::RestoreSessionInf
             reply: DaemonReply::Restored(info),
             ..
         })) => {
+            // The restore sheet's next stage needs only the answer: reported
+            // before the LastTradeIndex round trip below, which can take its
+            // own timeout.
+            crate::api::restore_progress::emit(crate::api::restore_progress::found(
+                &info,
+                restored_rows_to_fetch(&info).len(),
+            ));
             // #217: raise trade_key_index before returning, so the next
             // derive_trade_key() can't reuse a key a recovered trade already
             // owns. Monotonic and idempotent. A persist failure fails the
@@ -10334,6 +10352,43 @@ mod tests {
     /// process already handled for the identity it replaced. Left in the
     /// window, every one of them was dropped as a duplicate: the imported
     /// user's trades were never rebuilt until a restart emptied it.
+    /// The body of `fn name` in this file, up to its closing brace.
+    fn fn_body(name: &str) -> &'static str {
+        let source = include_str!("orders.rs");
+        let start = source.find(name).expect("the function exists");
+        let end = start + source[start..].find("\n}\n").expect("the function ends");
+        &source[start..end]
+    }
+
+    /// The restore sheet (design 20a–20d) follows the restore through these
+    /// steps; a step that stops being reported leaves the sheet stuck on it.
+    #[test]
+    fn a_restore_reports_each_of_its_steps() {
+        let session = fn_body("pub async fn restore_session()");
+        let published = session.find("publish_event_json(&event_json)").expect("publishes");
+        let connected = session
+            .find("RestoreProgress::Connected")
+            .expect("reports the request reaching a relay");
+        let found = session.find("restore_progress::found(").expect("reports the answer");
+        let rows = session
+            .find("persist_restored_trade_rows(")
+            .expect("loads the details");
+        assert!(published < connected, "Connected only once a relay took the request");
+        assert!(found < rows, "the total is known before the first order loads");
+        let counter = session
+            .find("last_trade_index(&sender_keys)")
+            .expect("asks for the trade-key counter");
+        assert!(
+            found < counter,
+            "the answer is reported before the unrelated LastTradeIndex round trip"
+        );
+
+        assert!(
+            fn_body("async fn persist_restored_trade_rows(").contains("RestoreProgress::Loaded"),
+            "each order's details are reported as they arrive"
+        );
+    }
+
     #[test]
     fn a_cleared_dedup_window_lets_a_replayed_message_through() {
         // Arrange
