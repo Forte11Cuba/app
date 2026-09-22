@@ -1148,7 +1148,6 @@
   "restoreDoneEmptySubtitle": "Dit account had geen orders op de node",
   "restoreSummaryOrders": "Orders",
   "restoreSummaryInProgress": "Lopend",
-  "restoreSummaryReputation": "Reputatie",
   "restoreActionNotice": "{count, plural, =1{Er wacht 1 actieve order op jou} other{Er wachten {count} actieve orders op jou}}",
   "restorePartialNotice": "{missing} van {total} orders konden niet worden geladen"
 }

@@ -195,11 +195,7 @@ void main() {
     ) async {
       await open(
         tester,
-        summary: const RestoreSummary(
-          inProgress: 1,
-          needsAction: 1,
-          rating: 4.8,
-        ),
+        summary: const RestoreSummary(inProgress: 1, needsAction: 1),
       );
       await send(tester, const [
         RestoreProgress.connected(),
@@ -212,7 +208,11 @@ void main() {
       expect(find.text('Recuperamos todo lo que el nodo tenía'), findsOneWidget);
       expect(find.text('3'), findsOneWidget);
       expect(find.text('1'), findsOneWidget);
-      expect(find.text('4.8'), findsOneWidget);
+      expect(
+        find.text('Reputación'),
+        findsNothing,
+        reason: 'the summary has no reputation card',
+      );
       expect(
         find.text('Tienes 1 orden activa esperando tu acción'),
         findsOneWidget,
@@ -235,7 +235,6 @@ void main() {
 
       expect(find.text('Esta cuenta no tenía órdenes en el nodo'), findsOneWidget);
       expect(find.text('0'), findsNWidgets(2));
-      expect(find.text('—'), findsOneWidget, reason: 'no rating known');
       expect(find.byKey(const Key('restore.action')), findsNothing);
     });
 

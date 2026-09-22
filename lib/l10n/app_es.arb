@@ -1148,7 +1148,6 @@
   "restoreDoneEmptySubtitle": "Esta cuenta no tenía órdenes en el nodo",
   "restoreSummaryOrders": "Órdenes",
   "restoreSummaryInProgress": "En curso",
-  "restoreSummaryReputation": "Reputación",
   "restoreActionNotice": "{count, plural, =1{Tienes 1 orden activa esperando tu acción} other{Tienes {count} órdenes activas esperando tu acción}}",
   "restorePartialNotice": "{missing} de {total} órdenes no se pudieron cargar"
 }

@@ -1148,7 +1148,6 @@
   "restoreDoneEmptySubtitle": "Dieses Konto hatte keine Orders auf dem Node",
   "restoreSummaryOrders": "Orders",
   "restoreSummaryInProgress": "Laufend",
-  "restoreSummaryReputation": "Reputation",
   "restoreActionNotice": "{count, plural, =1{1 aktive Order wartet auf dich} other{{count} aktive Orders warten auf dich}}",
   "restorePartialNotice": "{missing} von {total} Orders konnten nicht geladen werden"
 }

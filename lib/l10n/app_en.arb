@@ -4077,8 +4077,6 @@
   "@restoreSummaryOrders": {"description": "Label of the restored-orders count in the restore summary"},
   "restoreSummaryInProgress": "In progress",
   "@restoreSummaryInProgress": {"description": "Label of the trades-in-progress count in the restore summary"},
-  "restoreSummaryReputation": "Reputation",
-  "@restoreSummaryReputation": {"description": "Label of the user's rating in the restore summary"},
   "restoreActionNotice": "{count, plural, =1{You have 1 active order waiting for you} other{You have {count} active orders waiting for you}}",
   "@restoreActionNotice": {"description": "Restore summary notice: trades waiting for the user's next step", "placeholders": {"count": {"type": "int"}}},
   "restorePartialNotice": "{missing} of {total} orders couldn't be loaded",

@@ -1148,7 +1148,6 @@
   "restoreDoneEmptySubtitle": "Ce compte n'avait aucune commande sur le nœud",
   "restoreSummaryOrders": "Commandes",
   "restoreSummaryInProgress": "En cours",
-  "restoreSummaryReputation": "Réputation",
   "restoreActionNotice": "{count, plural, =1{Vous avez 1 commande active qui attend votre action} other{Vous avez {count} commandes actives qui attendent votre action}}",
   "restorePartialNotice": "{missing} commandes sur {total} n'ont pas pu être chargées"
 }

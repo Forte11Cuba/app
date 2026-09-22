@@ -3716,9 +3716,6 @@ class AppLocalizationsNl extends AppLocalizations {
   String get restoreSummaryInProgress => 'Lopend';
 
   @override
-  String get restoreSummaryReputation => 'Reputatie';
-
-  @override
   String restoreActionNotice(int count) {
     String _temp0 = intl.Intl.pluralLogic(
       count,

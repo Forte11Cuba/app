@@ -3724,9 +3724,6 @@ class AppLocalizationsIt extends AppLocalizations {
   String get restoreSummaryInProgress => 'In corso';
 
   @override
-  String get restoreSummaryReputation => 'Reputazione';
-
-  @override
   String restoreActionNotice(int count) {
     String _temp0 = intl.Intl.pluralLogic(
       count,

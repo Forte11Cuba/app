@@ -6202,12 +6202,6 @@ abstract class AppLocalizations {
   /// **'In progress'**
   String get restoreSummaryInProgress;
 
-  /// Label of the user's rating in the restore summary
-  ///
-  /// In en, this message translates to:
-  /// **'Reputation'**
-  String get restoreSummaryReputation;
-
   /// Restore summary notice: trades waiting for the user's next step
   ///
   /// In en, this message translates to:

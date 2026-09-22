@@ -1148,7 +1148,6 @@
   "restoreDoneEmptySubtitle": "Questo account non aveva ordini sul nodo",
   "restoreSummaryOrders": "Ordini",
   "restoreSummaryInProgress": "In corso",
-  "restoreSummaryReputation": "Reputazione",
   "restoreActionNotice": "{count, plural, =1{Hai 1 ordine attivo in attesa di una tua azione} other{Hai {count} ordini attivi in attesa di una tua azione}}",
   "restorePartialNotice": "{missing} di {total} ordini non sono stati caricati"
 }

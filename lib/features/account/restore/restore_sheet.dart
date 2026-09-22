@@ -7,7 +7,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mostro/core/app_theme.dart';
 import 'package:mostro/core/restore_palette.dart';
 import 'package:mostro/features/account/restore/restore_run.dart';
-import 'package:mostro/features/home/providers/home_order_providers.dart';
 import 'package:mostro/features/trades/models/trades_list_rules.dart';
 import 'package:mostro/features/trades/providers/trade_rows_provider.dart';
 import 'package:mostro/l10n/app_localizations.dart';
@@ -31,32 +30,21 @@ Future<void> showRestoreSheet(BuildContext context, {required RestoreRun run}) {
 /// What the finished restore adds up to (20d).
 @immutable
 class RestoreSummary {
-  const RestoreSummary({
-    required this.inProgress,
-    required this.needsAction,
-    this.rating,
-  });
+  const RestoreSummary({required this.inProgress, required this.needsAction});
 
   /// Trades not closed yet.
   final int inProgress;
 
   /// Trades whose next step is the user's.
   final int needsAction;
-
-  /// The user's rating, from the `rating` tag of one of their published
-  /// orders; null when none carries one.
-  final double? rating;
 }
 
-/// Read once the restore finished: what the trade list and the book hold.
+/// Read once the restore finished: what the trade list holds.
 final restoreSummaryProvider = Provider.autoDispose<RestoreSummary>((ref) {
   final rows = ref.watch(tradeRowsProvider).valueOrNull ?? const [];
-  final own = (ref.watch(orderBookProvider).valueOrNull ?? const [])
-      .where((o) => o.isMine && o.tradeCount > 0);
   return RestoreSummary(
     inProgress: rows.where((r) => r.state.group != TradeGroup.closed).length,
     needsAction: rows.where((r) => r.state.needsAction).length,
-    rating: own.isEmpty ? null : own.first.rating,
   );
 });
 
@@ -594,8 +582,6 @@ class _Summary extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    final pal = RestorePalette.of(context);
-    final rating = summary.rating;
     return Row(
       children: [
         _Figure(value: '$found', label: l10n.restoreSummaryOrders),
@@ -604,23 +590,16 @@ class _Summary extends StatelessWidget {
           value: '${summary.inProgress}',
           label: l10n.restoreSummaryInProgress,
         ),
-        const SizedBox(width: 8),
-        _Figure(
-          value: rating == null ? '—' : rating.toStringAsFixed(1),
-          label: l10n.restoreSummaryReputation,
-          color: pal.lime,
-        ),
       ],
     );
   }
 }
 
 class _Figure extends StatelessWidget {
-  const _Figure({required this.value, required this.label, this.color});
+  const _Figure({required this.value, required this.label});
 
   final String value;
   final String label;
-  final Color? color;
 
   @override
   Widget build(BuildContext context) {
@@ -642,7 +621,7 @@ class _Figure extends StatelessWidget {
                 fontFamily: AppFonts.figures,
                 fontSize: 22,
                 fontWeight: FontWeight.w700,
-                color: color ?? pal.text,
+                color: pal.text,
               ),
             ),
             const SizedBox(height: 2),
