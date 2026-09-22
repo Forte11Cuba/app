@@ -1690,8 +1690,28 @@ pub(crate) async fn resubscribe_active_chats() {
             return;
         }
     };
-    for trade in trades.into_iter().filter(chat_still_relevant) {
+    let total = trades.len();
+    let relevant: Vec<_> = trades.into_iter().filter(chat_still_relevant).collect();
+    // Each of these is a REQ, and relays cap them per connection (#560): the
+    // count and each trade's age say whether a stale row is holding one.
+    crate::api::logging::blog_info(
+        "messages",
+        format!(
+            "resubscribing {} chats of {total} persisted trades",
+            relevant.len()
+        ),
+    );
+    for trade in relevant {
         let order_id = trade.order.id.clone();
+        crate::api::logging::blog_debug(
+            "messages",
+            format!(
+                "chat resubscribe order={} status={:?} age={}s",
+                crate::api::logging::short_id(&order_id),
+                trade.order.status,
+                crate::rt::unix_now().saturating_sub(trade.started_at),
+            ),
+        );
         let Ok(trade_keys) =
             crate::api::identity::get_active_trade_keys(trade.trade_key_index).await
         else {
