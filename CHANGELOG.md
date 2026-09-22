@@ -4,6 +4,31 @@ All notable changes to Mostro are documented here, newest first. This file is
 written by the release workflow (docs/RELEASING.md) — do not edit it by hand.
 Versions follow [Semantic Versioning](https://semver.org/).
 
+## [2.0.5] - 2026-09-22
+
+### ✨ Features
+
+- **orders:** read the order's creation time from the NIP-69 tag ([#550](https://github.com/MostroP2P/app/pull/550)) by @grunch
+- **restore:** rebuild trade rows from the daemon's own record ([#546](https://github.com/MostroP2P/app/pull/546)) by @grunch
+- **account:** warn before replacing an identity with sats in play ([#545](https://github.com/MostroP2P/app/pull/545)) by @grunch
+- **restore:** recover the chat peer from the restore reply ([#544](https://github.com/MostroP2P/app/pull/544)) by @grunch
+- **l10n:** add Dutch (nl) translation ([#537](https://github.com/MostroP2P/app/pull/537)) by @BBakker26
+
+### 🐛 Bug Fixes
+
+- **account:** an identity swap shows the new user without a restart ([#557](https://github.com/MostroP2P/app/pull/557)) by @grunch
+- **trades:** handle takes left Canceled by the old optimistic cancel ([#448](https://github.com/MostroP2P/app/pull/448)) by @Catrya
+- **home:** the order book grid survives an order coming back ([#455](https://github.com/MostroP2P/app/pull/455)) by @Catrya
+- **account:** a new identity starts from zero ([#543](https://github.com/MostroP2P/app/pull/543)) by @grunch
+
+### ♻️ Refactoring
+
+- **l10n:** list languages from the ARB files; fix the own-order header at 2x text ([#542](https://github.com/MostroP2P/app/pull/542)) by @BBakker26
+
+### 🧹 Chores
+
+- **claude:** block commits whose generated code is stale ([#547](https://github.com/MostroP2P/app/pull/547)) by @grunch
+
 ## [2.0.4] - 2026-09-21
 
 ### ✨ Features
