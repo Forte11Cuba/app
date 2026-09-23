@@ -243,12 +243,11 @@ fn network_matches(invoice_network: &str, node_networks: &[String]) -> bool {
 /// fall back to the row's own `started_at` instead of counting from a step
 /// that ended hours ago (#567).
 ///
-/// It is checked here because nothing records a start for a take: the take's
-/// first reply is consumed by the waiting `take_order` before the per-action
-/// arms run, so the arm that would record it never sees that message. The
-/// dispatcher does, ahead of the interception — `maybe_capture_peer_reveal`
-/// already reads it there — so this is where the guard sits today, not the
-/// only place it could.
+/// Defence in depth, not the only line: the dispatcher records a start for
+/// the take's own reply at the interception that consumes it, so the key is
+/// normally on the current generation already. This refuses what a write
+/// path missed — a start left by a take whose messages stopped arriving,
+/// say — instead of counting from a step that ended hours ago.
 pub async fn trade_step_started_at(order_id: String) -> Option<i64> {
     let db = crate::db::app_db::db()?;
     let stored = db

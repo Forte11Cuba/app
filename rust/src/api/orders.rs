@@ -3101,6 +3101,28 @@ async fn dispatch_mostro_message(
     if kind.action != Action::CantDo {
         if let Some(pending) = take_matching_take(trade_pubkey_hex, kind.request_id) {
             let reply = classify_take_reply(&kind.action, &kind.payload);
+            // This message opens the taker's first step and no arm will ever
+            // see it, so the start is recorded here or not at all. Without it
+            // the screen fell back to the row's `started_at` — the local clock
+            // at take time, close but not the daemon's, and only available to
+            // a taker (#567).
+            if let Some(order_id) = &kind.id {
+                let status = match kind.action {
+                    Action::AddInvoice => add_invoice_sync(&kind.payload)
+                        .map(|(status, _)| format!("{status:?}")),
+                    Action::PayInvoice => Some("WaitingPayment".to_string()),
+                    _ => None,
+                };
+                if let Some(status) = status {
+                    crate::api::invoice::record_invoice_step_start(
+                        &order_id.to_string(),
+                        &status,
+                        event_ts,
+                        trade_index,
+                    )
+                    .await;
+                }
+            }
             if let Some(tx) = pending.tx {
                 crate::api::logging::blog_info(
                     "daemon-msg",
@@ -13943,6 +13965,55 @@ mod tests {
             }
         }
         assert!(emitted, "the UI must learn the order is pending again");
+    }
+
+    /// A take's first reply is consumed before the per-action arms, so the
+    /// arm that records a step start never runs for it. The dispatcher
+    /// records it at the interception instead, which is what gives a taker
+    /// the daemon's own step start rather than the row's local `started_at`.
+    #[tokio::test]
+    async fn a_takes_first_reply_records_its_step_start() {
+        use mostro_core::message::{Action, Message, Payload};
+
+        // Arrange: a take waiting on its nonce, as `take_order` leaves it.
+        let path =
+            std::env::temp_dir().join(format!("mostro_take_step_{}.db", std::process::id()));
+        let _ = crate::db::app_db::init_db(path.to_str().unwrap()).await;
+        let order_uuid = uuid::Uuid::new_v4();
+        let order_id = order_uuid.to_string();
+        let trade_pubkey = "aa00bb11cc22dd33ee44ff55aa66bb77";
+        let request_id = 4242_u64;
+        let _rx = insert_pending_take(trade_pubkey, request_id);
+
+        let taken_at = crate::rt::unix_now() - 30;
+        let sender = nostr_sdk::prelude::PublicKey::from_hex(&active_mostro_pubkey())
+            .expect("valid mostro pubkey");
+        let reply = mostro_core::nip59::UnwrappedMessage {
+            message: Message::new_order(
+                Some(order_uuid),
+                Some(request_id),
+                None,
+                Action::PayInvoice,
+                Some(Payload::PaymentRequest(
+                    None,
+                    "lnbc1invoice".into(),
+                    Some(1000),
+                )),
+            ),
+            signature: None,
+            sender,
+            identity: sender,
+            created_at: nostr_sdk::prelude::Timestamp::from(taken_at as u64),
+        };
+
+        // Act
+        dispatch_mostro_message(reply, "test-take-reply", trade_pubkey, 4).await;
+
+        // Assert: the daemon's timestamp, not the local clock.
+        assert_eq!(
+            crate::api::invoice::trade_step_started_at(order_id).await,
+            Some(taken_at),
+        );
     }
 
     /// The maker's half of #567, which the generation on the key cannot
