@@ -5523,6 +5523,24 @@ async fn resync_republished_maker_order(
                 ),
             );
         }
+        // The step this maker was in is over, and the generation on the key
+        // cannot say so: a maker keeps one trade key for the whole life of
+        // the order — mostrod's taker-cancel path clears only the
+        // counterparty's pubkeys (`edit_pubkeys_order`) — so the next take's
+        // AddInvoice / PayInvoice arrives on the same index and reads as the
+        // same step. Clearing here is what opens the new one (#567 review).
+        if let Err(e) = db
+            .delete_setting(&crate::db::settings_keys::invoice_step_start(order_id))
+            .await
+        {
+            crate::api::logging::blog_warn(
+                "orders",
+                format!(
+                    "step start not cleared for republished order={}: {e}",
+                    crate::api::logging::short_id(order_id),
+                ),
+            );
+        }
     }
     emit_trade_update_at(order_id, OrderStatus::Pending, None, event_ts);
     true
@@ -13925,6 +13943,121 @@ mod tests {
             }
         }
         assert!(emitted, "the UI must learn the order is pending again");
+    }
+
+    /// The maker's half of #567, which the generation on the key cannot
+    /// reach. A maker keeps one trade key for the whole life of the order —
+    /// mostrod's taker-cancel path clears only the counterparty's pubkeys
+    /// (`edit_pubkeys_order`) — so the next take's `PayInvoice` arrives on
+    /// the same index with the same status and a later timestamp, and
+    /// `next_step_start` reads it as the step already recorded. The maker has
+    /// no `started_at` fallback either, so that stale start is the only
+    /// deadline their screen gets.
+    ///
+    /// The republish is what ends the step, so it is what clears the key.
+    #[tokio::test]
+    async fn a_republished_maker_order_opens_a_new_step_for_the_next_take() {
+        use mostro_core::message::{Action, Message, Payload};
+
+        // Arrange: a maker sitting in `waiting-payment` on trade key 7, with
+        // the first take's step start recorded against that same key.
+        let path =
+            std::env::temp_dir().join(format!("mostro_maker_step_{}.db", std::process::id()));
+        let _ = crate::db::app_db::init_db(path.to_str().unwrap()).await;
+        let db = crate::db::app_db::db().expect("store initialised");
+
+        let order_uuid = uuid::Uuid::new_v4();
+        let order_id = order_uuid.to_string();
+        let mut order_info = dummy_order_info(&order_id);
+        order_info.kind = crate::api::types::OrderKind::Sell;
+        order_info.status = crate::api::types::OrderStatus::WaitingPayment;
+        order_info.is_mine = true;
+        order_book().upsert_order(order_info.clone()).await;
+        let mut row = cancel_test_row(order_info);
+        row.trade_key_index = 7;
+        db.save_trade(&row).await.expect("save the maker's row");
+        let first_take = crate::rt::unix_now() - 600;
+        crate::api::invoice::record_invoice_step_start(
+            &order_id,
+            "WaitingPayment",
+            first_take,
+            7,
+        )
+        .await;
+        assert_eq!(
+            crate::api::invoice::trade_step_started_at(order_id.clone()).await,
+            Some(first_take),
+            "precondition: the first take's start is on record"
+        );
+
+        let sender = nostr_sdk::prelude::PublicKey::from_hex(&active_mostro_pubkey())
+            .expect("valid mostro pubkey");
+        let daemon = |action: Action, payload: Option<Payload>, ts: i64| {
+            mostro_core::nip59::UnwrappedMessage {
+                message: Message::new_order(Some(order_uuid), None, None, action, payload),
+                signature: None,
+                sender,
+                identity: sender,
+                created_at: nostr_sdk::prelude::Timestamp::from(ts as u64),
+            }
+        };
+
+        // Act: the taker walks away, the daemon puts the order back on the
+        // book, and a new taker pays — all on the maker's one key.
+        let republished = mostro_core::order::SmallOrder::new(
+            Some(order_uuid),
+            Some(mostro_core::order::Kind::Sell),
+            Some(mostro_core::order::Status::Pending),
+            1000,
+            "ARS".to_string(),
+            None,
+            None,
+            1000,
+            "cash".to_string(),
+            0,
+            None,
+            None,
+            None,
+            None,
+            None,
+        );
+        let republish_ts = first_take + 60;
+        dispatch_mostro_message(
+            daemon(
+                Action::NewOrder,
+                Some(Payload::Order(republished)),
+                republish_ts,
+            ),
+            "test-maker-republish",
+            "ff00ff07",
+            7,
+        )
+        .await;
+
+        let second_take = republish_ts + 60;
+        dispatch_mostro_message(
+            daemon(
+                Action::PayInvoice,
+                Some(Payload::PaymentRequest(
+                    None,
+                    "lnbc1invoice".into(),
+                    Some(1000),
+                )),
+                second_take,
+            ),
+            "test-maker-retake",
+            "ff00ff07",
+            7,
+        )
+        .await;
+
+        // Assert: the screen counts the step that is running, not the one
+        // that ended ten minutes ago.
+        assert_eq!(
+            crate::api::invoice::trade_step_started_at(order_id).await,
+            Some(second_take),
+            "the maker's countdown stayed on the previous take's step"
+        );
     }
 
     /// A release must know whether it leaves a remainder: a missing trade

@@ -321,6 +321,15 @@ pub(crate) async fn record_invoice_step_start(
 /// for a superseded key and says nothing about the step now running, and
 /// inside one generation the earliest message of a step is still its start
 /// (issue #567).
+///
+/// **That covers a taker, who gets a fresh key per take, and not a maker,
+/// who keeps one key for the whole life of the order** — mostrod's
+/// taker-cancel path clears only the counterparty's pubkeys
+/// (`edit_pubkeys_order`), so a later take reaches the maker on the same
+/// index and reads here as the same step. The maker's new step is opened by
+/// deleting the key when the order goes back to the book
+/// (`resync_republished_maker_order`), not by anything this function can
+/// tell. Two mechanisms, one per role.
 fn next_step_start(
     existing: Option<&str>,
     status: &str,
