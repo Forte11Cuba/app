@@ -3113,6 +3113,7 @@ async fn dispatch_mostro_message(
                 &kind.action,
                 kind.payload.as_ref(),
                 trade_index,
+                event_age_secs,
             )
             .await;
         }
@@ -4799,6 +4800,11 @@ async fn persist_restored_trade_rows(
     let wanted: std::collections::HashMap<uuid::Uuid, u32> =
         restored_rows_to_fetch(info).into_iter().collect();
     let ids: Vec<uuid::Uuid> = wanted.keys().copied().collect();
+    // For the restore sheet: how many of `to_load` have their details. An
+    // order the node did not send back, or a chunk that failed, leaves the
+    // count short, which the sheet reports as a partial restore.
+    let to_load = ids.len() as u32;
+    let mut done = 0u32;
     for chunk in ids.chunks(OWN_ORDERS_PER_REQUEST) {
         let (orders, sent_at) = match fetch_own_orders(sender_keys, chunk.to_vec()).await {
             Ok(reply) => reply,
@@ -4819,6 +4825,11 @@ async fn persist_restored_trade_rows(
                 }
             };
             persist_restored_trade_row(db, &order, &own, trade_index, sent_at).await;
+            done += 1;
+            crate::api::restore_progress::emit(crate::api::types::RestoreProgress::Loaded {
+                done,
+                to_load,
+            });
         }
     }
 }
@@ -6027,6 +6038,7 @@ async fn maybe_capture_peer_reveal(
     action: &mostro_core::message::Action,
     payload: Option<&mostro_core::message::Payload>,
     trade_index: u32,
+    event_age_secs: i64,
 ) {
     let Some((buyer_hex, seller_hex)) = peer_reveal_pubkeys(payload) else {
         return;
@@ -6090,7 +6102,18 @@ async fn maybe_capture_peer_reveal(
         }
         crate::api::trade_touch::touch_trade(order_id);
     }
-    apply_peer_reveal(order_id, &peer_hex, &trade_keys, trade_index, role).await;
+    // A replayed reveal of a trade that can no longer chat still heals the
+    // row above; what it must not do is open a chat REQ (#560).
+    let with_chat = reveal_warrants_chat(order_id, event_age_secs).await;
+    apply_peer_reveal(
+        order_id,
+        &peer_hex,
+        &trade_keys,
+        trade_index,
+        role,
+        with_chat,
+    )
+    .await;
 }
 
 /// Pure payload side of the reveal: the two trade pubkeys a daemon payload
@@ -6146,12 +6169,51 @@ fn resolve_peer_side(
 /// the capture so tests can exercise the session logic with generated keys
 /// instead of mutating the process-global identity (shared with every other
 /// test in the binary).
+/// A reveal older than this, with no trade row to judge it by, is history
+/// the global kind-14 feed replayed, not a trade starting.
+const FRESH_REVEAL_SECS: i64 = 120;
+
+/// Whether this reveal warrants a **live chat REQ**, given the trade's row
+/// (`None` when it has none yet) and the age of the event that carried it.
+///
+/// Every start replays the node's whole kind-14 history, and every replayed
+/// reveal used to open one: 35 peer-chat REQs on a single start, which is
+/// what filled nos.lol's per-connection cap (#560). The chat of a trade that
+/// can no longer chat is history — already persisted, and re-read from the
+/// `messages` table — so only a trade that is still live gets a REQ. This is
+/// `resubscribe_active_chats`' rule (`chat_still_relevant`), which the
+/// restart path has always applied and the replay path never did.
+///
+/// With no row the age decides: a take's first reply reveals the peer before
+/// `persist_confirmed_take` writes the row, so a fresh reveal must still open
+/// the chat. A row that shows up later through the #394 rebuild does not
+/// reopen it — the next start does (its chat is then persisted and relevant).
+fn reveal_warrants_chat_with(
+    row: Option<&crate::api::types::TradeInfo>,
+    event_age_secs: i64,
+) -> bool {
+    match row {
+        Some(row) => crate::api::messages::chat_still_relevant(row),
+        None => event_age_secs < FRESH_REVEAL_SECS,
+    }
+}
+
+/// [`reveal_warrants_chat_with`] against the persisted row.
+async fn reveal_warrants_chat(order_id: &str, event_age_secs: i64) -> bool {
+    let row = match crate::db::app_db::db() {
+        Some(db) => db.get_trade_by_order_id(order_id).await.ok().flatten(),
+        None => None,
+    };
+    reveal_warrants_chat_with(row.as_ref(), event_age_secs)
+}
+
 async fn apply_peer_reveal(
     order_id: &str,
     peer_pubkey_hex: &str,
     trade_keys: &nostr_sdk::prelude::Keys,
     trade_index: u32,
     role: TradeRole,
+    with_chat: bool,
 ) {
     let peer_pubkey = match nostr_sdk::prelude::PublicKey::from_hex(peer_pubkey_hex) {
         Ok(pk) => pk,
@@ -6233,6 +6295,18 @@ async fn apply_peer_reveal(
         log::warn!(
             "[orders] peer-reveal: no session and none creatable for order={order_id} — incoming subscription still spawned"
         );
+    }
+    // The durable capture above happens either way; only the live REQ is
+    // gated (#560).
+    if !with_chat {
+        crate::api::logging::blog_debug(
+            "orders",
+            format!(
+                "peer-reveal order={}: no chat subscription — the trade can no longer chat",
+                crate::api::logging::short_id(order_id),
+            ),
+        );
+        return;
     }
     // Derive the chat conversation keys (K_conv / K_sign — HKDF split of the
     // trade-key ECDH secret, protocol chat spec) and spawn the incoming-chat
@@ -6389,7 +6463,7 @@ async fn subscribe_single_order(order_id: &str) {
     let order_id = order_id.to_string();
     // Claimed before the spawn, so a retake that calls this again supersedes
     // the earlier take's task at once rather than after it gets scheduled.
-    let (generation, replaced) = claim_single_order_task(&order_id);
+    let (generation, _) = claim_single_order_task(&order_id);
     crate::rt::spawn(async move {
         let Ok(pool) = crate::api::nostr::get_pool() else {
             log::warn!("[orders] subscribe_single_order: relay pool not initialized");
@@ -6408,26 +6482,18 @@ async fn subscribe_single_order(order_id: &str) {
             };
 
         let mut rx = client.notifications();
-        let filter = crate::nostr::order_events::trade_order_filter(&mostro_pubkey, &order_id);
-        let sub_id = single_order_subscription_id(&order_id);
-        // A retake: the earlier take's REQ is still open under this same id,
-        // and nostr-sdk refuses a subscribe whose id exists (it keeps the old
-        // filter and reports that per relay, not as an error). `replace` drops
-        // it and issues this one in a single critical section, so the
-        // superseded task cannot slot its own subscribe in between; the relay
-        // replays the order's latest event on the new REQ, so nothing is
-        // missed.
-        let subscribed = if replaced {
-            replace_subscription(&client, sub_id.clone(), filter).await
-        } else {
-            subscribe_accepted(&client, sub_id.clone(), filter).await
-        };
-        if let Err(e) = subscribed {
-            release_single_order_task(&order_id, generation);
+        // The order joins the one REQ every watched order shares, which
+        // replays its latest revision. A retake re-issues it the same way.
+        // With the pool offline the REQ is deferred to each relay's connect
+        // rather than failed, so the task keeps watching.
+        if let Err(e) = sync_watched_orders(&client).await {
+            if release_single_order_task(&order_id, generation) {
+                resync_watched_orders(&client).await;
+            }
             log::warn!("[orders] subscribe_single_order subscribe failed: {e}");
             return;
         }
-        log::info!("[orders] subscribed to d-tag updates for order={order_id}");
+        log::info!("[orders] watching d-tag updates for order={order_id}");
 
         use crate::rt::time::{timeout, Duration};
         use nostr_sdk::prelude::{ClientNotification, StreamExt};
@@ -6473,13 +6539,11 @@ async fn subscribe_single_order(order_id: &str) {
             }
         }
 
-        // Drop the relay-side REQ; see subscribe_daemon_messages. Only while
-        // this task still owns it: a superseded task leaves the REQ to the
-        // retake's task, which re-opened it under the same id.
+        // Take the order out of the shared REQ; see subscribe_daemon_messages.
+        // Only while this task still owns it: a superseded task leaves the
+        // order to the retake's task.
         if release_single_order_task(&order_id, generation) {
-            crate::nostr::live_subs::live_subs()
-                .close(&client, &sub_id)
-                .await;
+            resync_watched_orders(&client).await;
         } else {
             crate::api::logging::blog_debug(
                 "orders",
@@ -6493,7 +6557,7 @@ async fn subscribe_single_order(order_id: &str) {
 }
 
 /// Live single-order tasks, by order id: the generation of the task that owns
-/// the order's `mostro-order-<id>` subscription.
+/// the order's place in the shared `mostro-orders-watched` subscription.
 ///
 /// A retake calls [`subscribe_single_order`] again while the first take's
 /// task may still be running — it stops only on a 30-minute idle, a shutdown
@@ -6901,15 +6965,32 @@ async fn apply_restored_peer(
         ),
     );
     crate::api::trade_touch::touch_trade(order_id);
+    // The row is in hand here: a restored trade that can no longer chat gets
+    // its peer back without a chat REQ (#560).
     apply_peer_reveal(
         order_id,
         &peer,
         trade_keys,
         trade.trade_key_index,
         trade.role.clone(),
+        restored_chat_relevant(trade, &peer),
     )
     .await;
     true
+}
+
+/// Whether the trade the restore just filled still warrants a chat REQ.
+///
+/// [`crate::api::messages::chat_still_relevant`] reads the row's
+/// `counterparty_pubkey`, and the row in hand still carries the empty one the
+/// restore is replacing — asked as it stands it always answers no, and a live
+/// restored trade would get its peer back and never subscribe to incoming
+/// chat. So it is asked about the row as it will be.
+fn restored_chat_relevant(trade: &crate::api::types::TradeInfo, peer: &str) -> bool {
+    crate::api::messages::chat_still_relevant(&crate::api::types::TradeInfo {
+        counterparty_pubkey: peer.to_string(),
+        ..trade.clone()
+    })
 }
 
 /// [`reconcile_restored_history`] with the public-status lookup injected.
@@ -7346,9 +7427,51 @@ fn orders_subscription_id() -> nostr_sdk::prelude::SubscriptionId {
     nostr_sdk::prelude::SubscriptionId::new("mostro-orders")
 }
 
-/// Stable id for a single order's d-tag update subscription.
-fn single_order_subscription_id(order_id: &str) -> nostr_sdk::prelude::SubscriptionId {
-    nostr_sdk::prelude::SubscriptionId::new(format!("mostro-order-{order_id}"))
+/// Stable id of the one d-tag subscription every watched order shares.
+fn watched_orders_subscription_id() -> nostr_sdk::prelude::SubscriptionId {
+    nostr_sdk::prelude::SubscriptionId::new("mostro-orders-watched")
+}
+
+/// Point `mostro-orders-watched` at the orders the d-tag tasks hold now, or
+/// close it when they hold none. Every change to [`single_order_tasks`] is
+/// followed by a call.
+///
+/// Serialized, and both the set and the active node are read inside the
+/// critical section: two tasks that claim and release at once cannot leave
+/// the older set on the relays, and a task that captured the previous node
+/// before a switch cannot pin every watched order to it. The REQ replays
+/// each order's latest revision; the tasks match events by order id and a
+/// revision the row already holds writes nothing.
+async fn sync_watched_orders(client: &nostr_sdk::prelude::Client) -> Result<()> {
+    static SYNC: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
+    let _serial = SYNC.get_or_init(Default::default).lock().await;
+    let mostro_pubkey =
+        nostr_sdk::prelude::PublicKey::from_hex(&crate::config::active_mostro_pubkey())
+            .map_err(|e| anyhow::anyhow!("invalid mostro pubkey: {e}"))?;
+    let mut ids: Vec<String> = single_order_tasks()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .keys()
+        .cloned()
+        .collect();
+    ids.sort();
+    let subs = crate::nostr::live_subs::live_subs();
+    if ids.is_empty() {
+        subs.close(client, &watched_orders_subscription_id()).await;
+        return Ok(());
+    }
+    let filter = crate::nostr::order_events::watched_orders_filter(&mostro_pubkey, &ids);
+    subs.replace(client, watched_orders_subscription_id(), filter)
+        .await
+        .map(|_| ())
+}
+
+/// [`sync_watched_orders`], logged instead of returned: for the callers that
+/// have nothing to undo when it fails.
+async fn resync_watched_orders(client: &nostr_sdk::prelude::Client) {
+    if let Err(e) = sync_watched_orders(client).await {
+        log::warn!("[orders] watched-orders subscription not updated: {e}");
+    }
 }
 
 /// Stable subscription ID for the windowed any-status Kind 38383 feed that
@@ -7592,6 +7715,9 @@ pub(crate) async fn refresh_subscriptions_for_active_node() {
         log::error!("[orders] node switch: re-subscribe failed: {e}");
         return;
     }
+    // The shared d-tag REQ is author-pinned too: one stale node there
+    // silences every watched order, not just one.
+    resync_watched_orders(&client).await;
 
     // Repopulate the cleared book with the new node's current orders (the live
     // stream won't redeliver already-seen events — see refetch_active_node_orders).
@@ -8186,6 +8312,15 @@ async fn _run_order_subscription() {
                                 crate::api::logging::sanitize_relay_text(&msg),
                             ),
                         );
+                        // It names no subscription, so there is nothing to
+                        // repair — only a record of what filled the cap.
+                        if crate::nostr::req_census::is_req_cap_notice(&msg) {
+                            crate::nostr::req_census::report_req_cap(
+                                &client,
+                                &relay_url.to_string(),
+                            )
+                            .await;
+                        }
                     }
                     RelayMessage::Auth { .. } => {
                         crate::api::logging::blog_debug(
@@ -8318,12 +8453,10 @@ fn trade_is_over(row: Option<&crate::api::types::TradeInfo>) -> bool {
 /// relays' REQ caps. Offline there is nothing to close, and the in-memory
 /// state goes all the same.
 pub(crate) async fn release_identity_subscriptions() {
-    let watched_orders: Vec<String> = single_order_tasks()
+    single_order_tasks()
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .drain()
-        .map(|(order_id, _)| order_id)
-        .collect();
+        .clear();
     // Every trade key the bulk feed covers — a superset of the keys with a
     // per-trade watcher, since each of those joins the coverage when derived.
     let covered_keys: Vec<String> = global_dm_keys()
@@ -8336,10 +8469,7 @@ pub(crate) async fn release_identity_subscriptions() {
     if let Ok(pool) = crate::api::nostr::get_pool() {
         let client = pool.client();
         let subs = crate::nostr::live_subs::live_subs();
-        for order_id in &watched_orders {
-            subs.close(&client, &single_order_subscription_id(order_id))
-                .await;
-        }
+        subs.close(&client, &watched_orders_subscription_id()).await;
         for trade_pubkey in &covered_keys {
             crate::nostr::subscriptions::teardown(&client, trade_pubkey).await;
         }
@@ -8359,7 +8489,7 @@ pub(crate) async fn release_identity_subscriptions() {
 }
 
 /// Give back the per-trade relay subscriptions of a trade that ended (#523):
-/// its `mostro-order-<id>` d-tag watcher, its daemon-message watcher and its
+/// its place in the shared d-tag REQ, its daemon-message watcher and its
 /// chat REQs. They used to linger until a 30-minute idle, or the whole
 /// session for chats, and relays cap concurrent REQs (nos.lol, and
 /// relay.mostro.network's `CLOSED: exceeds limit`). The bulk kind-14 feed
@@ -8382,14 +8512,14 @@ fn release_finished_trade_subscriptions(order_id: &str, known_index: Option<u32>
             return;
         };
         let client = pool.client();
-        // Still under the order lock: these REQs are keyed by the order id,
-        // and a retake re-opens them under the same ids. A CLOSE sent after
-        // the lock would land on the retake's subscriptions. It only sends
-        // frames — no daemon reply is awaited, as `lock_order` requires.
+        // Still under the order lock: the chat REQs are keyed by the order
+        // id, and a retake re-opens them under the same ids. A CLOSE sent
+        // after the lock would land on the retake's subscriptions. It only
+        // sends frames — no daemon reply is awaited, as `lock_order` requires.
+        // The shared d-tag REQ is rebuilt from the task set, which a retake
+        // re-joins, so it is safe either side of the lock.
         if release.owned_d_tag {
-            crate::nostr::live_subs::live_subs()
-                .close(&client, &single_order_subscription_id(&order_id))
-                .await;
+            resync_watched_orders(&client).await;
         }
         let chats = crate::api::messages::stop_chat_subscriptions(&order_id).await;
         drop(release.order_lock);
@@ -9076,6 +9206,7 @@ pub async fn restore_session() -> Result<mostro_core::message::RestoreSessionInf
         remove_pending_request(&trade_pk_hex, 0);
         return Err(e);
     }
+    crate::api::restore_progress::emit(crate::api::types::RestoreProgress::Connected);
     crate::api::logging::blog_info(
         "restore",
         format!("RestoreSession published trade_index={trade_index} — waiting for daemon"),
@@ -9092,6 +9223,13 @@ pub async fn restore_session() -> Result<mostro_core::message::RestoreSessionInf
             reply: DaemonReply::Restored(info),
             ..
         })) => {
+            // The restore sheet's next stage needs only the answer: reported
+            // before the LastTradeIndex round trip below, which can take its
+            // own timeout.
+            crate::api::restore_progress::emit(crate::api::restore_progress::found(
+                &info,
+                restored_rows_to_fetch(&info).len(),
+            ));
             // #217: raise trade_key_index before returning, so the next
             // derive_trade_key() can't reuse a key a recovered trade already
             // owns. Monotonic and idempotent. A persist failure fails the
@@ -9224,8 +9362,7 @@ mod tests {
         let ids = [
             daemon_message_subscription_id(&a),
             daemon_message_subscription_id(&b),
-            single_order_subscription_id(&a),
-            single_order_subscription_id(&b),
+            watched_orders_subscription_id(),
             orders_subscription_id(),
             recent_orders_subscription_id(),
             relay_list_subscription_id(),
@@ -9247,11 +9384,10 @@ mod tests {
     fn subscription_ids_fit_nip01() {
         const NIP01_MAX_SUBSCRIPTION_ID_LEN: usize = 64;
         let trade_pubkey_hex = "ab".repeat(32);
-        let order_id = "3f2504e0-4f89-11d3-9a0c-0305e82c3301";
 
         for id in [
             daemon_message_subscription_id(&trade_pubkey_hex),
-            single_order_subscription_id(order_id),
+            watched_orders_subscription_id(),
             orders_subscription_id(),
             recent_orders_subscription_id(),
             relay_list_subscription_id(),
@@ -9263,6 +9399,98 @@ mod tests {
                 "subscription id {id} is {len} chars; NIP-01 relays reject anything over 64"
             );
         }
+    }
+
+    /// #560: a start replays the node's whole kind-14 history, and every
+    /// replayed reveal used to open a peer-chat REQ — 35 of them on one
+    /// start, which is what filled nos.lol's cap. A live chat belongs to a
+    /// trade that can still chat; the rest is history, already persisted.
+    #[test]
+    fn only_a_live_trade_gets_a_chat_req() {
+        use crate::api::types::OrderStatus;
+
+        let row = |status: OrderStatus, outcome| crate::api::types::TradeInfo {
+            counterparty_pubkey: "ab".repeat(32),
+            order: crate::api::types::OrderInfo {
+                creator_pubkey: "cd".repeat(32),
+                ..wire_order("order-1", status.clone())
+            },
+            outcome,
+            ..cancel_test_row(wire_order("order-1", status))
+        };
+        let live = row(OrderStatus::Active, None);
+        let finished = row(
+            OrderStatus::Success,
+            Some(crate::api::types::TradeOutcome::Success),
+        );
+
+        // A row decides on its own: its age says nothing (a long trade's
+        // reveal is replayed old and still needs its chat).
+        assert!(reveal_warrants_chat_with(Some(&live), 2_512_438));
+        assert!(!reveal_warrants_chat_with(Some(&finished), 0));
+        // No row yet: a take's first reply reveals the peer before
+        // `persist_confirmed_take` writes it, so a fresh reveal still opens
+        // the chat — a replayed one does not.
+        assert!(reveal_warrants_chat_with(None, 5));
+        assert!(!reveal_warrants_chat_with(None, 2_512_438));
+    }
+
+    /// Every order we follow shares one REQ instead of one each — a REQ per
+    /// order filled nos.lol's cap ("too many concurrent REQs"). The REQ
+    /// follows the set of live d-tag tasks as they claim and release orders.
+    #[tokio::test]
+    async fn watched_orders_share_one_subscription_that_follows_the_task_set() {
+        use nostr_sdk::local_relay::MockRelay;
+        use nostr_sdk::prelude::{Client, SingleLetterTag};
+
+        // Arrange
+        let relay = MockRelay::run().await.expect("mock relay");
+        let url = relay.url().await;
+        let client = Client::new();
+        client.add_relay(&url).await.expect("add relay");
+        client
+            .try_connect_relay(url, std::time::Duration::from_secs(3))
+            .await
+            .expect("connect");
+        let (a, b) = (
+            uuid::Uuid::new_v4().to_string(),
+            uuid::Uuid::new_v4().to_string(),
+        );
+        // Other tests claim orders concurrently: check ours, not the whole set.
+        let watched = || async {
+            client
+                .subscription(&watched_orders_subscription_id())
+                .await
+                .values()
+                .flatten()
+                .flat_map(|f| {
+                    f.generic_tags
+                        .get(&SingleLetterTag::LOWERCASE_D)
+                        .cloned()
+                        .unwrap_or_default()
+                })
+                .collect::<std::collections::BTreeSet<String>>()
+        };
+
+        // Act + Assert
+        let (gen_a, _) = claim_single_order_task(&a);
+        let (gen_b, _) = claim_single_order_task(&b);
+        sync_watched_orders(&client).await.expect("sync");
+        let both = watched().await;
+        assert!(
+            both.contains(&a) && both.contains(&b),
+            "one REQ follows both: {both:?}"
+        );
+
+        assert!(release_single_order_task(&a, gen_a));
+        sync_watched_orders(&client).await.expect("sync");
+        let only_b = watched().await;
+        assert!(!only_b.contains(&a), "a released order leaves the REQ");
+        assert!(only_b.contains(&b), "the others stay followed");
+
+        assert!(release_single_order_task(&b, gen_b));
+        sync_watched_orders(&client).await.expect("sync");
+        assert!(!watched().await.contains(&b));
     }
 
     /// A node switch re-runs `subscribe_node_filters` under the same stable
@@ -10414,6 +10642,43 @@ mod tests {
     /// process already handled for the identity it replaced. Left in the
     /// window, every one of them was dropped as a duplicate: the imported
     /// user's trades were never rebuilt until a restart emptied it.
+    /// The body of `fn name` in this file, up to its closing brace.
+    fn fn_body(name: &str) -> &'static str {
+        let source = include_str!("orders.rs");
+        let start = source.find(name).expect("the function exists");
+        let end = start + source[start..].find("\n}\n").expect("the function ends");
+        &source[start..end]
+    }
+
+    /// The restore sheet (design 20a–20d) follows the restore through these
+    /// steps; a step that stops being reported leaves the sheet stuck on it.
+    #[test]
+    fn a_restore_reports_each_of_its_steps() {
+        let session = fn_body("pub async fn restore_session()");
+        let published = session.find("publish_event_json(&event_json)").expect("publishes");
+        let connected = session
+            .find("RestoreProgress::Connected")
+            .expect("reports the request reaching a relay");
+        let found = session.find("restore_progress::found(").expect("reports the answer");
+        let rows = session
+            .find("persist_restored_trade_rows(")
+            .expect("loads the details");
+        assert!(published < connected, "Connected only once a relay took the request");
+        assert!(found < rows, "the total is known before the first order loads");
+        let counter = session
+            .find("last_trade_index(&sender_keys)")
+            .expect("asks for the trade-key counter");
+        assert!(
+            found < counter,
+            "the answer is reported before the unrelated LastTradeIndex round trip"
+        );
+
+        assert!(
+            fn_body("async fn persist_restored_trade_rows(").contains("RestoreProgress::Loaded"),
+            "each order's details are reported as they arrive"
+        );
+    }
+
     #[test]
     fn a_cleared_dedup_window_lets_a_replayed_message_through() {
         // Arrange
@@ -10589,6 +10854,23 @@ mod tests {
         let mut published = row.clone();
         published.order.creator_pubkey = peer.clone();
         assert_eq!(restored_peer_for(&published, &peer, &own, &mostro), None);
+    }
+
+    /// The row the restore reads still carries the empty peer it is about to
+    /// fill, and `chat_still_relevant` reads that field: asked about the row
+    /// as it stands, it always says no, and a live restored trade would take
+    /// its peer back without ever subscribing to incoming chat.
+    #[test]
+    fn a_restored_live_trade_still_warrants_its_chat() {
+        let order_id = uuid::Uuid::new_v4().to_string();
+        let peer = nostr_sdk::prelude::Keys::generate().public_key().to_hex();
+
+        let live = seam_trade_row(&order_id, OrderStatus::Active);
+        assert!(live.counterparty_pubkey.is_empty(), "the restore fills it");
+        assert!(restored_chat_relevant(&live, &peer));
+
+        let ended = seam_trade_row(&order_id, OrderStatus::Success);
+        assert!(!restored_chat_relevant(&ended, &peer));
     }
 
     #[tokio::test]
@@ -14590,6 +14872,7 @@ mod tests {
             &trade_keys,
             0,
             TradeRole::Buyer,
+            true,
         )
         .await;
         // If we reach here without panicking the test passes.
@@ -14610,7 +14893,7 @@ mod tests {
 
         order_book().upsert_order(dummy_order_info(&order_id)).await;
 
-        apply_peer_reveal(&order_id, &peer_hex, &trade_keys, 7, TradeRole::Seller).await;
+        apply_peer_reveal(&order_id, &peer_hex, &trade_keys, 7, TradeRole::Seller, true).await;
 
         let session = session_manager()
             .get_session(&order_id)

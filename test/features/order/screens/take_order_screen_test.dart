@@ -397,6 +397,60 @@ void main() {
         expect(find.text('Take order'), findsOneWidget);
       });
     });
+
+    testWidgets('a second tap while the first is still checking takes once', (
+      tester,
+    ) async {
+      // The button stays on Take order until the role lookup (and, on a
+      // range order, the amount modal) is done: a tap in that window must not
+      // start a second take (#551).
+      await withClock(Clock.fixed(kFakeNow), () async {
+        final rows = Completer<List<TradeInfo>>();
+        final taken = <String>[];
+        await _pump(
+          tester,
+          order: _order(),
+          readTrades: () => rows.future,
+          take: ({required orderId, required role, fiatAmount}) {
+            taken.add(orderId);
+            // Left unanswered: only the dispatch is under test.
+            return Completer<TradeInfo>().future;
+          },
+        );
+
+        await tester.tap(find.text('Take order'));
+        await tester.pump();
+        await tester.tap(find.text('Take order'));
+        await tester.pump();
+        rows.complete(const []);
+        await tester.pump();
+        await tester.pump();
+
+        expect(taken, [_id]);
+        expect(find.text('Taking…'), findsOneWidget);
+      });
+    });
+
+    testWidgets('a take that failed can be tried again', (tester) async {
+      await withClock(Clock.fixed(kFakeNow), () async {
+        var attempts = 0;
+        await _pump(
+          tester,
+          order: _order(),
+          take: ({required orderId, required role, fiatAmount}) async {
+            attempts++;
+            throw Exception('AnyhowException(NoDaemonResponse)');
+          },
+        );
+
+        await tester.tap(find.text('Take order'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Take order'));
+        await tester.pumpAndSettle();
+
+        expect(attempts, 2);
+      });
+    });
   });
 
   group('TakeOrderScreen when the order goes away', () {

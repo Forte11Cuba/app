@@ -583,13 +583,13 @@ abstract class AppLocalizations {
   /// Dialog title for importing a mnemonic phrase
   ///
   /// In en, this message translates to:
-  /// **'Import Mnemonic'**
+  /// **'Import secret words'**
   String get importMnemonicDialogTitle;
 
   /// Hint text in the mnemonic import text field
   ///
   /// In en, this message translates to:
-  /// **'Enter your 12 or 24 word phrase…'**
+  /// **'Enter your 12 secret words'**
   String get importMnemonicHintText;
 
   /// Button label to confirm mnemonic import
@@ -1927,13 +1927,13 @@ abstract class AppLocalizations {
   /// Snackbar shown when an imported mnemonic is invalid on the Account screen
   ///
   /// In en, this message translates to:
-  /// **'Invalid mnemonic. Please check your words and try again.'**
+  /// **'Invalid secret words. Please check your words and try again.'**
   String get invalidMnemonicMessage;
 
   /// Validation error shown in the import mnemonic dialog when the phrase is not 12 or 24 words
   ///
   /// In en, this message translates to:
-  /// **'Enter a valid 12 or 24 word phrase.'**
+  /// **'Enter your 12 secret words.'**
   String get enterValidMnemonicError;
 
   /// Snackbar confirming the order book was refreshed from the Account screen
@@ -6087,6 +6087,132 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Continue anyway'**
   String get fundsAtRiskContinue;
+
+  /// Restore sheet (design 20a/20b) title while an imported account asks its node for its orders
+  ///
+  /// In en, this message translates to:
+  /// **'Restoring your account'**
+  String get restoreSheetTitle;
+
+  /// Restore sheet subtitle before the node answered (20a)
+  ///
+  /// In en, this message translates to:
+  /// **'This may take a few seconds'**
+  String get restoreSheetWaiting;
+
+  /// Restore sheet subtitle while order details load (20b); done and total are order counts
+  ///
+  /// In en, this message translates to:
+  /// **'{done} of {total} orders recovered'**
+  String restoreSheetLoading(int done, int total);
+
+  /// Restore stage 1 while the request has not reached a relay yet
+  ///
+  /// In en, this message translates to:
+  /// **'Connecting to the Mostro node'**
+  String get restoreStageConnecting;
+
+  /// Restore stage 1 once the request reached a relay
+  ///
+  /// In en, this message translates to:
+  /// **'Connected to the Mostro node'**
+  String get restoreStageConnected;
+
+  /// Restore stage 2 while waiting for the node to answer
+  ///
+  /// In en, this message translates to:
+  /// **'Requesting your orders'**
+  String get restoreStageRequesting;
+
+  /// Restore stage 2 once the node answered; count is every order and dispute it returned
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 order found} other{{count} orders found}}'**
+  String restoreStageFound(int count);
+
+  /// Restore stage 3: loading each order's details
+  ///
+  /// In en, this message translates to:
+  /// **'Loading details'**
+  String get restoreStageLoading;
+
+  /// Tag on the restore stage that failed (20c)
+  ///
+  /// In en, this message translates to:
+  /// **'No response'**
+  String get restoreStageNoResponse;
+
+  /// Screen-reader form of the n/N counter of restore stage 3
+  ///
+  /// In en, this message translates to:
+  /// **'{done} of {total} orders'**
+  String restoreLoadingCountSemantics(int done, int total);
+
+  /// Restore sheet title when the restore failed (20c)
+  ///
+  /// In en, this message translates to:
+  /// **'We couldn\'t restore your orders'**
+  String get restoreFailedTitle;
+
+  /// Restore sheet subtitle when it failed: the account import itself is kept
+  ///
+  /// In en, this message translates to:
+  /// **'Your account was imported'**
+  String get restoreFailedSubtitle;
+
+  /// Restore failure paragraph; place is the Account screen name, shown in bold
+  ///
+  /// In en, this message translates to:
+  /// **'Check your connection and try again. You can retry any time from {place}.'**
+  String restoreFailedBody(String place);
+
+  /// Secondary action of the failed restore: close and keep the imported account without orders
+  ///
+  /// In en, this message translates to:
+  /// **'Continue without restoring'**
+  String get restoreContinueWithout;
+
+  /// Restore sheet title once it finished (20d)
+  ///
+  /// In en, this message translates to:
+  /// **'Account restored'**
+  String get restoreDoneTitle;
+
+  /// Restore sheet subtitle once it finished with orders
+  ///
+  /// In en, this message translates to:
+  /// **'We recovered everything the node had'**
+  String get restoreDoneSubtitle;
+
+  /// Restore sheet subtitle once it finished and the node had no orders for the account
+  ///
+  /// In en, this message translates to:
+  /// **'This account had no orders on the node'**
+  String get restoreDoneEmptySubtitle;
+
+  /// Label of the restored-orders count in the restore summary
+  ///
+  /// In en, this message translates to:
+  /// **'Orders'**
+  String get restoreSummaryOrders;
+
+  /// Label of the trades-in-progress count in the restore summary
+  ///
+  /// In en, this message translates to:
+  /// **'In progress'**
+  String get restoreSummaryInProgress;
+
+  /// Restore summary notice: trades waiting for the user's next step
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{You have 1 active order waiting for you} other{You have {count} active orders waiting for you}}'**
+  String restoreActionNotice(int count);
+
+  /// Restore summary warning when some orders' details did not load; missing and total are counts
+  ///
+  /// In en, this message translates to:
+  /// **'{missing} of {total} orders couldn\'t be loaded'**
+  String restorePartialNotice(int missing, int total);
 }
 
 class _AppLocalizationsDelegate
