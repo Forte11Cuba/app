@@ -12668,6 +12668,47 @@ mod tests {
         assert!(rang_for(&mut touches, &order_id).await);
     }
 
+    /// The read-side half of #567, through the real function rather than its
+    /// pure rule: a start recorded by an earlier take must not reach the
+    /// screen, and one recorded by the take the row is on must.
+    ///
+    /// Here rather than next to `step_start_applies` because this is the
+    /// wiring the pure test cannot see — reading the row and comparing *its*
+    /// index — and the row builders live in this module. Passing the wrong
+    /// index left all 821 tests green.
+    #[tokio::test]
+    async fn a_step_start_from_an_earlier_take_is_not_reported() {
+        // Arrange: the row is on generation 100, the stored start on 94.
+        let path = std::env::temp_dir()
+            .join(format!("mostro_step_generation_{}.db", std::process::id()));
+        let _ = crate::db::app_db::init_db(path.to_str().unwrap()).await;
+        let db = crate::db::app_db::db().expect("store initialised");
+        let order_id = uuid::Uuid::new_v4().to_string();
+        let mut row = cancel_test_row(wire_order(&order_id, OrderStatus::WaitingBuyerInvoice));
+        row.trade_key_index = 100;
+        db.save_trade(&row).await.expect("save the trade row");
+        let key = crate::db::settings_keys::invoice_step_start(&order_id);
+        db.set_setting(&key, "WaitingBuyerInvoice:1000:94")
+            .await
+            .expect("record the earlier take's start");
+
+        // Act + assert: refused, so the caller falls back to `started_at`.
+        assert_eq!(
+            crate::api::invoice::trade_step_started_at(order_id.clone()).await,
+            None,
+            "a start from trade key 94 described the take on 100"
+        );
+
+        // And the current take's own start is reported.
+        db.set_setting(&key, "WaitingBuyerInvoice:6520:100")
+            .await
+            .expect("record this take's start");
+        assert_eq!(
+            crate::api::invoice::trade_step_started_at(order_id).await,
+            Some(6_520)
+        );
+    }
+
     /// #567: the store held `trade_wiped:<id>` and `invoice_step_start:<id>`
     /// side by side — the row deleted on purpose, its step start still there.
     /// A deliberate wipe takes both.
