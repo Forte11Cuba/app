@@ -232,6 +232,13 @@ class AutomationIds {
   /// Row of a trade in the My Trades list.
   static String tradesItem(String orderId) => 'trades.item.$orderId';
 
+  /// My Trades, loaded with nothing to show under the current filter.
+  static const String tradesEmpty = 'trades.empty';
+
+  /// My Trades could not be loaded. With neither this, [tradesEmpty] nor a
+  /// [tradesItem] row on screen, the list is still loading.
+  static const String tradesError = 'trades.error';
+
   // Buyer invoice (NWC generated or manual) and hold-invoice payment
   static const String invoiceNwcText = 'invoice.nwc.text';
   static const String invoiceManual = 'invoice.manual';
