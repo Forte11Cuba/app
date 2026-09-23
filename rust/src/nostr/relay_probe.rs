@@ -145,18 +145,26 @@ pub(crate) async fn probe_once(relay: &Relay) -> bool {
 /// [`probe_once`] with the deadline spelled out, so a test can use one short
 /// enough to wait for.
 ///
-/// The deadline is **ours**, not `FetchEvents::timeout`: measured, the SDK's
-/// own timeout is not a failure but the end of collection, so a fetch against
-/// a relay that answered nothing at all still returns `Ok` with an empty set.
-/// Reading that as "the relay answered" would have made the probe incapable
-/// of ever detecting the thing it exists to detect.
+/// Two layers have to be `Ok`, and each one is a way to read this wrong:
+///
+/// - The deadline is **ours**, not `FetchEvents::timeout`: measured, the SDK's
+///   own timeout is not a failure but the end of collection, so a fetch against
+///   a relay that answered nothing at all still returns `Ok` with an empty set.
+/// - The fetch itself returns a `Result` too, and an `Err` from it — a
+///   transport failure, a relay gone from the pool — is evidence of trouble,
+///   not of an answer. Only the outer layer completing *with* an inner `Ok`
+///   means the relay replied.
+///
+/// Either misreading leaves the probe unable to detect the thing it exists to
+/// detect. The first one is the shape the live runs exercise: a half-dead
+/// socket does not error, it simply never answers.
 async fn probe_within(relay: &Relay, limit: Duration) -> bool {
     crate::rt::time::timeout(
         limit,
         std::future::IntoFuture::into_future(relay.fetch_events(probe_filter())),
     )
     .await
-    .is_ok()
+    .is_ok_and(|fetched| fetched.is_ok())
 }
 
 /// Bounce `url`'s connection so the reconnect re-issues its subscriptions.
