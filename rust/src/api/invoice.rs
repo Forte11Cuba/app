@@ -236,6 +236,13 @@ fn network_matches(invoice_network: &str, node_networks: &[String]) -> bool {
 /// mostrod times a waiting step from `taken_at` (`scheduler.rs`), which this
 /// message carries; the invoice screens add the node's `expiration_seconds`
 /// to it for their countdown.
+/// The generation is checked again here, against the row the start is meant
+/// to describe: a value left by an earlier take of the same order is not a
+/// late deadline, it is no deadline at all, and saying so lets the caller
+/// fall back to the row's own `started_at` instead of counting from a step
+/// that ended hours ago (#567). Guarding on the read as well as on the write
+/// is deliberate — the write path cannot see a take whose reply never reaches
+/// it, and that is exactly the case that produced the bug.
 pub async fn trade_step_started_at(order_id: String) -> Option<i64> {
     let db = crate::db::app_db::db()?;
     let stored = db
@@ -243,7 +250,27 @@ pub async fn trade_step_started_at(order_id: String) -> Option<i64> {
         .await
         .ok()
         .flatten()?;
-    parse_step_start(&stored).map(|(_, ts, _)| ts)
+    let (_, ts, stored_index) = parse_step_start(&stored)?;
+    let row_index = db
+        .get_trade_by_order_id(&order_id)
+        .await
+        .ok()
+        .flatten()
+        .map(|trade| trade.trade_key_index);
+    step_start_applies(stored_index, row_index).then_some(ts)
+}
+
+/// Whether a step start of generation `stored_index` describes the trade the
+/// row is on now.
+///
+/// Unknown on either side is not a mismatch: a value written before
+/// generations existed, or a row that is not there to compare against, leaves
+/// today's behaviour — the start is used, as it was before #567.
+fn step_start_applies(stored_index: Option<u32>, row_index: Option<u32>) -> bool {
+    match (stored_index, row_index) {
+        (Some(stored), Some(row)) => stored == row,
+        _ => true,
+    }
 }
 
 /// Record that the daemon message dated `event_ts`, addressed to trade key
@@ -452,6 +479,26 @@ mod tests {
             next_step_start(Some(legacy), "WaitingBuyerInvoice", 1_500, 100).as_deref(),
             Some("WaitingBuyerInvoice:1500:100")
         );
+    }
+
+    /// The case the write path cannot catch: a retake's own reply is consumed
+    /// by `take_order` and never reaches the arm that records a start, so the
+    /// key still holds the previous take's. The read refuses it, and the
+    /// caller falls back to the row's `started_at` (#567).
+    #[test]
+    fn a_start_from_an_earlier_take_does_not_describe_this_row() {
+        assert!(!step_start_applies(Some(94), Some(100)));
+        assert!(step_start_applies(Some(100), Some(100)));
+    }
+
+    /// Neither unknown is a mismatch: a value written before generations
+    /// existed, or no row to compare against, keeps pre-#567 behaviour rather
+    /// than silently dropping a deadline that may well be right.
+    #[test]
+    fn an_unknown_generation_is_not_a_mismatch() {
+        assert!(step_start_applies(None, Some(100)));
+        assert!(step_start_applies(Some(100), None));
+        assert!(step_start_applies(None, None));
     }
 
     #[test]

@@ -5879,6 +5879,20 @@ async fn wipe_trade_row(
             format!("wipe tombstone not persisted for order={order_id}: {e}"),
         );
     }
+    // The step start describes a row that no longer exists. Left behind it
+    // outlives the trade it belongs to — both keys were found side by side on
+    // a wiped order (#567) — and a later take would have to out-argue it.
+    if let Err(e) = db
+        .delete_setting(&crate::db::settings_keys::invoice_step_start(order_id))
+        .await
+    {
+        // Harmless on its own: the generation on the key and the one on the
+        // read both refuse a start that belongs to an older take.
+        crate::api::logging::blog_warn(
+            "orders",
+            format!("step start not cleared for order={order_id}: {e}"),
+        );
+    }
     release_finished_trade_subscriptions(order_id, Some(wiped_index));
     Ok(())
 }
@@ -12652,6 +12666,35 @@ mod tests {
 
         // Assert
         assert!(rang_for(&mut touches, &order_id).await);
+    }
+
+    /// #567: the store held `trade_wiped:<id>` and `invoice_step_start:<id>`
+    /// side by side — the row deleted on purpose, its step start still there.
+    /// A deliberate wipe takes both.
+    #[tokio::test]
+    async fn wiping_a_row_takes_its_step_start_with_it() {
+        // Arrange
+        let path = std::env::temp_dir()
+            .join(format!("mostro_wipe_step_start_{}.db", std::process::id()));
+        let _ = crate::db::app_db::init_db(path.to_str().unwrap()).await;
+        let db = crate::db::app_db::db().expect("store initialised");
+        let order_id = uuid::Uuid::new_v4().to_string();
+        let row = cancel_test_row(wire_order(&order_id, OrderStatus::WaitingBuyerInvoice));
+        db.save_trade(&row).await.expect("save the trade row");
+        let key = crate::db::settings_keys::invoice_step_start(&order_id);
+        db.set_setting(&key, "WaitingBuyerInvoice:1000:1")
+            .await
+            .expect("record a step start");
+
+        // Act
+        wipe_trade_row(db, &order_id, 1, 1).await.expect("wipe");
+
+        // Assert
+        assert_eq!(
+            db.get_setting(&key).await.expect("read back"),
+            None,
+            "the step start outlived the row it describes"
+        );
     }
 
     /// A confirmed take is its order's only row. A row an earlier take of the
