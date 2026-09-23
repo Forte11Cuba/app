@@ -66,6 +66,8 @@ A user browses available buy/sell offers in the public order book. The list is o
 2. **Given** an order card is rendered, **When** a user looks at it, **Then** they can see: fiat amount or range, currency code, country flag, price type, premium, payment methods, maker rating, trade count, and days active.
 3. **Given** the user taps the Filter button, **When** they select a currency or payment method, **Then** only matching orders are shown and the offer count updates.
 4. **Given** there are no matching orders for the active filter, **When** the filter is applied, **Then** a "No orders available" empty state is shown.
+5. **Given** the user applied filters, **When** they close the app completely and reopen it, **Then** the same filters are still applied and the Filter chip shows that the book is filtered and how many filters are on (#575).
+6. **Given** filters are applied, **When** the user taps Reset in the Filters dialog or Clear filters in the empty state, **Then** the book is unfiltered and stays unfiltered after the app is reopened.
 
 ---
 
@@ -327,6 +329,7 @@ Users manage their cryptographic identity from the Account screen: view their 12
 - **FR-014**: The system MUST display a public order book with two tabs (BUY BTC / SELL BTC) labeled from the taker's perspective.
 - **FR-015**: Each order card MUST display: fiat amount or range, currency code, country flag, price type, premium, payment methods, maker rating, total trade count, and days active.
 - **FR-016**: The order book MUST support filtering by fiat currency (multi-select), payment method (multi-select), rating range (slider), and premium range (slider).
+- **FR-016a**: The order-book filters MUST persist across app restarts, as a device preference (a new identity keeps them). A stored value MUST be validated on load — ranges clamped to the slider bounds, an unreadable control reset to "no filter" on its own — and every selected value MUST stay visible in the Filters dialog even when the currency catalogue or the method list no longer offers it, so it can be deselected. While any filter is on, the Filter chip MUST say so and how many are on (#575).
 - **FR-017**: The system MUST display only orders with "pending" status in the public order book.
 - **FR-018**: Orders in the public order book MUST be sorted by ascending expiration time (soonest expiring first).
 

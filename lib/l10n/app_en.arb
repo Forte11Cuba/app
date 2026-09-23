@@ -208,6 +208,15 @@
   "@filterButtonLabel": {
     "description": "Button label to open order book filter options"
   },
+  "filtersActiveCount": "{count, plural, =1{1 filter on} other{{count} filters on}}",
+  "@filtersActiveCount": {
+    "description": "Screen-reader addition to the order-book filter chip when filters narrow the book; the chip itself shows only the number in a badge. Read after the chip label, e.g. 'Filter, 2 filters on'",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
   "noOrdersAvailable": "No orders available",
   "@noOrdersAvailable": {
     "description": "Empty state message when the order book has no orders"
