@@ -49,12 +49,18 @@ Future<InvoiceVerdict> checkBuyerInvoice({
 /// mostrod times a waiting step from `taken_at` (`scheduler.rs`), which this
 /// message carries; the invoice screens add the node's `expiration_seconds`
 /// to it for their countdown.
+///
 /// The generation is checked again here, against the row the start is meant
 /// to describe: a value left by an earlier take of the same order is not a
 /// late deadline, it is no deadline at all, and saying so lets the caller
 /// fall back to the row's own `started_at` instead of counting from a step
-/// that ended hours ago (#567). Guarding on the read as well as on the write
-/// is deliberate — the write path cannot see a take whose reply never reaches
-/// it, and that is exactly the case that produced the bug.
+/// that ended hours ago (#567).
+///
+/// It is checked here because nothing records a start for a take: the take's
+/// first reply is consumed by the waiting `take_order` before the per-action
+/// arms run, so the arm that would record it never sees that message. The
+/// dispatcher does, ahead of the interception — `maybe_capture_peer_reveal`
+/// already reads it there — so this is where the guard sits today, not the
+/// only place it could.
 Future<PlatformInt64?> tradeStepStartedAt({required String orderId}) =>
     RustLib.instance.api.crateApiInvoiceTradeStepStartedAt(orderId: orderId);
