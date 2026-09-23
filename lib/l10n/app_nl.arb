@@ -49,6 +49,7 @@
   "tabBuyBtc": "BTC kopen",
   "tabSellBtc": "BTC verkopen",
   "filterButtonLabel": "Filter",
+  "filtersActiveCount": "{count, plural, =1{1 filter actief} other{{count} filters actief}}",
   "noOrdersAvailable": "Geen orders beschikbaar",
   "justNow": "Zojuist",
   "minutesAgo": "{m} min geleden",
