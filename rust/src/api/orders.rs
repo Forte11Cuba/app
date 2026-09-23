@@ -15467,6 +15467,57 @@ mod tests {
         );
     }
 
+    /// #568, the clamp: a rebuild from a message dated ahead of the local
+    /// clock — a node running fast — starts the trade now, never in the
+    /// future: a forward-dated row would inflate the inferred step deadline,
+    /// handing out time the daemon will not honour. Same instinct as the
+    /// provider's clamp on a recorded start. Mutation guard: dropping the
+    /// `.min(unix_now())` fails the upper bound.
+    #[tokio::test]
+    async fn a_rebuild_from_a_future_dated_message_is_clamped_to_now() {
+        use mostro_core::message::Action;
+
+        let path = std::env::temp_dir().join(format!("mostro_rebclamp_{}.db", std::process::id()));
+        let _ = crate::db::app_db::init_db(path.to_str().unwrap()).await;
+        let db = crate::db::app_db::db().expect("store initialised");
+
+        let order_uuid = uuid::Uuid::new_v4();
+        let order_id = order_uuid.to_string();
+        let buyer_hex = nostr_sdk::prelude::Keys::generate().public_key().to_hex();
+        let seller_hex = nostr_sdk::prelude::Keys::generate().public_key().to_hex();
+
+        let message_ts = (crate::rt::unix_now() + 86_400) as u64;
+        let before = crate::rt::unix_now();
+        dispatch_mostro_message(
+            daemon_message(
+                order_uuid,
+                Action::AddInvoice,
+                Some(taken_order_payload(order_uuid, &buyer_hex, &seller_hex, 1_000)),
+                message_ts,
+            ),
+            "test-rebuilt-clamp",
+            &buyer_hex,
+            9,
+        )
+        .await;
+        let after = crate::rt::unix_now();
+
+        let row = db
+            .get_trade_by_order_id(&order_id)
+            .await
+            .expect("lookup")
+            .expect("a future-dated take reply still rebuilds the row");
+        assert!(
+            row.started_at >= before && row.started_at <= after,
+            "a rebuilt trade is never dated in the future: started_at={} not in [{before}, {after}]",
+            row.started_at,
+        );
+        assert!(
+            (row.started_at as u64) < message_ts,
+            "the message's own future timestamp must not survive the clamp",
+        );
+    }
+
     /// `tombstone_covers` — the generation rule, plus the conservative
     /// fallback: a value without a parseable index covers everything.
     #[test]
