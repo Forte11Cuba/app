@@ -26,24 +26,31 @@ final _now = DateTime.utc(2026, 9, 22, 12);
 MostroInstance _node() =>
     const MostroInstance(pubKey: 'node', expirationSeconds: _stepWindow);
 
-/// Pumps the screen for a seller waiting to pay, with [deadline] as what the
-/// invoice step resolves to (null = not recorded).
-Future<void> _pumpWaitingPayment(
+/// Pumps the screen on a waiting step, with [deadline] as what the invoice
+/// step resolves to (null = not recorded).
+///
+/// [status] and [isBuyer] go together: the side that owes the step is the one
+/// the screen gives the clock to (`TradeTimerOwner.user`). A seller waits to
+/// pay the hold invoice; a buyer waits to send theirs. Pairing them the other
+/// way round would still render a countdown, but one no trade produces.
+Future<void> _pumpWaiting(
   WidgetTester tester, {
   required int? deadline,
+  OrderStatus status = OrderStatus.waitingPayment,
+  bool isBuyer = false,
 }) async {
   final trade = fakeTrade(
     id: _orderId,
     orderId: _orderId,
-    status: OrderStatus.waitingPayment,
+    status: status,
     amountSats: BigInt.from(11612),
   );
   final container = createContainer(
     overrides: [
-      tradeRoleProvider.overrideWith((ref) => {_orderId: false}),
+      tradeRoleProvider.overrideWith((ref) => {_orderId: isBuyer}),
       tradeStatusProvider(
         _orderId,
-      ).overrideWith((ref) => Stream.value(OrderStatus.waitingPayment)),
+      ).overrideWith((ref) => Stream.value(status)),
       orderBookProvider.overrideWith((ref) => Stream.value(const [])),
       rawTradesProvider.overrideWith((ref) async => [trade]),
       mostroNodeProvider.overrideWith((ref) async => _node()),
@@ -72,33 +79,61 @@ Future<void> _pumpWaitingPayment(
 }
 
 void main() {
-  testWidgets('a waiting step counts to the node deadline, not to expires_at', (
-    tester,
-  ) async {
-    await withClock(Clock.fixed(_now), () async {
-      final deadline = _now.add(const Duration(seconds: 45));
-      await _pumpWaitingPayment(
-        tester,
-        deadline: deadline.millisecondsSinceEpoch ~/ 1000,
-      );
+  // Both waiting steps, because they are two arms of the same condition and
+  // covering one leaves the other free to regress: with only the seller's
+  // case here, dropping `waitingInvoice` from the screen's step check left all
+  // 180 tests green — and the buyer's step is the one this fix was reported
+  // for (a countdown reading 359:59 on `waiting-buyer-invoice`).
+  for (final step in const [
+    (
+      name: 'the seller waiting to pay',
+      status: OrderStatus.waitingPayment,
+      isBuyer: false,
+    ),
+    (
+      name: 'the buyer waiting to send their invoice',
+      status: OrderStatus.waitingBuyerInvoice,
+      isBuyer: true,
+    ),
+  ]) {
+    testWidgets('${step.name} counts to the node deadline, not to expires_at', (
+      tester,
+    ) async {
+      await withClock(Clock.fixed(_now), () async {
+        final deadline = _now.add(const Duration(seconds: 45));
+        await _pumpWaiting(
+          tester,
+          status: step.status,
+          isBuyer: step.isBuyer,
+          deadline: deadline.millisecondsSinceEpoch ~/ 1000,
+        );
 
-      final countdown = tester.widget<TradeCountdown>(
-        find.byType(TradeCountdown),
-      );
-      // 45 s left of the node's 60 s window. Counting to `expires_at` would
-      // have shown the event's retention instead: ~336 hours.
-      expect(countdown.remaining, const Duration(seconds: 45));
-      expect(countdown.total, const Duration(seconds: _stepWindow));
+        final countdown = tester.widget<TradeCountdown>(
+          find.byType(TradeCountdown),
+        );
+        // 45 s left of the node's 60 s window. Counting to `expires_at` would
+        // have shown the event's retention instead: ~336 hours.
+        expect(countdown.remaining, const Duration(seconds: 45));
+        expect(countdown.total, const Duration(seconds: _stepWindow));
+      });
     });
-  });
 
-  testWidgets('no deadline, no countdown', (tester) async {
-    await withClock(Clock.fixed(_now), () async {
-      // What a maker gets: the reply that opened the step was consumed by the
-      // take, so nothing recorded when it started.
-      await _pumpWaitingPayment(tester, deadline: null);
+    testWidgets('${step.name} with no deadline gets no countdown', (
+      tester,
+    ) async {
+      await withClock(Clock.fixed(_now), () async {
+        // What a maker gets: the reply that opened the step was consumed by
+        // the take, so nothing recorded when it started.
+        await _pumpWaiting(
+          tester,
+          status: step.status,
+          isBuyer: step.isBuyer,
+          deadline: null,
+        );
 
-      expect(find.byType(TradeCountdown), findsNothing);
+        expect(find.byType(TradeCountdown), findsNothing);
+      });
     });
-  });
+
+  }
 }

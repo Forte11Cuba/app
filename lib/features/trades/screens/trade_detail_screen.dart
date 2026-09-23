@@ -122,6 +122,14 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen>
   /// Not for the waiting steps: `expires_at` carries the 38383 event's NIP-40
   /// retention, which the daemon sets ~14 days out once the order is taken —
   /// never the step's deadline. Those read [invoiceDeadlineProvider] instead.
+  ///
+  /// The step is checked twice because the first check usually cannot know:
+  /// `initState` calls this before `tradeStatusProvider` has emitted, so the
+  /// status reads `null` there and a waiting step falls straight through. The
+  /// load is not deferred until it resolves, because that stream drops null
+  /// statuses entirely — an order the user only views from the book never
+  /// emits one, and its countdown would never load. So the fetch goes ahead
+  /// and the result is refused afterwards, once the status is usually known.
   Future<void> _loadExpiresAt() async {
     if (_isWaitingStep(
       ref.read(tradeStatusProvider(widget.orderId)).valueOrNull,
@@ -131,8 +139,15 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen>
     final request = ++_expiresAtRequest;
     try {
       final info = await orders_api.getOrder(orderId: widget.orderId);
+      if (!mounted ||
+          request != _expiresAtRequest ||
+          _isWaitingStep(
+            ref.read(tradeStatusProvider(widget.orderId)).valueOrNull,
+          )) {
+        return;
+      }
       final raw = info?.expiresAt;
-      if (raw == null || !mounted || request != _expiresAtRequest) return;
+      if (raw == null) return;
       final expiresAtSeconds = platformInt64ToInt(raw);
       final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
       final diff = expiresAtSeconds - now;
