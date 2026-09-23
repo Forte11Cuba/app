@@ -3681,6 +3681,7 @@ async fn dispatch_mostro_message(
                 &order_id,
                 &format!("{new_status:?}"),
                 event_ts,
+                trade_index,
             )
             .await;
             // Sync the book with status AND calculated sats: the add-invoice
@@ -3784,6 +3785,7 @@ async fn dispatch_mostro_message(
                 &order_id,
                 "WaitingPayment",
                 event_ts,
+                trade_index,
             )
             .await;
             // Save the hold invoice and update status to WaitingPayment. A
