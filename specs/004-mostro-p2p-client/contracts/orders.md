@@ -30,7 +30,10 @@ a stale replay:
   order, or by the next start's replay, where no in-memory record remains to
   intercept (#394: role from the payload's trade pubkeys, or
   AddInvoice ⇒ buyer / PayInvoice ⇒ seller where mostrod omits them; never
-  guessed).
+  guessed). The rebuilt row's `started_at` is the rebuilding message's own
+  time (clamped to the local clock), never the payload's `created_at` —
+  that field dates the order itself, and a step deadline inferred from it
+  would be born expired for any order older than the node's window (#568).
 - **add-invoice**: acknowledged and passed through — the reply doubles as a
   status update, which the per-action arms process as usual.
 - **dispute**: reconciled — `record_late_acceptance` persists the accepted

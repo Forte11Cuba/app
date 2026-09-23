@@ -1925,8 +1925,13 @@ fn trade_row_from_small_order(
         trade_key_index: trade_index,
         cooperative_cancel_state: None,
         timeout_at: None,
-        // The list dates a trade by this: a replayed row is as old as its
-        // order, not as the replay that rebuilt it.
+        // The maker paths that share this builder (range remainder, late
+        // create confirmation, late maker bond) started their trade when
+        // their order was created, so that is the default. The DM rebuild
+        // overrides it with the message's own time — the payload's
+        // `created_at` is the order row's, which for a taker can predate the
+        // take by days (#568) — and the restored-maker fill keeps the row's
+        // recorded start.
         started_at: order.created_at.filter(|&t| t > 0).unwrap_or(now),
         completed_at: None,
         outcome: None,
@@ -2138,7 +2143,7 @@ async fn rebuild_trade_from_dm(
             | (Some(mostro_core::order::Kind::Buy), TradeRole::Buyer)
     );
     let db = crate::db::app_db::db()?;
-    let trade = trade_row_from_small_order(
+    let mut trade = trade_row_from_small_order(
         order_id,
         order,
         role,
@@ -2148,6 +2153,14 @@ async fn rebuild_trade_from_dm(
         "",
         status.clone(),
     )?;
+    // A rebuilt trade starts when the message that proved it was sent, not
+    // when its order was published: the payload dates the order itself
+    // (mostrod puts `order.created_at` there), which for an order that sat
+    // in the book leaves the row — and the step deadline the invoice
+    // fallback infers from it — born expired (#568). The order's age stays
+    // readable in `order.created_at` on the same row. Clamped so a node
+    // clock running ahead never dates the trade in the future.
+    trade.started_at = occurred_at.min(crate::rt::unix_now());
     store_trade_key_index(order_id, trade_index).await;
     if let Err(e) = persist_trade_row(db, &trade).await {
         crate::api::logging::blog_warn(
@@ -11633,10 +11646,13 @@ mod tests {
         assert!(!looked_up.contains(&live) && !looked_up.contains(&fresh));
     }
 
-    /// A rebuilt row is dated by its order, not by the moment of the replay
-    /// that rebuilt it: the trade list shows `started_at`.
+    /// The shared builder defaults `started_at` to the order's creation —
+    /// right for the maker paths (range remainder, late create confirmation,
+    /// late maker bond), whose trade did start then. The DM rebuild
+    /// overrides it with the message's time (#568); that path has its own
+    /// test through the dispatcher.
     #[test]
-    fn a_rebuilt_row_starts_when_its_order_was_created() {
+    fn the_shared_builder_dates_a_maker_row_by_its_order() {
         let mut order = mostro_core::order::SmallOrder::default();
         order.kind = Some(mostro_core::order::Kind::Sell);
         order.fiat_code = "ARS".into();
@@ -15326,6 +15342,128 @@ mod tests {
         assert_eq!(
             drain_updates(&mut rx, &order_id),
             vec![crate::api::types::OrderStatus::WaitingBuyerInvoice],
+        );
+    }
+
+    /// The `AddInvoice` payload for a taken sell order whose own
+    /// `created_at` is `order_ts` — the shape the daemon replays after a
+    /// take reply outran its waiter (#568).
+    fn taken_order_payload(
+        order_uuid: uuid::Uuid,
+        buyer_hex: &str,
+        seller_hex: &str,
+        order_ts: i64,
+    ) -> mostro_core::message::Payload {
+        mostro_core::message::Payload::Order(mostro_core::order::SmallOrder::new(
+            Some(order_uuid),
+            Some(mostro_core::order::Kind::Sell),
+            Some(mostro_core::order::Status::WaitingBuyerInvoice),
+            457,
+            "USD".to_string(),
+            None,
+            None,
+            100,
+            "Bank".to_string(),
+            0,
+            Some(buyer_hex.to_string()),
+            Some(seller_hex.to_string()),
+            None,
+            Some(order_ts),
+            None,
+        ))
+    }
+
+    /// #568: a row rebuilt from a replayed daemon message starts when that
+    /// message was sent, not when its order was created — the payload dates
+    /// the order itself, which for a taker can predate the take by days,
+    /// leaving the inferred step deadline born expired. The order's age
+    /// stays readable in `order.created_at` on the same row. Mutation
+    /// guard: dating the row from the order again fails both asserts.
+    #[tokio::test]
+    async fn a_rebuilt_row_starts_at_the_message_not_the_order() {
+        use mostro_core::message::Action;
+
+        let path = std::env::temp_dir().join(format!("mostro_rebuilt_{}.db", std::process::id()));
+        let _ = crate::db::app_db::init_db(path.to_str().unwrap()).await;
+        let db = crate::db::app_db::db().expect("store initialised");
+
+        let order_uuid = uuid::Uuid::new_v4();
+        let order_id = order_uuid.to_string();
+        let buyer_hex = nostr_sdk::prelude::Keys::generate().public_key().to_hex();
+        let seller_hex = nostr_sdk::prelude::Keys::generate().public_key().to_hex();
+
+        // The order was published a day before the message that rebuilds
+        // the row.
+        let order_ts = 1_000i64;
+        let message_ts = 87_400u64;
+        dispatch_mostro_message(
+            daemon_message(
+                order_uuid,
+                Action::AddInvoice,
+                Some(taken_order_payload(
+                    order_uuid,
+                    &buyer_hex,
+                    &seller_hex,
+                    order_ts,
+                )),
+                message_ts,
+            ),
+            "test-rebuilt-started-at",
+            &buyer_hex,
+            7,
+        )
+        .await;
+
+        let row = db
+            .get_trade_by_order_id(&order_id)
+            .await
+            .expect("lookup")
+            .expect("the replayed take reply must rebuild the row");
+        assert_eq!(
+            row.started_at, message_ts as i64,
+            "a rebuilt trade starts at the message that rebuilt it",
+        );
+        assert_eq!(
+            row.order.created_at, order_ts,
+            "the order's own age stays readable on the same row",
+        );
+    }
+
+    /// #568, the primary path: a rebuild from `AddInvoice` falls through to
+    /// the arm, which records the invoice step start at the message's own
+    /// time — so the deadline the invoice screens compute does not depend
+    /// on the fallback. Read through `trade_step_started_at` on purpose:
+    /// the stored value's format is the cursor's own business.
+    #[tokio::test]
+    async fn a_rebuild_records_the_step_start_at_the_message() {
+        use mostro_core::message::Action;
+
+        let path = std::env::temp_dir().join(format!("mostro_rebstep_{}.db", std::process::id()));
+        let _ = crate::db::app_db::init_db(path.to_str().unwrap()).await;
+
+        let order_uuid = uuid::Uuid::new_v4();
+        let order_id = order_uuid.to_string();
+        let buyer_hex = nostr_sdk::prelude::Keys::generate().public_key().to_hex();
+        let seller_hex = nostr_sdk::prelude::Keys::generate().public_key().to_hex();
+
+        let message_ts = 87_400u64;
+        dispatch_mostro_message(
+            daemon_message(
+                order_uuid,
+                Action::AddInvoice,
+                Some(taken_order_payload(order_uuid, &buyer_hex, &seller_hex, 1_000)),
+                message_ts,
+            ),
+            "test-rebuilt-step-start",
+            &buyer_hex,
+            8,
+        )
+        .await;
+
+        assert_eq!(
+            crate::api::invoice::trade_step_started_at(order_id).await,
+            Some(message_ts as i64),
+            "the AddInvoice arm must record the step start of a rebuilt trade",
         );
     }
 
