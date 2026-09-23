@@ -533,6 +533,25 @@ mod tests {
         assert_eq!(parse_step_start("WaitingPayment:x"), None);
     }
 
+    /// Pins how a value this module would never write is read, so the answer
+    /// does not drift silently if the format ever gains a field: an
+    /// unparseable generation reads as "written before generations existed",
+    /// and anything past the third field is ignored. Both then pass the read
+    /// guard, which is the lenient side to be on — a start that cannot name
+    /// its generation is used, not dropped.
+    #[test]
+    fn a_malformed_generation_reads_as_no_generation() {
+        assert_eq!(
+            parse_step_start("WaitingPayment:12:x"),
+            Some(("WaitingPayment", 12, None))
+        );
+        assert_eq!(
+            parse_step_start("WaitingPayment:12:3:9"),
+            Some(("WaitingPayment", 12, Some(3)))
+        );
+        assert!(step_start_applies(None, Some(100)));
+    }
+
     #[test]
     fn every_currency_maps_to_an_lnd_network_name() {
         assert_eq!(lnd_network_name(Currency::Bitcoin), "mainnet");
