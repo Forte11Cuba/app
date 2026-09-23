@@ -68,6 +68,15 @@ final invoiceStepStartLookupProvider = Provider<Future<int?> Function(String)>(
 /// the same node window — never the fixed `timeout_at`, which assumes 900 s.
 /// A maker's `started_at` is when the order was created, so without a
 /// recorded step start their deadline is unknown and no band is drawn.
+///
+/// The stand-in is a guess, so a guess that already lies in the past is
+/// answered as null — "cannot be told" — not published as a fact: a row
+/// restored from the daemon's history dates the trade by its order, hours
+/// or days before any step opened (#568). The cost, accepted on purpose:
+/// for a live taker the guess is ≈ the truth, and a recompute after the
+/// window has passed now draws nothing instead of "time is up" until the
+/// daemon's Canceled lands. A recorded step start is exempt — its past
+/// deadline is the truth, and a genuinely expired step keeps saying so.
 final invoiceDeadlineProvider = FutureProvider.autoDispose.family<int?, String>(
   (ref, orderId) async {
     // Both dependencies are watched before the first await. Watched after
@@ -94,6 +103,8 @@ final invoiceDeadlineProvider = FutureProvider.autoDispose.family<int?, String>(
       debugPrint('[invoiceDeadline] step start unavailable: $e');
     }
     if (trade == null || trade.order.isMine) return null;
-    return trade.startedAt.toInt() + window;
+    final guess = trade.startedAt.toInt() + window;
+    final now = clock.now().millisecondsSinceEpoch ~/ 1000;
+    return guess > now ? guess : null;
   },
 );
