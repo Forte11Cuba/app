@@ -113,6 +113,15 @@ navigates away on its own. Taking a range order asks its amount in a dialog
 (`order.take.amount`, `order.take.amount.confirm`) right after
 `order.take.confirm`; a fixed order never shows the dialog.
 
+**My Trades says which state it is in.** Loaded with rows, each row is
+`trades.item.<orderId>`. Loaded with nothing to show under the current filter,
+the list shows `trades.empty`; a list that failed to load shows `trades.error`,
+whose retry keeps its own node. With none of these on screen the list is still
+loading. A trade that never went active leaves the list once the daemon
+cancels it (`specs/004-mostro-p2p-client/contracts/orders.md`), so a driver
+proving that reads a missing row as gone only on a loaded list: next to
+`trades.empty` or other rows, never while loading or on `trades.error`.
+
 **A take parked on the anti-abuse bond offers `trade.payBond` (`Pay deposit`)
 and `trade.cancel`.** While `order.status` reads `waiting-bond`
 (`docs/ANTI_ABUSE_BOND.md`), `trade.payBond` opens `/pay_bond/:orderId`; the

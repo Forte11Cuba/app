@@ -110,9 +110,13 @@ const _nyms = {
   'peer-heron': 'quiet-heron',
 };
 
-/// Everything the trades tab reads, with no Rust behind it.
-List<Override> tradesListOverrides(List<TradeInfo> trades) => [
-  rawTradesProvider.overrideWith((ref) async => trades),
+/// Everything the trades tab reads, with no Rust behind it. [load] replaces
+/// the list load, for a list that never finishes loading or fails.
+List<Override> tradesListOverrides(
+  List<TradeInfo> trades, {
+  Future<List<TradeInfo>> Function()? load,
+}) => [
+  rawTradesProvider.overrideWith((ref) => load?.call() ?? Future.value(trades)),
   for (final t in trades)
     tradeStatusProvider(
       t.order.id,
