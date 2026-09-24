@@ -394,6 +394,12 @@ abstract class AppLocalizations {
   /// **'Filter'**
   String get filterButtonLabel;
 
+  /// Screen-reader addition to the order-book filter chip when filters narrow the book; the chip itself shows only the number in a badge. Read after the chip label, e.g. 'Filter, 2 filters on'
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 filter on} other{{count} filters on}}'**
+  String filtersActiveCount(int count);
+
   /// Empty state message when the order book has no orders
   ///
   /// In en, this message translates to:

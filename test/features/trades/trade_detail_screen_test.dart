@@ -10,6 +10,7 @@ import 'package:mostro/core/app_routes.dart';
 import 'package:mostro/core/app_theme.dart';
 import 'package:mostro/core/automation/automation_ids.dart';
 import 'package:mostro/features/home/providers/home_order_providers.dart';
+import 'package:mostro/features/order/providers/invoice_providers.dart';
 import 'package:mostro/features/order/providers/trade_state_provider.dart';
 import 'package:mostro/features/rate/providers/rating_providers.dart';
 import 'package:mostro/features/rate/screens/rate_counterpart_screen.dart';
@@ -66,6 +67,13 @@ Future<ProviderContainer> _pumpTradeDetail(
         orderId,
       ).overrideWith((ref) => statusUpdates ?? Stream.value(status)),
       orderBookProvider.overrideWith((ref) => Stream.value(const [])),
+      // A waiting step draws its countdown from the step deadline, which
+      // without a bridge resolves to "unknown" — and then the screen draws
+      // none (#270). The 8a cases below assert the countdown's label, so the
+      // harness stands in for the daemon message that opened the step.
+      invoiceDeadlineProvider(orderId).overrideWith(
+        (ref) async => DateTime.now().millisecondsSinceEpoch ~/ 1000 + 600,
+      ),
       tradeRatingProvider(orderId).overrideWith((ref) {
         // A pending Completer future keeps the rating lookup in its first
         // loading state, pinning the no-CTA-flash guard.

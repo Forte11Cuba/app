@@ -173,6 +173,17 @@ class AppLocalizationsIt extends AppLocalizations {
   String get filterButtonLabel => 'Filtra';
 
   @override
+  String filtersActiveCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count filtri attivi',
+      one: '1 filtro attivo',
+    );
+    return '$_temp0';
+  }
+
+  @override
   String get noOrdersAvailable => 'Nessun ordine disponibile';
 
   @override
