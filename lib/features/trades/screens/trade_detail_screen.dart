@@ -16,7 +16,9 @@ import 'package:mostro/features/account/providers/privacy_mode_provider.dart';
 import 'package:mostro/features/chat/providers/chat_providers.dart';
 import 'package:mostro/features/disputes/providers/disputes_providers.dart';
 import 'package:mostro/features/home/providers/home_order_providers.dart';
+import 'package:mostro/features/order/providers/invoice_providers.dart';
 import 'package:mostro/features/order/providers/trade_state_provider.dart';
+import 'package:mostro/features/order/widgets/invoice_clock.dart';
 import 'package:mostro/features/rate/providers/rating_providers.dart';
 import 'package:mostro/features/trades/models/trade_status.dart';
 import 'package:mostro/features/trades/models/trade_view.dart';
@@ -68,7 +70,8 @@ const _kCountdownSeconds = 900; // 15 minutes
 /// Overflow-menu actions (currently just sharing the order).
 enum _OverflowAction { shareOrder }
 
-class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen> {
+class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen>
+    with InvoiceClock {
   Timer? _tick;
 
   /// Drives only the countdown. A notifier rather than screen state: it
@@ -92,6 +95,14 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen> {
   @override
   void initState() {
     super.initState();
+    // The waiting steps run on the daemon's own clock — the message that
+    // opened the step plus the node's window — which is what the invoice
+    // screens show. Everything else keeps the order's lifetime below.
+    ref.listenManual<AsyncValue<int?>>(
+      invoiceDeadlineProvider(widget.orderId),
+      (_, next) => trackInvoiceDeadline(next.valueOrNull),
+      fireImmediately: true,
+    );
     _loadExpiresAt();
     _scheduleTick();
   }
@@ -107,12 +118,36 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen> {
   ///
   /// Falls back to the default [_kCountdownSeconds] when the field is null or
   /// the order is no longer available.
+  ///
+  /// Not for the waiting steps: `expires_at` carries the 38383 event's NIP-40
+  /// retention, which the daemon sets ~14 days out once the order is taken —
+  /// never the step's deadline. Those read [invoiceDeadlineProvider] instead.
+  ///
+  /// The step is checked twice because the first check usually cannot know:
+  /// `initState` calls this before `tradeStatusProvider` has emitted, so the
+  /// status reads `null` there and a waiting step falls straight through. The
+  /// load is not deferred until it resolves, because that stream drops null
+  /// statuses entirely — an order the user only views from the book never
+  /// emits one, and its countdown would never load. So the fetch goes ahead
+  /// and the result is refused afterwards, once the status is usually known.
   Future<void> _loadExpiresAt() async {
+    if (_isWaitingStep(
+      ref.read(tradeStatusProvider(widget.orderId)).valueOrNull,
+    )) {
+      return;
+    }
     final request = ++_expiresAtRequest;
     try {
       final info = await orders_api.getOrder(orderId: widget.orderId);
+      if (!mounted ||
+          request != _expiresAtRequest ||
+          _isWaitingStep(
+            ref.read(tradeStatusProvider(widget.orderId)).valueOrNull,
+          )) {
+        return;
+      }
       final raw = info?.expiresAt;
-      if (raw == null || !mounted || request != _expiresAtRequest) return;
+      if (raw == null) return;
       final expiresAtSeconds = platformInt64ToInt(raw);
       final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
       final diff = expiresAtSeconds - now;
@@ -497,6 +532,21 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen> {
         : TradeStatus.pendingRating;
   }
 
+  /// The steps mostrod times from the message that opened them: the buyer's
+  /// invoice and the seller's payment. Their deadline is the node's, not the
+  /// order's lifetime.
+  static bool _isWaitingStep(OrderStatus? status) =>
+      status == OrderStatus.waitingBuyerInvoice ||
+      status == OrderStatus.waitingPayment;
+
+  /// The step window the node advertises, which sizes the bar while a
+  /// waiting step runs.
+  Duration get _stepWindow => Duration(
+    seconds:
+        ref.watch(mostroNodeProvider).valueOrNull?.expirationSeconds ??
+        kDefaultInvoiceStepSeconds,
+  );
+
   /// The whole window the countdown bar fills: the node's advertised
   /// expiration when it is known and can contain the remaining time, else
   /// the remaining time measured on load.
@@ -867,6 +917,28 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen> {
       TradeTimerNote.leavesBook => l10n.tradeTimerPendingConsequence,
       TradeTimerNote.none => null,
     };
+    final isWaiting = view.timer != TradeTimerOwner.user;
+    if (status == TradeStatus.waitingInvoice ||
+        status == TradeStatus.waitingPayment) {
+      final total = _stepWindow;
+      return ValueListenableBuilder<Duration?>(
+        valueListenable: invoiceRemaining,
+        builder:
+            (context, remaining, _) =>
+                // No recorded step start — a maker whose reply the take consumed
+                // — means the deadline cannot be told. A bar counting down from
+                // an invented one is worse than none (#270).
+                remaining == null
+                    ? const SizedBox.shrink()
+                    : TradeCountdown(
+                      remaining: remaining,
+                      total: total,
+                      label: label,
+                      isWaiting: isWaiting,
+                      note: note,
+                    ),
+      );
+    }
     final total = _window(status);
     return ValueListenableBuilder<Duration>(
       valueListenable: _remaining,
@@ -875,7 +947,7 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen> {
             remaining: remaining,
             total: total,
             label: label,
-            isWaiting: view.timer != TradeTimerOwner.user,
+            isWaiting: isWaiting,
             note: note,
           ),
     );
