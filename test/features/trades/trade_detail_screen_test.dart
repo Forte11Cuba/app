@@ -636,6 +636,25 @@ void main() {
       expect(find.text(_en.tradeHeadlinePayoutPending), findsNothing);
     });
 
+    testWidgets('who already rated is not offered the form again', (
+      tester,
+    ) async {
+      // Codex on #587: a seller back on `/rate_user/:id` (say, from the
+      // rating notification) while the payout still retries must see their
+      // rating, not a form whose submit meets `AlreadyRated`.
+      await _pumpTradeDetail(
+        tester,
+        orderId: 'order-seller-rated-route',
+        isBuyer: false,
+        status: OrderStatus.settledHoldInvoice,
+        ratingRoute: true,
+        rating: _rating(isMine: true),
+      );
+      expect(find.byType(StarRating), findsNothing);
+      expect(find.text(_en.successfulOrder), findsNothing);
+      expect(_filledButtonWithText(_en.tradeSendRatingAction), findsNothing);
+    });
+
     testWidgets('once rated, is done — even before the payout completes', (
       tester,
     ) async {

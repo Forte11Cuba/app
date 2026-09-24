@@ -42,10 +42,12 @@ class _RateCounterpartScreenState extends ConsumerState<RateCounterpartScreen> {
   int _rating = 0;
   bool _isSubmitting = false;
 
-  bool get _canRate => _atRatingStep(
-    ref.read(tradeStatusProvider(widget.orderId)).valueOrNull,
-    _isBuyer(read: true),
-  );
+  bool get _canRate =>
+      _atRatingStep(
+        ref.read(tradeStatusProvider(widget.orderId)).valueOrNull,
+        _isBuyer(read: true),
+      ) &&
+      !ref.read(ratedByMeProvider(widget.orderId));
 
   /// The user's role, `null` until known. Unknown counts as the buyer: then
   /// only `success` opens the rating, which the daemon accepts from either
@@ -100,7 +102,15 @@ class _RateCounterpartScreenState extends ConsumerState<RateCounterpartScreen> {
   @override
   Widget build(BuildContext context) {
     final status = ref.watch(tradeStatusProvider(widget.orderId)).valueOrNull;
-    if (!_atRatingStep(status, _isBuyer())) {
+    // A rating already sent sends the user to the trade screen, which shows
+    // it: the seller's rating step can last as long as a retrying payout
+    // (#586), and a second submit would only meet `AlreadyRated`. Until the
+    // local rating has been read, that screen's own `loading` stands in —
+    // no flash of a form that is about to go away.
+    final rating = ref.watch(tradeRatingProvider(widget.orderId));
+    if (!_atRatingStep(status, _isBuyer()) ||
+        (rating.isLoading && !rating.hasValue) ||
+        ref.watch(ratedByMeProvider(widget.orderId))) {
       return TradeDetailScreen(orderId: widget.orderId);
     }
     final colors = Theme.of(context).extension<AppColors>();
