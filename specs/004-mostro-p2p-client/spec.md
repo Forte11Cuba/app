@@ -121,7 +121,7 @@ A buyer (taker of a sell order) completes a trade. Without NWC, they manually en
 2. **Given** a buyer has taken a sell order and NWC IS configured, **When** the order is accepted, **Then** the invoice step is skipped entirely and the buyer proceeds to the active trade view.
 3. **Given** the trade is in "active" status, **When** the buyer views Trade Detail, **Then** they see: trade summary, payment method, order ID, instructions to contact the seller, a "Fiat Sent" primary CTA, a secondary row with outlined Cancel and Dispute buttons, and a persistent chat chip for Contact.
 4. **Given** the buyer has sent fiat payment, **When** they tap "Fiat Sent", **Then** the order status changes to "Fiat sent" and the seller sees instructions to verify and release.
-5. **Given** the seller releases sats, **When** the buyer receives the Lightning payment, **Then** both parties are prompted to rate each other.
+5. **Given** the seller releases sats, **When** the daemon settles the hold invoice, **Then** the seller is prompted to rate the buyer right away; the buyer sees the payout as pending and is prompted to rate the seller once the Lightning payment completes (#586).
 
 ---
 
@@ -195,7 +195,7 @@ After a trade completes, both parties are prompted to rate each other on a 1–5
 
 **Acceptance Scenarios**:
 
-1. **Given** a seller releases sats, **When** the transaction settles, **Then** the seller is prompted to rate the buyer via a Rate button on the trade screen.
+1. **Given** a seller releases sats, **When** the hold invoice settles (`settled-hold-invoice`), **Then** the seller is prompted to rate the buyer via a Rate button on the trade screen — without waiting for the payout to the buyer, which is Mostro's job and may take long if it retries. mostrod sends the seller `rate` with the release and accepts the seller's rating in that status (#586).
 2. **Given** a buyer receives the Lightning payment, **When** the order reaches "success", **Then** the buyer is prompted to rate the seller.
 3. **Given** the user taps "Rate", **When** the rating screen opens, **Then** 5 tappable stars are shown and the Submit button is disabled until at least 1 star is selected.
 4. **Given** the user selects 4 stars and taps Submit, **When** the rating is sent, **Then** the screen closes and the trade moves to a completed state.

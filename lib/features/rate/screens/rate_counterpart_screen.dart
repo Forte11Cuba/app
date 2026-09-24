@@ -11,12 +11,15 @@ import 'package:mostro/features/order/providers/trade_state_provider.dart';
 import 'package:mostro/features/trades/screens/trade_detail_screen.dart';
 import 'package:mostro/features/rate/widgets/star_rating.dart';
 import 'package:mostro/l10n/app_localizations.dart';
+import 'package:mostro/src/rust/api/types.dart' show OrderStatus;
 import 'package:mostro/src/rust/api/reputation.dart' as reputation_api;
 
 /// Rate counterpart screen — Route `/rate_user/:orderId`.
 ///
-/// Both actors may rate only after payout completion. An early notification
-/// or direct route shows the live trade screen until the order succeeds.
+/// The buyer may rate once the payout completes; the seller as soon as they
+/// have released (#586) — the daemon accepts the seller's rating at
+/// `settled-hold-invoice`. An early notification or direct route shows the
+/// live trade screen until the user's rating step.
 ///
 /// Layout:
 ///   - "RATE" header label (uppercase, gray)
@@ -39,11 +42,26 @@ class _RateCounterpartScreenState extends ConsumerState<RateCounterpartScreen> {
   int _rating = 0;
   bool _isSubmitting = false;
 
-  bool get _canRate {
-    final status = ref.read(tradeStatusProvider(widget.orderId)).valueOrNull;
-    return status != null &&
-        tradeStatusFromOrderStatus(status) == TradeStatus.pendingRating;
+  bool get _canRate => _atRatingStep(
+    ref.read(tradeStatusProvider(widget.orderId)).valueOrNull,
+    _isBuyer(read: true),
+  );
+
+  /// The user's role, `null` until known. Unknown counts as the buyer: then
+  /// only `success` opens the rating, which the daemon accepts from either
+  /// side — never offer a rating it would refuse.
+  bool? _isBuyer({bool read = false}) {
+    final roles =
+        read ? ref.read(tradeRoleProvider) : ref.watch(tradeRoleProvider);
+    if (roles.containsKey(widget.orderId)) return roles[widget.orderId];
+    final db = tradeRoleFromDbProvider(widget.orderId);
+    return (read ? ref.read(db) : ref.watch(db)).valueOrNull;
   }
+
+  static bool _atRatingStep(OrderStatus? status, bool? isBuyer) =>
+      status != null &&
+      tradeStatusFor(status, isBuyer: isBuyer ?? true) ==
+          TradeStatus.pendingRating;
 
   Future<void> _submit() async {
     if (_rating == 0 || !_canRate) return;
@@ -82,8 +100,7 @@ class _RateCounterpartScreenState extends ConsumerState<RateCounterpartScreen> {
   @override
   Widget build(BuildContext context) {
     final status = ref.watch(tradeStatusProvider(widget.orderId)).valueOrNull;
-    if (status == null ||
-        tradeStatusFromOrderStatus(status) != TradeStatus.pendingRating) {
+    if (!_atRatingStep(status, _isBuyer())) {
       return TradeDetailScreen(orderId: widget.orderId);
     }
     final colors = Theme.of(context).extension<AppColors>();

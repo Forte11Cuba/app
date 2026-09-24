@@ -520,39 +520,26 @@ void main() {
   });
 
   group('payout pending', () {
-    for (final isBuyer in [true, false]) {
-      testWidgets(
-        'escrow settlement stays pending for ${isBuyer ? "buyer" : "seller"}',
-        (tester) async {
-          final semantics = tester.ensureSemantics();
-          try {
-            await _pumpTradeDetail(
-              tester,
-              orderId: 'order-payout-pending',
-              isBuyer: isBuyer,
-              status: OrderStatus.settledHoldInvoice,
-              rating: _rating(isMine: true),
-            );
-            expect(
-              tradeStatusFromOrderStatus(
-                OrderStatus.settledHoldInvoice,
-              ).machineName,
-              'payout-pending',
-            );
-            expect(find.bySemanticsLabel('payout-pending'), findsOneWidget);
-            expect(find.text(_en.tradeHeadlinePayoutPending), findsOneWidget);
-            expect(find.text(_en.tradeCompletedTitle), findsNothing);
-            expect(find.byType(TradeCompletedCard), findsNothing);
-            expect(
-              find.byWidgetPredicate((w) => w is FilledButton),
-              findsNothing,
-            );
-          } finally {
-            semantics.dispose();
-          }
-        },
-      );
-    }
+    testWidgets('the buyer waits for the payout after the release', (
+      tester,
+    ) async {
+      final semantics = tester.ensureSemantics();
+      try {
+        await _pumpTradeDetail(
+          tester,
+          orderId: 'order-payout-pending',
+          isBuyer: true,
+          status: OrderStatus.settledHoldInvoice,
+        );
+        expect(find.bySemanticsLabel('payout-pending'), findsOneWidget);
+        expect(find.text(_en.tradeHeadlinePayoutPending), findsOneWidget);
+        expect(find.text(_en.tradeCompletedTitle), findsNothing);
+        expect(find.byType(TradeCompletedCard), findsNothing);
+        expect(find.byWidgetPredicate((w) => w is FilledButton), findsNothing);
+      } finally {
+        semantics.dispose();
+      }
+    });
 
     testWidgets('a successful payout replaces the pending state with rating', (
       tester,
@@ -579,7 +566,7 @@ void main() {
       expect(_filledButtonWithText(_en.tradeSendRatingAction), findsOneWidget);
     });
 
-    testWidgets('a rating notification cannot show success before payout', (
+    testWidgets('a rating notification cannot show the buyer success early', (
       tester,
     ) async {
       final updates = StreamController<OrderStatus>();
@@ -588,11 +575,12 @@ void main() {
       await _pumpTradeDetail(
         tester,
         orderId: 'order-early-rating',
-        isBuyer: false,
+        isBuyer: true,
         status: OrderStatus.settledHoldInvoice,
         statusUpdates: updates.stream,
         ratingRoute: true,
       );
+      // The daemon refuses the buyer's rating until the payout completes.
       expect(find.text(_en.successfulOrder), findsNothing);
       expect(find.byType(StarRating), findsNothing);
       expect(find.text(_en.tradeHeadlinePayoutPending), findsOneWidget);
@@ -602,6 +590,70 @@ void main() {
 
       expect(find.text(_en.successfulOrder), findsOneWidget);
       expect(find.byType(StarRating), findsOneWidget);
+    });
+  });
+
+  /// Once released, the seller's part is over: getting the sats to the buyer
+  /// is Mostro's job, and mostrod asks the seller to rate right away — it
+  /// sends `rate` with the release and accepts the seller's rating at
+  /// `settled-hold-invoice` (#586).
+  group('the seller after the release', () {
+    testWidgets('is asked to rate, not told to wait for the payout', (
+      tester,
+    ) async {
+      final semantics = tester.ensureSemantics();
+      try {
+        await _pumpTradeDetail(
+          tester,
+          orderId: 'order-seller-released',
+          isBuyer: false,
+          status: OrderStatus.settledHoldInvoice,
+        );
+        expect(find.bySemanticsLabel('pending-rating'), findsOneWidget);
+        expect(find.text(_en.tradeHeadlinePayoutPending), findsNothing);
+        expect(find.byType(TradeCompletedCard), findsOneWidget);
+        expect(
+          _filledButtonWithText(_en.tradeSendRatingAction),
+          findsOneWidget,
+        );
+      } finally {
+        semantics.dispose();
+      }
+    });
+
+    testWidgets('reaches the rating screen without waiting for success', (
+      tester,
+    ) async {
+      await _pumpTradeDetail(
+        tester,
+        orderId: 'order-seller-rates',
+        isBuyer: false,
+        status: OrderStatus.settledHoldInvoice,
+        ratingRoute: true,
+      );
+      expect(find.text(_en.successfulOrder), findsOneWidget);
+      expect(find.byType(StarRating), findsOneWidget);
+      expect(find.text(_en.tradeHeadlinePayoutPending), findsNothing);
+    });
+
+    testWidgets('once rated, is done — even before the payout completes', (
+      tester,
+    ) async {
+      final semantics = tester.ensureSemantics();
+      try {
+        await _pumpTradeDetail(
+          tester,
+          orderId: 'order-seller-rated',
+          isBuyer: false,
+          status: OrderStatus.settledHoldInvoice,
+          rating: _rating(isMine: true),
+        );
+        expect(find.bySemanticsLabel('rated'), findsOneWidget);
+        expect(find.text(_en.tradeHeadlinePayoutPending), findsNothing);
+        expect(_filledButtonWithText(_en.tradeSendRatingAction), findsNothing);
+      } finally {
+        semantics.dispose();
+      }
     });
   });
 
