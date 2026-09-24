@@ -1842,7 +1842,7 @@ class AppLocalizationsEs extends AppLocalizations {
   String get reasonBestPremium => 'Mejor prima';
 
   @override
-  String get reasonMostReputable => 'Más reputado';
+  String get reasonMostReputable => 'Mejor reputado';
 
   @override
   String get marketPriceCaption => 'Precio de mercado';

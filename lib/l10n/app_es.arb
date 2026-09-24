@@ -528,7 +528,7 @@
   "changeButton": "Cambiar",
   "unableToOpenNotification": "No se pueden abrir los detalles de la notificación.",
   "reasonBestPremium": "Mejor prima",
-  "reasonMostReputable": "Más reputado",
+  "reasonMostReputable": "Mejor reputado",
   "marketPriceCaption": "Precio de mercado",
   "reputationTradesLabel": "{count, plural, =1{operación} other{operaciones}}",
   "reputationDaysLabel": "{count, plural, =1{día} other{días}}",
