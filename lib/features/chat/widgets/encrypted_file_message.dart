@@ -1,183 +1,143 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:mostro/core/app_theme.dart';
+import 'package:mostro/features/chat/attachments/attachment_errors.dart';
+import 'package:mostro/features/chat/attachments/attachment_gateway.dart';
+import 'package:mostro/features/chat/attachments/attachment_providers.dart';
+import 'package:mostro/features/chat/attachments/attachment_saver.dart';
 import 'package:mostro/l10n/app_localizations.dart';
+import 'package:mostro/src/rust/api/types.dart' as rust_types;
 
-/// Placeholder widget for encrypted file attachments (non-image).
+/// An encrypted file that is not an image — a PDF, or a DOC/DOCX/video sent
+/// from v1 — drawn inside its chat bubble.
 ///
-/// Simulates a download progress bar for 1.5 s, then shows a stub SnackBar
-/// until the Rust bridge download_attachment() + decrypt_file() are wired
-/// (Phase 10+).
-class EncryptedFileMessage extends StatefulWidget {
+/// Nothing is downloaded until the user asks: Save fetches, checks and
+/// decrypts it in memory, then hands it to the system save dialog.
+class EncryptedFileMessage extends ConsumerStatefulWidget {
   const EncryptedFileMessage({
     super.key,
     required this.messageId,
-    required this.fileName,
-    required this.mimeType,
-    required this.fileSizeBytes,
+    required this.attachment,
   });
 
   final String messageId;
-  final String fileName;
-  final String mimeType;
-  final int fileSizeBytes;
+  final rust_types.AttachmentInfo attachment;
 
   @override
-  State<EncryptedFileMessage> createState() => _EncryptedFileMessageState();
+  ConsumerState<EncryptedFileMessage> createState() =>
+      _EncryptedFileMessageState();
 }
 
-class _EncryptedFileMessageState extends State<EncryptedFileMessage> {
-  bool _downloading = false;
+class _EncryptedFileMessageState extends ConsumerState<EncryptedFileMessage> {
+  bool _busy = false;
+
+  Future<void> _save() async {
+    final l10n = AppLocalizations.of(context);
+    final messenger = ScaffoldMessenger.of(context);
+    setState(() => _busy = true);
+    try {
+      final data = await loadAttachment(
+        cache: ref.read(decryptedAttachmentCacheProvider),
+        gateway: ref.read(attachmentGatewayProvider),
+        messageId: widget.messageId,
+      );
+      if (!mounted) return;
+      await saveAttachmentWithFeedback(context, ref, data);
+    } catch (e) {
+      debugPrint('[chat] download attachment failed: $e');
+      messenger.showSnackBar(
+        SnackBar(content: Text(attachmentErrorMessage(l10n, e))),
+      );
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    final colors = Theme.of(context).extension<AppColors>();
-    if (colors == null) throw StateError('AppColors theme extension must be registered');
+    final l10n = AppLocalizations.of(context);
     final textTheme = Theme.of(context).textTheme;
+    final attachment = widget.attachment;
+    final details =
+        '${formatAttachmentSize(attachment.fileSize.toInt())} · '
+        '${fileTypeLabel(attachment.mimeType, l10n)}';
 
-    final icon = _iconForMime(widget.mimeType);
-    final sizeLabel = _formatSize(widget.fileSizeBytes);
-    final typeLabel = _typeLabel(widget.mimeType, AppLocalizations.of(context));
-
-    return Card(
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(AppRadius.card),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(
-          horizontal: AppSpacing.md,
-          vertical: AppSpacing.sm,
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Row(
+    return Semantics(
+      label: '${attachment.fileName}, $details',
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            fileTypeIcon(attachment.mimeType),
+            color: Colors.white,
+            size: 32,
+          ),
+          const SizedBox(width: AppSpacing.sm),
+          Flexible(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
               children: [
-                // File type icon
-                Icon(icon, color: colors.mostroGreen, size: 32),
-                const SizedBox(width: AppSpacing.md),
-
-                // File details
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        widget.fileName,
-                        style: textTheme.bodyMedium?.copyWith(
-                          fontWeight: FontWeight.bold,
-                          color: colors.textPrimary,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      const SizedBox(height: 2),
-                      Row(
-                        children: [
-                          Text(
-                            sizeLabel,
-                            style: textTheme.bodySmall
-                                ?.copyWith(color: colors.textSubtle),
-                          ),
-                          const SizedBox(width: AppSpacing.sm),
-                          _TypeChip(label: typeLabel, colors: colors),
-                        ],
-                      ),
-                    ],
+                Text(
+                  attachment.fileName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: textTheme.bodyMedium?.copyWith(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
-
-                // Download button
-                IconButton(
-                  icon: Icon(Icons.download, color: colors.textSecondary),
-                  tooltip: AppLocalizations.of(context).downloadTooltip,
-                  onPressed: _downloading ? null : () => _startDownload(context),
+                const SizedBox(height: 2),
+                ExcludeSemantics(
+                  child: Text(
+                    details,
+                    style: textTheme.bodySmall?.copyWith(color: Colors.white70),
+                  ),
                 ),
               ],
             ),
-
-            // Progress bar (visible while simulating download)
-            if (_downloading) ...[
-              const SizedBox(height: AppSpacing.xs),
-              LinearProgressIndicator(
-                valueColor:
-                    AlwaysStoppedAnimation<Color>(colors.mostroGreen),
-                backgroundColor: colors.backgroundInput,
-              ),
-            ],
-          ],
-        ),
+          ),
+          const SizedBox(width: AppSpacing.xs),
+          SizedBox.square(
+            dimension: 40,
+            child:
+                _busy
+                    ? const Padding(
+                      padding: EdgeInsets.all(10),
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white70,
+                      ),
+                    )
+                    : IconButton(
+                      tooltip: l10n.attachmentSave,
+                      icon: const Icon(
+                        Icons.download_outlined,
+                        color: Colors.white,
+                      ),
+                      onPressed: _save,
+                    ),
+          ),
+        ],
       ),
     );
-  }
-
-  Future<void> _startDownload(BuildContext context) async {
-    setState(() => _downloading = true);
-    await Future<void>.delayed(const Duration(milliseconds: 1500));
-    if (!mounted) return;
-    setState(() => _downloading = false);
-    // Use this.context (State.context) which is guarded by the mounted check above.
-    ScaffoldMessenger.of(this.context).showSnackBar(
-      SnackBar(
-        content: Text(AppLocalizations.of(this.context).fileDownloadPlaceholder),
-        duration: const Duration(seconds: 2),
-      ),
-    );
-  }
-
-  // ── Static helpers ───────────────────────────────────────────────────────
-
-  IconData _iconForMime(String mime) {
-    if (mime.contains('pdf')) return Icons.picture_as_pdf;
-    if (mime.contains('video')) return Icons.video_file;
-    return Icons.description;
-  }
-
-  String _formatSize(int bytes) {
-    if (bytes >= 1024 * 1024) {
-      final mb = (bytes / (1024 * 1024)).toStringAsFixed(1);
-      return '$mb MB';
-    }
-    final kb = (bytes / 1024).ceil();
-    return '$kb KB';
-  }
-
-  String _typeLabel(String mime, AppLocalizations l10n) {
-    if (mime.contains('pdf')) return 'PDF';
-    if (mime.contains('video')) return l10n.fileTypeVideo;
-    if (mime.contains('image')) return l10n.fileTypeImage;
-    if (mime.contains('zip') || mime.contains('tar')) return l10n.fileTypeArchive;
-    return l10n.fileTypeFile;
   }
 }
 
-// ── Private chip widget ───────────────────────────────────────────────────────
+/// The icon for a file of [mime] type, as the sender declared it.
+IconData fileTypeIcon(String mime) {
+  if (mime.contains('pdf')) return Icons.picture_as_pdf_outlined;
+  if (mime.startsWith('video/')) return Icons.video_file_outlined;
+  if (mime.startsWith('image/')) return Icons.image_outlined;
+  return Icons.description_outlined;
+}
 
-class _TypeChip extends StatelessWidget {
-  const _TypeChip({required this.label, required this.colors});
-
-  final String label;
-  final AppColors colors;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(
-        horizontal: AppSpacing.xs,
-        vertical: 2,
-      ),
-      decoration: BoxDecoration(
-        color: colors.backgroundInput,
-        borderRadius: BorderRadius.circular(AppRadius.chip),
-      ),
-      child: Text(
-        label,
-        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              color: colors.textSubtle,
-              fontSize: 10,
-            ),
-      ),
-    );
-  }
+/// The short type label shown next to the size.
+String fileTypeLabel(String mime, AppLocalizations l10n) {
+  if (mime.contains('pdf')) return 'PDF';
+  if (mime.startsWith('video/')) return l10n.fileTypeVideo;
+  if (mime.startsWith('image/')) return l10n.fileTypeImage;
+  if (mime.contains('zip') || mime.contains('tar')) return l10n.fileTypeArchive;
+  return l10n.fileTypeFile;
 }

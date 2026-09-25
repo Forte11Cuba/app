@@ -1497,16 +1497,6 @@ class AppLocalizationsEs extends AppLocalizations {
       'Guarda tu clave compartida de forma segura — es necesaria para resolver disputas';
 
   @override
-  String get attachmentLabel => '[Adjunto]';
-
-  @override
-  String get downloadTooltip => 'Descargar';
-
-  @override
-  String get fileDownloadPlaceholder =>
-      'Descarga de archivos disponible en la Fase 10+';
-
-  @override
   String get fileTypeVideo => 'Vídeo';
 
   @override
@@ -1517,13 +1507,6 @@ class AppLocalizationsEs extends AppLocalizations {
 
   @override
   String get fileTypeFile => 'Archivo';
-
-  @override
-  String get tapToDownload => 'Toca para descargar';
-
-  @override
-  String get imageDownloadPlaceholder =>
-      'Descarga de imágenes disponible en la Fase 10+';
 
   @override
   String buyingSatsAmount(String sats) {
@@ -3737,4 +3720,85 @@ class AppLocalizationsEs extends AppLocalizations {
   String restorePartialNotice(int missing, int total) {
     return '$missing de $total órdenes no se pudieron cargar';
   }
+
+  @override
+  String get attachSheetTitle => 'Enviar un archivo';
+
+  @override
+  String get attachSheetBody =>
+      'Se cifra en tu dispositivo. Solo tu contraparte puede abrirlo.';
+
+  @override
+  String get attachSourcePhoto => 'Foto';
+
+  @override
+  String get attachSourceCamera => 'Cámara';
+
+  @override
+  String get attachSourcePdf => 'Documento PDF';
+
+  @override
+  String get attachConfirmTitle => '¿Enviar este archivo?';
+
+  @override
+  String attachConfirmBody(String fileName, String size) {
+    return '$fileName ($size)';
+  }
+
+  @override
+  String get attachmentTooLarge => 'Los archivos pueden pesar hasta 25 MB.';
+
+  @override
+  String get attachmentUnsupported =>
+      'Solo se pueden enviar archivos JPEG, PNG y PDF.';
+
+  @override
+  String get attachmentInvalidImage => 'No se pudo leer esta imagen.';
+
+  @override
+  String get attachmentReadFailed => 'No se pudo leer el archivo.';
+
+  @override
+  String get attachmentPeerUnknown =>
+      'Podrás enviar archivos cuando alguien tome la orden.';
+
+  @override
+  String get attachmentUploadFailed =>
+      'La subida falló. Revisa tu conexión e inténtalo de nuevo.';
+
+  @override
+  String get attachmentSendFailed => 'No se pudo enviar el archivo.';
+
+  @override
+  String get attachmentDownloadFailed => 'No se pudo descargar el archivo.';
+
+  @override
+  String get attachmentDecryptFailed => 'No se pudo descifrar este archivo.';
+
+  @override
+  String get attachmentWebUnavailable =>
+      'Los archivos aún no están disponibles en la web.';
+
+  @override
+  String get attachmentUploading => 'Enviando…';
+
+  @override
+  String get attachmentDiscard => 'Descartar';
+
+  @override
+  String get attachmentSave => 'Guardar';
+
+  @override
+  String get attachmentSaved => 'Archivo guardado';
+
+  @override
+  String get attachmentSaveFailed => 'No se pudo guardar el archivo.';
+
+  @override
+  String attachmentImageSemantics(String fileName) {
+    return 'Imagen: $fileName';
+  }
+
+  @override
+  String get attachmentOpenImage => 'Abrir imagen';
 }
