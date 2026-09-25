@@ -258,7 +258,8 @@ pub trait Storage: Send + Sync {
     async fn clear_trade_keys(&self) -> Result<()>;
 
     /// Delete everything the current identity produced: trades, chat
-    /// messages, payout claims, the outbound queue, the cached order book
+    /// messages and their cached attachments, payout claims, the outbound
+    /// queue, the cached order book
     /// (its `is_mine` marks are the identity's) and the per-order settings
     /// ([`settings_keys::IDENTITY_SCOPED_PREFIXES`] and the retained-nodes
     /// map). Used on identity deletion, next to [`Self::clear_trade_keys`]:
@@ -390,4 +391,22 @@ pub trait Storage: Send + Sync {
 
     /// Remove one claim. No-op when absent.
     async fn delete_bond_claim(&self, node_pubkey: &str, order_id: &str) -> Result<()>;
+
+    // ── Chat attachment cache (#589) ──────────────────────────────────────────
+
+    /// Keep an attachment's blob, **still encrypted**, under its SHA-256, so
+    /// it is not downloaded again. Decrypted bytes are never stored: the cache
+    /// is as unreadable as the copy on the Blossom server. Identity-scoped —
+    /// [`Self::clear_identity_data`] empties it.
+    ///
+    /// The default keeps nothing: the web backend has no cache yet (#589
+    /// phase 4), and a miss only costs a download.
+    async fn save_attachment_blob(&self, _sha256: &str, _blob: &[u8]) -> Result<()> {
+        Ok(())
+    }
+
+    /// The encrypted blob cached under `sha256`, if any.
+    async fn get_attachment_blob(&self, _sha256: &str) -> Result<Option<Vec<u8>>> {
+        Ok(None)
+    }
 }

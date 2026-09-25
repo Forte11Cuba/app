@@ -299,7 +299,7 @@ abstract class RustLibApi extends BaseApi {
 
   Future<void> crateApiNwcDisconnectWallet();
 
-  Future<FileDownloadResult> crateApiMessagesDownloadAttachment({
+  Future<AttachmentData> crateApiMessagesDownloadAttachment({
     required String messageId,
   });
 
@@ -538,7 +538,7 @@ abstract class RustLibApi extends BaseApi {
     required String tradeId,
     required List<int> fileBytes,
     required String fileName,
-    required String mimeType,
+    required String uploadId,
   });
 
   Future<void> crateApiOrdersSendInvoice({
@@ -2822,7 +2822,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       const TaskConstMeta(debugName: "disconnect_wallet", argNames: []);
 
   @override
-  Future<FileDownloadResult> crateApiMessagesDownloadAttachment({
+  Future<AttachmentData> crateApiMessagesDownloadAttachment({
     required String messageId,
   }) {
     return handler.executeNormal(
@@ -2838,7 +2838,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           );
         },
         codec: SseCodec(
-          decodeSuccessData: sse_decode_file_download_result,
+          decodeSuccessData: sse_decode_attachment_data,
           decodeErrorData: sse_decode_AnyhowException,
         ),
         constMeta: kCrateApiMessagesDownloadAttachmentConstMeta,
@@ -5504,7 +5504,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     required String tradeId,
     required List<int> fileBytes,
     required String fileName,
-    required String mimeType,
+    required String uploadId,
   }) {
     return handler.executeNormal(
       NormalTask(
@@ -5513,7 +5513,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           sse_encode_String(tradeId, serializer);
           sse_encode_list_prim_u_8_loose(fileBytes, serializer);
           sse_encode_String(fileName, serializer);
-          sse_encode_String(mimeType, serializer);
+          sse_encode_String(uploadId, serializer);
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
@@ -5526,7 +5526,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           decodeErrorData: sse_decode_AnyhowException,
         ),
         constMeta: kCrateApiMessagesSendFileConstMeta,
-        argValues: [tradeId, fileBytes, fileName, mimeType],
+        argValues: [tradeId, fileBytes, fileName, uploadId],
         apiImpl: this,
       ),
     );
@@ -5534,7 +5534,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
 
   TaskConstMeta get kCrateApiMessagesSendFileConstMeta => const TaskConstMeta(
     debugName: "send_file",
-    argNames: ["tradeId", "fileBytes", "fileName", "mimeType"],
+    argNames: ["tradeId", "fileBytes", "fileName", "uploadId"],
   );
 
   @override
@@ -7047,18 +7047,35 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  AttachmentData dco_decode_attachment_data(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 3)
+      throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
+    return AttachmentData(
+      bytes: dco_decode_list_prim_u_8_strict(arr[0]),
+      fileName: dco_decode_String(arr[1]),
+      mimeType: dco_decode_String(arr[2]),
+    );
+  }
+
+  @protected
   AttachmentInfo dco_decode_attachment_info(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 6)
-      throw Exception('unexpected arr length: expect 6 but see ${arr.length}');
+    if (arr.length != 10)
+      throw Exception('unexpected arr length: expect 10 but see ${arr.length}');
     return AttachmentInfo(
       fileName: dco_decode_String(arr[0]),
       mimeType: dco_decode_String(arr[1]),
       fileSize: dco_decode_u_64(arr[2]),
       fileType: dco_decode_file_type(arr[3]),
       downloadStatus: dco_decode_download_status(arr[4]),
-      localPath: dco_decode_opt_String(arr[5]),
+      blossomUrl: dco_decode_String(arr[5]),
+      sha256: dco_decode_String(arr[6]),
+      encryptedSize: dco_decode_u_64(arr[7]),
+      width: dco_decode_opt_box_autoadd_u_32(arr[8]),
+      height: dco_decode_opt_box_autoadd_u_32(arr[9]),
     );
   }
 
@@ -7526,20 +7543,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     return FiatOrderCount(
       fiatCode: dco_decode_String(arr[0]),
       count: dco_decode_u_32(arr[1]),
-    );
-  }
-
-  @protected
-  FileDownloadResult dco_decode_file_download_result(dynamic raw) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    final arr = raw as List<dynamic>;
-    if (arr.length != 4)
-      throw Exception('unexpected arr length: expect 4 but see ${arr.length}');
-    return FileDownloadResult(
-      localPath: dco_decode_String(arr[0]),
-      fileName: dco_decode_String(arr[1]),
-      mimeType: dco_decode_String(arr[2]),
-      fileSize: dco_decode_u_64(arr[3]),
     );
   }
 
@@ -9377,6 +9380,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  AttachmentData sse_decode_attachment_data(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_bytes = sse_decode_list_prim_u_8_strict(deserializer);
+    var var_fileName = sse_decode_String(deserializer);
+    var var_mimeType = sse_decode_String(deserializer);
+    return AttachmentData(
+      bytes: var_bytes,
+      fileName: var_fileName,
+      mimeType: var_mimeType,
+    );
+  }
+
+  @protected
   AttachmentInfo sse_decode_attachment_info(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var var_fileName = sse_decode_String(deserializer);
@@ -9384,14 +9400,22 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_fileSize = sse_decode_u_64(deserializer);
     var var_fileType = sse_decode_file_type(deserializer);
     var var_downloadStatus = sse_decode_download_status(deserializer);
-    var var_localPath = sse_decode_opt_String(deserializer);
+    var var_blossomUrl = sse_decode_String(deserializer);
+    var var_sha256 = sse_decode_String(deserializer);
+    var var_encryptedSize = sse_decode_u_64(deserializer);
+    var var_width = sse_decode_opt_box_autoadd_u_32(deserializer);
+    var var_height = sse_decode_opt_box_autoadd_u_32(deserializer);
     return AttachmentInfo(
       fileName: var_fileName,
       mimeType: var_mimeType,
       fileSize: var_fileSize,
       fileType: var_fileType,
       downloadStatus: var_downloadStatus,
-      localPath: var_localPath,
+      blossomUrl: var_blossomUrl,
+      sha256: var_sha256,
+      encryptedSize: var_encryptedSize,
+      width: var_width,
+      height: var_height,
     );
   }
 
@@ -9958,23 +9982,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_fiatCode = sse_decode_String(deserializer);
     var var_count = sse_decode_u_32(deserializer);
     return FiatOrderCount(fiatCode: var_fiatCode, count: var_count);
-  }
-
-  @protected
-  FileDownloadResult sse_decode_file_download_result(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    var var_localPath = sse_decode_String(deserializer);
-    var var_fileName = sse_decode_String(deserializer);
-    var var_mimeType = sse_decode_String(deserializer);
-    var var_fileSize = sse_decode_u_64(deserializer);
-    return FileDownloadResult(
-      localPath: var_localPath,
-      fileName: var_fileName,
-      mimeType: var_mimeType,
-      fileSize: var_fileSize,
-    );
   }
 
   @protected
@@ -12296,6 +12303,17 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_attachment_data(
+    AttachmentData self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_list_prim_u_8_strict(self.bytes, serializer);
+    sse_encode_String(self.fileName, serializer);
+    sse_encode_String(self.mimeType, serializer);
+  }
+
+  @protected
   void sse_encode_attachment_info(
     AttachmentInfo self,
     SseSerializer serializer,
@@ -12306,7 +12324,11 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_u_64(self.fileSize, serializer);
     sse_encode_file_type(self.fileType, serializer);
     sse_encode_download_status(self.downloadStatus, serializer);
-    sse_encode_opt_String(self.localPath, serializer);
+    sse_encode_String(self.blossomUrl, serializer);
+    sse_encode_String(self.sha256, serializer);
+    sse_encode_u_64(self.encryptedSize, serializer);
+    sse_encode_opt_box_autoadd_u_32(self.width, serializer);
+    sse_encode_opt_box_autoadd_u_32(self.height, serializer);
   }
 
   @protected
@@ -12840,18 +12862,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_String(self.fiatCode, serializer);
     sse_encode_u_32(self.count, serializer);
-  }
-
-  @protected
-  void sse_encode_file_download_result(
-    FileDownloadResult self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_String(self.localPath, serializer);
-    sse_encode_String(self.fileName, serializer);
-    sse_encode_String(self.mimeType, serializer);
-    sse_encode_u_64(self.fileSize, serializer);
   }
 
   @protected

@@ -363,7 +363,13 @@ Users manage their cryptographic identity from the Account screen: view their 12
 **P2P Chat**
 
 - **FR-035**: Each active trade MUST have a dedicated encrypted chat room accessible from the Trade Detail screen via the Contact button.
-- **FR-036**: The chat MUST support text messages, encrypted image attachments, and encrypted file attachments.
+- **FR-036**: The chat MUST support text messages, encrypted image attachments, and encrypted file attachments, **interoperable with v1** in both directions (#589):
+  - **Sent**: JPEG, PNG and PDF, recognised by their content (never by name or claimed MIME), up to 25 MB. Images are re-encoded before upload, with the orientation applied to the pixels, so EXIF/GPS metadata never leaves the device.
+  - **Received**: everything v1 sends (`image_encrypted`, and `file_encrypted` with `file_type` image, video or document).
+  - **Encryption**: ChaCha20-Poly1305 under the raw ECDH secret with the counterpart — the peer's trade key in the P2P chat, the solver in the dispute chat — the key v1 uses. Files are uploaded to Blossom (BUD-02 `/upload`), each upload signed by a throwaway key, never the identity.
+  - **Download**: verified against the blob hash in its URL before decrypting.
+  - **Storage**: the device caches the encrypted blob only, in an identity-scoped, size-bounded cache; decrypted content stays in memory.
+  - **Solver access**: a solver given `K_conv` reads the P2P chat but cannot open its files, as in v1. Changing that needs a protocol change adopted by both clients.
 - **FR-037**: The chat room MUST display the peer's avatar, handle, and provide access to a Trade Information panel and a User Information panel.
 - **FR-038**: The User Information panel MUST display the shared ECDH encryption key as a copyable value so it can optionally be shared with a dispute admin.
 - **FR-039**: Messages MUST appear optimistically immediately after send, before relay confirmation.

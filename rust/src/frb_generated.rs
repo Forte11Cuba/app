@@ -6161,7 +6161,7 @@ fn wire__crate__api__messages__send_file_impl(
             let api_trade_id = <String>::sse_decode(&mut deserializer);
             let api_file_bytes = <Vec<u8>>::sse_decode(&mut deserializer);
             let api_file_name = <String>::sse_decode(&mut deserializer);
-            let api_mime_type = <String>::sse_decode(&mut deserializer);
+            let api_upload_id = <String>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| async move {
                 transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
@@ -6170,7 +6170,7 @@ fn wire__crate__api__messages__send_file_impl(
                             api_trade_id,
                             api_file_bytes,
                             api_file_name,
-                            api_mime_type,
+                            api_upload_id,
                         )
                         .await?;
                         Ok(output_ok)
@@ -7529,6 +7529,20 @@ impl SseDecode for crate::api::types::AppSettings {
     }
 }
 
+impl SseDecode for crate::api::messages::AttachmentData {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_bytes = <Vec<u8>>::sse_decode(deserializer);
+        let mut var_fileName = <String>::sse_decode(deserializer);
+        let mut var_mimeType = <String>::sse_decode(deserializer);
+        return crate::api::messages::AttachmentData {
+            bytes: var_bytes,
+            file_name: var_fileName,
+            mime_type: var_mimeType,
+        };
+    }
+}
+
 impl SseDecode for crate::api::types::AttachmentInfo {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -7537,14 +7551,22 @@ impl SseDecode for crate::api::types::AttachmentInfo {
         let mut var_fileSize = <u64>::sse_decode(deserializer);
         let mut var_fileType = <crate::api::types::FileType>::sse_decode(deserializer);
         let mut var_downloadStatus = <crate::api::types::DownloadStatus>::sse_decode(deserializer);
-        let mut var_localPath = <Option<String>>::sse_decode(deserializer);
+        let mut var_blossomUrl = <String>::sse_decode(deserializer);
+        let mut var_sha256 = <String>::sse_decode(deserializer);
+        let mut var_encryptedSize = <u64>::sse_decode(deserializer);
+        let mut var_width = <Option<u32>>::sse_decode(deserializer);
+        let mut var_height = <Option<u32>>::sse_decode(deserializer);
         return crate::api::types::AttachmentInfo {
             file_name: var_fileName,
             mime_type: var_mimeType,
             file_size: var_fileSize,
             file_type: var_fileType,
             download_status: var_downloadStatus,
-            local_path: var_localPath,
+            blossom_url: var_blossomUrl,
+            sha256: var_sha256,
+            encrypted_size: var_encryptedSize,
+            width: var_width,
+            height: var_height,
         };
     }
 }
@@ -7944,22 +7966,6 @@ impl SseDecode for crate::api::node_stats::FiatOrderCount {
         return crate::api::node_stats::FiatOrderCount {
             fiat_code: var_fiatCode,
             count: var_count,
-        };
-    }
-}
-
-impl SseDecode for crate::api::messages::FileDownloadResult {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
-        let mut var_localPath = <String>::sse_decode(deserializer);
-        let mut var_fileName = <String>::sse_decode(deserializer);
-        let mut var_mimeType = <String>::sse_decode(deserializer);
-        let mut var_fileSize = <u64>::sse_decode(deserializer);
-        return crate::api::messages::FileDownloadResult {
-            local_path: var_localPath,
-            file_name: var_fileName,
-            mime_type: var_mimeType,
-            file_size: var_fileSize,
         };
     }
 }
@@ -10386,6 +10392,28 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::types::AppSettings>
     }
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::messages::AttachmentData {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.bytes.into_into_dart().into_dart(),
+            self.file_name.into_into_dart().into_dart(),
+            self.mime_type.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::messages::AttachmentData
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::messages::AttachmentData>
+    for crate::api::messages::AttachmentData
+{
+    fn into_into_dart(self) -> crate::api::messages::AttachmentData {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for crate::api::types::AttachmentInfo {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
@@ -10394,7 +10422,11 @@ impl flutter_rust_bridge::IntoDart for crate::api::types::AttachmentInfo {
             self.file_size.into_into_dart().into_dart(),
             self.file_type.into_into_dart().into_dart(),
             self.download_status.into_into_dart().into_dart(),
-            self.local_path.into_into_dart().into_dart(),
+            self.blossom_url.into_into_dart().into_dart(),
+            self.sha256.into_into_dart().into_dart(),
+            self.encrypted_size.into_into_dart().into_dart(),
+            self.width.into_into_dart().into_dart(),
+            self.height.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -10914,29 +10946,6 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::node_stats::FiatOrderCount>
     for crate::api::node_stats::FiatOrderCount
 {
     fn into_into_dart(self) -> crate::api::node_stats::FiatOrderCount {
-        self
-    }
-}
-// Codec=Dco (DartCObject based), see doc to use other codecs
-impl flutter_rust_bridge::IntoDart for crate::api::messages::FileDownloadResult {
-    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
-        [
-            self.local_path.into_into_dart().into_dart(),
-            self.file_name.into_into_dart().into_dart(),
-            self.mime_type.into_into_dart().into_dart(),
-            self.file_size.into_into_dart().into_dart(),
-        ]
-        .into_dart()
-    }
-}
-impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
-    for crate::api::messages::FileDownloadResult
-{
-}
-impl flutter_rust_bridge::IntoIntoDart<crate::api::messages::FileDownloadResult>
-    for crate::api::messages::FileDownloadResult
-{
-    fn into_into_dart(self) -> crate::api::messages::FileDownloadResult {
         self
     }
 }
@@ -12515,6 +12524,15 @@ impl SseEncode for crate::api::types::AppSettings {
     }
 }
 
+impl SseEncode for crate::api::messages::AttachmentData {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <Vec<u8>>::sse_encode(self.bytes, serializer);
+        <String>::sse_encode(self.file_name, serializer);
+        <String>::sse_encode(self.mime_type, serializer);
+    }
+}
+
 impl SseEncode for crate::api::types::AttachmentInfo {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -12523,7 +12541,11 @@ impl SseEncode for crate::api::types::AttachmentInfo {
         <u64>::sse_encode(self.file_size, serializer);
         <crate::api::types::FileType>::sse_encode(self.file_type, serializer);
         <crate::api::types::DownloadStatus>::sse_encode(self.download_status, serializer);
-        <Option<String>>::sse_encode(self.local_path, serializer);
+        <String>::sse_encode(self.blossom_url, serializer);
+        <String>::sse_encode(self.sha256, serializer);
+        <u64>::sse_encode(self.encrypted_size, serializer);
+        <Option<u32>>::sse_encode(self.width, serializer);
+        <Option<u32>>::sse_encode(self.height, serializer);
     }
 }
 
@@ -12870,16 +12892,6 @@ impl SseEncode for crate::api::node_stats::FiatOrderCount {
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <String>::sse_encode(self.fiat_code, serializer);
         <u32>::sse_encode(self.count, serializer);
-    }
-}
-
-impl SseEncode for crate::api::messages::FileDownloadResult {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
-        <String>::sse_encode(self.local_path, serializer);
-        <String>::sse_encode(self.file_name, serializer);
-        <String>::sse_encode(self.mime_type, serializer);
-        <u64>::sse_encode(self.file_size, serializer);
     }
 }
 
