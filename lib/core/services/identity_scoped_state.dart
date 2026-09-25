@@ -18,7 +18,8 @@ import 'package:mostro/shared/providers/session_provider.dart';
 /// on screen until the app restarts, whatever the database says.
 ///
 /// Device preferences are not identity data and stay: theme, language, the
-/// node and relay choice, the wallet connection, the trade-list filter.
+/// node and relay choice, the wallet connection, the trade-list filter, the
+/// order-book filters.
 ///
 /// New identity-scoped state must be added here, or it leaks into the next
 /// user's session.

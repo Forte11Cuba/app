@@ -4,6 +4,23 @@ All notable changes to Mostro are documented here, newest first. This file is
 written by the release workflow (docs/RELEASING.md) — do not edit it by hand.
 Versions follow [Semantic Versioning](https://semver.org/).
 
+## [2.0.6] - 2026-09-24
+
+### ✨ Features
+
+- **trades:** expose the My Trades empty and error states to automation ([#579](https://github.com/MostroP2P/app/pull/579)) by @Catrya
+- **order-book:** keep the filters across launches ([#576](https://github.com/MostroP2P/app/pull/576)) by @grunch
+- **account:** restore sheet when importing an account (design 20a-20d) ([#559](https://github.com/MostroP2P/app/pull/559)) by @grunch
+
+### 🐛 Bug Fixes
+
+- **relay:** detect and recover a relay that is Connected but not delivering ([#572](https://github.com/MostroP2P/app/pull/572)) by @Catrya
+- **trades:** count the waiting steps to the node's deadline ([#564](https://github.com/MostroP2P/app/pull/564)) by @Catrya
+- **order:** show the waiting state after an NWC payment ([#563](https://github.com/MostroP2P/app/pull/563)) by @Catrya
+- **order:** the take screen keeps Taking… while its own take settles ([#456](https://github.com/MostroP2P/app/pull/456)) by @Catrya
+- **relays:** share one d-tag REQ across watched orders ([#560](https://github.com/MostroP2P/app/pull/560)) by @grunch
+- **order:** one take per tap on the take screen ([#558](https://github.com/MostroP2P/app/pull/558)) by @grunch
+
 ## [2.0.5] - 2026-09-22
 
 ### ✨ Features

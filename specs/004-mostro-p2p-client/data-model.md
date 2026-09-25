@@ -325,27 +325,30 @@ A Nostr Wallet Connect wallet connection for automatic invoice payment.
 
 ### FileAttachment
 
-An encrypted file sent or received in trade chat.
+An encrypted file sent or received in trade chat (#589). Stored inside its
+`Message` (`AttachmentInfo`), read from v1's JSON message; nothing about the
+key is stored — it is re-derived (raw ECDH with the counterpart) when needed.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| id | UUID | Primary key |
-| message_id | UUID | FK → Message |
 | file_type | Enum | `Image`, `Document`, `Video` |
-| mime_type | String | MIME type (e.g., "image/jpeg") |
-| file_name | String | Original file name |
-| file_size | u64 | Size in bytes (max 25MB) |
-| blossom_url | String | URL on Blossom server |
-| encryption_nonce | Bytes | 12-byte nonce for ChaCha20-Poly1305 |
-| encryption_key_encrypted | Bytes | Symmetric key encrypted at rest (wrapped by the device master key; plaintext key is ephemeral and held only in memory during encrypt/decrypt) |
-| key_wrapping_id | String | Identifier of the wrapping key used to encrypt `encryption_key_encrypted` |
+| mime_type | String | As declared by the sender (a label; the bytes are sniffed after decrypting) |
+| file_name | String | Sanitized: last path component, no control characters |
+| file_size | u64 | Size before encryption, in bytes (max 25MB) |
+| blossom_url | String | `https://…/<sha256>` |
+| sha256 | String | Hex SHA-256 of the encrypted blob, from the URL |
+| encrypted_size | u64 | `file_size` + 28 (nonce + tag) |
+| width / height | u32? | Pixel size, images only |
 | download_status | Enum | `Pending`, `Downloading`, `Downloaded`, `Failed` |
-| local_path | String? | Path to decrypted file on device (null if not downloaded) |
-| created_at | Timestamp | When attachment was created |
+
+The encrypted blob itself is cached in `attachment_blobs` (keyed by
+`sha256`, still ciphertext, 300 MB cap, oldest evicted first,
+wiped with the identity).
 
 **Validation rules**:
 - `file_size` MUST not exceed 26,214,400 bytes (25MB).
-- `file_type` determined from `mime_type`.
+- Only `https://` URLs naming a 64-hex blob hash are accepted; anything else
+  keeps the message as text.
 - Images auto-download; documents and videos are download-on-demand.
 
 ---

@@ -71,6 +71,11 @@ class _TakeOrderScreenState extends ConsumerState<TakeOrderScreen> {
   Timer? _rateTimer;
   TakeOrderCta _cta = TakeOrderCta.idle;
 
+  /// The order's clock ran out while this screen was open. Kept apart from
+  /// [_cta] because a take in flight owns the button until the daemon
+  /// answers, and the expiry still has to be applied when it fails.
+  bool _expired = false;
+
   /// The order as last seen in the book, kept so the screen can show it
   /// unavailable in place once the relay drops it.
   OrderItem? _lastOrder;
@@ -113,18 +118,39 @@ class _TakeOrderScreenState extends ConsumerState<TakeOrderScreen> {
     final left = expiresAt.difference(clock.now());
     if (left <= Duration.zero) {
       _remaining.value = Duration.zero;
-      if (_cta != TakeOrderCta.unavailable) {
+      _expired = true;
+      // Only an idle button: a take in flight is settled by the daemon's
+      // answer, and `_onTakeOrder`'s `finally` applies this expiry if the
+      // take fails (#454).
+      if (_cta == TakeOrderCta.idle) {
         setState(() => _cta = TakeOrderCta.unavailable);
       }
       return;
     }
+    _expired = false;
     _remaining.value = left;
     _countdown = Timer(countdownTick(left), () {
       if (mounted) _syncCountdown(order);
     });
   }
 
+  /// Held from the tap until its take settles, however it ends. `_cta` only
+  /// turns `loading` once the take is dispatched, after the role lookup and
+  /// the amount modal, so on its own it let a second tap start a second take
+  /// in that window (#551).
+  bool _taking = false;
+
   Future<void> _onTakeOrder() async {
+    if (_taking) return;
+    _taking = true;
+    try {
+      await _takeOrder();
+    } finally {
+      _taking = false;
+    }
+  }
+
+  Future<void> _takeOrder() async {
     final order = _lastOrder;
     if (order == null || _cta != TakeOrderCta.idle) return;
 
@@ -151,6 +177,12 @@ class _TakeOrderScreenState extends ConsumerState<TakeOrderScreen> {
     }
 
     setState(() => _cta = TakeOrderCta.loading);
+    // `context.go` does not unmount this screen at once: it stays in the tree
+    // while the next route animates in, long enough for the `finally` below
+    // to hand the button back to the book — which by then holds the status of
+    // this very take (#454). Once the screen is on its way out, nothing here
+    // decides what it shows any more.
+    var navigated = false;
     try {
       final trade = await ref.read(takeOrderActionProvider)(
         orderId: widget.orderId,
@@ -172,18 +204,34 @@ class _TakeOrderScreenState extends ConsumerState<TakeOrderScreen> {
       // The node asks for an anti-abuse bond first: the Lightning step of
       // the trade only opens once it locks (docs/ANTI_ABUSE_BOND.md §6.1).
       if (trade.order.status == OrderStatus.waitingTakerBond) {
+        navigated = true;
         context.go(AppRoute.tradeDetailPath(widget.orderId));
         context.push(AppRoute.payBondPath(widget.orderId));
       } else if (widget.isBuying) {
+        // The take is done, so this screen is leaving either way: what is
+        // read next only decides where it lands.
+        navigated = true;
         // With a default LN address Mostro pays it directly and the buyer
-        // skips the add-invoice step.
-        final settings = await settings_api.getSettings();
+        // skips the add-invoice step. An unreadable setting is not a failed
+        // take — it reached this line — so it must not reach `_showTakeError`,
+        // whose errors mean no trade was created. The trade screen offers the
+        // invoice step itself for a buyer waiting on it, so landing there is
+        // right whichever way the setting would have read.
+        String? payTo;
+        var settingsRead = true;
+        try {
+          payTo = (await settings_api.getSettings()).defaultLightningAddress;
+        } catch (e, st) {
+          settingsRead = false;
+          debugPrint('[TakeOrderScreen] settings read failed: $e\n$st');
+        }
         if (!mounted) return;
         context.go(AppRoute.tradeDetailPath(widget.orderId));
-        if (settings.defaultLightningAddress == null) {
+        if (settingsRead && payTo == null) {
           context.push(AppRoute.addInvoicePath(widget.orderId));
         }
       } else {
+        navigated = true;
         context.go(AppRoute.tradeDetailPath(widget.orderId));
         context.push(AppRoute.payInvoicePath(widget.orderId));
       }
@@ -191,8 +239,13 @@ class _TakeOrderScreenState extends ConsumerState<TakeOrderScreen> {
       if (!mounted) return;
       _showTakeError(e);
     } finally {
-      if (mounted && _cta == TakeOrderCta.loading) {
-        setState(() => _cta = TakeOrderCta.idle);
+      // The countdown holds its fire while a take is in flight, so an expiry
+      // that fell inside it is applied here instead: the button must not come
+      // back to life on an order whose clock ran out.
+      if (mounted && !navigated && _cta == TakeOrderCta.loading) {
+        setState(
+          () => _cta = _expired ? TakeOrderCta.unavailable : TakeOrderCta.idle,
+        );
       }
     }
   }
@@ -282,10 +335,17 @@ class _TakeOrderScreenState extends ConsumerState<TakeOrderScreen> {
     final book = OrderBookPalette.of(context);
     final flags = ref.watch(currencyFlagsProvider);
     final privacyMode = ref.watch(privacyModeProvider);
+    // Not while a take is in flight: the user's own take moves the order out
+    // of `pending` before it settles (Rust updates the book entry as soon as
+    // the daemon confirms, then persists the trade and subscribes, and only
+    // then does `take_order` return). Read as the order going away, that
+    // showed "No longer available" for the order the user had just got
+    // (#454). The listener above holds back for the same reason; once the
+    // take settles, a failure lands back on `idle` and the book decides.
     final isUnavailable =
         _cta == TakeOrderCta.unavailable ||
-        live == null ||
-        live.status != OrderStatus.pending;
+        (_cta != TakeOrderCta.loading &&
+            (live == null || live.status != OrderStatus.pending));
     final cta = isUnavailable ? TakeOrderCta.unavailable : _cta;
 
     return Scaffold(

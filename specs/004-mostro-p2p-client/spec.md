@@ -66,6 +66,8 @@ A user browses available buy/sell offers in the public order book. The list is o
 2. **Given** an order card is rendered, **When** a user looks at it, **Then** they can see: fiat amount or range, currency code, country flag, price type, premium, payment methods, maker rating, trade count, and days active.
 3. **Given** the user taps the Filter button, **When** they select a currency or payment method, **Then** only matching orders are shown and the offer count updates.
 4. **Given** there are no matching orders for the active filter, **When** the filter is applied, **Then** a "No orders available" empty state is shown.
+5. **Given** the user applied filters, **When** they close the app completely and reopen it, **Then** the same filters are still applied and the Filter chip shows that the book is filtered and how many filters are on (#575).
+6. **Given** filters are applied, **When** the user taps Reset in the Filters dialog or Clear filters in the empty state, **Then** the book is unfiltered and stays unfiltered after the app is reopened.
 
 ---
 
@@ -119,7 +121,7 @@ A buyer (taker of a sell order) completes a trade. Without NWC, they manually en
 2. **Given** a buyer has taken a sell order and NWC IS configured, **When** the order is accepted, **Then** the invoice step is skipped entirely and the buyer proceeds to the active trade view.
 3. **Given** the trade is in "active" status, **When** the buyer views Trade Detail, **Then** they see: trade summary, payment method, order ID, instructions to contact the seller, a "Fiat Sent" primary CTA, a secondary row with outlined Cancel and Dispute buttons, and a persistent chat chip for Contact.
 4. **Given** the buyer has sent fiat payment, **When** they tap "Fiat Sent", **Then** the order status changes to "Fiat sent" and the seller sees instructions to verify and release.
-5. **Given** the seller releases sats, **When** the buyer receives the Lightning payment, **Then** both parties are prompted to rate each other.
+5. **Given** the seller releases sats, **When** the daemon settles the hold invoice, **Then** the seller is prompted to rate the buyer right away; the buyer sees the payout as pending and is prompted to rate the seller once the Lightning payment completes (#586).
 
 ---
 
@@ -193,7 +195,7 @@ After a trade completes, both parties are prompted to rate each other on a 1–5
 
 **Acceptance Scenarios**:
 
-1. **Given** a seller releases sats, **When** the transaction settles, **Then** the seller is prompted to rate the buyer via a Rate button on the trade screen.
+1. **Given** a seller releases sats, **When** the hold invoice settles (`settled-hold-invoice`), **Then** the seller is prompted to rate the buyer via a Rate button on the trade screen — without waiting for the payout to the buyer, which is Mostro's job and may take long if it retries. mostrod sends the seller `rate` with the release and accepts the seller's rating in that status (#586).
 2. **Given** a buyer receives the Lightning payment, **When** the order reaches "success", **Then** the buyer is prompted to rate the seller.
 3. **Given** the user taps "Rate", **When** the rating screen opens, **Then** 5 tappable stars are shown and the Submit button is disabled until at least 1 star is selected.
 4. **Given** the user selects 4 stars and taps Submit, **When** the rating is sent, **Then** the screen closes and the trade moves to a completed state.
@@ -327,6 +329,7 @@ Users manage their cryptographic identity from the Account screen: view their 12
 - **FR-014**: The system MUST display a public order book with two tabs (BUY BTC / SELL BTC) labeled from the taker's perspective.
 - **FR-015**: Each order card MUST display: fiat amount or range, currency code, country flag, price type, premium, payment methods, maker rating, total trade count, and days active.
 - **FR-016**: The order book MUST support filtering by fiat currency (multi-select), payment method (multi-select), rating range (slider), and premium range (slider).
+- **FR-016a**: The order-book filters MUST persist across app restarts, as a device preference (a new identity keeps them). A stored value MUST be validated on load — ranges clamped to the slider bounds, an unreadable control reset to "no filter" on its own — and every selected value MUST stay visible in the Filters dialog even when the currency catalogue or the method list no longer offers it, so it can be deselected. While any filter is on, the Filter chip MUST say so and how many are on (#575).
 - **FR-017**: The system MUST display only orders with "pending" status in the public order book.
 - **FR-018**: Orders in the public order book MUST be sorted by ascending expiration time (soonest expiring first).
 
@@ -360,7 +363,13 @@ Users manage their cryptographic identity from the Account screen: view their 12
 **P2P Chat**
 
 - **FR-035**: Each active trade MUST have a dedicated encrypted chat room accessible from the Trade Detail screen via the Contact button.
-- **FR-036**: The chat MUST support text messages, encrypted image attachments, and encrypted file attachments.
+- **FR-036**: The chat MUST support text messages, encrypted image attachments, and encrypted file attachments, **interoperable with v1** in both directions (#589):
+  - **Sent**: JPEG, PNG and PDF, recognised by their content (never by name or claimed MIME), up to 25 MB. Images are re-encoded before upload, with the orientation applied to the pixels, so EXIF/GPS metadata never leaves the device.
+  - **Received**: everything v1 sends (`image_encrypted`, and `file_encrypted` with `file_type` image, video or document).
+  - **Encryption**: ChaCha20-Poly1305 under the raw ECDH secret with the counterpart — the peer's trade key in the P2P chat, the solver in the dispute chat — the key v1 uses. Files are uploaded to Blossom (BUD-02 `/upload`), each upload signed by a throwaway key, never the identity.
+  - **Download**: verified against the blob hash in its URL before decrypting.
+  - **Storage**: the device caches the encrypted blob only, in an identity-scoped, size-bounded cache; decrypted content stays in memory.
+  - **Solver access**: a solver given `K_conv` reads the P2P chat but cannot open its files, as in v1. Changing that needs a protocol change adopted by both clients.
 - **FR-037**: The chat room MUST display the peer's avatar, handle, and provide access to a Trade Information panel and a User Information panel.
 - **FR-038**: The User Information panel MUST display the shared ECDH encryption key as a copyable value so it can optionally be shared with a dispute admin.
 - **FR-039**: Messages MUST appear optimistically immediately after send, before relay confirmation.

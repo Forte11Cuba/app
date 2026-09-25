@@ -10,7 +10,7 @@ part 'types.freezed.dart';
 
 // These functions are ignored because they are not marked as `pub`: `default_expiration_hours`, `default_expiration_seconds`
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `AppState`, `MostroNodeInfo`, `QueuedMessageStatus`, `TradeHistoryEntry`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 
 /// The `bond_claims` key for a node / order pair.
 Future<String> bondClaimKey({
@@ -72,13 +72,30 @@ class AppSettings {
           privacyMode == other.privacyMode;
 }
 
+/// An image or file sent in a chat (#589), as read from v1's JSON message.
 class AttachmentInfo {
+  /// Sanitized: the last path component only, safe to show and save under.
   final String fileName;
+
+  /// As declared by the sender; a label only.
   final String mimeType;
+
+  /// Size of the file before encryption, in bytes.
   final BigInt fileSize;
   final FileType fileType;
   final DownloadStatus downloadStatus;
-  final String? localPath;
+
+  /// Where the encrypted blob lives (`https://…/<sha256>`).
+  final String blossomUrl;
+
+  /// Hex SHA-256 of the encrypted blob, from the URL.
+  final String sha256;
+  final BigInt encryptedSize;
+
+  /// Pixel size, for images: lets the bubble keep its shape before the
+  /// image is decrypted.
+  final int? width;
+  final int? height;
 
   const AttachmentInfo({
     required this.fileName,
@@ -86,7 +103,11 @@ class AttachmentInfo {
     required this.fileSize,
     required this.fileType,
     required this.downloadStatus,
-    this.localPath,
+    required this.blossomUrl,
+    required this.sha256,
+    required this.encryptedSize,
+    this.width,
+    this.height,
   });
 
   @override
@@ -96,7 +117,11 @@ class AttachmentInfo {
       fileSize.hashCode ^
       fileType.hashCode ^
       downloadStatus.hashCode ^
-      localPath.hashCode;
+      blossomUrl.hashCode ^
+      sha256.hashCode ^
+      encryptedSize.hashCode ^
+      width.hashCode ^
+      height.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -108,7 +133,11 @@ class AttachmentInfo {
           fileSize == other.fileSize &&
           fileType == other.fileType &&
           downloadStatus == other.downloadStatus &&
-          localPath == other.localPath;
+          blossomUrl == other.blossomUrl &&
+          sha256 == other.sha256 &&
+          encryptedSize == other.encryptedSize &&
+          width == other.width &&
+          height == other.height;
 }
 
 /// What the add-invoice screen needs from a BOLT11 invoice to validate it
@@ -1676,6 +1705,28 @@ class RelayInfo {
 enum RelaySource { default_, mostroDiscovered, userAdded }
 
 enum RelayStatus { connected, disconnected, connecting, error }
+
+@freezed
+sealed class RestoreProgress with _$RestoreProgress {
+  const RestoreProgress._();
+
+  /// The restore request reached at least one relay.
+  const factory RestoreProgress.connected() = RestoreProgress_Connected;
+
+  /// The node answered. `found` is every order and dispute it returned;
+  /// `to_load` is how many of them the app fetches the details of.
+  const factory RestoreProgress.found({
+    required int found,
+    required int toLoad,
+  }) = RestoreProgress_Found;
+
+  /// `done` of the `to_load` orders have their details. A restore that
+  /// ends with `done < to_load` recovered only part of them.
+  const factory RestoreProgress.loaded({
+    required int done,
+    required int toLoad,
+  }) = RestoreProgress_Loaded;
+}
 
 /// What one `resync` pass found and did (docs/PUSH_NOTIFICATIONS.md §10).
 class ResyncOutcome {

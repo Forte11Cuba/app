@@ -174,6 +174,17 @@ class AppLocalizationsNl extends AppLocalizations {
   String get filterButtonLabel => 'Filter';
 
   @override
+  String filtersActiveCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count filters actief',
+      one: '1 filter actief',
+    );
+    return '$_temp0';
+  }
+
+  @override
   String get noOrdersAvailable => 'Geen orders beschikbaar';
 
   @override
@@ -284,7 +295,7 @@ class AppLocalizationsNl extends AppLocalizations {
   String get importMnemonicDialogTitle => 'Geheime woorden importeren';
 
   @override
-  String get importMnemonicHintText => 'Vul je 12 of 24 woorden in…';
+  String get importMnemonicHintText => 'Vul je 12 geheime woorden in';
 
   @override
   String get importButtonLabel => 'Importeren';
@@ -1030,11 +1041,10 @@ class AppLocalizationsNl extends AppLocalizations {
 
   @override
   String get invalidMnemonicMessage =>
-      'Ongeldige woordenreeks. Controleer je woorden en probeer het opnieuw.';
+      'Ongeldige geheime woorden. Controleer je woorden en probeer het opnieuw.';
 
   @override
-  String get enterValidMnemonicError =>
-      'Vul een geldige reeks van 12 of 24 woorden in.';
+  String get enterValidMnemonicError => 'Vul je 12 geheime woorden in.';
 
   @override
   String get orderBookRefreshedMessage => 'Orderboek ververst';
@@ -3643,4 +3653,92 @@ class AppLocalizationsNl extends AppLocalizations {
 
   @override
   String get fundsAtRiskContinue => 'Toch doorgaan';
+
+  @override
+  String get restoreSheetTitle => 'Je account wordt hersteld';
+
+  @override
+  String get restoreSheetWaiting => 'Dit kan een paar seconden duren';
+
+  @override
+  String restoreSheetLoading(int done, int total) {
+    return '$done van $total orders hersteld';
+  }
+
+  @override
+  String get restoreStageConnecting => 'Verbinden met de Mostro-node';
+
+  @override
+  String get restoreStageConnected => 'Verbonden met de Mostro-node';
+
+  @override
+  String get restoreStageRequesting => 'Je orders opvragen';
+
+  @override
+  String restoreStageFound(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count orders gevonden',
+      one: '1 order gevonden',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get restoreStageLoading => 'Details laden';
+
+  @override
+  String get restoreStageNoResponse => 'Geen antwoord';
+
+  @override
+  String restoreLoadingCountSemantics(int done, int total) {
+    return '$done van $total orders';
+  }
+
+  @override
+  String get restoreFailedTitle => 'We konden je orders niet herstellen';
+
+  @override
+  String get restoreFailedSubtitle => 'Je account is wel geïmporteerd';
+
+  @override
+  String restoreFailedBody(String place) {
+    return 'Controleer je verbinding en probeer het opnieuw. Je kunt het altijd opnieuw proberen via $place.';
+  }
+
+  @override
+  String get restoreContinueWithout => 'Doorgaan zonder herstellen';
+
+  @override
+  String get restoreDoneTitle => 'Account hersteld';
+
+  @override
+  String get restoreDoneSubtitle => 'We hebben alles hersteld wat de node had';
+
+  @override
+  String get restoreDoneEmptySubtitle =>
+      'Dit account had geen orders op de node';
+
+  @override
+  String get restoreSummaryOrders => 'Orders';
+
+  @override
+  String get restoreSummaryInProgress => 'Lopend';
+
+  @override
+  String restoreActionNotice(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Er wachten $count actieve orders op jou',
+      one: 'Er wacht 1 actieve order op jou',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String restorePartialNotice(int missing, int total) {
+    return '$missing van $total orders konden niet worden geladen';
+  }
 }
