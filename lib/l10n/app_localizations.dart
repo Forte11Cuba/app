@@ -214,17 +214,11 @@ abstract class AppLocalizations {
   /// **'Failed to load disputes. Please try again.'**
   String get disputeLoadError;
 
-  /// Snackbar shown when user tries to send a dispute message
+  /// Shown when the user tries to write in a dispute chat before a solver has taken the dispute
   ///
   /// In en, this message translates to:
-  /// **'Dispute messaging coming soon'**
-  String get disputeMessagingComingSoon;
-
-  /// Snackbar shown when user tries to attach a file in dispute chat
-  ///
-  /// In en, this message translates to:
-  /// **'File attachments coming soon'**
-  String get disputeAttachmentsComingSoon;
+  /// **'No resolver has taken this dispute yet. You can write once one does.'**
+  String get disputeSolverNotAssigned;
 
   /// Body text shown when a dispute cannot be found by ID
   ///
@@ -6201,6 +6195,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'It is encrypted on your device. Only your counterpart can open it.'**
   String get attachSheetBody;
+
+  /// Body of the attach sheet in the dispute chat, where only the solver can open the file
+  ///
+  /// In en, this message translates to:
+  /// **'It is encrypted on your device. Only the resolver can open it.'**
+  String get attachSheetBodySolver;
 
   /// Attach sheet row: pick a photo from the gallery
   ///

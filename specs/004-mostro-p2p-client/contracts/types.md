@@ -273,6 +273,8 @@ sha256: String           # of the encrypted blob
 encrypted_size: u64
 width: u32?              # images
 height: u32?
+counterpart_pubkey: String?  # our own sends only: who it was encrypted to
+                             # (peer or solver); never from the wire (#596)
 ```
 
 ### RelaySource

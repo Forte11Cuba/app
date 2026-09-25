@@ -65,12 +65,8 @@ class AppLocalizationsFr extends AppLocalizations {
       'Impossible de charger les litiges. Veuillez réessayer.';
 
   @override
-  String get disputeMessagingComingSoon =>
-      'Messagerie de litige bientôt disponible';
-
-  @override
-  String get disputeAttachmentsComingSoon =>
-      'Pièces jointes bientôt disponibles';
+  String get disputeSolverNotAssigned =>
+      'Aucun médiateur n\'a encore pris ce litige. Vous pourrez écrire dès qu\'un médiateur l\'aura pris.';
 
   @override
   String get disputeNotFound => 'Litige introuvable.';
@@ -3763,6 +3759,10 @@ class AppLocalizationsFr extends AppLocalizations {
   @override
   String get attachSheetBody =>
       'Il est chiffré sur votre appareil. Seule votre contrepartie peut l\'ouvrir.';
+
+  @override
+  String get attachSheetBodySolver =>
+      'Il est chiffré sur votre appareil. Seul le médiateur peut l\'ouvrir.';
 
   @override
   String get attachSourcePhoto => 'Photo';

@@ -386,13 +386,13 @@ fn peer_to_wake(delivered: bool, peer_hex: &str) -> Option<&str> {
 
 /// Record a message we just sent to the solver, mirroring what `send_message`
 /// stores for the peer chat: identified by the inner event id so the relay
-/// echo dedups against it, and never unread (we wrote it).
+/// echo dedups against it, and never unread (we wrote it). Returns it.
 pub(crate) async fn store_outgoing_admin_message(
     trade_id: &str,
     ctx: &ChatContext,
     content: &str,
     inner: &nostr_sdk::prelude::Event,
-) {
+) -> ChatMessage {
     let msg = ChatMessage {
         id: inner.id.to_hex(),
         trade_id: trade_id.to_string(),
@@ -405,7 +405,8 @@ pub(crate) async fn store_outgoing_admin_message(
         attachment: None,
         created_at: inner.created_at.as_secs() as i64,
     };
-    let _ = message_store().add_message(msg).await;
+    let _ = message_store().add_message(msg.clone()).await;
+    msg
 }
 
 async fn publish_chat_payload(ctx: &ChatContext, payload: &str) -> Result<PublishedChat> {
@@ -574,13 +575,54 @@ pub async fn send_file(
     file_name: String,
     upload_id: String,
 ) -> Result<ChatMessage> {
-    use crate::attachments::payload::{AttachmentPayload, FilePayload, ImagePayload};
-
     if trade_id.trim().is_empty() {
         bail!("TradeNotFound: trade_id must not be empty");
     }
+    // The session — rebuilt from the trade row when absent (#381).
+    let target = async {
+        let session = session_or_rebuild(&trade_id)
+            .await
+            .ok_or_else(|| anyhow!("SessionNotFound: {trade_id}"))?;
+        let counterpart_hex = session
+            .peer_pubkey
+            .clone()
+            .ok_or_else(|| anyhow!("PeerUnknown: the counterpart has not taken the order yet"))?;
+        Ok(AttachmentTarget {
+            trade_key_index: session.trade_key_index,
+            counterpart_hex,
+            channel: ChatChannel::Peer,
+        })
+    };
+    send_attachment(&trade_id, file_bytes, file_name, &upload_id, target).await
+}
+
+/// Who an attachment goes to: the counterpart its key and envelope are
+/// shared with — the peer, or the solver in the dispute chat — and the
+/// conversation it is filed under.
+pub(crate) struct AttachmentTarget {
+    pub(crate) trade_key_index: u32,
+    pub(crate) counterpart_hex: String,
+    pub(crate) channel: ChatChannel,
+}
+
+/// The send path shared by [`send_file`] and the dispute chat's
+/// `send_dispute_file` (#589 phase 3); see [`send_file`] for the steps.
+///
+/// `target` is awaited only once the file passed its checks, so a file that
+/// could never be sent is refused as such whatever the conversation's state.
+pub(crate) async fn send_attachment(
+    trade_id: &str,
+    file_bytes: Vec<u8>,
+    file_name: String,
+    upload_id: &str,
+    target: impl std::future::Future<Output = Result<AttachmentTarget>>,
+) -> Result<ChatMessage> {
+    use crate::attachments::payload::{AttachmentPayload, FilePayload, ImagePayload};
+
     let progress = |p: f64| {
-        let _ = message_store().attachment_tx.send((upload_id.clone(), p));
+        let _ = message_store()
+            .attachment_tx
+            .send((upload_id.to_string(), p));
     };
     let generation = crate::api::identity::identity_generation().await;
 
@@ -588,19 +630,13 @@ pub async fn send_file(
     let prepared = crate::attachments::media::prepare_for_send(file_bytes)?;
     progress(0.1);
 
-    // 2. The session — rebuilt from the trade row when absent (#381) — and
-    //    the key shared with the peer.
-    let session = session_or_rebuild(&trade_id)
-        .await
-        .ok_or_else(|| anyhow!("SessionNotFound: {trade_id}"))?;
-    let peer_hex = session
-        .peer_pubkey
-        .clone()
-        .ok_or_else(|| anyhow!("PeerUnknown: the counterpart has not taken the order yet"))?;
-    let peer_pubkey = nostr_sdk::prelude::PublicKey::from_hex(&peer_hex)
-        .map_err(|e| anyhow!("PeerUnknown: invalid peer pubkey: {e}"))?;
-    let trade_keys = crate::api::identity::get_active_trade_keys(session.trade_key_index).await?;
-    let key = crate::crypto::file_enc::attachment_key(&trade_keys, &peer_pubkey)?;
+    // 2. The conversation, and the key shared with whoever is on the other
+    //    side of it.
+    let target = target.await?;
+    let counterpart = nostr_sdk::prelude::PublicKey::from_hex(&target.counterpart_hex)
+        .map_err(|e| anyhow!("PeerUnknown: invalid counterpart pubkey: {e}"))?;
+    let trade_keys = crate::api::identity::get_active_trade_keys(target.trade_key_index).await?;
+    let key = crate::crypto::file_enc::attachment_key(&trade_keys, &counterpart)?;
     let encrypted = crate::crypto::file_enc::encrypt_file(&prepared.bytes, &key)
         .map_err(|e| anyhow!("FileEncryptionFailed: {e}"))?;
     progress(0.3);
@@ -640,12 +676,16 @@ pub async fn send_file(
         }),
     };
 
-    let ctx = chat_context(session.trade_key_index, &peer_hex).await?;
+    let ctx = chat_context(target.trade_key_index, &target.counterpart_hex).await?;
     let published = publish_chat_payload(&ctx, &payload.to_json())
         .await
         .map_err(|e| anyhow!("SendFailed: {e}"))?;
-    if let Some(peer) = peer_to_wake(published.delivered, &peer_hex) {
-        crate::api::push::wake_peer(peer);
+    // Only the peer is a push client: the solver is never rung (see
+    // CLAUDE.md, "Dispute chat must wake").
+    if target.channel == ChatChannel::Peer {
+        if let Some(peer) = peer_to_wake(published.delivered, &target.counterpart_hex) {
+            crate::api::push::wake_peer(peer);
+        }
     }
     progress(1.0);
 
@@ -661,15 +701,16 @@ pub async fn send_file(
         encrypted_size,
         width: prepared.width,
         height: prepared.height,
+        counterpart_pubkey: Some(target.counterpart_hex.clone()),
     };
     // Identified by the inner event id, like `send_message`: the relay echo
     // and the recipient's replay dedup on it.
     let msg = ChatMessage {
         id: published.inner.id.to_hex(),
-        trade_id,
+        trade_id: trade_id.to_string(),
         sender_pubkey: trade_keys.public_key().to_hex(),
         content: file_name,
-        message_type: MessageType::Peer,
+        message_type: target.channel.message_type(),
         is_mine: true,
         is_read: true,
         has_attachment: true,
@@ -818,8 +859,10 @@ async fn attachment_key_for(msg: &ChatMessage) -> Result<zeroize::Zeroizing<[u8;
 /// For the solver's own messages that is their sender: `mostro_unwrap`
 /// admitted the inner event only as signed by the solver, and the stored
 /// message keeps it after the dispute is resolved and its solver key cleared
-/// — so the history stays openable after a restart (PR #590 review). The
-/// live dispute is the fallback, for our own messages to the solver.
+/// — so the history stays openable after a restart (PR #590 review). Our
+/// own files to the solver name the solver they were encrypted to, for the
+/// same reason (PR #596 review); the live dispute is the last fallback, for
+/// a copy that does not (an echo of a send from another device).
 fn counterpart_of(
     msg: &ChatMessage,
     peer_hex: Option<String>,
@@ -828,7 +871,11 @@ fn counterpart_of(
     match msg.message_type {
         MessageType::Peer => peer_hex,
         MessageType::Admin if !msg.is_mine => Some(msg.sender_pubkey.clone()),
-        MessageType::Admin => live_solver,
+        MessageType::Admin => msg
+            .attachment
+            .as_ref()
+            .and_then(|a| a.counterpart_pubkey.clone())
+            .or(live_solver),
         MessageType::System => None,
     }
 }
@@ -1322,6 +1369,8 @@ fn parse_chat_payload(payload: &str) -> (String, Option<AttachmentInfo>) {
                 encrypted_size: a.encrypted_size,
                 width: a.width,
                 height: a.height,
+                // Only our own sends record it; a peer cannot supply it.
+                counterpart_pubkey: None,
             }),
         ),
         None => (payload.to_string(), None),
@@ -2268,6 +2317,7 @@ mod tests {
             encrypted_size: 128,
             width: Some(10),
             height: Some(10),
+            counterpart_pubkey: None,
         };
         let msg = ChatMessage {
             id: msg_id.clone(),
@@ -2707,6 +2757,41 @@ mod tests {
         assert_eq!(counterpart_of(&msg, Some(peer.clone()), None), Some(peer));
         msg.message_type = MessageType::System;
         assert_eq!(counterpart_of(&msg, None, None), None);
+    }
+
+    /// PR #596 review: a file we sent to the solver names the solver it was
+    /// encrypted to, so it still opens once the resolved dispute is gone —
+    /// and that record wins over whoever the live dispute names.
+    #[test]
+    fn own_solver_attachment_keeps_its_recipient() {
+        let solver = nostr_sdk::prelude::Keys::generate().public_key().to_hex();
+        let other = nostr_sdk::prelude::Keys::generate().public_key().to_hex();
+        let mut msg = notification_test_message("o", 1);
+        msg.message_type = MessageType::Admin;
+        msg.is_mine = true;
+        msg.sender_pubkey = "me".into();
+        let (_, attachment) = parse_chat_payload(
+            &crate::attachments::payload::AttachmentPayload::File(
+                crate::attachments::payload::FilePayload {
+                    file_type: "document".into(),
+                    blossom_url: format!("https://blossom.example/{}", "a".repeat(64)),
+                    nonce: "00".repeat(12),
+                    mime_type: "application/pdf".into(),
+                    original_size: 10,
+                    filename: "r.pdf".into(),
+                    encrypted_size: 38,
+                },
+            )
+            .to_json(),
+        );
+        let mut attachment = attachment.expect("a v1 file parses");
+        // Nothing read from the wire names a recipient.
+        assert_eq!(attachment.counterpart_pubkey, None);
+        attachment.counterpart_pubkey = Some(solver.clone());
+        msg.attachment = Some(attachment);
+
+        assert_eq!(counterpart_of(&msg, None, None), Some(solver.clone()));
+        assert_eq!(counterpart_of(&msg, None, Some(other)), Some(solver));
     }
 
     /// PR #590 review: a transfer that resumes after its identity was

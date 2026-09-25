@@ -37,6 +37,7 @@ import 'package:mostro/src/rust/api/identity.dart' as identity_api;
 import 'package:mostro/shared/utils/platform_int64.dart';
 import 'package:mostro/src/rust/api/types.dart'
     show BondClaimPhase, BondClaimUpdate, BondSlashedEvent, SlashCause;
+import 'package:mostro/features/disputes/providers/disputes_providers.dart';
 import 'package:mostro/features/notifications/models/notification_model.dart';
 import 'package:mostro/features/trades/providers/trades_providers.dart'
     show rawTradesProvider;
@@ -244,6 +245,8 @@ Future<void> bootstrapAndRun({List<String> seedRelays = const []}) async {
     isEnabled: (event) => prefs.getBool(event.prefsKey) ?? true,
     identityCreatedAt: IdentityService.createdAt,
     currentLocation: _currentLocation,
+    disputeIdForTrade: (tradeId) =>
+        container.read(disputeByTradeIdProvider(tradeId))?.id,
   );
   pumpEvents('trade-cards', tradeUpdateStream.next, eventCards.onTradeUpdate);
   pumpEvents('chat-cards', chatMessageStream.next, eventCards.onChatMessage);

@@ -90,6 +90,22 @@ class FakeAttachmentGateway extends AttachmentGateway {
     return result(uploadId);
   }
 
+  /// Files sent to the solver, as [sends] records the peer's.
+  final solverSends = <({String tradeId, String fileName, String id})>[];
+
+  @override
+  Future<rust_types.ChatMessage> sendToSolver({
+    required String tradeId,
+    required Uint8List bytes,
+    required String fileName,
+    required String uploadId,
+  }) {
+    solverSends.add((tradeId: tradeId, fileName: fileName, id: uploadId));
+    final result = sendResult;
+    if (result == null) throw StateError('no send result');
+    return result(uploadId);
+  }
+
   @override
   Future<messages_api.AttachmentData> download(String messageId) {
     downloads.add(messageId);

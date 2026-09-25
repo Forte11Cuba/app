@@ -23,6 +23,32 @@ void main() {
     return container.read(chatUploadsProvider(_trade).notifier);
   }
 
+  test(
+    'the dispute chat sends to the solver, the P2P chat to the peer',
+    () async {
+      final sent = attachmentMessage(id: 'evt', attachment: imageInfo());
+      gateway = FakeAttachmentGateway(sendResult: (_) async => sent);
+      final container = createContainer(
+        overrides: [attachmentGatewayProvider.overrideWithValue(gateway)],
+      );
+      container
+        ..listen(disputeUploadsProvider(_trade), (_, _) {})
+        ..listen(chatUploadsProvider(_trade), (_, _) {});
+
+      await container
+          .read(disputeUploadsProvider(_trade).notifier)
+          .send('receipt.png', Uint8List(3));
+      expect(gateway.solverSends.single.tradeId, _trade);
+      expect(gateway.sends, isEmpty);
+
+      await container
+          .read(chatUploadsProvider(_trade).notifier)
+          .send('receipt.png', Uint8List(3));
+      expect(gateway.sends.single.tradeId, _trade);
+      expect(gateway.solverSends, hasLength(1));
+    },
+  );
+
   test('shows the upload while it runs and drops it once sent', () async {
     final done = Completer<rust_types.ChatMessage>();
     gateway = FakeAttachmentGateway(sendResult: (_) => done.future);

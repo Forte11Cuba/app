@@ -66,10 +66,8 @@ class AppLocalizationsEs extends AppLocalizations {
       'No se pudieron cargar las disputas. Por favor, inténtalo de nuevo.';
 
   @override
-  String get disputeMessagingComingSoon => 'Mensajería de disputa próximamente';
-
-  @override
-  String get disputeAttachmentsComingSoon => 'Archivos adjuntos próximamente';
+  String get disputeSolverNotAssigned =>
+      'Ningún resolutor ha tomado esta disputa todavía. Podrás escribir cuando alguno lo haga.';
 
   @override
   String get disputeNotFound => 'Disputa no encontrada.';
@@ -3727,6 +3725,10 @@ class AppLocalizationsEs extends AppLocalizations {
   @override
   String get attachSheetBody =>
       'Se cifra en tu dispositivo. Solo tu contraparte puede abrirlo.';
+
+  @override
+  String get attachSheetBodySolver =>
+      'Se cifra en tu dispositivo. Solo el resolutor puede abrirlo.';
 
   @override
   String get attachSourcePhoto => 'Foto';

@@ -5,13 +5,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:mostro/core/app_theme.dart';
-import 'package:mostro/features/chat/attachments/attachment_gateway.dart';
-import 'package:mostro/features/chat/attachments/attachment_picker.dart';
+import 'package:mostro/features/chat/attachments/attachment_flow.dart';
 import 'package:mostro/features/chat/attachments/upload_controller.dart';
 import 'package:mostro/features/chat/models/chat_list_rules.dart';
 import 'package:mostro/features/chat/providers/chat_list_provider.dart';
 import 'package:mostro/features/chat/providers/chat_providers.dart';
-import 'package:mostro/features/chat/widgets/attach_sheet.dart';
 import 'package:mostro/features/chat/widgets/info_panels.dart';
 import 'package:mostro/features/chat/widgets/message_bubble.dart';
 import 'package:mostro/features/chat/widgets/message_input.dart';
@@ -22,7 +20,6 @@ import 'package:mostro/features/notifications/providers/notifications_provider.d
 import 'package:mostro/features/trades/providers/trades_providers.dart';
 import 'package:mostro/l10n/app_localizations.dart';
 import 'package:mostro/shared/widgets/bottom_nav_bar.dart';
-import 'package:mostro/shared/widgets/mostro_modal.dart';
 import 'package:mostro/shared/widgets/nym_avatar.dart';
 import 'package:mostro/src/rust/api/messages.dart' as messages_api;
 import 'package:mostro/src/rust/api/types.dart' as rust_types;
@@ -269,7 +266,11 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
   /// pick and the read; the upload shows its own progress in the list.
   Future<void> _onAttach() async {
     if (_isAttaching) return;
-    final picked = await _pickAttachment();
+    final picked = await pickAttachmentToSend(
+      context,
+      ref,
+      onBusy: (busy) => setState(() => _isAttaching = busy),
+    );
     if (picked == null || !mounted) return;
     _scrollToBottom();
     final sent = await ref
@@ -283,68 +284,6 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
         .read(chatUploadsProvider(widget.orderId).notifier)
         .retry(uploadId);
     if (sent != null && mounted) _addOwnMessage(sent);
-  }
-
-  /// The file to send, read into memory, or null when the user backed out
-  /// or it cannot be sent (and was told why).
-  Future<({String name, Uint8List bytes})?> _pickAttachment() async {
-    final l10n = AppLocalizations.of(context);
-    final messenger = ScaffoldMessenger.of(context);
-    final picker = ref.read(attachmentPickerProvider);
-    final source =
-        await showAttachSheet(context, showCamera: picker.supportsCamera);
-    if (source == null || !mounted) return null;
-    setState(() => _isAttaching = true);
-    try {
-      final outcome = await picker.pick(source);
-      if (!mounted) return null;
-      switch (outcome) {
-        case PickCancelled():
-          return null;
-        case PickTooLarge():
-          messenger.showSnackBar(
-            SnackBar(content: Text(l10n.attachmentTooLarge)),
-          );
-          return null;
-        case Picked(:final file):
-          if (!await _confirmSend(file)) return null;
-          return (name: file.name, bytes: await file.read());
-      }
-    } catch (e) {
-      // A denied camera permission or an unreadable file.
-      debugPrint('[chat] pick attachment failed: $e');
-      messenger.showSnackBar(
-        SnackBar(content: Text(l10n.attachmentReadFailed)),
-      );
-      return null;
-    } finally {
-      if (mounted) setState(() => _isAttaching = false);
-    }
-  }
-
-  Future<bool> _confirmSend(PickedAttachment file) async {
-    final confirmed = await showMostroDialog<bool>(
-      context: context,
-      builder: (dialogContext) {
-        final l10n = AppLocalizations.of(dialogContext);
-        return MostroDialog(
-          title: l10n.attachConfirmTitle,
-          body: l10n.attachConfirmBody(
-            file.name,
-            formatAttachmentSize(file.size),
-          ),
-          primary: ModalAction(
-            label: l10n.disputeSend,
-            onPressed: () => Navigator.of(dialogContext).pop(true),
-          ),
-          secondary: ModalAction(
-            label: l10n.cancel,
-            onPressed: () => Navigator.of(dialogContext).pop(false),
-          ),
-        );
-      },
-    );
-    return confirmed ?? false;
   }
 
   // ── Incoming stream ───────────────────────────────────────────────────────

@@ -52,7 +52,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.11.1";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -1068204071;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -414893120;
 
 // Section: executor
 
@@ -6100,6 +6100,51 @@ fn wire__crate__api__nostr__resync_impl(
         },
     )
 }
+fn wire__crate__api__disputes__send_dispute_file_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::SseCodec, _, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "send_dispute_file",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_trade_id = <String>::sse_decode(&mut deserializer);
+            let api_file_bytes = <Vec<u8>>::sse_decode(&mut deserializer);
+            let api_file_name = <String>::sse_decode(&mut deserializer);
+            let api_upload_id = <String>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| async move {
+                transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
+                    (move || async move {
+                        let output_ok = crate::api::disputes::send_dispute_file(
+                            api_trade_id,
+                            api_file_bytes,
+                            api_file_name,
+                            api_upload_id,
+                        )
+                        .await?;
+                        Ok(output_ok)
+                    })()
+                    .await,
+                )
+            }
+        },
+    )
+}
 fn wire__crate__api__orders__send_fiat_sent_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -7556,6 +7601,7 @@ impl SseDecode for crate::api::types::AttachmentInfo {
         let mut var_encryptedSize = <u64>::sse_decode(deserializer);
         let mut var_width = <Option<u32>>::sse_decode(deserializer);
         let mut var_height = <Option<u32>>::sse_decode(deserializer);
+        let mut var_counterpartPubkey = <Option<String>>::sse_decode(deserializer);
         return crate::api::types::AttachmentInfo {
             file_name: var_fileName,
             mime_type: var_mimeType,
@@ -7567,6 +7613,7 @@ impl SseDecode for crate::api::types::AttachmentInfo {
             encrypted_size: var_encryptedSize,
             width: var_width,
             height: var_height,
+            counterpart_pubkey: var_counterpartPubkey,
         };
     }
 }
@@ -9898,67 +9945,70 @@ fn pde_ffi_dispatcher_primary_impl(
             data_len,
         ),
         151 => wire__crate__api__nostr__resync_impl(port, ptr, rust_vec_len, data_len),
-        152 => wire__crate__api__orders__send_fiat_sent_impl(port, ptr, rust_vec_len, data_len),
-        153 => wire__crate__api__messages__send_file_impl(port, ptr, rust_vec_len, data_len),
-        154 => wire__crate__api__orders__send_invoice_impl(port, ptr, rust_vec_len, data_len),
-        155 => wire__crate__api__messages__send_message_impl(port, ptr, rust_vec_len, data_len),
-        156 => wire__crate__api__settings__set_active_mostro_node_impl(
+        152 => {
+            wire__crate__api__disputes__send_dispute_file_impl(port, ptr, rust_vec_len, data_len)
+        }
+        153 => wire__crate__api__orders__send_fiat_sent_impl(port, ptr, rust_vec_len, data_len),
+        154 => wire__crate__api__messages__send_file_impl(port, ptr, rust_vec_len, data_len),
+        155 => wire__crate__api__orders__send_invoice_impl(port, ptr, rust_vec_len, data_len),
+        156 => wire__crate__api__messages__send_message_impl(port, ptr, rust_vec_len, data_len),
+        157 => wire__crate__api__settings__set_active_mostro_node_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        157 => wire__crate__api__escrow__set_cashu_mint_url_override_impl(
+        158 => wire__crate__api__escrow__set_cashu_mint_url_override_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        158 => wire__crate__api__settings__set_default_fiat_code_impl(
+        159 => wire__crate__api__settings__set_default_fiat_code_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        159 => wire__crate__api__settings__set_default_lightning_address_impl(
+        160 => wire__crate__api__settings__set_default_lightning_address_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        160 => wire__crate__api__escrow__set_escrow_mode_override_impl(
+        161 => wire__crate__api__escrow__set_escrow_mode_override_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        161 => wire__crate__api__settings__set_language_impl(port, ptr, rust_vec_len, data_len),
-        162 => {
+        162 => wire__crate__api__settings__set_language_impl(port, ptr, rust_vec_len, data_len),
+        163 => {
             wire__crate__api__settings__set_logging_enabled_impl(port, ptr, rust_vec_len, data_len)
         }
-        163 => {
+        164 => {
             wire__crate__api__reputation__set_privacy_mode_impl(port, ptr, rust_vec_len, data_len)
         }
-        164 => wire__crate__api__push__set_push_enabled_impl(port, ptr, rust_vec_len, data_len),
-        165 => wire__crate__api__push__set_push_token_impl(port, ptr, rust_vec_len, data_len),
-        166 => wire__crate__api__settings__set_test_order_expiry_impl(
+        165 => wire__crate__api__push__set_push_enabled_impl(port, ptr, rust_vec_len, data_len),
+        166 => wire__crate__api__push__set_push_token_impl(port, ptr, rust_vec_len, data_len),
+        167 => wire__crate__api__settings__set_test_order_expiry_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        167 => wire__crate__api__settings__set_theme_impl(port, ptr, rust_vec_len, data_len),
-        168 => wire__crate__api__bond__submit_bond_payout_invoice_impl(
+        168 => wire__crate__api__settings__set_theme_impl(port, ptr, rust_vec_len, data_len),
+        169 => wire__crate__api__bond__submit_bond_payout_invoice_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        169 => wire__crate__api__disputes__submit_evidence_impl(port, ptr, rust_vec_len, data_len),
-        170 => wire__crate__api__reputation__submit_rating_impl(port, ptr, rust_vec_len, data_len),
-        171 => wire__crate__api__orders__subscribe_orders_impl(port, ptr, rust_vec_len, data_len),
-        172 => wire__crate__api__orders__take_order_impl(port, ptr, rust_vec_len, data_len),
-        173 => {
+        170 => wire__crate__api__disputes__submit_evidence_impl(port, ptr, rust_vec_len, data_len),
+        171 => wire__crate__api__reputation__submit_rating_impl(port, ptr, rust_vec_len, data_len),
+        172 => wire__crate__api__orders__subscribe_orders_impl(port, ptr, rust_vec_len, data_len),
+        173 => wire__crate__api__orders__take_order_impl(port, ptr, rust_vec_len, data_len),
+        174 => {
             wire__crate__api__invoice__trade_step_started_at_impl(port, ptr, rust_vec_len, data_len)
         }
         _ => unreachable!(),
@@ -10427,6 +10477,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::types::AttachmentInfo {
             self.encrypted_size.into_into_dart().into_dart(),
             self.width.into_into_dart().into_dart(),
             self.height.into_into_dart().into_dart(),
+            self.counterpart_pubkey.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -12546,6 +12597,7 @@ impl SseEncode for crate::api::types::AttachmentInfo {
         <u64>::sse_encode(self.encrypted_size, serializer);
         <Option<u32>>::sse_encode(self.width, serializer);
         <Option<u32>>::sse_encode(self.height, serializer);
+        <Option<String>>::sse_encode(self.counterpart_pubkey, serializer);
     }
 }
 

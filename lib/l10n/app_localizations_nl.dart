@@ -66,12 +66,8 @@ class AppLocalizationsNl extends AppLocalizations {
       'De disputen konden niet worden geladen. Probeer het opnieuw.';
 
   @override
-  String get disputeMessagingComingSoon =>
-      'Berichten bij disputen komen binnenkort';
-
-  @override
-  String get disputeAttachmentsComingSoon =>
-      'Bestanden toevoegen komt binnenkort';
+  String get disputeSolverNotAssigned =>
+      'Nog geen solver heeft dit dispuut opgepakt. Je kunt schrijven zodra iemand dat doet.';
 
   @override
   String get disputeNotFound => 'Dispuut niet gevonden.';
@@ -3731,6 +3727,10 @@ class AppLocalizationsNl extends AppLocalizations {
   @override
   String get attachSheetBody =>
       'Het wordt op je apparaat versleuteld. Alleen je tegenpartij kan het openen.';
+
+  @override
+  String get attachSheetBodySolver =>
+      'Het wordt op je apparaat versleuteld. Alleen de solver kan het openen.';
 
   @override
   String get attachSourcePhoto => 'Foto';

@@ -2,6 +2,7 @@ import 'dart:typed_data';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:mostro/src/rust/api/disputes.dart' as disputes_api;
 import 'package:mostro/src/rust/api/messages.dart' as messages_api;
 import 'package:mostro/src/rust/api/types.dart' as rust_types;
 
@@ -39,6 +40,22 @@ class AttachmentGateway {
     required String fileName,
     required String uploadId,
   }) => messages_api.sendFile(
+    tradeId: tradeId,
+    fileBytes: bytes,
+    fileName: fileName,
+    uploadId: uploadId,
+  );
+
+  /// Encrypts, uploads and sends [bytes] to the solver of [tradeId]'s
+  /// dispute (#589 phase 3), keyed to the solver instead of the peer.
+  ///
+  /// Fails with the markers of `send_dispute_file`.
+  Future<rust_types.ChatMessage> sendToSolver({
+    required String tradeId,
+    required Uint8List bytes,
+    required String fileName,
+    required String uploadId,
+  }) => disputes_api.sendDisputeFile(
     tradeId: tradeId,
     fileBytes: bytes,
     fileName: fileName,
