@@ -255,8 +255,18 @@ class _AddLightningInvoiceScreenState
     return expiresAt - (node.minRemainingSecs ?? 0);
   }
 
+  /// Retires whatever is in flight: it was asked about something the screen
+  /// has moved on from.
+  ///
+  /// Called where a request *stops being the question*, not where its
+  /// replacement starts — the two are not the same moment. An edit waits out
+  /// [_debounce] before the next check begins, and a failure arriving in that
+  /// gap would otherwise still hold the current number and be believed.
+  void _supersede() => _evaluation++;
+
   void _onInputChanged() {
     _checkTimer?.cancel();
+    _supersede();
     // The daemon's verdict was about the previous input; the new one gets
     // its own local verdict.
     setState(() => _lastError = null);
@@ -268,7 +278,13 @@ class _AddLightningInvoiceScreenState
   /// Ask the Rust core what [input] is and whether the daemon would take it
   /// for a trade of [sats]. A core that cannot answer leaves the input to
   /// the daemon rather than refusing it for a missing bridge.
-  Future<void> _evaluate(String input, BigInt? sats) async {
+  ///
+  /// Returns the verdict for *this* request, or null once it has been
+  /// superseded — so a caller acting on one invoice cannot be handed the
+  /// verdict of another. What it returns is the raw verdict; the node-facts
+  /// withholding that [_check] applies is a readout rule and does not change
+  /// whether submission is allowed.
+  Future<InvoiceCheck?> _evaluate(String input, BigInt? sats) async {
     final generation = ++_evaluation;
     final node = _nodeContext();
     final request = (
@@ -288,11 +304,14 @@ class _AddLightningInvoiceScreenState
       // is sticky and short-circuits ahead of the re-judge, so an older
       // failure landing after a newer answer would blank the readout and
       // unlock submission until the buyer typed again.
-      if (!mounted || generation != _evaluation) return;
+      if (!mounted || generation != _evaluation) return null;
       setState(() => _checkerAvailable = false);
-      return;
+      // Unverified, not null: a core that cannot answer hands the input to
+      // the daemon, and a caller waiting on this request must get that
+      // policy rather than a refusal.
+      return const InvoiceCheckUnverified();
     }
-    if (!mounted || generation != _evaluation) return;
+    if (!mounted || generation != _evaluation) return null;
     setState(() {
       _checkerAvailable = true;
       _verdictInput = input;
@@ -301,6 +320,7 @@ class _AddLightningInvoiceScreenState
       _verdict = verdict;
     });
     _armExpiryTimer(verdict, node);
+    return verdict;
   }
 
   /// Re-judge a valid invoice the moment it stops being acceptable.
@@ -319,9 +339,15 @@ class _AddLightningInvoiceScreenState
   /// stopped fitting the node while the screen sat idle.
   Future<InvoiceCheck> _freshCheck(String input, BigInt? sats) async {
     _checkTimer?.cancel();
-    await _evaluate(input, sats);
+    _supersede();
+    final verdict = await _evaluate(input, sats);
     if (!mounted) return const InvoiceCheckPending();
-    return _check(sats);
+    // The verdict this request got, never whatever `_check` holds by now:
+    // an edit or a node change mid-flight leaves a verdict about a different
+    // invoice, and the caller would send the one it captured on the strength
+    // of it. Superseded reads as pending, so nothing is sent and the buyer
+    // can ask again.
+    return verdict ?? const InvoiceCheckPending();
   }
 
   InvoiceCheck _check(BigInt? sats) {
@@ -343,6 +369,7 @@ class _AddLightningInvoiceScreenState
       // run into the node's window: judge again, and hold submission
       // meanwhile.
       _checkTimer?.cancel();
+      _supersede();
       _checkTimer = Timer(Duration.zero, () => _evaluate(input, sats));
       return const InvoiceCheckPending();
     }

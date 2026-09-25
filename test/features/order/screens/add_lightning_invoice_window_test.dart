@@ -612,4 +612,175 @@ void main() {
       semantics.dispose();
     }
   });
+
+  // The gap the counter alone did not cover: an edit retires the check in
+  // flight, but its replacement does not start for another 300 ms. A failure
+  // landing inside that window used to still hold the current number, and
+  // `_checkerAvailable` is sticky and short-circuits ahead of the re-judge —
+  // so the readout went blank and the button opened until the buyer typed
+  // again.
+  testWidgets('a check that fails inside the debounce window is ignored', (
+    tester,
+  ) async {
+    final semantics = tester.ensureSemantics();
+    final pending = <Completer<InvoiceCheck>>[];
+    try {
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            isWalletConnectedProvider.overrideWithValue(false),
+            tradeAmountProvider.overrideWith(
+              (ref, orderId) => Stream.value(BigInt.from(250)),
+            ),
+            tradeUpdatesProvider.overrideWith(
+              (ref) => const Stream<TradeUpdate>.empty(),
+            ),
+            tradeInfoProvider.overrideWith((ref, orderId) async => null),
+            mostroNodeProvider.overrideWith(
+              (ref) async => const MostroInstance(
+                pubKey: 'node-a',
+                lndNetworks: 'mainnet',
+              ),
+            ),
+            invoiceCheckerProvider.overrideWithValue((request) {
+              final c = Completer<InvoiceCheck>();
+              pending.add(c);
+              return c.future;
+            }),
+          ],
+          child: MaterialApp(
+            theme: buildDarkTheme(),
+            localizationsDelegates: AppLocalizations.localizationsDelegates,
+            supportedLocales: AppLocalizations.supportedLocales,
+            locale: const Locale('en'),
+            home: const AddLightningInvoiceScreen(orderId: 'order-1'),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+
+      await tester.enterText(find.byType(TextField), 'lnbc2500u1x');
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(pending, hasLength(1), reason: 'the first check is out');
+      expect(
+        _canSubmit(tester),
+        isFalse,
+        reason: 'nothing judged yet, so submission is held',
+      );
+
+      // Edit, then stop short of the debounce: the check above is retired,
+      // and its replacement has not started.
+      await tester.enterText(find.byType(TextField), 'lnbc2500u1y');
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(pending, hasLength(1), reason: 'the replacement has not begun');
+
+      // The retired check fails here, inside the gap.
+      pending.first.completeError(StateError('the bridge went away'));
+      await tester.pump(const Duration(milliseconds: 100));
+
+      expect(
+        _canSubmit(tester),
+        isFalse,
+        reason: 'a retired failure must not declare the core gone',
+      );
+      expect(_checkWord(tester), isNull);
+
+      // The replacement runs and answers, and the screen judges normally.
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(pending, hasLength(2));
+      pending[1].complete(const InvoiceCheckValid(250));
+      await tester.pump(const Duration(milliseconds: 200));
+
+      expect(_checkWord(tester), 'valid');
+      expect(_canSubmit(tester), isTrue);
+    } finally {
+      semantics.dispose();
+    }
+  });
+
+  // `_freshCheck` used to await its own evaluation and then read whatever
+  // verdict the screen held by then. Superseded mid-flight, that is a verdict
+  // about a different invoice — and `_submit` would send the one it captured
+  // on the strength of it.
+  testWidgets('a submit whose check is superseded sends nothing', (
+    tester,
+  ) async {
+    final semantics = tester.ensureSemantics();
+    final pending = <Completer<InvoiceCheck>>[];
+    final sent = <String>[];
+    try {
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            isWalletConnectedProvider.overrideWithValue(false),
+            tradeAmountProvider.overrideWith(
+              (ref, orderId) => Stream.value(BigInt.from(250)),
+            ),
+            tradeUpdatesProvider.overrideWith(
+              (ref) => const Stream<TradeUpdate>.empty(),
+            ),
+            tradeInfoProvider.overrideWith((ref, orderId) async => null),
+            mostroNodeProvider.overrideWith(
+              (ref) async => const MostroInstance(
+                pubKey: 'node-a',
+                lndNetworks: 'mainnet',
+              ),
+            ),
+            invoiceCheckerProvider.overrideWithValue((request) {
+              final c = Completer<InvoiceCheck>();
+              pending.add(c);
+              return c.future;
+            }),
+          ],
+          child: MaterialApp(
+            theme: buildDarkTheme(),
+            localizationsDelegates: AppLocalizations.localizationsDelegates,
+            supportedLocales: AppLocalizations.supportedLocales,
+            locale: const Locale('en'),
+            home: AddLightningInvoiceScreen(
+              orderId: 'order-1',
+              submitInvoice: (orderId, invoice, sats) async {
+                sent.add(invoice);
+              },
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+
+      await tester.enterText(find.byType(TextField), 'lnbc2500u1first');
+      await tester.pump(const Duration(milliseconds: 400));
+      pending.first.complete(const InvoiceCheckValid(250));
+      await tester.pump(const Duration(milliseconds: 200));
+      expect(_canSubmit(tester), isTrue);
+
+      // Tap send: the submit-time check goes out for `first`.
+      await tester.tap(_semantics('invoice.submit'), warnIfMissed: false);
+      await tester.pump();
+      expect(pending, hasLength(2), reason: 'submit judges again');
+
+      // The buyer edits while that check is still out, and the replacement
+      // answers first — a verdict about `second`.
+      await tester.enterText(find.byType(TextField), 'lnbc2500u1second');
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(pending, hasLength(3));
+      pending[2].complete(const InvoiceCheckValid(250));
+      await tester.pump(const Duration(milliseconds: 200));
+
+      // Only now does the submit's own check answer.
+      pending[1].complete(const InvoiceCheckValid(250));
+      await tester.pump(const Duration(milliseconds: 200));
+      await tester.pump(const Duration(milliseconds: 200));
+
+      expect(
+        sent,
+        isEmpty,
+        reason: 'the captured invoice was never the one judged',
+      );
+    } finally {
+      semantics.dispose();
+    }
+  });
 }
