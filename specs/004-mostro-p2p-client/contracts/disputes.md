@@ -157,9 +157,11 @@ memory win, enforced under the store's single write lock so a concurrent
 `get_dispute` non-null and `submit_evidence` work again after a restart.
 
 **Terminal states**: the *trade* status, not the dispute record, is the durable
-signal that a dispute is over — the daemon's `admin-settled` / `admin-canceled`
-are persisted by the order status-sync path without being routed into the
-dispute store. A trade is finished at `SettledByAdmin`, `CanceledByAdmin`,
+signal that a dispute is over. The daemon's `admin-settled` / `admin-canceled`
+are persisted by the order status-sync path, which also routes them into the
+dispute store (`apply_admin_verdict`, #596) — that resolves the live record
+and tells `on_dispute_updated`, but the record is in memory and gone after a
+restart. A trade is finished at `SettledByAdmin`, `CanceledByAdmin`,
 `CompletedByAdmin`, `Success`, `Canceled`, `CooperativelyCanceled` or
 `Expired`. Three places enforce it, and all three clear both keys:
 
@@ -170,19 +172,17 @@ dispute store. A trade is finished at `SettledByAdmin`, `CanceledByAdmin`,
   replay would, one second after rehydration cleared the keys, recreate the
   record as `InReview`, write the solver key straight back and arm a listener
   nobody is on the other end of — on every startup;
-- a resolution reaching the dispute store clears them too. Today nothing routes
-  the daemon's verdicts there (`handle_admin_settled` / `handle_admin_canceled`
-  have no production caller), so in practice the two trade-status guards above
-  are what clean up; the resolution path is ready for when that wiring lands.
+- a resolution reaching the dispute store clears them too: the verdicts are
+  routed there since #596.
 
-**UI wiring**: this is the Rust layer only. Nothing in Dart consumes the
-rehydrated record yet — `get_dispute`, `submit_evidence` and
-`on_dispute_updated` have no callers outside the generated bindings — and the
-dispute chat has no UI: `chat_room_screen.dart` renders only peer messages and
-`send_message` has no channel parameter, so the solver can be read but not
-written to. What lands today is the re-armed listener: solver messages arrive
-and persist as `MessageType::Admin`. Repopulating the dispute screen and the
-admin chat are the tracked follow-ups. So is one-tap delivery of the P2P
+Sending to the solver (`submit_evidence`, `send_dispute_file`) checks both:
+a resolved record or a finished trade is `NoOpenDispute`.
+
+**UI wiring**: the dispute chat screen (#143, #589 phase 3) reads the record
+with `get_dispute` when it opens and follows `on_dispute_updated`, shows the
+`MessageType::Admin` messages, and writes with `submit_evidence` and
+`send_dispute_file`. The disputes list is still fed on resume only (#397).
+Still to come: one-tap delivery of the P2P
 shared key to the solver (#415): Rust will send it over this channel behind an
 explicit confirmation in the UI, and the key is never exposed to Dart; that
 function and the `Dispute` state it adds are specified when it lands.
@@ -197,4 +197,6 @@ persistence on web.
 
 ### on_dispute_updated(trade_id: String) → Stream<Dispute>
 Emits when dispute status changes (opened, admin message received,
-resolved).
+resolved). A subscriber that falls behind the broadcast buffer gets the
+record as it stands in place of the updates it missed, so a resolution is
+never skipped (#596).

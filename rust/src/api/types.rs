@@ -597,6 +597,12 @@ pub struct AttachmentInfo {
     pub width: Option<u32>,
     #[serde(default)]
     pub height: Option<u32>,
+    /// For a file we sent: the pubkey it was encrypted to — the peer, or the
+    /// solver in the dispute chat. Never read from the wire. Kept because
+    /// our own message names only us as its sender, and a resolved
+    /// dispute's solver key is gone after a restart (PR #596 review).
+    #[serde(default)]
+    pub counterpart_pubkey: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

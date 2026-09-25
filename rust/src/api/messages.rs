@@ -701,6 +701,7 @@ pub(crate) async fn send_attachment(
         encrypted_size,
         width: prepared.width,
         height: prepared.height,
+        counterpart_pubkey: Some(target.counterpart_hex.clone()),
     };
     // Identified by the inner event id, like `send_message`: the relay echo
     // and the recipient's replay dedup on it.
@@ -858,8 +859,10 @@ async fn attachment_key_for(msg: &ChatMessage) -> Result<zeroize::Zeroizing<[u8;
 /// For the solver's own messages that is their sender: `mostro_unwrap`
 /// admitted the inner event only as signed by the solver, and the stored
 /// message keeps it after the dispute is resolved and its solver key cleared
-/// — so the history stays openable after a restart (PR #590 review). The
-/// live dispute is the fallback, for our own messages to the solver.
+/// — so the history stays openable after a restart (PR #590 review). Our
+/// own files to the solver name the solver they were encrypted to, for the
+/// same reason (PR #596 review); the live dispute is the last fallback, for
+/// a copy that does not (an echo of a send from another device).
 fn counterpart_of(
     msg: &ChatMessage,
     peer_hex: Option<String>,
@@ -868,7 +871,11 @@ fn counterpart_of(
     match msg.message_type {
         MessageType::Peer => peer_hex,
         MessageType::Admin if !msg.is_mine => Some(msg.sender_pubkey.clone()),
-        MessageType::Admin => live_solver,
+        MessageType::Admin => msg
+            .attachment
+            .as_ref()
+            .and_then(|a| a.counterpart_pubkey.clone())
+            .or(live_solver),
         MessageType::System => None,
     }
 }
@@ -1362,6 +1369,8 @@ fn parse_chat_payload(payload: &str) -> (String, Option<AttachmentInfo>) {
                 encrypted_size: a.encrypted_size,
                 width: a.width,
                 height: a.height,
+                // Only our own sends record it; a peer cannot supply it.
+                counterpart_pubkey: None,
             }),
         ),
         None => (payload.to_string(), None),
@@ -2308,6 +2317,7 @@ mod tests {
             encrypted_size: 128,
             width: Some(10),
             height: Some(10),
+            counterpart_pubkey: None,
         };
         let msg = ChatMessage {
             id: msg_id.clone(),
@@ -2747,6 +2757,41 @@ mod tests {
         assert_eq!(counterpart_of(&msg, Some(peer.clone()), None), Some(peer));
         msg.message_type = MessageType::System;
         assert_eq!(counterpart_of(&msg, None, None), None);
+    }
+
+    /// PR #596 review: a file we sent to the solver names the solver it was
+    /// encrypted to, so it still opens once the resolved dispute is gone —
+    /// and that record wins over whoever the live dispute names.
+    #[test]
+    fn own_solver_attachment_keeps_its_recipient() {
+        let solver = nostr_sdk::prelude::Keys::generate().public_key().to_hex();
+        let other = nostr_sdk::prelude::Keys::generate().public_key().to_hex();
+        let mut msg = notification_test_message("o", 1);
+        msg.message_type = MessageType::Admin;
+        msg.is_mine = true;
+        msg.sender_pubkey = "me".into();
+        let (_, attachment) = parse_chat_payload(
+            &crate::attachments::payload::AttachmentPayload::File(
+                crate::attachments::payload::FilePayload {
+                    file_type: "document".into(),
+                    blossom_url: format!("https://blossom.example/{}", "a".repeat(64)),
+                    nonce: "00".repeat(12),
+                    mime_type: "application/pdf".into(),
+                    original_size: 10,
+                    filename: "r.pdf".into(),
+                    encrypted_size: 38,
+                },
+            )
+            .to_json(),
+        );
+        let mut attachment = attachment.expect("a v1 file parses");
+        // Nothing read from the wire names a recipient.
+        assert_eq!(attachment.counterpart_pubkey, None);
+        attachment.counterpart_pubkey = Some(solver.clone());
+        msg.attachment = Some(attachment);
+
+        assert_eq!(counterpart_of(&msg, None, None), Some(solver.clone()));
+        assert_eq!(counterpart_of(&msg, None, Some(other)), Some(solver));
     }
 
     /// PR #590 review: a transfer that resumes after its identity was

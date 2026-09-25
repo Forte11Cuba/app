@@ -90,12 +90,31 @@ final disputeChatGatewayProvider = Provider<DisputeChatGateway>(
   (ref) => const DisputeChatGateway(),
 );
 
+/// How many times [disputeUpdatesProvider] subscribes again after the
+/// bridge stream fails, before it gives up.
+const int kDisputeUpdateResubscribes = 3;
+
 /// Live updates of one trade's dispute from the bridge: the solver taking
 /// it, its resolution (#143).
+///
+/// A failed stream is subscribed again, a bounded number of times, and each
+/// new subscription starts with the record as it stands — whatever changed
+/// while none was listening (PR #596 review). The screen also refreshes on
+/// open, so giving up leaves it as current as its last update.
 final disputeUpdatesProvider = StreamProvider.autoDispose
     .family<rust_types.Dispute, String>((ref, tradeId) async* {
-      final stream = await disputes_api.onDisputeUpdated(tradeId: tradeId);
-      while (true) {
-        yield await stream.next();
+      for (var attempt = 0; attempt <= kDisputeUpdateResubscribes; attempt++) {
+        try {
+          final stream = await disputes_api.onDisputeUpdated(tradeId: tradeId);
+          if (attempt > 0) {
+            final current = await disputes_api.getDispute(tradeId: tradeId);
+            if (current != null) yield current;
+          }
+          while (true) {
+            yield await stream.next();
+          }
+        } catch (e) {
+          debugPrint('[disputes] update stream failed ($attempt): $e');
+        }
       }
     });

@@ -7109,8 +7109,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   AttachmentInfo dco_decode_attachment_info(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 10)
-      throw Exception('unexpected arr length: expect 10 but see ${arr.length}');
+    if (arr.length != 11)
+      throw Exception('unexpected arr length: expect 11 but see ${arr.length}');
     return AttachmentInfo(
       fileName: dco_decode_String(arr[0]),
       mimeType: dco_decode_String(arr[1]),
@@ -7122,6 +7122,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       encryptedSize: dco_decode_u_64(arr[7]),
       width: dco_decode_opt_box_autoadd_u_32(arr[8]),
       height: dco_decode_opt_box_autoadd_u_32(arr[9]),
+      counterpartPubkey: dco_decode_opt_String(arr[10]),
     );
   }
 
@@ -9451,6 +9452,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_encryptedSize = sse_decode_u_64(deserializer);
     var var_width = sse_decode_opt_box_autoadd_u_32(deserializer);
     var var_height = sse_decode_opt_box_autoadd_u_32(deserializer);
+    var var_counterpartPubkey = sse_decode_opt_String(deserializer);
     return AttachmentInfo(
       fileName: var_fileName,
       mimeType: var_mimeType,
@@ -9462,6 +9464,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       encryptedSize: var_encryptedSize,
       width: var_width,
       height: var_height,
+      counterpartPubkey: var_counterpartPubkey,
     );
   }
 
@@ -12375,6 +12378,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_u_64(self.encryptedSize, serializer);
     sse_encode_opt_box_autoadd_u_32(self.width, serializer);
     sse_encode_opt_box_autoadd_u_32(self.height, serializer);
+    sse_encode_opt_String(self.counterpartPubkey, serializer);
   }
 
   @protected
@@ -14288,8 +14292,9 @@ class DisputeStreamImpl extends RustOpaque implements DisputeStream {
 
   /// Poll for the next dispute update matching this trade.
   ///
-  /// `RecvError::Lagged` is handled gracefully: dropped messages are skipped
-  /// and the loop continues rather than terminating the stream.
+  /// `RecvError::Lagged` does not end the stream. The skipped messages may
+  /// have held this trade's latest state (its resolution), so the record as
+  /// it stands now is returned in their place (PR #596 review).
   Future<Dispute> next() =>
       RustLib.instance.api.crateApiDisputesDisputeStreamNext(that: this);
 }

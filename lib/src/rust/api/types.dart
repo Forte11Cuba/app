@@ -97,6 +97,12 @@ class AttachmentInfo {
   final int? width;
   final int? height;
 
+  /// For a file we sent: the pubkey it was encrypted to — the peer, or the
+  /// solver in the dispute chat. Never read from the wire. Kept because
+  /// our own message names only us as its sender, and a resolved
+  /// dispute's solver key is gone after a restart (PR #596 review).
+  final String? counterpartPubkey;
+
   const AttachmentInfo({
     required this.fileName,
     required this.mimeType,
@@ -108,6 +114,7 @@ class AttachmentInfo {
     required this.encryptedSize,
     this.width,
     this.height,
+    this.counterpartPubkey,
   });
 
   @override
@@ -121,7 +128,8 @@ class AttachmentInfo {
       sha256.hashCode ^
       encryptedSize.hashCode ^
       width.hashCode ^
-      height.hashCode;
+      height.hashCode ^
+      counterpartPubkey.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -137,7 +145,8 @@ class AttachmentInfo {
           sha256 == other.sha256 &&
           encryptedSize == other.encryptedSize &&
           width == other.width &&
-          height == other.height;
+          height == other.height &&
+          counterpartPubkey == other.counterpartPubkey;
 }
 
 /// What the add-invoice screen needs from a BOLT11 invoice to validate it

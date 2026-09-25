@@ -440,12 +440,15 @@ class _ChatClosedBanner extends StatelessWidget {
         children: [
           Icon(Icons.lock_outline, size: 14, color: colors.textSubtle),
           const SizedBox(width: AppSpacing.xs),
-          Text(
-            AppLocalizations.of(context).disputeChatClosed,
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: colors.textSubtle,
-                  fontStyle: FontStyle.italic,
-                ),
+          // Wraps on a narrow phone instead of overflowing (PR #596).
+          Flexible(
+            child: Text(
+              AppLocalizations.of(context).disputeChatClosed,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: colors.textSubtle,
+                    fontStyle: FontStyle.italic,
+                  ),
+            ),
           ),
         ],
       ),

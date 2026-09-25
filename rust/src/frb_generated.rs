@@ -7601,6 +7601,7 @@ impl SseDecode for crate::api::types::AttachmentInfo {
         let mut var_encryptedSize = <u64>::sse_decode(deserializer);
         let mut var_width = <Option<u32>>::sse_decode(deserializer);
         let mut var_height = <Option<u32>>::sse_decode(deserializer);
+        let mut var_counterpartPubkey = <Option<String>>::sse_decode(deserializer);
         return crate::api::types::AttachmentInfo {
             file_name: var_fileName,
             mime_type: var_mimeType,
@@ -7612,6 +7613,7 @@ impl SseDecode for crate::api::types::AttachmentInfo {
             encrypted_size: var_encryptedSize,
             width: var_width,
             height: var_height,
+            counterpart_pubkey: var_counterpartPubkey,
         };
     }
 }
@@ -10475,6 +10477,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::types::AttachmentInfo {
             self.encrypted_size.into_into_dart().into_dart(),
             self.width.into_into_dart().into_dart(),
             self.height.into_into_dart().into_dart(),
+            self.counterpart_pubkey.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -12594,6 +12597,7 @@ impl SseEncode for crate::api::types::AttachmentInfo {
         <u64>::sse_encode(self.encrypted_size, serializer);
         <Option<u32>>::sse_encode(self.width, serializer);
         <Option<u32>>::sse_encode(self.height, serializer);
+        <Option<String>>::sse_encode(self.counterpart_pubkey, serializer);
     }
 }
 

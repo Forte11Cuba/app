@@ -472,6 +472,12 @@ async fn solver_conversation(trade_id: &str) -> Result<(u32, nostr_sdk::prelude:
     if dispute.status == DisputeStatus::Resolved {
         bail!("NoOpenDispute: dispute for trade {trade_id} is already resolved");
     }
+    // The trade row is the other witness: a verdict that reached it but not
+    // this record (a replay dropped, an older build) still closes the chat
+    // (PR #596 review).
+    if persisted_order_is_finished(trade_id).await {
+        bail!("NoOpenDispute: the trade of dispute {trade_id} is finished");
+    }
 
     // Admin pubkey must be known (set by handle_admin_took_dispute).
     let admin_pubkey_hex = dispute
@@ -1038,6 +1044,28 @@ pub async fn handle_admin_canceled(trade_id: String) -> Result<()> {
     resolve_dispute(trade_id, DisputeResolution::FundsToSeller).await
 }
 
+/// The dispute side of a verdict the daemon sent (`admin-settled`,
+/// `admin-canceled`): resolve the dispute, which closes its chat and tells
+/// `on_dispute_updated`. The trade row takes the status separately, in the
+/// order dispatcher (PR #596 review: nothing resolved the record before).
+///
+/// A verdict for an order without a dispute record here, or one already
+/// resolved (a replay), changes nothing.
+pub(crate) async fn apply_admin_verdict(order_id: &str, action: &mostro_core::message::Action) {
+    use mostro_core::message::Action;
+    let resolution = match action {
+        Action::AdminSettled => DisputeResolution::FundsToBuyer,
+        Action::AdminCanceled => DisputeResolution::FundsToSeller,
+        _ => return,
+    };
+    if dispute_store().get(order_id).await.is_none() {
+        return;
+    }
+    if let Err(e) = resolve_dispute(order_id.to_string(), resolution).await {
+        log::debug!("[disputes] verdict for order={order_id} not applied: {e}");
+    }
+}
+
 async fn resolve_dispute(trade_id: String, resolution: DisputeResolution) -> Result<()> {
     dispute_store()
         .update_conditional(&trade_id, move |dispute| {
@@ -1071,14 +1099,19 @@ pub struct DisputeStream {
 impl DisputeStream {
     /// Poll for the next dispute update matching this trade.
     ///
-    /// `RecvError::Lagged` is handled gracefully: dropped messages are skipped
-    /// and the loop continues rather than terminating the stream.
+    /// `RecvError::Lagged` does not end the stream. The skipped messages may
+    /// have held this trade's latest state (its resolution), so the record as
+    /// it stands now is returned in their place (PR #596 review).
     pub async fn next(&mut self) -> Result<Dispute> {
         loop {
             match self.rx.recv().await {
                 Ok(dispute) if dispute.trade_id == self.trade_id => return Ok(dispute),
                 Ok(_) => continue, // different trade — keep waiting
-                Err(RecvError::Lagged(_)) => continue, // missed messages; keep going
+                Err(RecvError::Lagged(_)) => {
+                    if let Some(current) = dispute_store().get(&self.trade_id).await {
+                        return Ok(current);
+                    }
+                }
                 Err(RecvError::Closed) => bail!("DisputeStream closed: channel sender dropped"),
             }
         }
@@ -1834,6 +1867,37 @@ mod tests {
             err.to_string().starts_with("AdminNotAssigned"),
             "got: {err}"
         );
+    }
+
+    /// PR #596 review: the daemon's verdict resolves the dispute record —
+    /// before, only the trade row learned of it and the chat stayed open.
+    #[tokio::test]
+    async fn an_admin_verdict_resolves_the_dispute() {
+        use mostro_core::message::Action;
+        let settled = format!("t-{}", uuid::Uuid::new_v4());
+        seed_dispute(&settled, None).await;
+        apply_admin_verdict(&settled, &Action::AdminSettled).await;
+        let d = get_dispute(settled.clone()).await.unwrap().unwrap();
+        assert_eq!(d.status, DisputeStatus::Resolved);
+        assert_eq!(d.resolution, Some(DisputeResolution::FundsToBuyer));
+        // A replay changes nothing.
+        apply_admin_verdict(&settled, &Action::AdminCanceled).await;
+        let d = get_dispute(settled).await.unwrap().unwrap();
+        assert_eq!(d.resolution, Some(DisputeResolution::FundsToBuyer));
+
+        let canceled = format!("t-{}", uuid::Uuid::new_v4());
+        seed_dispute(&canceled, None).await;
+        apply_admin_verdict(&canceled, &Action::AdminCanceled).await;
+        let d = get_dispute(canceled).await.unwrap().unwrap();
+        assert_eq!(d.resolution, Some(DisputeResolution::FundsToSeller));
+
+        // Not a verdict, or no dispute: nothing happens.
+        let other = format!("t-{}", uuid::Uuid::new_v4());
+        seed_dispute(&other, None).await;
+        apply_admin_verdict(&other, &Action::FiatSentOk).await;
+        let d = get_dispute(other).await.unwrap().unwrap();
+        assert_eq!(d.status, DisputeStatus::Open);
+        apply_admin_verdict("no-such-order", &Action::AdminSettled).await;
     }
 
     /// The file is judged before the dispute: what could never be sent is

@@ -3852,6 +3852,10 @@ async fn dispatch_mostro_message(
             if status_arm_gate(&row_state, &kind.action, &order_id) {
                 return;
             }
+            // A verdict also closes the dispute, whatever the row's status
+            // write decides below: a replay the row no longer needs can still
+            // be the first news of it here.
+            crate::api::disputes::apply_admin_verdict(&order_id, &kind.action).await;
             // Map action → OrderStatus for DB sync (shared with the take
             // reply classification).
             let new_status = status_for_action(&kind.action);

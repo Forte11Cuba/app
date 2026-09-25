@@ -58,9 +58,12 @@ DisputeItem _dispute({
 
 /// Answers the dispute chat's text sends with what the test set.
 class _FakeDisputeGateway extends DisputeChatGateway {
-  _FakeDisputeGateway(this.onSend);
+  _FakeDisputeGateway(this.onSend, {this.refresh});
 
   final Future<rust_types.ChatMessage> Function(String text) onSend;
+
+  /// What `getDispute` answers; null when absent.
+  final Future<rust_types.Dispute?> Function()? refresh;
   final texts = <String>[];
 
   @override
@@ -73,8 +76,24 @@ class _FakeDisputeGateway extends DisputeChatGateway {
   }
 
   @override
-  Future<rust_types.Dispute?> getDispute(String tradeId) async => null;
+  Future<rust_types.Dispute?> getDispute(String tradeId) =>
+      refresh?.call() ?? Future.value();
 }
+
+rust_types.Dispute _bridgeDispute({
+  rust_types.DisputeStatus status = rust_types.DisputeStatus.inReview,
+  rust_types.DisputeResolution? resolution,
+}) => rust_types.Dispute(
+  id: _disputeId,
+  tradeId: _trade,
+  status: status,
+  initiatedByMe: true,
+  adminPubkey: _solver,
+  resolution: resolution,
+  openedAt: intToPlatformInt64(100),
+  resolvedAt: resolution == null ? null : intToPlatformInt64(200),
+  isRead: true,
+);
 
 Future<void> _pumpScreen(
   WidgetTester tester, {
@@ -83,6 +102,7 @@ Future<void> _pumpScreen(
   _FakeDisputeGateway? disputeGateway,
   FakeAttachmentGateway? attachments,
   FakeAttachmentPicker? picker,
+  Stream<rust_types.Dispute>? updates,
 }) async {
   tester.view.physicalSize = const Size(400, 800);
   tester.view.devicePixelRatio = 1;
@@ -93,9 +113,9 @@ Future<void> _pumpScreen(
       disputeChatProvider(
         _trade,
       ).overrideWith((ref) => DisputeChatNotifier(() async => history)),
-      disputeUpdatesProvider(
-        _trade,
-      ).overrideWith((ref) => const Stream<rust_types.Dispute>.empty()),
+      disputeUpdatesProvider(_trade).overrideWith(
+        (ref) => updates ?? const Stream<rust_types.Dispute>.empty(),
+      ),
       disputeChatGatewayProvider.overrideWithValue(
         disputeGateway ?? _FakeDisputeGateway((_) => Completer<Never>().future),
       ),
@@ -239,6 +259,54 @@ void main() {
   });
 
   group('DisputeChatScreen', () {
+    testWidgets('a verdict arriving live closes the chat', (tester) async {
+      final updates = StreamController<rust_types.Dispute>();
+      addTearDown(updates.close);
+      await _pumpScreen(tester, dispute: _dispute(), updates: updates.stream);
+      expect(find.byType(DisputeMessageInput), findsOneWidget);
+
+      updates.add(
+        _bridgeDispute(
+          status: rust_types.DisputeStatus.resolved,
+          resolution: rust_types.DisputeResolution.fundsToBuyer,
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+
+      expect(find.byType(DisputeMessageInput), findsNothing);
+    });
+
+    testWidgets('a refresh a live update overtook is dropped', (tester) async {
+      final refresh = Completer<rust_types.Dispute?>();
+      final updates = StreamController<rust_types.Dispute>();
+      addTearDown(updates.close);
+      await _pumpScreen(
+        tester,
+        dispute: _dispute(),
+        updates: updates.stream,
+        disputeGateway: _FakeDisputeGateway(
+          (_) => Completer<Never>().future,
+          refresh: () => refresh.future,
+        ),
+      );
+
+      // The verdict lands while the refresh on open is still out…
+      updates.add(
+        _bridgeDispute(
+          status: rust_types.DisputeStatus.resolved,
+          resolution: rust_types.DisputeResolution.fundsToSeller,
+        ),
+      );
+      await tester.pump();
+      // …which then answers with the record from before it.
+      refresh.complete(_bridgeDispute());
+      await tester.pump();
+      await tester.pump();
+
+      expect(find.byType(DisputeMessageInput), findsNothing);
+    });
+
     testWidgets('has no composer until a solver takes the dispute', (
       tester,
     ) async {

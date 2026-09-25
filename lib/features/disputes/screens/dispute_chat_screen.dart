@@ -51,6 +51,10 @@ class _DisputeChatScreenState extends ConsumerState<DisputeChatScreen> {
   /// marked read: done once, as soon as the dispute is known.
   String? _openedTradeId;
 
+  /// Live updates applied so far. A refresh that started before one of them
+  /// answers with an older record, so it is dropped (PR #596 review).
+  int _liveUpdates = 0;
+
   @override
   void initState() {
     super.initState();
@@ -80,11 +84,12 @@ class _DisputeChatScreenState extends ConsumerState<DisputeChatScreen> {
   /// The list learns of a dispute's changes on resume only; a solver who took
   /// it since then must show here before the first live update does.
   Future<void> _refreshDispute(String tradeId) async {
+    final liveUpdates = _liveUpdates;
     try {
       final dispute = await ref
           .read(disputeChatGatewayProvider)
           .getDispute(tradeId);
-      if (dispute == null || !mounted) return;
+      if (dispute == null || !mounted || liveUpdates != _liveUpdates) return;
       ref
           .read(disputeNotifierProvider.notifier)
           .applyBridgeUpdate(disputeItemFromRust(dispute));
@@ -169,11 +174,12 @@ class _DisputeChatScreenState extends ConsumerState<DisputeChatScreen> {
     // The solver taking the dispute, and its resolution, while it is open.
     ref.listen(
       disputeUpdatesProvider(tradeId),
-      (_, next) => next.whenData(
-        (update) => ref
+      (_, next) => next.whenData((update) {
+        _liveUpdates++;
+        ref
             .read(disputeNotifierProvider.notifier)
-            .applyBridgeUpdate(disputeItemFromRust(update)),
-      ),
+            .applyBridgeUpdate(disputeItemFromRust(update));
+      }),
     );
     final messages = ref.watch(disputeChatProvider(tradeId));
     final uploads = ref.watch(disputeUploadsProvider(tradeId));
