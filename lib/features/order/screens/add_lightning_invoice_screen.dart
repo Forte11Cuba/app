@@ -206,14 +206,22 @@ class _AddLightningInvoiceScreenState
   /// lifetime left than this). Both may still be loading.
   _NodeContext _nodeContext() {
     final async = ref.read(mostroNodeProvider);
-    // A fetch still in flight is the only state with nothing to say: a node
-    // that publishes no window and a fetch that failed are both answers.
-    // Riverpod hands out the previous node's facts throughout a refetch
-    // (`copyWithPrevious`, so `hasValue` stays true), and after a node switch
-    // those belong to the node being replaced — judging against them would
-    // apply the old window and network to the new node. One predicate, so the
-    // facts and the flag saying they are known cannot drift apart.
-    final settled = !async.isLoading;
+    // Only an answer counts, and only `AsyncData` is one. Riverpod keeps
+    // handing out the previous value through both a refetch and a *failed*
+    // refetch (`copyWithPrevious`, so `hasValue` survives either), and after
+    // a node switch that value belongs to the node being replaced: judging
+    // against it would apply the old window and network to the new node. The
+    // error case is the worse of the two, because a failed fetch does not
+    // resolve on its own the way a pending one does.
+    //
+    // A node whose capabilities never load therefore never gets a pass
+    // published for it. That is the honest answer — a rule that could not run
+    // did not pass — and it locks nobody out: an unjudged invoice stays
+    // submittable and the daemon decides (`docs/automation-contract.md`).
+    //
+    // One predicate, so the facts and the flag saying they are known cannot
+    // drift apart.
+    final settled = !async.isLoading && !async.hasError;
     final node = settled ? async.valueOrNull : null;
     final networks =
         node?.lndNetworks

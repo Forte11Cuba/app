@@ -424,4 +424,90 @@ void main() {
       semantics.dispose();
     }
   });
+
+  // The refetch that never succeeds. Riverpod keeps serving the previous
+  // value on an error too, so the replaced node's window and network are
+  // still on hand — and unlike a pending fetch, a failed one does not clear
+  // itself. Judging against them would publish a refusal the new node never
+  // asked for, and keep the send button shut on an invoice it would take.
+  testWidgets('a failed node reload does not fall back on the old node', (
+    tester,
+  ) async {
+    final semantics = tester.ensureSemantics();
+    final fetches = <Completer<MostroInstance?>>[
+      Completer<MostroInstance?>(),
+      Completer<MostroInstance?>(),
+    ];
+    var served = 0;
+    try {
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            isWalletConnectedProvider.overrideWithValue(false),
+            tradeAmountProvider.overrideWith(
+              (ref, orderId) => Stream.value(BigInt.from(250)),
+            ),
+            tradeUpdatesProvider.overrideWith(
+              (ref) => const Stream<TradeUpdate>.empty(),
+            ),
+            tradeInfoProvider.overrideWith((ref, orderId) async => null),
+            mostroNodeProvider.overrideWith((ref) => fetches[served++].future),
+            invoiceCheckerProvider.overrideWithValue(
+              (request) async =>
+                  request.minRemainingSecs != null
+                      ? const InvoiceCheckError(
+                        InvoiceProblem.expiresTooSoon,
+                        minRemainingSecs: 3600,
+                      )
+                      : const InvoiceCheckValid(250),
+            ),
+          ],
+          child: MaterialApp(
+            theme: buildDarkTheme(),
+            localizationsDelegates: AppLocalizations.localizationsDelegates,
+            supportedLocales: AppLocalizations.supportedLocales,
+            locale: const Locale('en'),
+            home: const AddLightningInvoiceScreen(orderId: 'order-1'),
+          ),
+        ),
+      );
+      await tester.pump();
+
+      fetches[0].complete(
+        const MostroInstance(
+          pubKey: 'node-a',
+          lndNetworks: 'mainnet',
+          invoiceExpirationWindow: 3600,
+        ),
+      );
+      await tester.pump();
+
+      await tester.enterText(find.byType(TextField), 'lnbc2500u1soon');
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pump();
+
+      expect(_checkWord(tester), 'expires-too-soon');
+
+      ProviderScope.containerOf(
+        tester.element(find.byType(AddLightningInvoiceScreen)),
+      ).invalidate(mostroNodeProvider);
+      await tester.pump();
+      fetches[1].completeError(StateError('the relay never answered'));
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pump(const Duration(milliseconds: 200));
+
+      expect(
+        _checkWord(tester),
+        isNull,
+        reason: 'node A answered; the failure is not node B answering',
+      );
+      expect(
+        _canSubmit(tester),
+        isTrue,
+        reason: 'a node we cannot read about must not lock the buyer out',
+      );
+    } finally {
+      semantics.dispose();
+    }
+  });
 }

@@ -267,14 +267,30 @@ submission returns to the matching trade detail (`order.id` and `order.status`).
 never sent, so no `invoice.error` follows and nothing changes on the relay. A scenario for one of those
 rules asserts `invoice.check`, not the daemon's refusal.
 
-Two of those rules need facts that arrive asynchronously — the trade's amount, and the expiry floor and
-network from the node's Kind 38385 capabilities — and the screen starts that fetch on entry. Until it
-settles no word is published, because a pass those rules could not test is not a pass; submission stays
-*allowed* and the daemon remains the backstop, exactly as for an invoice this side cannot judge at all.
-While the check itself is running, submission is instead held. So a harness waits for the word it expects
-rather than reading once, and accepts that on a cold entry a daemon rejection is still reachable. It must
-not read a missing word as a pass, and it must not conclude anything from the button alone: enabled means
-either "judged good" or "not judged".
+Some of those rules need facts that arrive asynchronously: the **trade's amount**, and the **expiry floor
+and network** from the node's Kind 38385 capabilities, whose fetch the screen starts on entry. What is
+withheld until they settle is a local **pass** — a rule that could not run did not pass — and the words
+that depend on the missing fact. The classifications that need neither appear straight away:
+
+| Word | Needs |
+|---|---|
+| `unrecognized`, `malformed` | nothing — published immediately |
+| `expired` | nothing but the clock — published immediately |
+| `address` | nothing; note submission is *held* until the amount resolves the address |
+| `wrong-amount` | the trade's amount |
+| `wrong-network`, `expires-too-soon` | the node's capabilities |
+| `valid` | both — the last word to become available |
+
+So absence of `valid` is never evidence of a problem, and the presence of `malformed` this early is not a
+sign the facts arrived. A node whose capabilities never load — a failed fetch, not merely a slow one —
+never gets a pass published for it at all; the daemon stays the backstop and submission stays *allowed*,
+exactly as for an invoice this side cannot judge. While the check itself is running, and while a refusal
+stands, submission is instead held.
+
+A harness therefore waits for the word it expects rather than reading once, and accepts that on a cold
+entry a daemon rejection is still reachable. It must not read a missing word as a pass, and it must not
+conclude anything from the button alone: enabled means "judged good", "an address whose amount has
+arrived", or "not judged at all" — three states one bit cannot tell apart.
 
 A refusal by either side, while both parties are still at the invoice step, leaves the order at
 `waiting-invoice` and the buyer free to submit again. One daemon refusal is different: when the daemon
