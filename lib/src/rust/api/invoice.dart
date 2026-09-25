@@ -7,7 +7,7 @@ import '../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'types.dart';
 
-// These functions are ignored because they are not marked as `pub`: `check`, `classify`, `is_lightning_address`, `lnd_network_name`, `network_matches`, `next_step_start`, `normalize`, `parse_step_start`, `record_invoice_step_start`, `rejected_with`, `step_start_applies`, `summarize`
+// These functions are ignored because they are not marked as `pub`: `check`, `classify`, `is_lightning_address`, `lnd_network_name`, `network_matches`, `next_step_start`, `normalize`, `parse_step_start`, `record_invoice_step_start`, `rejected_with`, `step_start_applies`, `step_start_recorded_at`, `summarize`
 
 /// Amount and expiry of `invoice`, or `None` when it is not a well-formed,
 /// correctly signed BOLT11 invoice. A `lightning:` prefix and surrounding

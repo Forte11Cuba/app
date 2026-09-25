@@ -5524,6 +5524,70 @@ async fn clear_maker_step_start(db: &impl Storage, order_id: &str) {
     }
 }
 
+/// The statuses a maker's order can be republished out of: a waiting step
+/// whose taker walked away.
+fn is_maker_waiting_step(status: &OrderStatus) -> bool {
+    matches!(
+        status,
+        OrderStatus::WaitingPayment | OrderStatus::WaitingBuyerInvoice | OrderStatus::InProgress
+    )
+}
+
+/// Ends a maker's waiting step: the row goes back to `Pending` and the step
+/// start goes with it. Returns whether it did.
+///
+/// **The caller must hold this order's [`lock_order`] guard**, and must pass
+/// the moment it read the public status as `observed_at`.
+///
+/// Both are load-bearing. The sweep decides from a row snapshot taken at the
+/// top of its pass and a public status that may cost a relay round-trip, so a
+/// take can begin in between — and then writing `Pending` buries a live
+/// private progression, while deleting the start leaves that take's invoice
+/// step with no deadline, which is the one thing the start exists to prevent
+/// (#567). The daemon path reaches this under the dispatch lock already.
+///
+/// Re-reading the status is not enough on its own: a new take puts the row
+/// back into the same `WaitingPayment` the snapshot saw. What separates them
+/// is that the new take recorded its own step start, dated after the public
+/// read — the old step either has none (which is why the sweep exists) or one
+/// older than the age gate, fifteen minutes back against at most a minute of
+/// clock skew.
+async fn end_maker_waiting_step(
+    db: &impl crate::db::Storage,
+    order_id: &str,
+    observed_at: i64,
+) -> bool {
+    let status = match db.get_trade_by_order_id(order_id).await {
+        Ok(Some(trade)) => trade.order.status,
+        _ => return false,
+    };
+    if !is_maker_waiting_step(&status) {
+        return false;
+    }
+    if let Ok(Some(stored)) = db
+        .get_setting(&crate::db::settings_keys::invoice_step_start(order_id))
+        .await
+    {
+        if crate::api::invoice::step_start_recorded_at(&stored)
+            .is_some_and(|ts| ts >= observed_at)
+        {
+            log::info!(
+                "[orders] step start for order={order_id} is newer than the public read — a take began, leaving it alone"
+            );
+            return false;
+        }
+    }
+    if let Err(e) = db
+        .update_trade_fields(order_id, Some(OrderStatus::Pending), None, None)
+        .await
+    {
+        log::warn!("[orders] could not end the waiting step for order={order_id}: {e}");
+        return false;
+    }
+    clear_maker_step_start(db, order_id).await;
+    true
+}
+
 async fn resync_republished_maker_order(
     order_id: &str,
     kind: &mostro_core::message::MessageKind,
@@ -5540,10 +5604,7 @@ async fn resync_republished_maker_order(
     let Some(local) = current_local_status(order_id).await else {
         return false;
     };
-    if !matches!(
-        local,
-        OrderStatus::WaitingPayment | OrderStatus::WaitingBuyerInvoice | OrderStatus::InProgress
-    ) {
+    if !is_maker_waiting_step(&local) {
         return false;
     }
     if status_write_blocked(order_id, &kind.action, event_ts).await {
@@ -7311,6 +7372,10 @@ async fn run_stale_sweep_once() {
             Some(status) => Some(status),
             None => fetch_public_order_status(&oid).await,
         };
+        // When that status was true. A take accepted after it carries a step
+        // start dated later, which is how `end_maker_waiting_step` tells the
+        // two apart.
+        let observed_at = crate::rt::unix_now();
         match sweep_action(
             trade.order.is_mine,
             &trade.order.status,
@@ -7337,27 +7402,22 @@ async fn run_stale_sweep_once() {
                 Err(e) => log::warn!("[orders] sweep: failed to wipe {oid}: {e}"),
             },
             SweepAction::SyncPending => {
-                match db
-                    .update_trade_fields(
-                        &oid,
-                        Some(crate::api::types::OrderStatus::Pending),
-                        None,
-                        None,
-                    )
-                    .await
-                {
-                    Ok(()) => {
-                        // Same end of the same step as the daemon-driven path,
-                        // reached when that message never landed or was
-                        // refused as stale by the cursor.
-                        clear_maker_step_start(db, &oid).await;
-                        emit_trade_update(&oid, crate::api::types::OrderStatus::Pending);
-                        log::info!(
-                            "[orders] sweep: resynced republished maker order={oid} to pending"
-                        );
-                        resynced += 1;
-                    }
-                    Err(e) => log::warn!("[orders] sweep: failed to resync {oid}: {e}"),
+                // Serialized against daemon dispatch, which holds the same
+                // guard — taken here and not around the match, both because
+                // the public read above must not hold it and because the
+                // `SyncSuccess` arm takes it itself and this mutex is not
+                // reentrant.
+                let _guard = lock_order(&oid).await;
+                // Same end of the same step as the daemon-driven path,
+                // reached when that message never landed or was refused as
+                // stale by the cursor. The row is re-read in there: what was
+                // decided above is a snapshot, and a take may have begun.
+                if end_maker_waiting_step(db, &oid, observed_at).await {
+                    emit_trade_update(&oid, crate::api::types::OrderStatus::Pending);
+                    log::info!(
+                        "[orders] sweep: resynced republished maker order={oid} to pending"
+                    );
+                    resynced += 1;
                 }
             }
             SweepAction::Keep => {}
@@ -18219,6 +18279,83 @@ mod tests {
             )
             .await,
             "a missing row keeps today's warn-and-emit behavior",
+        );
+    }
+
+    /// The sweep decides from a row snapshot and a public status that can
+    /// cost a relay round-trip, and it is not the dispatch task: a take can
+    /// be accepted in that window. Ending the step then would bury a live
+    /// progression under `Pending` and delete the very start that take just
+    /// recorded, leaving its invoice screen with no deadline — the defect
+    /// #567 exists to prevent, reintroduced by a race.
+    ///
+    /// Re-reading the status cannot see it: the new take puts the row back
+    /// into the same `WaitingPayment` the snapshot held. The start's own date
+    /// is what separates them.
+    #[tokio::test]
+    async fn a_take_accepted_after_the_public_read_keeps_its_step() {
+        let path = std::env::temp_dir().join(format!("mostro_endstep_{}.db", std::process::id()));
+        let _ = crate::db::app_db::init_db(path.to_str().unwrap()).await;
+        let db = crate::db::app_db::db().expect("store initialised");
+
+        let order_id = uuid::Uuid::new_v4().to_string();
+        db.save_trade(&seam_trade_row(
+            &order_id,
+            crate::api::types::OrderStatus::WaitingPayment,
+        ))
+        .await
+        .expect("save the trade row");
+
+        let key = crate::db::settings_keys::invoice_step_start(&order_id);
+        let observed_at = crate::rt::unix_now();
+
+        // The take the sweep never saw, recorded while it was asking the
+        // relays. Its index matches the row's: a maker keeps one trade key,
+        // so the generation cannot tell this step from the previous one.
+        db.set_setting(&key, &format!("WaitingPayment:{}:1", observed_at + 2))
+            .await
+            .expect("record the new step start");
+
+        assert!(
+            !end_maker_waiting_step(db, &order_id, observed_at).await,
+            "a step opened after the public read is not the one being ended"
+        );
+        assert_eq!(
+            db.get_trade_by_order_id(&order_id)
+                .await
+                .unwrap()
+                .unwrap()
+                .order
+                .status,
+            crate::api::types::OrderStatus::WaitingPayment,
+            "the live progression stands"
+        );
+        assert!(
+            db.get_setting(&key).await.unwrap().is_some(),
+            "and so does the deadline that take is counting to"
+        );
+
+        // The case the sweep is for: the step it set out to end is older than
+        // its own observation, or was never recorded at all.
+        db.set_setting(&key, &format!("WaitingPayment:{}:1", observed_at - 900))
+            .await
+            .expect("record the stale step start");
+        assert!(
+            end_maker_waiting_step(db, &order_id, observed_at).await,
+            "the step the sweep observed does end"
+        );
+        assert_eq!(
+            db.get_trade_by_order_id(&order_id)
+                .await
+                .unwrap()
+                .unwrap()
+                .order
+                .status,
+            crate::api::types::OrderStatus::Pending,
+        );
+        assert!(
+            db.get_setting(&key).await.unwrap().is_none(),
+            "and its start goes with it",
         );
     }
 
