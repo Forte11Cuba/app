@@ -18,6 +18,7 @@ import 'package:mostro/core/lifecycle/app_lifecycle_service.dart';
 import 'package:mostro/core/lifecycle/resume_resync.dart';
 import 'package:mostro/core/web/bridge_probe.dart';
 import 'package:mostro/core/web/store_probe.dart';
+import 'package:mostro/features/chat/attachments/attachment_launcher.dart';
 import 'package:mostro/features/settings/providers/settings_provider.dart';
 import 'package:mostro/features/settings/widgets/mostro_node_selector.dart';
 import 'package:mostro/features/walkthrough/providers/first_run_provider.dart';
@@ -253,6 +254,13 @@ Future<void> bootstrapAndRun({List<String> seedRelays = const []}) async {
   AppLifecycleService(
     onResume: ResumeResync(container: container).run,
   ).attach();
+
+  // Copies of attachments handed to another app ("open with…", share) are
+  // deleted once the user is back, and whatever an earlier run left behind
+  // goes now (#589).
+  final attachmentLauncher = container.read(attachmentLauncherProvider);
+  unawaited(attachmentLauncher.sweep());
+  AppLifecycleService(onResume: attachmentLauncher.sweep).attach();
 
   runApp(
     UncontrolledProviderScope(container: container, child: const MostroApp()),

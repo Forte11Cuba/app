@@ -4117,5 +4117,19 @@
   "attachmentImageSemantics": "Image: {fileName}",
   "@attachmentImageSemantics": {"description": "Screen-reader label of an image in the chat", "placeholders": {"fileName": {"type": "String"}}},
   "attachmentOpenImage": "Open image",
-  "@attachmentOpenImage": {"description": "Screen-reader hint: tapping opens the image full screen"}
+  "@attachmentOpenImage": {"description": "Screen-reader hint: tapping opens the image full screen"},
+  "attachmentOpenWith": "Open with…",
+  "@attachmentOpenWith": {"description": "Action that hands a received file to another app on the device"},
+  "attachmentShare": "Share",
+  "@attachmentShare": {"description": "Action that opens the system share sheet for a received file"},
+  "attachmentMoreActions": "More options",
+  "@attachmentMoreActions": {"description": "Tooltip of the menu on a file card in the chat"},
+  "attachmentNoAppToOpen": "No app on this device can open this file.",
+  "@attachmentNoAppToOpen": {"description": "Snackbar: no installed app can open the file"},
+  "attachmentOpenFailed": "The file could not be opened.",
+  "@attachmentOpenFailed": {"description": "Snackbar: opening the file in another app failed"},
+  "attachmentShareFailed": "The file could not be shared.",
+  "@attachmentShareFailed": {"description": "Snackbar: sharing the file failed"},
+  "attachmentSaveOnly": "This type of file can only be saved.",
+  "@attachmentSaveOnly": {"description": "Snackbar: the file is of a type the app will not hand to another app"}
 }

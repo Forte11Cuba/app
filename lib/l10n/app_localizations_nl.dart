@@ -3808,4 +3808,27 @@ class AppLocalizationsNl extends AppLocalizations {
 
   @override
   String get attachmentOpenImage => 'Afbeelding openen';
+
+  @override
+  String get attachmentOpenWith => 'Openen met…';
+
+  @override
+  String get attachmentShare => 'Delen';
+
+  @override
+  String get attachmentMoreActions => 'Meer opties';
+
+  @override
+  String get attachmentNoAppToOpen =>
+      'Geen app op dit apparaat kan dit bestand openen.';
+
+  @override
+  String get attachmentOpenFailed => 'Het bestand kon niet worden geopend.';
+
+  @override
+  String get attachmentShareFailed => 'Het bestand kon niet worden gedeeld.';
+
+  @override
+  String get attachmentSaveOnly =>
+      'Dit type bestand kan alleen worden opgeslagen.';
 }

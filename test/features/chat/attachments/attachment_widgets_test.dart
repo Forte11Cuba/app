@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mostro/core/app_theme.dart';
 import 'package:mostro/features/chat/attachments/attachment_gateway.dart';
+import 'package:mostro/features/chat/attachments/attachment_launcher.dart';
 import 'package:mostro/features/chat/attachments/attachment_saver.dart';
 import 'package:mostro/features/chat/attachments/upload_controller.dart';
 import 'package:mostro/features/chat/screens/attachment_viewer_screen.dart';
@@ -16,6 +17,7 @@ import 'package:mostro/features/chat/widgets/message_bubble.dart';
 import 'package:mostro/features/chat/widgets/upload_bubble.dart';
 import 'package:mostro/l10n/app_localizations.dart';
 import 'package:mostro/src/rust/api/messages.dart' as messages_api;
+import 'package:mostro/src/rust/api/types.dart' as rust_types;
 
 import '../../../support/attachment_fixtures.dart';
 import '../../../support/provider_harness.dart';
@@ -50,11 +52,15 @@ Future<void> _pump(
   Widget child, {
   required FakeAttachmentGateway gateway,
   FakeAttachmentSaver? saver,
+  FakeAttachmentLauncher? launcher,
 }) async {
   final container = createContainer(
     overrides: [
       attachmentGatewayProvider.overrideWithValue(gateway),
       if (saver != null) attachmentSaverProvider.overrideWithValue(saver),
+      attachmentLauncherProvider.overrideWithValue(
+        launcher ?? FakeAttachmentLauncher(),
+      ),
     ],
   );
   await tester.pumpWidget(
@@ -136,6 +142,9 @@ void main() {
 
       expect(find.byType(AttachmentViewerScreen), findsOneWidget);
       expect(find.byType(InteractiveViewer), findsOneWidget);
+      expect(find.byTooltip('Share'), findsOneWidget);
+      expect(find.byTooltip('Open with…'), findsOneWidget);
+      expect(find.byTooltip('Save'), findsOneWidget);
       // Served from memory: the viewer does not decrypt it again.
       expect(gateway.downloads, ['m1']);
     });
@@ -203,67 +212,220 @@ void main() {
       expect(gateway.downloads, isEmpty);
     });
 
-    testWidgets('Save downloads, decrypts and hands it to the dialog', (
-      tester,
-    ) async {
-      final gateway = FakeAttachmentGateway(
-        downloadResult:
-            (_) async => attachmentData(
-              [37, 80, 68, 70],
-              fileName: 'transfer.pdf',
-              mimeType: 'application/pdf',
-            ),
-      );
-      final saver = FakeAttachmentSaver();
+    FakeAttachmentGateway pdfGateway({String mimeType = 'application/pdf'}) =>
+        FakeAttachmentGateway(
+          downloadResult:
+              (_) async => attachmentData(
+                [37, 80, 68, 70],
+                fileName: 'transfer.pdf',
+                mimeType: mimeType,
+              ),
+        );
+
+    Future<void> pickFromMenu(WidgetTester tester, String item) async {
+      await tester.tap(find.byTooltip('More options'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(item));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('tapping the card opens it in another app', (tester) async {
+      final gateway = pdfGateway();
+      final launcher = FakeAttachmentLauncher();
 
       await _pump(
         tester,
         EncryptedFileMessage(messageId: 'm2', attachment: pdfInfo()),
         gateway: gateway,
-        saver: saver,
+        launcher: launcher,
       );
-      await tester.tap(find.byTooltip('Save'));
+      await tester.tap(find.text('transfer.pdf'));
       await tester.pumpAndSettle();
 
       expect(gateway.downloads, ['m2']);
+      expect(launcher.opened, ['transfer.pdf']);
+      expect(find.byType(SnackBar), findsNothing);
+    });
+
+    testWidgets('says so when no app can open it', (tester) async {
+      await _pump(
+        tester,
+        EncryptedFileMessage(messageId: 'm2', attachment: pdfInfo()),
+        gateway: pdfGateway(),
+        launcher: FakeAttachmentLauncher(openOutcome: LaunchOutcome.noApp),
+      );
+      await tester.tap(find.text('transfer.pdf'));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text('No app on this device can open this file.'),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('the menu offers open, share and save', (tester) async {
+      final launcher = FakeAttachmentLauncher();
+      final saver = FakeAttachmentSaver();
+      await _pump(
+        tester,
+        EncryptedFileMessage(messageId: 'm2', attachment: pdfInfo()),
+        gateway: pdfGateway(),
+        saver: saver,
+        launcher: launcher,
+      );
+
+      await pickFromMenu(tester, 'Share');
+      await pickFromMenu(tester, 'Save');
+
+      expect(launcher.shared, ['transfer.pdf']);
       expect(saver.saved, ['transfer.pdf']);
       expect(find.text('File saved'), findsOneWidget);
     });
 
-    testWidgets('a closed save dialog says nothing', (tester) async {
-      final gateway = FakeAttachmentGateway(
-        downloadResult: (_) async => attachmentData([1]),
-      );
-
+    testWidgets('no Share where the share sheet takes no files', (
+      tester,
+    ) async {
       await _pump(
         tester,
         EncryptedFileMessage(messageId: 'm2', attachment: pdfInfo()),
-        gateway: gateway,
+        gateway: pdfGateway(),
+        launcher: FakeAttachmentLauncher(canShare: false),
+      );
+      await tester.tap(find.byTooltip('More options'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Open with…'), findsOneWidget);
+      expect(find.text('Share'), findsNothing);
+      expect(find.text('Save'), findsOneWidget);
+    });
+
+    testWidgets('a type it will not hand off can only be saved', (
+      tester,
+    ) async {
+      final saver = FakeAttachmentSaver();
+      final launcher = FakeAttachmentLauncher();
+      final apk = rust_types.AttachmentInfo(
+        fileName: 'update.apk',
+        mimeType: 'application/vnd.android.package-archive',
+        fileSize: BigInt.from(2048),
+        fileType: rust_types.FileType.document,
+        downloadStatus: rust_types.DownloadStatus.pending,
+        blossomUrl: 'https://blossom.example/$kSha',
+        sha256: kSha,
+        encryptedSize: BigInt.from(2076),
+      );
+      await _pump(
+        tester,
+        EncryptedFileMessage(messageId: 'm2', attachment: apk),
+        gateway: pdfGateway(
+          mimeType: 'application/vnd.android.package-archive',
+        ),
+        saver: saver,
+        launcher: launcher,
+      );
+
+      await tester.tap(find.byTooltip('More options'));
+      await tester.pumpAndSettle();
+      expect(find.text('Open with…'), findsNothing);
+      expect(find.text('Share'), findsNothing);
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+      // Tapping the card saves too, rather than opening.
+      await tester.tap(find.text('update.apk'));
+      await tester.pumpAndSettle();
+
+      expect(launcher.opened, isEmpty);
+      expect(saver.saved, ['transfer.pdf', 'transfer.pdf']);
+    });
+
+    testWidgets('declared a PDF, turned out otherwise: save only', (
+      tester,
+    ) async {
+      final launcher = FakeAttachmentLauncher();
+      await _pump(
+        tester,
+        EncryptedFileMessage(messageId: 'm2', attachment: pdfInfo()),
+        // Rust reports what the bytes are, not what the sender said.
+        gateway: pdfGateway(mimeType: 'application/octet-stream'),
+        launcher: launcher,
+      );
+      await tester.tap(find.text('transfer.pdf'));
+      await tester.pumpAndSettle();
+
+      expect(launcher.opened, isEmpty);
+      expect(find.text('This type of file can only be saved.'), findsOneWidget);
+    });
+
+    testWidgets('a closed save dialog says nothing', (tester) async {
+      await _pump(
+        tester,
+        EncryptedFileMessage(messageId: 'm2', attachment: pdfInfo()),
+        gateway: pdfGateway(),
         saver: FakeAttachmentSaver(result: false),
       );
-      await tester.tap(find.byTooltip('Save'));
-      await tester.pumpAndSettle();
+      await pickFromMenu(tester, 'Save');
 
       expect(find.byType(SnackBar), findsNothing);
     });
 
-    testWidgets('a failed download is reported, not saved', (tester) async {
-      final gateway = FakeAttachmentGateway(
-        downloadResult: (_) async => throw Exception('DownloadFailed: 404'),
-      );
-      final saver = FakeAttachmentSaver();
-
+    testWidgets('a failed download is reported, not opened', (tester) async {
+      final launcher = FakeAttachmentLauncher();
       await _pump(
         tester,
         EncryptedFileMessage(messageId: 'm2', attachment: pdfInfo()),
-        gateway: gateway,
-        saver: saver,
+        gateway: FakeAttachmentGateway(
+          downloadResult: (_) async => throw Exception('DownloadFailed: 404'),
+        ),
+        launcher: launcher,
       );
-      await tester.tap(find.byTooltip('Save'));
+      await tester.tap(find.text('transfer.pdf'));
       await tester.pumpAndSettle();
 
-      expect(saver.saved, isEmpty);
+      expect(launcher.opened, isEmpty);
       expect(find.text('The file could not be downloaded.'), findsOneWidget);
+    });
+
+    testWidgets('DOC and DOCX from v1 are labelled by format', (tester) async {
+      rust_types.AttachmentInfo doc(String name, String mime) =>
+          rust_types.AttachmentInfo(
+            fileName: name,
+            mimeType: mime,
+            fileSize: BigInt.from(1024),
+            fileType: rust_types.FileType.document,
+            downloadStatus: rust_types.DownloadStatus.pending,
+            blossomUrl: 'https://blossom.example/$kSha',
+            sha256: kSha,
+            encryptedSize: BigInt.from(1052),
+          );
+      await _pump(
+        tester,
+        Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            EncryptedFileMessage(
+              messageId: 'a',
+              attachment: doc('a.doc', 'application/msword'),
+            ),
+            EncryptedFileMessage(
+              messageId: 'b',
+              attachment: doc(
+                'b.docx',
+                'application/vnd.openxmlformats-officedocument.'
+                    'wordprocessingml.document',
+              ),
+            ),
+            EncryptedFileMessage(
+              messageId: 'c',
+              attachment: doc('c.mp4', 'video/mp4'),
+            ),
+          ],
+        ),
+        gateway: FakeAttachmentGateway(),
+      );
+
+      expect(find.text('1 KB · DOC'), findsOneWidget);
+      expect(find.text('1 KB · DOCX'), findsOneWidget);
+      expect(find.text('1 KB · Video'), findsOneWidget);
     });
   });
 

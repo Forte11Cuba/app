@@ -3774,4 +3774,26 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get attachmentOpenImage => 'Open image';
+
+  @override
+  String get attachmentOpenWith => 'Open with…';
+
+  @override
+  String get attachmentShare => 'Share';
+
+  @override
+  String get attachmentMoreActions => 'More options';
+
+  @override
+  String get attachmentNoAppToOpen =>
+      'No app on this device can open this file.';
+
+  @override
+  String get attachmentOpenFailed => 'The file could not be opened.';
+
+  @override
+  String get attachmentShareFailed => 'The file could not be shared.';
+
+  @override
+  String get attachmentSaveOnly => 'This type of file can only be saved.';
 }
