@@ -255,12 +255,15 @@ Future<void> bootstrapAndRun({List<String> seedRelays = const []}) async {
     onResume: ResumeResync(container: container).run,
   ).attach();
 
-  // Copies of attachments handed to another app ("open with…", share) are
-  // deleted once the user is back, and whatever an earlier run left behind
-  // goes now (#589).
+  // Copies of attachments handed to another app ("open with…", share):
+  // whatever an earlier run left behind goes now, and a resume clears those
+  // past their lifetime — a younger one may still be read (#589).
   final attachmentLauncher = container.read(attachmentLauncherProvider);
   unawaited(attachmentLauncher.sweep());
-  AppLifecycleService(onResume: attachmentLauncher.sweep).attach();
+  AppLifecycleService(
+    onResume: () =>
+        attachmentLauncher.sweep(olderThan: attachmentLauncher.copyLifetime),
+  ).attach();
 
   runApp(
     UncontrolledProviderScope(container: container, child: const MostroApp()),

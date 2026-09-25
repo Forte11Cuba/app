@@ -129,7 +129,13 @@ void main() {
 
       shortLived.releaseCopy(path, handedOff: true);
       expect(File(path).existsSync(), isTrue);
-      await Future<void>.delayed(const Duration(milliseconds: 80));
+      // Polled, not slept on: under a loaded test run the timer and the
+      // delete can land well after the lifetime.
+      final deadline = DateTime.now().add(const Duration(seconds: 2));
+      while (File(path).parent.existsSync() &&
+          DateTime.now().isBefore(deadline)) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
 
       expect(File(path).parent.existsSync(), isFalse);
     });
@@ -142,6 +148,43 @@ void main() {
       await pumpEventQueue();
 
       expect(elsewhere.existsSync(), isTrue);
+    });
+
+    test('a resume sweep keeps a copy that may still be read', () async {
+      final data = attachmentData(
+        [1],
+        fileName: 'a.pdf',
+        mimeType: 'application/pdf',
+      );
+      final fresh = await launcher.writeTempCopy(data);
+
+      await launcher.sweep(olderThan: const Duration(hours: 1));
+      expect(File(fresh).existsSync(), isTrue);
+
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      await launcher.sweep(olderThan: const Duration(milliseconds: 10));
+      expect(File(fresh).existsSync(), isFalse);
+    });
+
+    test('a sweep and a write never overlap', () async {
+      final data = attachmentData(
+        [1, 2],
+        fileName: 'a.pdf',
+        mimeType: 'application/pdf',
+      );
+      // Not awaited in between, as the start-up, resume and identity sweeps
+      // are: whatever order they land in, the write completes and a write
+      // queued after the sweep survives it.
+      final write1 = launcher.writeTempCopy(data);
+      final sweep = launcher.sweep();
+      final write2 = launcher.writeTempCopy(data);
+
+      final first = await write1;
+      await sweep;
+      final second = await write2;
+
+      expect(File(first).existsSync(), isFalse);
+      expect(File(second).readAsBytesSync(), [1, 2]);
     });
 
     test('sweep with nothing to delete is a no-op', () async {

@@ -84,9 +84,9 @@ enum LaunchOutcome { done, noApp, failed }
 ///
 /// - at once, when no app took it (nothing to open it, or an error);
 /// - [copyLifetime] after it was handed off, while the app runs;
-/// - by [sweep], with every other copy: when the user comes back to the app,
-///   at start-up and on an identity change — which also catches a copy whose
-///   timer died with the process.
+/// - by [sweep]: every copy at start-up and on an identity change, and those
+///   past [copyLifetime] when the user comes back to the app — which also
+///   catches a copy whose timer died with the process.
 class AttachmentLauncher {
   AttachmentLauncher({
     Future<Directory> Function()? tempRoot,
@@ -95,6 +95,16 @@ class AttachmentLauncher {
 
   final Future<Directory> Function() _tempRoot;
   final Duration copyLifetime;
+
+  /// The tail of the writes and sweeps in flight. They run one at a time, so
+  /// a sweep never deletes a copy's directory while it is being written.
+  Future<void> _diskQueue = Future.value();
+
+  Future<T> _serialized<T>(Future<T> Function() operation) {
+    final result = _diskQueue.then((_) => operation());
+    _diskQueue = result.then((_) {}, onError: (_) {});
+    return result;
+  }
 
   /// Whether [data] may be opened or shared: a known type, on a platform
   /// with a file system.
@@ -175,30 +185,52 @@ class AttachmentLauncher {
     if (extension == null) {
       throw StateError('not an openable type: ${data.mimeType}');
     }
-    // A directory per copy, so two files with the same name never collide.
-    final dir = Directory(
-      p.join((await _tempRoot()).path, kAttachmentTempDir, const Uuid().v4()),
-    );
-    await dir.create(recursive: true);
-    final file = File(
-      p.join(dir.path, safeTempFileName(data.fileName, extension)),
-    );
-    await file.writeAsBytes(data.bytes, flush: true);
-    return file.path;
+    return _serialized(() async {
+      // A directory per copy, so two files with the same name never collide.
+      final dir = Directory(
+        p.join((await _tempRoot()).path, kAttachmentTempDir, const Uuid().v4()),
+      );
+      await dir.create(recursive: true);
+      final file = File(
+        p.join(dir.path, safeTempFileName(data.fileName, extension)),
+      );
+      await file.writeAsBytes(data.bytes, flush: true);
+      return file.path;
+    });
   }
 
-  /// Deletes every temporary copy. Never throws: a copy that cannot be
-  /// deleted now is retried at the next sweep.
-  Future<void> sweep() async {
+  /// Deletes the temporary copies: all of them, or with [olderThan] only
+  /// those handed off longer ago than that.
+  ///
+  /// Start-up and an identity change clear everything. A resume passes
+  /// [copyLifetime]: coming back to the app does not mean the other app has
+  /// read its copy (an Android share target may upload it later), and a
+  /// younger copy has its own expiry pending anyway.
+  ///
+  /// Never throws: a copy that cannot be deleted now is retried at the next
+  /// sweep.
+  Future<void> sweep({Duration? olderThan}) async {
     if (kIsWeb) return;
-    try {
-      final dir = Directory(
-        p.join((await _tempRoot()).path, kAttachmentTempDir),
-      );
-      if (await dir.exists()) await dir.delete(recursive: true);
-    } catch (e) {
-      debugPrint('[chat] attachment temp sweep failed: $e');
-    }
+    await _serialized(() async {
+      try {
+        final dir = Directory(
+          p.join((await _tempRoot()).path, kAttachmentTempDir),
+        );
+        if (!await dir.exists()) return;
+        if (olderThan == null) {
+          await dir.delete(recursive: true);
+          return;
+        }
+        final cutoff = DateTime.now().subtract(olderThan);
+        await for (final copy in dir.list()) {
+          if ((await copy.stat()).modified.isBefore(cutoff)) {
+            await copy.delete(recursive: true);
+          }
+        }
+      } catch (e) {
+        debugPrint('[chat] attachment temp sweep failed: $e');
+      }
+    });
   }
 }
 
