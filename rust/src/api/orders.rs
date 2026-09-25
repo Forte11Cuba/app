@@ -278,12 +278,26 @@ struct BookState {
     /// The pending feed's stored events ended for the node this book holds;
     /// see `OrderBookSnapshot::loaded`.
     loaded: bool,
+    /// Orders the current identity made, as claimed by its maker rows
+    /// ([`OrderBook::claim_mine`]). Every write below raises `is_mine` on
+    /// them, so the mark no longer depends on which of the order's Kind
+    /// 38383 and the daemon's confirmation arrives first, nor on the row
+    /// being readable (#552). Identity-scoped: emptied by
+    /// [`OrderBook::forget_ownership`] (issue #533). A node switch keeps it —
+    /// order ids are daemon UUIDs, so another node's book never matches one.
+    own: std::collections::HashSet<String>,
 }
 
 impl BookState {
     /// Insert or replace `order`. An order re-announced unchanged — the
     /// common case on the wire — is not a change: no revision, no delta.
-    fn upsert(&mut self, order: OrderInfo, deltas: &broadcast::Sender<OrderBookDelta>) {
+    fn upsert(&mut self, mut order: OrderInfo, deltas: &broadcast::Sender<OrderBookDelta>) {
+        // Before the comparison: the wire always says `is_mine = false`, so
+        // marking after it would turn every unchanged re-announce of an own
+        // order into a revision and a delta.
+        if self.own.contains(&order.id) {
+            order.is_mine = true;
+        }
         if self.orders.get(&order.id) == Some(&order) {
             return;
         }
@@ -309,7 +323,15 @@ impl BookState {
     }
 
     fn replace_all(&mut self, orders: Vec<OrderInfo>, deltas: &broadcast::Sender<OrderBookDelta>) {
-        self.orders = orders.into_iter().map(|o| (o.id.clone(), o)).collect();
+        self.orders = orders
+            .into_iter()
+            .map(|mut o| {
+                if self.own.contains(&o.id) {
+                    o.is_mine = true;
+                }
+                (o.id.clone(), o)
+            })
+            .collect();
         self.revision += 1;
         let _ = deltas.send(OrderBookDelta::Reset);
     }
@@ -390,6 +412,10 @@ impl OrderBook {
     pub async fn clear(&self) {
         {
             let mut book = self.orders.write().await;
+            // `own` survives on purpose: the identity did not change, and the
+            // claims name daemon UUIDs, which the next node's book never
+            // reuses. Emptying it would drop a claim whose row failed to save
+            // and leave the order unmarked on the way back (#552).
             book.replace_all(Vec::new(), &self.delta_tx);
             // Emptied for another node, whose relay has confirmed nothing.
             book.loaded = false;
@@ -415,6 +441,8 @@ impl OrderBook {
         let notes = std::mem::take(&mut *self.wire_notes());
         let snapshot = {
             let mut book = self.orders.write().await;
+            // First: `replace_all` re-marks whatever `own` still names.
+            book.own.clear();
             let orders = book
                 .orders
                 .values()
@@ -548,23 +576,28 @@ impl OrderBook {
         self.delta_tx.subscribe()
     }
 
-    /// Set `is_mine = true` on an existing cached order and notify listeners,
-    /// atomically — read-modify-write under one write lock, like
-    /// [`Self::update_order_status`], so a concurrent ingest's newer entry is
-    /// never overwritten by a stale clone (#552 review).
+    /// Claim `order_id` as made by the current identity, and mark its entry
+    /// if the book already holds it (#552).
     ///
-    /// No-op when the order is absent or already marked: never inserts — the
-    /// public book is fed only by the daemon's Kind 38383 events (see
-    /// `create_order`), and an entry the wire has not produced yet needs no
-    /// correction; when it arrives, the ingest restore finds binding and row
-    /// and raises the flag itself. The snapshot goes out at once, ahead of
-    /// any batched refetch emission in flight, but a refetch ingests with
-    /// binding and row long since present, so only the live create race ever
-    /// reaches here with an entry to fix. No `touch_trade`: the row's own
-    /// write rings it (`persist_trade_row`), and Home reads this snapshot.
-    pub(crate) async fn mark_mine(&self, order_id: &str) {
+    /// The claim is what makes the mark stick: every later write of the order
+    /// raises `is_mine` from it ([`BookState::upsert`]), so it holds whichever
+    /// of the order's Kind 38383 and its maker row lands first, and without
+    /// the row ever being readable — a failed save included. Never inserts an
+    /// entry: the public book is fed only by the daemon's Kind 38383 events
+    /// (see `create_order`).
+    ///
+    /// Ordered against [`Self::forget_ownership`] by the book's lock alone:
+    /// a claim taken first is forgotten with the identity, one taken after
+    /// the teardown sticks. That is why the caller claims before anything
+    /// else it awaits — see `persist_trade_row`.
+    ///
+    /// The snapshot goes out at once, ahead of any batched refetch emission
+    /// in flight; only a live create reaches here with an entry to fix. No
+    /// `touch_trade`: the row's own write rings it (`persist_trade_row`).
+    pub(crate) async fn claim_mine(&self, order_id: &str) {
         let snapshot = {
             let mut book = self.orders.write().await;
+            book.own.insert(order_id.to_string());
             let Some(mut order) = book.orders.get(order_id).cloned() else {
                 return;
             };
@@ -576,6 +609,13 @@ impl OrderBook {
             book.snapshot()
         };
         let _ = self.tx.send(snapshot);
+    }
+
+    /// Whether `order_id` was claimed by the current identity's maker row
+    /// ([`Self::claim_mine`]). In memory, so the ingest asks it first and
+    /// reads the row only on a miss.
+    pub(crate) async fn owns(&self, order_id: &str) -> bool {
+        self.orders.read().await.own.contains(order_id)
     }
 
     /// Update the status of an existing cached order and notify listeners.
@@ -5916,6 +5956,33 @@ async fn wipe_trade_row(
 /// A direct `save_trade` for a *new* row would leave a stale tombstone
 /// swallowing the new trade's daemon messages (issue #394).
 async fn persist_trade_row(db: &impl Storage, trade: &crate::api::types::TradeInfo) -> Result<()> {
+    persist_trade_row_in(db, trade, order_book()).await
+}
+
+/// [`persist_trade_row`] against a given book, so a test can race it with an
+/// identity teardown without forgetting the process-wide book under every
+/// other test running in parallel.
+async fn persist_trade_row_in(
+    db: &impl Storage,
+    trade: &crate::api::types::TradeInfo,
+    book: &OrderBook,
+) -> Result<()> {
+    // A maker row's book entry usually predates the row: the order's Kind
+    // 38383 outruns the daemon confirmation that binds the UUID and persists
+    // this row, so the ingest wrote `is_mine = false` and nostr-sdk never
+    // redelivers the event (#552). The claim fixes that entry and every later
+    // write of it, and does not depend on the save below succeeding.
+    //
+    // Claimed first, before this function awaits anything else, so that no
+    // write of the old identity's lands after a teardown that began while
+    // this row was being saved: the book's lock orders the claim against
+    // `forget_ownership`, and the claim is the only book write here. A
+    // persist that *starts* after the teardown is not covered — nothing in
+    // the crate carries an identity generation from where the operation
+    // began.
+    if trade.order.is_mine {
+        book.claim_mine(&trade.order.id).await;
+    }
     let key = crate::db::settings_keys::trade_wiped(&trade.order.id);
     if let Err(e) = db.delete_setting(&key).await {
         // Save anyway: a stale tombstone only mutes replays for this order,
@@ -5930,16 +5997,6 @@ async fn persist_trade_row(db: &impl Storage, trade: &crate::api::types::TradeIn
         );
     }
     let saved = db.save_trade(trade).await;
-    // A maker row's book entry can predate the row itself: the order's Kind
-    // 38383 usually outruns the daemon confirmation that binds the UUID and
-    // persists this row, so the ingest wrote `is_mine = false` and nostr-sdk
-    // never redelivers the event (#552). Corrected here, on the funnel every
-    // row creation passes through — and regardless of `saved`, like the
-    // touch below: the ingest restore reads this row, so a failed save is
-    // exactly when the in-memory correction is the only one left.
-    if trade.order.is_mine {
-        order_book().mark_mine(&trade.order.id).await;
-    }
     crate::api::trade_touch::touch_trade(&trade.order.id);
     crate::api::push::request_reconcile();
     saved
@@ -7969,27 +8026,6 @@ async fn ingest_order_event(event: &nostr_sdk::prelude::Event) {
     ingest_order_event_with(event, Publish::Coalesced).await;
 }
 
-/// Re-run the maker restore after an ingest wrote its book entry (#552).
-///
-/// Same proof as the pre-upsert restore in [`ingest_order_event_with`] —
-/// binding first, row only on a hit, maker-ness from the row — applied when
-/// that restore ran too early to see either. See the call site for the
-/// interleaving this closes and why it cannot be forced from the seam.
-async fn recheck_ingested_ownership(order_id: &str) {
-    if lookup_trade_key_index(order_id).await.is_none() {
-        return;
-    }
-    let Some(db) = crate::db::app_db::db() else {
-        return;
-    };
-    let Ok(Some(trade)) = db.get_trade_by_order_id(order_id).await else {
-        return;
-    };
-    if trade.order.is_mine {
-        order_book().mark_mine(order_id).await;
-    }
-}
-
 async fn ingest_order_event_with(event: &nostr_sdk::prelude::Event, publish: Publish) {
     log::debug!(
         "[orders] event kind={} author={}",
@@ -8018,6 +8054,14 @@ async fn ingest_order_event_with(event: &nostr_sdk::prelude::Event, publish: Pub
             // maker-ness from the payload's kind plus the proven role
             // (review round 2), so this restore trusts the row for makers
             // and takers alike.
+            //
+            // A claim of the current identity's maker row answers first, in
+            // memory (#552): it holds when the row was never saved, and it
+            // keeps everything below — the status sync, `ours` — treating the
+            // order as ours, like the book entry the upsert will mark.
+            if !info.is_mine && order_book().owns(&info.id).await {
+                info.is_mine = true;
+            }
             if !info.is_mine && lookup_trade_key_index(&info.id).await.is_some() {
                 if let Some(db) = crate::db::app_db::db() {
                     if let Ok(Some(trade)) = db.get_trade_by_order_id(&info.id).await {
@@ -8101,26 +8145,7 @@ async fn ingest_order_event_with(event: &nostr_sdk::prelude::Event, publish: Pub
             let ours = info.is_mine
                 || (is_hard_terminal(&info.status)
                     && lookup_trade_key_index(&info.id).await.is_some());
-            let order_id = info.id.clone();
-            let was_mine = info.is_mine;
             order_book().apply_ingested_order(info, ours, publish).await;
-            // The residual half of the #552 race. The maker restore above
-            // read binding and row BEFORE this upsert; a create confirmation
-            // landing in between binds, persists and re-marks (see
-            // `persist_trade_row`) an entry that does not exist yet — and
-            // this upsert then writes `is_mine = false` over nothing. Asking
-            // again after the upsert closes every interleaving: one side
-            // must see the other's write. Free for strangers' orders: the
-            // restore's miss is in the negative cache, which answers this
-            // lookup too, and `store_trade_key_index` lifts that entry when
-            // it binds, so a stale "absent" cannot be read here. The call
-            // site itself is not seam-testable — forcing the interleaving
-            // needs an injection point between the restore and the upsert —
-            // so the helper is tested on the interleaving's end state
-            // instead, and this wiring is covered by review only.
-            if !was_mine {
-                recheck_ingested_ownership(&order_id).await;
-            }
         }
         None => {
             log::warn!(
@@ -12259,8 +12284,8 @@ mod tests {
     /// #552: the fresh-create race. The order's Kind 38383 lands before the
     /// daemon confirmation binds the UUID and persists the maker row, so the
     /// ingest writes `is_mine = false` — and nostr-sdk never redelivers the
-    /// event to correct it. The confirmation's row persist must re-mark the
-    /// book entry itself.
+    /// event to correct it. The row persist's claim must mark the book entry
+    /// itself.
     #[tokio::test]
     async fn late_binding_remarks_the_book_entry_as_mine() {
         let path = std::env::temp_dir().join(format!("mostro_remark_{}.db", std::process::id()));
@@ -12294,7 +12319,7 @@ mod tests {
                 .await
                 .expect("book entry")
                 .is_mine,
-            "persisting the maker row must re-mark the book entry (#552)",
+            "persisting the maker row must mark the book entry (#552)",
         );
 
         // The other half of the hook's contract: a take goes through the
@@ -12315,53 +12340,344 @@ mod tests {
         );
     }
 
-    /// #552, the residual interleaving: the ingest read binding and row
-    /// before the confirmation wrote them, and the confirmation's re-mark ran
-    /// before the ingest's upsert — entry `false`, binding and maker row
-    /// present, and neither side left to correct it. The post-upsert re-check
-    /// is what fixes that end state; the interleaving itself cannot be forced
-    /// without an injection point mid-ingest, so the helper is tested on the
-    /// state it must repair.
+    /// #552, the other order: the maker row is persisted before the order's
+    /// Kind 38383 arrives. The entry must land marked.
     #[tokio::test]
-    async fn ownership_recheck_repairs_the_residual_interleaving() {
-        let path = std::env::temp_dir().join(format!("mostro_recheck_{}.db", std::process::id()));
+    async fn a_maker_row_persisted_first_marks_the_entry_when_it_arrives() {
+        let path =
+            std::env::temp_dir().join(format!("mostro_claimfirst_{}.db", std::process::id()));
         let _ = crate::db::app_db::init_db(path.to_str().unwrap()).await;
         let db = crate::db::app_db::db().expect("store initialised");
 
-        // The end state the interleaving leaves behind.
         let order_id = uuid::Uuid::new_v4().to_string();
-        order_book().upsert_order(dummy_order_info(&order_id)).await;
-        db.save_trade(&seam_trade_row(
-            &order_id,
-            crate::api::types::OrderStatus::Pending,
-        ))
+        store_trade_key_index(&order_id, 63).await;
+        persist_trade_row(
+            db,
+            &seam_trade_row(&order_id, crate::api::types::OrderStatus::Pending),
+        )
         .await
-        .expect("save maker row");
-        store_trade_key_index(&order_id, 62).await;
+        .expect("persist maker row");
+        assert!(
+            order_book().get_order(&order_id).await.is_none(),
+            "a claim never inserts: the book is fed by Kind 38383 alone",
+        );
 
-        recheck_ingested_ownership(&order_id).await;
+        ingest_order_event_with(&book_event(&order_id, "pending"), Publish::WhenBatchEnds).await;
         assert!(
             order_book()
                 .get_order(&order_id)
                 .await
                 .expect("book entry")
                 .is_mine,
-            "binding + maker row must repair the entry post-upsert (#552)",
         );
+    }
 
-        // A stranger's order: no binding, the re-check must touch nothing.
-        let stranger_id = uuid::Uuid::new_v4().to_string();
-        order_book()
-            .upsert_order(dummy_order_info(&stranger_id))
-            .await;
-        recheck_ingested_ownership(&stranger_id).await;
+    /// #552 review round 2 (ermeme): the maker row's save fails, and the
+    /// persist runs before the order's Kind 38383 lands — so there is no
+    /// entry to mark yet, and no row for the ingest restore to read. The
+    /// claim must still mark the entry when it arrives, keep it marked
+    /// through a later revision, and have the ingest treat the order as ours
+    /// (it rings the trade's doorbell, which it does for no stranger's order).
+    #[tokio::test]
+    async fn a_failed_maker_save_still_marks_the_entry_and_its_revisions() {
+        let path = std::env::temp_dir().join(format!("mostro_failsave_{}.db", std::process::id()));
+        let _ = crate::db::app_db::init_db(path.to_str().unwrap()).await;
+
+        let order_id = uuid::Uuid::new_v4().to_string();
+        store_trade_key_index(&order_id, 64).await;
+        let saved = persist_trade_row(
+            &PersistProbe::FailSave,
+            &seam_trade_row(&order_id, crate::api::types::OrderStatus::Pending),
+        )
+        .await;
+        assert!(saved.is_err(), "the probe's save must fail");
+
+        let mut touches = crate::api::trade_touch::on_trade_touched().await.unwrap();
+        ingest_order_event_with(&book_event(&order_id, "pending"), Publish::WhenBatchEnds).await;
         assert!(
-            !order_book()
-                .get_order(&stranger_id)
+            order_book()
+                .get_order(&order_id)
                 .await
                 .expect("book entry")
                 .is_mine,
+            "the claim must mark the entry without a readable row",
         );
+        assert!(
+            rang_for(&mut touches, &order_id).await,
+            "the ingest must treat a claimed order as ours",
+        );
+
+        // The next revision comes with `is_mine = false` like every other,
+        // and still no row to restore from.
+        ingest_order_event_with(
+            &book_event(&order_id, "in-progress"),
+            Publish::WhenBatchEnds,
+        )
+        .await;
+        let entry = order_book().get_order(&order_id).await.expect("book entry");
+        assert!(entry.is_mine, "a later revision must not undo the mark");
+        assert_eq!(entry.status, crate::api::types::OrderStatus::InProgress);
+    }
+
+    /// #552 review round 2 (ermeme): an identity teardown lands while the old
+    /// identity's maker row is being saved. Nothing of that persist may mark
+    /// the book afterwards — not the entry, and not the claim, which would
+    /// re-mark the entry on its next Kind 38383. A book of the test's own:
+    /// forgetting the process-wide one would unmark every parallel test's.
+    #[tokio::test]
+    async fn a_teardown_during_a_maker_save_leaves_nothing_marked() {
+        let book = OrderBook::new();
+        let order_id = uuid::Uuid::new_v4().to_string();
+        let mut wire = dummy_order_info(&order_id);
+        wire.is_mine = false;
+        book.upsert_order(wire.clone()).await;
+
+        let entered = Arc::new(tokio::sync::Notify::new());
+        let release = Arc::new(tokio::sync::Notify::new());
+        let probe = PersistProbe::PauseSave {
+            entered: Arc::clone(&entered),
+            release: Arc::clone(&release),
+        };
+        let row = seam_trade_row(&order_id, crate::api::types::OrderStatus::Pending);
+        let teardown = async {
+            entered.notified().await;
+            book.forget_ownership().await;
+            release.notify_one();
+        };
+        let (saved, ()) = tokio::join!(persist_trade_row_in(&probe, &row, &book), teardown);
+        saved.expect("the probe's paused save succeeds");
+
+        assert!(
+            !book.get_order(&order_id).await.expect("book entry").is_mine,
+            "the old identity's persist must not mark the entry after the teardown",
+        );
+        assert!(!book.owns(&order_id).await, "nor leave its claim behind");
+        book.upsert_order(wire).await;
+        assert!(!book.get_order(&order_id).await.expect("book entry").is_mine);
+    }
+
+    /// The claim is applied before the unchanged-check: every Kind 38383
+    /// says `is_mine = false`, so an own order re-announced unchanged would
+    /// otherwise count as a change — a revision and a delta each time.
+    #[tokio::test]
+    async fn an_unchanged_reannounce_of_a_claimed_order_is_not_a_change() {
+        let book = OrderBook::new();
+        let order_id = uuid::Uuid::new_v4().to_string();
+        let mut wire = dummy_order_info(&order_id);
+        wire.is_mine = false;
+        book.claim_mine(&order_id).await;
+        book.upsert_order(wire.clone()).await;
+        assert!(book.get_order(&order_id).await.expect("book entry").is_mine);
+
+        let revision = book.orders.read().await.revision;
+        book.upsert_order(wire).await;
+        assert_eq!(book.orders.read().await.revision, revision);
+    }
+
+    /// A `Storage` for driving `persist_trade_row` alone, which calls only
+    /// `delete_setting` and `save_trade`: its save either fails or parks until
+    /// released. Every other method is `unimplemented!()` — reaching one is a
+    /// test bug, not silent success.
+    enum PersistProbe {
+        FailSave,
+        PauseSave {
+            entered: Arc<tokio::sync::Notify>,
+            release: Arc<tokio::sync::Notify>,
+        },
+    }
+
+    impl Storage for PersistProbe {
+        async fn save_identity(&self, _identity: &crate::api::types::IdentityInfo) -> Result<()> {
+            unimplemented!()
+        }
+        async fn save_order(&self, _order: &crate::api::types::OrderInfo) -> Result<()> {
+            unimplemented!()
+        }
+        async fn get_order(&self, _id: &str) -> Result<Option<crate::api::types::OrderInfo>> {
+            unimplemented!()
+        }
+        async fn delete_order(&self, _id: &str) -> Result<()> {
+            unimplemented!()
+        }
+        async fn list_orders(&self) -> Result<Vec<crate::api::types::OrderInfo>> {
+            unimplemented!()
+        }
+        async fn save_trade(&self, _trade: &crate::api::types::TradeInfo) -> Result<()> {
+            match self {
+                Self::FailSave => anyhow::bail!("injected save failure"),
+                Self::PauseSave { entered, release } => {
+                    entered.notify_one();
+                    release.notified().await;
+                    Ok(())
+                }
+            }
+        }
+        async fn get_trade(&self, _id: &str) -> Result<Option<crate::api::types::TradeInfo>> {
+            unimplemented!()
+        }
+        async fn list_trades(&self) -> Result<Vec<crate::api::types::TradeInfo>> {
+            unimplemented!()
+        }
+        async fn save_message(&self, _msg: &crate::api::types::ChatMessage) -> Result<()> {
+            unimplemented!()
+        }
+        async fn list_messages(
+            &self,
+            _trade_id: &str,
+        ) -> Result<Vec<crate::api::types::ChatMessage>> {
+            unimplemented!()
+        }
+        async fn list_unread_messages(&self) -> Result<Vec<crate::api::types::ChatMessage>> {
+            unimplemented!()
+        }
+        async fn mark_messages_read(&self, _trade_id: &str) -> Result<()> {
+            unimplemented!()
+        }
+        async fn message_exists(&self, _id: &str) -> Result<bool> {
+            unimplemented!()
+        }
+        async fn save_relay(&self, _relay: &crate::api::types::RelayInfo) -> Result<()> {
+            unimplemented!()
+        }
+        async fn delete_relay(&self, _url: &str) -> Result<()> {
+            unimplemented!()
+        }
+        async fn list_relays(&self) -> Result<Vec<crate::api::types::RelayInfo>> {
+            unimplemented!()
+        }
+        async fn get_identity(&self) -> Result<Option<crate::api::types::IdentityInfo>> {
+            unimplemented!()
+        }
+        async fn delete_identity(&self) -> Result<()> {
+            unimplemented!()
+        }
+        async fn update_trade_peer_reputation(
+            &self,
+            _order_id: &str,
+            _rating: f64,
+            _reviews: u32,
+            _days: u32,
+        ) -> Result<()> {
+            unimplemented!()
+        }
+        async fn update_trade_bond(
+            &self,
+            _order_id: &str,
+            _bond: &crate::api::types::BondInfo,
+        ) -> Result<()> {
+            unimplemented!()
+        }
+
+        async fn mark_trade_rated(&self, _order_id: &str, _rated_at: i64) -> Result<()> {
+            unimplemented!()
+        }
+        async fn set_cooperative_cancel_state(
+            &self,
+            _order_id: &str,
+            _state: crate::api::types::CooperativeCancelState,
+        ) -> Result<()> {
+            unimplemented!()
+        }
+        async fn update_trade_counterparty(
+            &self,
+            _order_id: &str,
+            _counterparty_pubkey: &str,
+        ) -> Result<()> {
+            unimplemented!()
+        }
+        async fn save_bond_claim(&self, _claim: &crate::api::types::BondClaim) -> Result<()> {
+            unimplemented!()
+        }
+        async fn get_bond_claim(
+            &self,
+            _node_pubkey: &str,
+            _order_id: &str,
+        ) -> Result<Option<crate::api::types::BondClaim>> {
+            unimplemented!()
+        }
+        async fn list_bond_claims(&self) -> Result<Vec<crate::api::types::BondClaim>> {
+            unimplemented!()
+        }
+        async fn delete_bond_claim(&self, _node_pubkey: &str, _order_id: &str) -> Result<()> {
+            unimplemented!()
+        }
+        async fn save_queued_message(
+            &self,
+            _msg: &crate::queue::outbox::QueuedMessage,
+        ) -> Result<()> {
+            unimplemented!()
+        }
+        async fn list_queued_messages(&self) -> Result<Vec<crate::queue::outbox::QueuedMessage>> {
+            unimplemented!()
+        }
+        async fn update_queued_message_status(
+            &self,
+            _id: &str,
+            _status: crate::api::types::QueuedMessageStatus,
+        ) -> Result<()> {
+            unimplemented!()
+        }
+        async fn delete_queued_message(&self, _id: &str) -> Result<()> {
+            unimplemented!()
+        }
+        async fn save_trade_key(&self, _order_id: &str, _key_index: u32) -> Result<()> {
+            unimplemented!()
+        }
+        async fn get_trade_key(&self, _order_id: &str) -> Result<Option<u32>> {
+            unimplemented!()
+        }
+        async fn get_order_id_by_trade_index(&self, _key_index: u32) -> Result<Option<String>> {
+            unimplemented!()
+        }
+        async fn delete_trade_key(&self, _order_id: &str) -> Result<()> {
+            unimplemented!()
+        }
+        async fn clear_trade_keys(&self) -> Result<()> {
+            unimplemented!()
+        }
+        async fn clear_identity_data(&self) -> Result<()> {
+            unimplemented!()
+        }
+        async fn get_setting(&self, _key: &str) -> Result<Option<String>> {
+            unimplemented!()
+        }
+        async fn set_setting(&self, _key: &str, _value: &str) -> Result<()> {
+            unimplemented!()
+        }
+        async fn delete_setting(&self, _key: &str) -> Result<()> {
+            Ok(())
+        }
+        async fn save_active_mostro_pubkey(&self, _pubkey: &str) -> Result<()> {
+            unimplemented!()
+        }
+        async fn get_active_mostro_pubkey(&self) -> Result<Option<String>> {
+            unimplemented!()
+        }
+        async fn get_trade_by_order_id(
+            &self,
+            _order_id: &str,
+        ) -> Result<Option<crate::api::types::TradeInfo>> {
+            unimplemented!()
+        }
+        async fn delete_trade_by_order_id(&self, _order_id: &str) -> Result<()> {
+            unimplemented!()
+        }
+        async fn update_trade_order_id(
+            &self,
+            _old_order_id: &str,
+            _new_order_id: &str,
+        ) -> Result<()> {
+            unimplemented!()
+        }
+        async fn update_trade_fields(
+            &self,
+            _order_id: &str,
+            _status: Option<crate::api::types::OrderStatus>,
+            _hold_invoice: Option<String>,
+            _amount_sats: Option<u64>,
+        ) -> Result<()> {
+            unimplemented!()
+        }
     }
 
     /// PR #253 review round 2 (ermeme): a key derived after the global

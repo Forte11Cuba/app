@@ -111,11 +111,19 @@ outruns the confirmation that binds the daemon UUID and persists the maker
 row, so the ingest writes the entry with `is_mine = false` — and the live
 stream never redelivers the event to correct it. Persisting a maker row
 (`persist_trade_row`, the funnel every row creation passes through) therefore
-re-marks the order's **existing** book entry `is_mine = true`; it never
-inserts one, keeping the book fed by Kind 38383 alone. An ingest completing
-*around* the persist re-checks binding and row once more after its own
-upsert, so every interleaving leaves the entry marked. A taker's row
-(`is_mine = false`) marks nothing.
+**claims** the order in the book, in memory and before the save: the claim
+marks the order's existing entry `is_mine = true` and every later write of it,
+whichever arrives first and even when the save fails. It never inserts an
+entry, keeping the book fed by Kind 38383 alone. The ingest reads the claim
+too, so it treats a claimed order as ours without a readable row. A taker's
+row (`is_mine = false`) claims nothing.
+
+Claims belong to the identity: forgetting the identity (#533) empties them
+under the same lock, so a persist of the old identity's that was already
+under way when the teardown began cannot mark the book afterwards. A node
+switch keeps them (order ids are daemon UUIDs). Not covered: a persist that
+*starts* after the teardown — no operation carries an identity generation
+from where it began.
 
 **Errors**: `NoIdentity`, `Offline` (queued), `NoDaemonResponse` (daemon did not confirm within the timeout), `ProtocolError`.
 
