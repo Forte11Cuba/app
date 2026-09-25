@@ -286,6 +286,29 @@ struct BookState {
     /// [`OrderBook::forget_ownership`] (issue #533). A node switch keeps it —
     /// order ids are daemon UUIDs, so another node's book never matches one.
     own: std::collections::HashSet<String>,
+    /// Bumped with every [`OrderBook::forget_ownership`], under the same lock
+    /// that empties `own`. An ingest reads it with the claim before it
+    /// classifies an order, and the write that applies the classification
+    /// compares it again: an identity forgotten in between leaves the old
+    /// user's `is_mine`, `ours` and local status out of the book (#552
+    /// review round 3).
+    ownership_epoch: u64,
+}
+
+/// A Kind 38383 order classified against the identity that was current when
+/// its classification began — see [`classify_ingested_order`].
+#[flutter_rust_bridge::frb(ignore)]
+pub(crate) struct IngestedOrder {
+    /// The order as the book should hold it for that identity: `is_mine`
+    /// restored, a refused wire status replaced by the local trade's.
+    order: OrderInfo,
+    /// The order as the event carried it, before anything of the identity's
+    /// was applied — what a stranger's ingest would write.
+    wire: OrderInfo,
+    /// Whether the order is that identity's, maker or taker.
+    ours: bool,
+    /// [`BookState::ownership_epoch`] when the classification began.
+    epoch: u64,
 }
 
 impl BookState {
@@ -443,6 +466,7 @@ impl OrderBook {
             let mut book = self.orders.write().await;
             // First: `replace_all` re-marks whatever `own` still names.
             book.own.clear();
+            book.ownership_epoch += 1;
             let orders = book
                 .orders
                 .values()
@@ -474,6 +498,12 @@ impl OrderBook {
     /// "Without notifying" is about the snapshot stream. The delta goes out
     /// at once: it is one order, so there is nothing to batch, and a delta
     /// subscriber must see every change in order.
+    ///
+    /// Test-only since #552 review round 3: the ingest applies this mode, and
+    /// the coalesced one below, inside [`Self::apply_ingested_order`], under
+    /// the lock that re-checks its classification. These keep the publishing
+    /// rules pinned one order at a time.
+    #[cfg(test)]
     pub(crate) async fn upsert_order_deferred(&self, order: OrderInfo) {
         self.orders.write().await.upsert(order, &self.delta_tx);
     }
@@ -485,6 +515,8 @@ impl OrderBook {
     /// read them and every emission carries the whole book. The window is
     /// trailing: the burst that opens it is published when it closes, so the
     /// subscriber sees the settled book rather than each intermediate state.
+    /// Test-only, like [`Self::upsert_order_deferred`].
+    #[cfg(test)]
     pub(crate) async fn upsert_order_coalesced(&self, order: OrderInfo) {
         self.upsert_order_deferred(order).await;
         self.schedule_publish();
@@ -612,10 +644,18 @@ impl OrderBook {
     }
 
     /// Whether `order_id` was claimed by the current identity's maker row
-    /// ([`Self::claim_mine`]). In memory, so the ingest asks it first and
-    /// reads the row only on a miss.
+    /// ([`Self::claim_mine`]).
+    #[cfg(test)]
     pub(crate) async fn owns(&self, order_id: &str) -> bool {
         self.orders.read().await.own.contains(order_id)
+    }
+
+    /// The ownership epoch and whether `order_id` is claimed, read together:
+    /// read apart, a teardown between the two would pair the new epoch with
+    /// the old identity's claim, and the apply would take it as current.
+    pub(crate) async fn ownership_view(&self, order_id: &str) -> (u64, bool) {
+        let book = self.orders.read().await;
+        (book.ownership_epoch, book.own.contains(order_id))
     }
 
     /// Update the status of an existing cached order and notify listeners.
@@ -717,25 +757,46 @@ impl OrderBook {
     /// ingest waits for the batch's single emission, and one from the relay
     /// firehose joins the coalescing window instead of sending a whole-book
     /// snapshot of its own.
-    pub(crate) async fn apply_ingested_order(
-        &self,
-        order: OrderInfo,
-        ours: bool,
-        publish: Publish,
-    ) {
-        if !ours && crate::mostro::status::is_hard_terminal(&order.status) {
-            // The removal is a no-op when the order was never in the book —
-            // the common case, a stranger's order finishing unseen — and then
-            // nothing is published either.
-            if self.remove_order_deferred(&order.id).await && publish == Publish::Coalesced {
-                self.schedule_publish();
+    ///
+    /// The classification is applied only if the identity it was made for is
+    /// still the current one, checked under the same write lock as the
+    /// mutation (#552 review round 3). The classifying ingest awaits the
+    /// database several times after it read the claim or the row, and a
+    /// teardown can land in any of those awaits; its entry would otherwise
+    /// hand the old user's `is_mine` and local status to the next one. A
+    /// stale classification is not the whole event, though: the public view
+    /// it carried still applies, as a stranger's order — marked only by a
+    /// claim of the new identity's — and is dropped when finished, like any
+    /// stranger's.
+    pub(crate) async fn apply_ingested_order(&self, ingested: IngestedOrder, publish: Publish) {
+        let IngestedOrder {
+            order,
+            wire,
+            ours,
+            epoch,
+        } = ingested;
+        let (touched, changed) = {
+            let mut book = self.orders.write().await;
+            let (order, ours) = if book.ownership_epoch == epoch {
+                (order, ours)
+            } else {
+                let mine = book.own.contains(&wire.id);
+                (wire, mine)
+            };
+            if !ours && crate::mostro::status::is_hard_terminal(&order.status) {
+                // The removal is a no-op when the order was never in the
+                // book — the common case, a stranger's order finishing
+                // unseen — and then nothing is published either.
+                let removed = book.remove(&order.id, &self.delta_tx);
+                (None, removed)
+            } else {
+                let touched = ours.then(|| order.id.clone());
+                book.upsert(order, &self.delta_tx);
+                (touched, true)
             }
-            return;
-        }
-        let touched = ours.then(|| order.id.clone());
-        match publish {
-            Publish::Coalesced => self.upsert_order_coalesced(order).await,
-            Publish::WhenBatchEnds => self.upsert_order_deferred(order).await,
+        };
+        if changed && publish == Publish::Coalesced {
+            self.schedule_publish();
         }
         // Ours only: the firehose is everybody else's orders, and a trade
         // screen never follows those.
@@ -8033,119 +8094,16 @@ async fn ingest_order_event_with(event: &nostr_sdk::prelude::Event, publish: Pub
         &event.pubkey.to_hex()[..8]
     );
     match parse_order_event(event, None) {
-        Some(mut info) => {
+        Some(info) => {
             log::debug!(
                 "[orders] parsed order id={} kind={:?} status={:?}",
                 info.id,
                 info.kind,
                 info.status
             );
-            // Restore `is_mine` — "I am the maker" — on cold start from the
-            // durable trade-key binding plus the trade row it points at,
-            // keyed by the daemon UUID and never by order content (#394
-            // step 3): a content fingerprint also matches a stranger's
-            // identical order, and a taken range order republishes as a
-            // plain fixed order — index 21 bound where 16 belonged, and
-            // release/cancel/rate signed with the wrong key (#326). Every
-            // reference client keys ownership by daemon UUID. The binding
-            // miss is the common case (every stranger's order), answered by
-            // the in-memory map or the negative cache; the row read only
-            // runs on a hit. A row recovered by DM rebuild proves its
-            // maker-ness from the payload's kind plus the proven role
-            // (review round 2), so this restore trusts the row for makers
-            // and takers alike.
-            //
-            // A claim of the current identity's maker row answers first, in
-            // memory (#552): it holds when the row was never saved, and it
-            // keeps everything below — the status sync, `ours` — treating the
-            // order as ours, like the book entry the upsert will mark.
-            if !info.is_mine && order_book().owns(&info.id).await {
-                info.is_mine = true;
-            }
-            if !info.is_mine && lookup_trade_key_index(&info.id).await.is_some() {
-                if let Some(db) = crate::db::app_db::db() {
-                    if let Ok(Some(trade)) = db.get_trade_by_order_id(&info.id).await {
-                        info.is_mine = trade.order.is_mine;
-                    }
-                }
-            }
-            // The note a lost take is restored from must follow the wire even
-            // after the d-tag subscription idled out. Only refreshed, never
-            // created here: this feed never overrides a `pending`, and any
-            // other view ends in dropping the entry, note or not. For orders
-            // never noted this is a single map lookup.
-            order_book().refresh_wire_order(&info);
-            let final_view = is_hard_terminal(&info.status);
-            // Sync trade status in DB for own orders so My Trades
-            // reflects status changes even without daemon-message delivery.
-            // A `canceled` that ends a trade of ours before it went active —
-            // maker or taker — wipes it instead, and leaves nothing local to
-            // sync or to hold the entry at (`wipe_on_public_cancel`; one more
-            // indexed row lookup, for `canceled` events only).
-            if info.status != crate::api::types::OrderStatus::Pending
-                && !wipe_on_public_cancel(&info.id, &info.status).await
-            {
-                let local = local_trade_status(&info.id).await;
-                let applies = wire_status_applies(local.as_ref(), &info.status);
-                if info.is_mine {
-                    // Only own orders: for stranger book entries `local`
-                    // falls back to the book itself and would log every
-                    // public update.
-                    log_wire_status_sync(
-                        &info.id,
-                        &info.status,
-                        local.as_ref(),
-                        applies,
-                        "38383/book",
-                    );
-                    // Gated whole on `applies`: a public bucket that may not
-                    // replace the private status must not sneak its amount
-                    // into the row either (#394 review), and an event
-                    // carrying what the row already holds writes nothing.
-                    if applies {
-                        if let Some(db) = crate::db::app_db::db() {
-                            let row = db.get_trade_by_order_id(&info.id).await.ok().flatten();
-                            sync_trade_fields_if_changed(
-                                db,
-                                &info.id,
-                                row.as_ref(),
-                                Some(info.status.clone()),
-                                None,
-                                info.amount_sats,
-                            )
-                            .await;
-                        }
-                    }
-                }
-                if !applies {
-                    if let Some(local) = local {
-                        info.status = local;
-                    }
-                }
-            }
-            // After the wipe decision above, which settles a never-active take
-            // from this very view.
-            if final_view {
-                order_book().forget_wire_order(&info.id);
-            }
-            // Whether this order is *ours*, which is not what `is_mine`
-            // answers: that flag means "I am the maker". `parse_order_event`
-            // hardcodes it to false, and the binding+row restore above only
-            // raises it for maker rows, so an order we *took* arrives with
-            // `is_mine == false` and is indistinguishable from a stranger's at
-            // this layer. What both roles do have is a trade-key binding for
-            // the order id, so that is the question asked.
-            //
-            // Asked only when the answer can change what happens — a
-            // hard-terminal order — so the firehose of pending updates never
-            // pays for the lookup. It is answered from the in-memory map or the
-            // negative cache in the common case, which also keeps it correct on
-            // web, where the trade store is a stub (#233) and a DB-only test
-            // would call every trade of ours a stranger's.
-            let ours = info.is_mine
-                || (is_hard_terminal(&info.status)
-                    && lookup_trade_key_index(&info.id).await.is_some());
-            order_book().apply_ingested_order(info, ours, publish).await;
+            let book = order_book();
+            let ingested = classify_ingested_order(info, book).await;
+            book.apply_ingested_order(ingested, publish).await;
         }
         None => {
             log::warn!(
@@ -8159,6 +8117,129 @@ async fn ingest_order_event_with(event: &nostr_sdk::prelude::Event, publish: Pub
                     .collect::<Vec<_>>()
             );
         }
+    }
+}
+
+/// Classify a parsed Kind 38383 order against the current identity: restore
+/// `is_mine`, sync the trade row, and decide whether the order is ours.
+///
+/// Split from the apply so the two can be raced against an identity
+/// teardown: everything here awaits, and [`OrderBook::apply_ingested_order`]
+/// re-checks the returned epoch under its lock (#552 review round 3).
+async fn classify_ingested_order(mut info: OrderInfo, book: &OrderBook) -> IngestedOrder {
+    let wire = info.clone();
+    // Restore `is_mine` — "I am the maker" — on cold start from the
+    // durable trade-key binding plus the trade row it points at,
+    // keyed by the daemon UUID and never by order content (#394
+    // step 3): a content fingerprint also matches a stranger's
+    // identical order, and a taken range order republishes as a
+    // plain fixed order — index 21 bound where 16 belonged, and
+    // release/cancel/rate signed with the wrong key (#326). Every
+    // reference client keys ownership by daemon UUID. The binding
+    // miss is the common case (every stranger's order), answered by
+    // the in-memory map or the negative cache; the row read only
+    // runs on a hit. A row recovered by DM rebuild proves its
+    // maker-ness from the payload's kind plus the proven role
+    // (review round 2), so this restore trusts the row for makers
+    // and takers alike.
+    //
+    // A claim of the current identity's maker row answers first, in
+    // memory (#552): it holds when the row was never saved, and it
+    // keeps everything below — the status sync, `ours` — treating the
+    // order as ours, like the book entry the upsert will mark. Read with
+    // the epoch, before the row: both classifications are the identity's,
+    // and the apply discards either if that identity is gone by then.
+    let (epoch, claimed) = book.ownership_view(&info.id).await;
+    if !info.is_mine && claimed {
+        info.is_mine = true;
+    }
+    if !info.is_mine && lookup_trade_key_index(&info.id).await.is_some() {
+        if let Some(db) = crate::db::app_db::db() {
+            if let Ok(Some(trade)) = db.get_trade_by_order_id(&info.id).await {
+                info.is_mine = trade.order.is_mine;
+            }
+        }
+    }
+    // The note a lost take is restored from must follow the wire even
+    // after the d-tag subscription idled out. Only refreshed, never
+    // created here: this feed never overrides a `pending`, and any
+    // other view ends in dropping the entry, note or not. For orders
+    // never noted this is a single map lookup.
+    book.refresh_wire_order(&info);
+    let final_view = is_hard_terminal(&info.status);
+    // Sync trade status in DB for own orders so My Trades
+    // reflects status changes even without daemon-message delivery.
+    // A `canceled` that ends a trade of ours before it went active —
+    // maker or taker — wipes it instead, and leaves nothing local to
+    // sync or to hold the entry at (`wipe_on_public_cancel`; one more
+    // indexed row lookup, for `canceled` events only).
+    if info.status != crate::api::types::OrderStatus::Pending
+        && !wipe_on_public_cancel(&info.id, &info.status).await
+    {
+        let local = local_trade_status(&info.id).await;
+        let applies = wire_status_applies(local.as_ref(), &info.status);
+        if info.is_mine {
+            // Only own orders: for stranger book entries `local`
+            // falls back to the book itself and would log every
+            // public update.
+            log_wire_status_sync(
+                &info.id,
+                &info.status,
+                local.as_ref(),
+                applies,
+                "38383/book",
+            );
+            // Gated whole on `applies`: a public bucket that may not
+            // replace the private status must not sneak its amount
+            // into the row either (#394 review), and an event
+            // carrying what the row already holds writes nothing.
+            if applies {
+                if let Some(db) = crate::db::app_db::db() {
+                    let row = db.get_trade_by_order_id(&info.id).await.ok().flatten();
+                    sync_trade_fields_if_changed(
+                        db,
+                        &info.id,
+                        row.as_ref(),
+                        Some(info.status.clone()),
+                        None,
+                        info.amount_sats,
+                    )
+                    .await;
+                }
+            }
+        }
+        if !applies {
+            if let Some(local) = local {
+                info.status = local;
+            }
+        }
+    }
+    // After the wipe decision above, which settles a never-active take
+    // from this very view.
+    if final_view {
+        book.forget_wire_order(&info.id);
+    }
+    // Whether this order is *ours*, which is not what `is_mine`
+    // answers: that flag means "I am the maker". `parse_order_event`
+    // hardcodes it to false, and the binding+row restore above only
+    // raises it for maker rows, so an order we *took* arrives with
+    // `is_mine == false` and is indistinguishable from a stranger's at
+    // this layer. What both roles do have is a trade-key binding for
+    // the order id, so that is the question asked.
+    //
+    // Asked only when the answer can change what happens — a
+    // hard-terminal order — so the firehose of pending updates never
+    // pays for the lookup. It is answered from the in-memory map or the
+    // negative cache in the common case, which also keeps it correct on
+    // web, where the trade store is a stub (#233) and a DB-only test
+    // would call every trade of ours a stranger's.
+    let ours = info.is_mine
+        || (is_hard_terminal(&info.status) && lookup_trade_key_index(&info.id).await.is_some());
+    IngestedOrder {
+        order: info,
+        wire,
+        ours,
+        epoch,
     }
 }
 
@@ -9806,7 +9887,7 @@ mod tests {
         assert!(book.get_order("stranger-done").await.is_some());
 
         done.status = crate::api::types::OrderStatus::Success;
-        book.apply_ingested_order(done, false, Publish::Coalesced)
+        book.apply_ingested_order(current(&book, done, false).await, Publish::Coalesced)
             .await;
 
         assert!(
@@ -10237,7 +10318,7 @@ mod tests {
         let mut mine = dummy_order_info("mine-done");
         mine.status = crate::api::types::OrderStatus::Success;
 
-        book.apply_ingested_order(mine, true, Publish::Coalesced)
+        book.apply_ingested_order(current(&book, mine, true).await, Publish::Coalesced)
             .await;
 
         assert!(
@@ -10259,7 +10340,8 @@ mod tests {
         let mut touches = crate::api::trade_touch::on_trade_touched().await.unwrap();
 
         // Act
-        book.apply_ingested_order(mine, true, Publish::WhenBatchEnds).await;
+        book.apply_ingested_order(current(&book, mine, true).await, Publish::WhenBatchEnds)
+            .await;
 
         // Assert
         assert!(rang_for(&mut touches, &order_id).await);
@@ -10275,11 +10357,26 @@ mod tests {
         let mut touches = crate::api::trade_touch::on_trade_touched().await.unwrap();
 
         // Act
-        book.apply_ingested_order(dummy_order_info(&order_id), false, Publish::WhenBatchEnds)
-            .await;
+        book.apply_ingested_order(
+            current(&book, dummy_order_info(&order_id), false).await,
+            Publish::WhenBatchEnds,
+        )
+        .await;
 
         // Assert
         assert!(!rang_for(&mut touches, &order_id).await);
+    }
+
+    /// `order` classified for the book's current identity, for the tests that
+    /// drive the apply alone.
+    async fn current(book: &OrderBook, order: OrderInfo, ours: bool) -> IngestedOrder {
+        let (epoch, _) = book.ownership_view(&order.id).await;
+        IngestedOrder {
+            wire: order.clone(),
+            order,
+            ours,
+            epoch,
+        }
     }
 
     /// Build a signed Kind 38383 event for `order_id` at `status`, the shape
@@ -10441,7 +10538,7 @@ mod tests {
         let mut unseen = dummy_order_info("never-seen");
         unseen.status = crate::api::types::OrderStatus::Canceled;
 
-        book.apply_ingested_order(unseen, false, Publish::Coalesced)
+        book.apply_ingested_order(current(&book, unseen, false).await, Publish::Coalesced)
             .await;
 
         assert!(
@@ -12472,6 +12569,138 @@ mod tests {
         let revision = book.orders.read().await.revision;
         book.upsert_order(wire).await;
         assert_eq!(book.orders.read().await.revision, revision);
+    }
+
+    /// The parsed order of a Kind 38383 event for `order_id` at `status`.
+    fn parsed_book_order(order_id: &str, status: &str) -> OrderInfo {
+        parse_order_event(&book_event(order_id, status), None).expect("parsed")
+    }
+
+    /// #552 review round 3 (ermeme): an ingest classifies an order from the
+    /// claim, then the identity is torn down before its write. The book must
+    /// get the event's public view, not the old user's mark. A book of the
+    /// test's own, like the persist race: see
+    /// `a_teardown_during_a_maker_save_leaves_nothing_marked`.
+    #[tokio::test]
+    async fn a_claim_classified_before_a_teardown_is_not_applied_after_it() {
+        let book = OrderBook::new();
+        let order_id = uuid::Uuid::new_v4().to_string();
+        book.claim_mine(&order_id).await;
+
+        let ingested =
+            classify_ingested_order(parsed_book_order(&order_id, "pending"), &book).await;
+        assert!(
+            ingested.order.is_mine,
+            "classified for the identity that claimed it"
+        );
+        book.forget_ownership().await;
+        book.apply_ingested_order(ingested, Publish::WhenBatchEnds)
+            .await;
+
+        let entry = book
+            .get_order(&order_id)
+            .await
+            .expect("the public view still lands");
+        assert!(
+            !entry.is_mine,
+            "the old identity's claim must not outlive it"
+        );
+        assert_eq!(entry.status, crate::api::types::OrderStatus::Pending);
+    }
+
+    /// A maker row with a private status (`active`) and a binding, as the
+    /// row-restore half of the classification reads them.
+    async fn bound_maker_row(order_id: &str, index: u32) {
+        let path = std::env::temp_dir().join(format!("mostro_epoch_{}.db", std::process::id()));
+        let _ = crate::db::app_db::init_db(path.to_str().unwrap()).await;
+        let db = crate::db::app_db::db().expect("store initialised");
+        store_trade_key_index(order_id, index).await;
+        db.save_trade(&seam_trade_row(
+            order_id,
+            crate::api::types::OrderStatus::Active,
+        ))
+        .await
+        .expect("save maker row");
+    }
+
+    /// #552 review round 3: the same race through the row restore, which
+    /// predates the claim. The classification also replaced the refused wire
+    /// status by the old trade's private one; the stale apply must write
+    /// neither — only what the wire said, as a stranger's order.
+    #[tokio::test]
+    async fn a_row_classified_before_a_teardown_leaves_only_the_wire_view() {
+        let book = OrderBook::new();
+        let order_id = uuid::Uuid::new_v4().to_string();
+        bound_maker_row(&order_id, 65).await;
+
+        let ingested =
+            classify_ingested_order(parsed_book_order(&order_id, "in-progress"), &book).await;
+        assert!(ingested.order.is_mine);
+        assert_eq!(
+            ingested.order.status,
+            crate::api::types::OrderStatus::Active,
+            "a refused wire status is replaced by the trade's",
+        );
+        book.forget_ownership().await;
+        book.apply_ingested_order(ingested, Publish::WhenBatchEnds)
+            .await;
+
+        let entry = book
+            .get_order(&order_id)
+            .await
+            .expect("the public view still lands");
+        assert!(!entry.is_mine);
+        assert_eq!(entry.status, crate::api::types::OrderStatus::InProgress);
+    }
+
+    /// The other side of the epoch check: with no teardown in between, the
+    /// classification applies as made — mark and local status alike. A check
+    /// that dropped every classification would pass the two tests above.
+    #[tokio::test]
+    async fn a_classification_applies_while_its_identity_is_current() {
+        let book = OrderBook::new();
+        let order_id = uuid::Uuid::new_v4().to_string();
+        bound_maker_row(&order_id, 66).await;
+
+        let ingested =
+            classify_ingested_order(parsed_book_order(&order_id, "in-progress"), &book).await;
+        book.apply_ingested_order(ingested, Publish::WhenBatchEnds)
+            .await;
+
+        let entry = book.get_order(&order_id).await.expect("book entry");
+        assert!(entry.is_mine);
+        assert_eq!(entry.status, crate::api::types::OrderStatus::Active);
+    }
+
+    /// #552 review round 3: a stale `ours` must not keep an entry either. A
+    /// finished take is kept in the book only for the identity that took it;
+    /// torn down in between, the event is a stranger's finished order, which
+    /// the book drops.
+    #[tokio::test]
+    async fn a_stale_classification_of_a_finished_take_drops_the_entry() {
+        let path = std::env::temp_dir().join(format!("mostro_epoch_{}.db", std::process::id()));
+        let _ = crate::db::app_db::init_db(path.to_str().unwrap()).await;
+        let db = crate::db::app_db::db().expect("store initialised");
+        let book = OrderBook::new();
+        let order_id = uuid::Uuid::new_v4().to_string();
+        store_trade_key_index(&order_id, 67).await;
+        let mut taken = seam_trade_row(&order_id, crate::api::types::OrderStatus::Active);
+        taken.order.is_mine = false;
+        db.save_trade(&taken).await.expect("save taker row");
+        book.upsert_order(parsed_book_order(&order_id, "pending"))
+            .await;
+
+        let ingested =
+            classify_ingested_order(parsed_book_order(&order_id, "success"), &book).await;
+        assert!(ingested.ours, "a bound take is ours");
+        book.forget_ownership().await;
+        book.apply_ingested_order(ingested, Publish::WhenBatchEnds)
+            .await;
+
+        assert!(
+            book.get_order(&order_id).await.is_none(),
+            "the old identity's take must not keep a stranger's finished order",
+        );
     }
 
     /// A `Storage` for driving `persist_trade_row` alone, which calls only

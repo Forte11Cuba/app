@@ -121,9 +121,20 @@ row (`is_mine = false`) claims nothing.
 Claims belong to the identity: forgetting the identity (#533) empties them
 under the same lock, so a persist of the old identity's that was already
 under way when the teardown began cannot mark the book afterwards. A node
-switch keeps them (order ids are daemon UUIDs). Not covered: a persist that
-*starts* after the teardown — no operation carries an identity generation
-from where it began.
+switch keeps them (order ids are daemon UUIDs).
+
+The ingest classifies an order for the identity current when it starts —
+`is_mine` from the claim or the trade row, a refused wire status replaced
+by the trade's, whether the order is ours — and awaits the database before
+writing the entry. Forgetting the identity also bumps an ownership epoch,
+which the ingest reads with the claim and the write checks again under the
+book's lock: a classification made for a forgotten identity is discarded,
+and the event applies as a stranger's order (its wire view, marked only by
+a claim of the new identity's, dropped when finished).
+
+Not covered: a persist that *starts* after the teardown, and writes that
+read an entry and write it back outside the lock — no operation carries an
+identity generation from where it began.
 
 **Errors**: `NoIdentity`, `Offline` (queued), `NoDaemonResponse` (daemon did not confirm within the timeout), `ProtocolError`.
 
