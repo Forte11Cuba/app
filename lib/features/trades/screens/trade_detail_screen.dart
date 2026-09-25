@@ -504,7 +504,7 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen>
   /// overlaying the local rating (#327). While that first lookup is
   /// unresolved the screen holds `loading` for the same reason; a refresh
   /// keeps the previous value, so a fresh rating never bounces through it.
-  TradeStatus _status() {
+  TradeStatus _status({required bool isBuyer}) {
     final live = ref.watch(tradeStatusProvider(widget.orderId));
     if (live.hasError && !live.hasValue) {
       debugPrint('[TradeDetailScreen] trade status failed: ${live.error}');
@@ -521,8 +521,9 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen>
         !tradeAsync.hasValue) {
       return TradeStatus.loading;
     }
-    final status = tradeStatusFromOrderStatus(
+    final status = tradeStatusFor(
       _shown(live.value!, tradeAsync.valueOrNull),
+      isBuyer: isBuyer,
     );
     if (status != TradeStatus.pendingRating) return status;
     final rating = ref.watch(tradeRatingProvider(widget.orderId));
@@ -594,7 +595,8 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen>
     });
 
     final role = _isBuyer();
-    final status = role == null ? TradeStatus.loading : _status();
+    final status =
+        role == null ? TradeStatus.loading : _status(isBuyer: role);
     final isBuyer = role ?? true;
     // A failed status subscription would otherwise look like a slow one.
     final loadFailed =
