@@ -6333,6 +6333,48 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Open image'**
   String get attachmentOpenImage;
+
+  /// Action that hands a received file to another app on the device
+  ///
+  /// In en, this message translates to:
+  /// **'Open with…'**
+  String get attachmentOpenWith;
+
+  /// Action that opens the system share sheet for a received file
+  ///
+  /// In en, this message translates to:
+  /// **'Share'**
+  String get attachmentShare;
+
+  /// Tooltip of the menu on a file card in the chat
+  ///
+  /// In en, this message translates to:
+  /// **'More options'**
+  String get attachmentMoreActions;
+
+  /// Snackbar: no installed app can open the file
+  ///
+  /// In en, this message translates to:
+  /// **'No app on this device can open this file.'**
+  String get attachmentNoAppToOpen;
+
+  /// Snackbar: opening the file in another app failed
+  ///
+  /// In en, this message translates to:
+  /// **'The file could not be opened.'**
+  String get attachmentOpenFailed;
+
+  /// Snackbar: sharing the file failed
+  ///
+  /// In en, this message translates to:
+  /// **'The file could not be shared.'**
+  String get attachmentShareFailed;
+
+  /// Snackbar: the file is of a type the app will not hand to another app
+  ///
+  /// In en, this message translates to:
+  /// **'This type of file can only be saved.'**
+  String get attachmentSaveOnly;
 }
 
 class _AppLocalizationsDelegate

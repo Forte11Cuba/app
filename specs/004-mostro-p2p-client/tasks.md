@@ -31,8 +31,7 @@ the UI wiring doesn't):
   relays, identity, queued messages and trade keys return "IndexedDB not
   yet implemented", so the web target cannot persist a trade (#233).
 - **P2P chat** (Phase 10): T079 — the trade info panel still shows
-  placeholder fields; T081 — files send, show and save (#589 phase 2a), but
-  "open with…" and share are phase 2b.
+  placeholder fields.
 - **Dispute admin chat** (Phase 12 — Dispute System): T088, T090, T091,
   T092, T093 — the Rust side (T085/T086) is ready; the screens are stubs
   with no bridge subscription.
@@ -286,9 +285,9 @@ configuration.
 - [x] T078 [P] Implement message input widget in `lib/features/chat/widgets/message_input.dart`: paperclip attach icon (spinner when attaching), text input "Write a message..." pill, green send button. Clears field after send.
 - [~] T079 [P] Implement trade info panel in `lib/features/chat/widgets/info_panels.dart`: `TradeInformationTab` (order ID copyable, placeholder fields). `UserInformationTab` (peer avatar + handle + copyable peer pubkey). **Partial**: still placeholder dashes — the trade-detail fields are not yet wired to the bridge. The ECDH shared-key display is dropped from scope: the key is never exposed to Dart/UI; Rust sends it to the solver over the dispute chat behind an explicit confirmation (one-tap delivery and the `contracts/disputes.md` update are deferred to #415).
 - [x] T080 Implement encrypted image message widget in `lib/features/chat/widgets/encrypted_image_message.dart`: downloaded and decrypted on arrival through `download_attachment()` (plaintext in memory only, `attachment_providers.dart`), drawn at the sender's `width`/`height`, loading and error states with retry; tap opens `AttachmentViewerScreen` (pinch-zoom, Save). #589 phase 2a.
-- [~] T081 [P] Implement encrypted file message widget in `lib/features/chat/widgets/encrypted_file_message.dart`: file card with type icon, name, size; Save downloads, decrypts and hands it to the system save dialog. **Partial**: "open with…" and share come in #589 phase 2b.
+- [x] T081 [P] Implement encrypted file message widget in `lib/features/chat/widgets/encrypted_file_message.dart`: file card with type icon, name, size (PDF, and DOC/DOCX/video from v1); tap opens it in another app, the menu adds Share and Save (`attachment_launcher.dart`: allow-listed types only, temporary copies swept on resume, start-up and identity change). #589 phases 2a–2b.
 
-**Checkpoint**: P2P text chat works end to end — `send_message` (NIP-59 publish) + `subscribe_incoming_chat` (receive → store → `on_new_message`), peer ECDH key derivation, and the Blossom client (Kind-24242 auth) are all done. Images and PDFs send and display since #589 phase 2a (paperclip → `send_file`, bubbles → `download_attachment`). **Still pending**: "open with…" and share (phase 2b), the dispute chat (phase 3), the web (phase 4).
+**Checkpoint**: P2P text chat works end to end — `send_message` (NIP-59 publish) + `subscribe_incoming_chat` (receive → store → `on_new_message`), peer ECDH key derivation, and the Blossom client (Kind-24242 auth) are all done. Images and PDFs send and display since #589 phase 2a (paperclip → `send_file`, bubbles → `download_attachment`). Received files open in another app or share since phase 2b. **Still pending**: the dispute chat (phase 3), the web (phase 4).
 
 ---
 

@@ -1,7 +1,9 @@
 import 'dart:async';
+import 'dart:ui' show Rect;
 import 'dart:typed_data';
 
 import 'package:mostro/features/chat/attachments/attachment_gateway.dart';
+import 'package:mostro/features/chat/attachments/attachment_launcher.dart';
 import 'package:mostro/features/chat/attachments/attachment_picker.dart';
 import 'package:mostro/features/chat/attachments/attachment_saver.dart';
 import 'package:mostro/shared/utils/platform_int64.dart';
@@ -151,3 +153,30 @@ PickedAttachment pickedFile({String name = 'receipt.png', int size = 3}) =>
       size: size,
       read: () async => Uint8List.fromList(List.filled(size, 7)),
     );
+
+/// Records what was handed off instead of launching anything.
+class FakeAttachmentLauncher extends AttachmentLauncher {
+  FakeAttachmentLauncher({
+    this.openOutcome = LaunchOutcome.done,
+    this.canShare = true,
+  });
+
+  final LaunchOutcome openOutcome;
+  final bool canShare;
+  final opened = <String>[];
+  final shared = <String>[];
+
+  @override
+  bool get supportsShare => canShare;
+
+  @override
+  Future<LaunchOutcome> openWith(messages_api.AttachmentData data) async {
+    opened.add(data.fileName);
+    return openOutcome;
+  }
+
+  @override
+  Future<void> share(messages_api.AttachmentData data, {Rect? origin}) async {
+    shared.add(data.fileName);
+  }
+}

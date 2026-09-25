@@ -42,7 +42,8 @@ pub struct AttachmentData {
     pub bytes: Vec<u8>,
     pub file_name: String,
     /// What the bytes are, sniffed after decrypting (JPEG, PNG, PDF); for any
-    /// other type, the MIME the sender declared.
+    /// other type, the MIME the sender declared — or `application/octet-stream`
+    /// when the sender declared JPEG, PNG or PDF and the bytes are not.
     pub mime_type: String,
 }
 
@@ -723,9 +724,7 @@ pub async fn download_attachment(message_id: String) -> Result<AttachmentData> {
     };
 
     set_download_status(&message_id, DownloadStatus::Downloaded).await;
-    let mime_type = crate::attachments::media::sniff(&bytes)
-        .map(|k| k.mime().to_string())
-        .unwrap_or(attachment.mime_type);
+    let mime_type = crate::attachments::media::reported_mime(&bytes, &attachment.mime_type);
     Ok(AttachmentData { bytes, file_name: attachment.file_name, mime_type })
 }
 

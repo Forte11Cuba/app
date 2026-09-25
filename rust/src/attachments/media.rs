@@ -62,6 +62,29 @@ pub fn sniff(bytes: &[u8]) -> Option<Kind> {
     }
 }
 
+/// Marks bytes that are not what their sender said they are.
+pub const UNKNOWN_MIME: &str = "application/octet-stream";
+
+/// The type to report for a received file: what its bytes are when they are
+/// JPEG, PNG or PDF, otherwise what the sender declared — unless the sender
+/// declared one of those three, in which case the bytes have just proved it
+/// false and the file is [`UNKNOWN_MIME`]. Dart decides from this what it may
+/// hand to another app, so a claimed PDF that is not one must not keep the
+/// claim (#595 review).
+pub fn reported_mime(bytes: &[u8], declared: &str) -> String {
+    if let Some(kind) = sniff(bytes) {
+        return kind.mime().to_string();
+    }
+    let claims_sniffable = [Kind::Jpeg, Kind::Png, Kind::Pdf]
+        .iter()
+        .any(|k| k.mime().eq_ignore_ascii_case(declared.trim()));
+    if claims_sniffable {
+        UNKNOWN_MIME.to_string()
+    } else {
+        declared.to_string()
+    }
+}
+
 /// A file ready to be encrypted and uploaded.
 #[derive(Debug)]
 pub struct Prepared {
@@ -178,6 +201,36 @@ fn is_invisible_format(c: char) -> bool {
 mod tests {
     use super::*;
     use image::{Rgb, RgbImage};
+
+    #[test]
+    fn reported_mime_trusts_the_bytes_over_the_claim() {
+        assert_eq!(reported_mime(b"%PDF-1.7 ...", "image/png"), "application/pdf");
+        assert_eq!(
+            reported_mime(&[0xFF, 0xD8, 0xFF, 0xE0], "application/pdf"),
+            "image/jpeg"
+        );
+    }
+
+    #[test]
+    fn reported_mime_drops_a_sniffable_claim_the_bytes_disprove() {
+        for claim in ["application/pdf", "image/jpeg", "IMAGE/PNG ", "image/png"] {
+            assert_eq!(
+                reported_mime(b"MZ\x90\x00 not a pdf", claim),
+                UNKNOWN_MIME,
+                "{claim}"
+            );
+        }
+    }
+
+    #[test]
+    fn reported_mime_keeps_a_claim_it_cannot_check() {
+        let docx = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+        assert_eq!(reported_mime(b"PK\x03\x04", docx), docx);
+        assert_eq!(
+            reported_mime(b"\x00\x00\x00\x18ftypmp42", "video/mp4"),
+            "video/mp4"
+        );
+    }
 
     fn jpeg(width: u32, height: u32) -> Vec<u8> {
         let img = DynamicImage::ImageRgb8(RgbImage::from_pixel(width, height, Rgb([200, 30, 30])));

@@ -1169,5 +1169,12 @@
   "attachmentSaved": "Fichier enregistré",
   "attachmentSaveFailed": "Impossible d'enregistrer le fichier.",
   "attachmentImageSemantics": "Image : {fileName}",
-  "attachmentOpenImage": "Ouvrir l'image"
+  "attachmentOpenImage": "Ouvrir l'image",
+  "attachmentOpenWith": "Ouvrir avec…",
+  "attachmentShare": "Partager",
+  "attachmentMoreActions": "Plus d'options",
+  "attachmentNoAppToOpen": "Aucune application de cet appareil ne peut ouvrir ce fichier.",
+  "attachmentOpenFailed": "Impossible d'ouvrir le fichier.",
+  "attachmentShareFailed": "Impossible de partager le fichier.",
+  "attachmentSaveOnly": "Ce type de fichier peut seulement être enregistré."
 }

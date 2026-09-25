@@ -1169,5 +1169,12 @@
   "attachmentSaved": "Bestand opgeslagen",
   "attachmentSaveFailed": "Het bestand kon niet worden opgeslagen.",
   "attachmentImageSemantics": "Afbeelding: {fileName}",
-  "attachmentOpenImage": "Afbeelding openen"
+  "attachmentOpenImage": "Afbeelding openen",
+  "attachmentOpenWith": "Openen met…",
+  "attachmentShare": "Delen",
+  "attachmentMoreActions": "Meer opties",
+  "attachmentNoAppToOpen": "Geen app op dit apparaat kan dit bestand openen.",
+  "attachmentOpenFailed": "Het bestand kon niet worden geopend.",
+  "attachmentShareFailed": "Het bestand kon niet worden gedeeld.",
+  "attachmentSaveOnly": "Dit type bestand kan alleen worden opgeslagen."
 }

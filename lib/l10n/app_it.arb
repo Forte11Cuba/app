@@ -1169,5 +1169,12 @@
   "attachmentSaved": "File salvato",
   "attachmentSaveFailed": "Impossibile salvare il file.",
   "attachmentImageSemantics": "Immagine: {fileName}",
-  "attachmentOpenImage": "Apri immagine"
+  "attachmentOpenImage": "Apri immagine",
+  "attachmentOpenWith": "Apri con…",
+  "attachmentShare": "Condividi",
+  "attachmentMoreActions": "Altre opzioni",
+  "attachmentNoAppToOpen": "Nessuna app di questo dispositivo può aprire questo file.",
+  "attachmentOpenFailed": "Impossibile aprire il file.",
+  "attachmentShareFailed": "Impossibile condividere il file.",
+  "attachmentSaveOnly": "Questo tipo di file può solo essere salvato."
 }

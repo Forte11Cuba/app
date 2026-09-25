@@ -3838,4 +3838,27 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get attachmentOpenImage => 'Ouvrir l\'image';
+
+  @override
+  String get attachmentOpenWith => 'Ouvrir avec…';
+
+  @override
+  String get attachmentShare => 'Partager';
+
+  @override
+  String get attachmentMoreActions => 'Plus d\'options';
+
+  @override
+  String get attachmentNoAppToOpen =>
+      'Aucune application de cet appareil ne peut ouvrir ce fichier.';
+
+  @override
+  String get attachmentOpenFailed => 'Impossible d\'ouvrir le fichier.';
+
+  @override
+  String get attachmentShareFailed => 'Impossible de partager le fichier.';
+
+  @override
+  String get attachmentSaveOnly =>
+      'Ce type de fichier peut seulement être enregistré.';
 }
