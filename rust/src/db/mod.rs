@@ -132,10 +132,25 @@ pub mod settings_keys {
     /// Prefix of [`invoice_step_start`] keys.
     pub const INVOICE_STEP_PREFIX: &str = "invoice_step_start:";
 
-    /// Per-order start of the current invoice step (`<status>:<unix secs>`,
-    /// node clock), written only by the AddInvoice / PayInvoice arms. Unlike
-    /// [`status_cursor`], later messages for the same step never advance it,
-    /// so the invoice screens' countdown cannot be pushed out.
+    /// Per-order start of the current invoice step
+    /// (`<status>:<unix secs>:<trade_index>`, node clock), written only by the
+    /// AddInvoice / PayInvoice arms. Unlike [`status_cursor`], later messages
+    /// for the same step never advance it, so the invoice screens' countdown
+    /// cannot be pushed out.
+    ///
+    /// `trade_index` is the generation the message was addressed to, and it
+    /// decides before the timestamp does: a step belongs to one trade, not to
+    /// one status, so a later take opens a new step even though its status is
+    /// `WaitingBuyerInvoice` again, and a message for a superseded key never
+    /// walks the current start backwards (`next_step_start`, issue #567).
+    /// Values written before the generation existed carry two fields and are
+    /// replaced by the first message that can name its own.
+    ///
+    /// The generation identifies a **taker's** take, since a taker derives a
+    /// key per take. A maker keeps one key for the whole life of the order,
+    /// so nothing in the value distinguishes their takes: the key is deleted
+    /// instead when the daemon puts the order back on the book
+    /// (`resync_republished_maker_order`), and when the row is wiped.
     pub fn invoice_step_start(order_id: &str) -> String {
         format!("{INVOICE_STEP_PREFIX}{order_id}")
     }
