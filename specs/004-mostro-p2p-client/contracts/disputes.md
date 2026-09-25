@@ -95,12 +95,33 @@ message (`localizedDaemonError`).
 ---
 
 ### submit_evidence(trade_id: String, text: String) → ChatMessage
-Submit text evidence for an open dispute. Delivered as an admin-type
-message.
+Send a text message to the solver of an open dispute, in the dispute chat
+envelope keyed to the solver. Returns it as stored: an admin-type message,
+`is_mine`, identified by its inner event id, so the relay echo dedups
+against it. This is the dispute chat's text send path (#143).
 
-**Validation**: `text` MUST not be empty. Dispute MUST be open.
+**Validation**: `text` MUST not be empty. The dispute MUST exist, not be
+resolved, and have a solver (`admin-took-dispute`).
 
-**Errors**: `NoOpenDispute`, `EvidenceEmpty`.
+**Errors**: `EvidenceEmpty`, `NoOpenDispute`, `AdminNotAssigned`,
+`TradeNotFound`.
+
+---
+
+### send_dispute_file(trade_id: String, file_bytes: Vec<u8>, file_name: String, upload_id: String) → ChatMessage
+Encrypt, upload and send an image or PDF to the solver (#589 phase 3). The
+same path as `send_file` in `contracts/messages.md` — checks, Blossom
+upload, v1 `image_encrypted` / `file_encrypted` message, progress on
+`on_attachment_progress(upload_id)` — with two differences: the file key is
+the raw ECDH between the trade key and the **solver's** pubkey (as v1
+encrypts dispute-chat files), and nobody is woken (the solver is not a push
+client). The file is checked before the dispute, so a file that could never
+be sent is refused as such. Returns an admin-type message. The peer cannot
+open these files; the solver cannot open the P2P chat's (FR-036).
+
+**Errors**: `FileTooLarge`, `UnsupportedFileType`, `InvalidImage`,
+`NoOpenDispute`, `AdminNotAssigned`, `TradeNotFound`, `UploadFailed`,
+`SendFailed`.
 
 ---
 

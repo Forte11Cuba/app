@@ -66,11 +66,8 @@ class AppLocalizationsDe extends AppLocalizations {
       'Streitfälle konnten nicht geladen werden. Bitte versuche es erneut.';
 
   @override
-  String get disputeMessagingComingSoon =>
-      'Streitfall-Nachrichten demnächst verfügbar';
-
-  @override
-  String get disputeAttachmentsComingSoon => 'Dateianhänge demnächst verfügbar';
+  String get disputeSolverNotAssigned =>
+      'Noch hat kein Schlichter diesen Streitfall übernommen. Du kannst schreiben, sobald einer ihn übernimmt.';
 
   @override
   String get disputeNotFound => 'Streitfall nicht gefunden.';
@@ -3747,6 +3744,10 @@ class AppLocalizationsDe extends AppLocalizations {
   @override
   String get attachSheetBody =>
       'Die Datei wird auf deinem Gerät verschlüsselt. Nur dein Handelspartner kann sie öffnen.';
+
+  @override
+  String get attachSheetBodySolver =>
+      'Die Datei wird auf deinem Gerät verschlüsselt. Nur der Schlichter kann sie öffnen.';
 
   @override
   String get attachSourcePhoto => 'Foto';

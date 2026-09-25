@@ -73,13 +73,9 @@
   "@disputeLoadError": {
     "description": "Error message shown when disputes fail to load"
   },
-  "disputeMessagingComingSoon": "Dispute messaging coming soon",
-  "@disputeMessagingComingSoon": {
-    "description": "Snackbar shown when user tries to send a dispute message"
-  },
-  "disputeAttachmentsComingSoon": "File attachments coming soon",
-  "@disputeAttachmentsComingSoon": {
-    "description": "Snackbar shown when user tries to attach a file in dispute chat"
+  "disputeSolverNotAssigned": "No resolver has taken this dispute yet. You can write once one does.",
+  "@disputeSolverNotAssigned": {
+    "description": "Shown when the user tries to write in a dispute chat before a solver has taken the dispute"
   },
   "disputeNotFound": "Dispute not found.",
   "@disputeNotFound": {
@@ -4074,6 +4070,8 @@
   "@attachSheetTitle": {"description": "Title of the sheet that picks a file to send in the trade chat"},
   "attachSheetBody": "It is encrypted on your device. Only your counterpart can open it.",
   "@attachSheetBody": {"description": "Body of the attach sheet: what happens to the file"},
+  "attachSheetBodySolver": "It is encrypted on your device. Only the resolver can open it.",
+  "@attachSheetBodySolver": {"description": "Body of the attach sheet in the dispute chat, where only the solver can open the file"},
   "attachSourcePhoto": "Photo",
   "@attachSourcePhoto": {"description": "Attach sheet row: pick a photo from the gallery"},
   "attachSourceCamera": "Camera",

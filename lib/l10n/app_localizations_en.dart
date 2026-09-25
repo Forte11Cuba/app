@@ -65,10 +65,8 @@ class AppLocalizationsEn extends AppLocalizations {
   String get disputeLoadError => 'Failed to load disputes. Please try again.';
 
   @override
-  String get disputeMessagingComingSoon => 'Dispute messaging coming soon';
-
-  @override
-  String get disputeAttachmentsComingSoon => 'File attachments coming soon';
+  String get disputeSolverNotAssigned =>
+      'No resolver has taken this dispute yet. You can write once one does.';
 
   @override
   String get disputeNotFound => 'Dispute not found.';
@@ -3700,6 +3698,10 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get attachSheetBody =>
       'It is encrypted on your device. Only your counterpart can open it.';
+
+  @override
+  String get attachSheetBodySolver =>
+      'It is encrypted on your device. Only the resolver can open it.';
 
   @override
   String get attachSourcePhoto => 'Photo';

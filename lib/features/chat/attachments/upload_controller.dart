@@ -9,6 +9,15 @@ import 'package:mostro/src/rust/api/types.dart' as rust_types;
 
 enum UploadStatus { uploading, failed }
 
+/// The conversation of a trade an upload goes to.
+enum ChatThread {
+  /// Buyer and seller.
+  peer,
+
+  /// Us and the solver of the trade's dispute.
+  dispute,
+}
+
 /// A file on its way out, shown as our own bubble until Rust returns the
 /// message it sent.
 @immutable
@@ -50,16 +59,22 @@ class PendingUpload {
   );
 }
 
-/// The uploads in flight in one trade's chat.
+/// The uploads in flight in one conversation of a trade: the P2P chat, or
+/// the dispute chat with the solver ([thread]).
 ///
 /// Scoped to the open room: leaving it drops the failed ones, whose bytes
 /// were only ever in memory. One still uploading finishes in Rust and shows
 /// up in the history.
 class ChatUploadsNotifier extends StateNotifier<List<PendingUpload>> {
-  ChatUploadsNotifier(this._gateway, this._tradeId) : super(const []);
+  ChatUploadsNotifier(
+    this._gateway,
+    this._tradeId, {
+    this.thread = ChatThread.peer,
+  }) : super(const []);
 
   final AttachmentGateway _gateway;
   final String _tradeId;
+  final ChatThread thread;
 
   /// Starts sending [bytes]. Resolves to the sent message, or null when it
   /// failed — the bubble then offers a retry.
@@ -106,7 +121,11 @@ class ChatUploadsNotifier extends StateNotifier<List<PendingUpload>> {
       onError: (Object e) => debugPrint('[chat] upload progress: $e'),
     );
     try {
-      final sent = await _gateway.send(
+      final send = switch (thread) {
+        ChatThread.peer => _gateway.send,
+        ChatThread.dispute => _gateway.sendToSolver,
+      };
+      final sent = await send(
         tradeId: _tradeId,
         bytes: upload.bytes,
         fileName: upload.fileName,
@@ -115,7 +134,7 @@ class ChatUploadsNotifier extends StateNotifier<List<PendingUpload>> {
       if (mounted) discard(upload.id);
       return sent;
     } catch (e) {
-      debugPrint('[chat] send_file failed: $e');
+      debugPrint('[chat] ${thread.name} attachment send failed: $e');
       final current = _find(upload.id);
       if (current != null) {
         _replace(current.copyWith(status: UploadStatus.failed, error: e));
@@ -144,4 +163,14 @@ final chatUploadsProvider = StateNotifierProvider.autoDispose
     .family<ChatUploadsNotifier, List<PendingUpload>, String>(
       (ref, tradeId) =>
           ChatUploadsNotifier(ref.watch(attachmentGatewayProvider), tradeId),
+    );
+
+/// The uploads on their way to the solver of a trade's dispute.
+final disputeUploadsProvider = StateNotifierProvider.autoDispose
+    .family<ChatUploadsNotifier, List<PendingUpload>, String>(
+      (ref, tradeId) => ChatUploadsNotifier(
+        ref.watch(attachmentGatewayProvider),
+        tradeId,
+        thread: ChatThread.dispute,
+      ),
     );

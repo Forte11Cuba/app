@@ -396,18 +396,76 @@ pub async fn open_dispute(trade_id: String, reason: Option<String>) -> Result<Di
     Ok(stored)
 }
 
-/// Submit free-text evidence for an open dispute.
+/// Submit free-text evidence for an open dispute, and return it as stored.
 ///
 /// Delivered as an admin-type message in the dispute chat.
 ///
-/// **Errors**: `NoOpenDispute`, `EvidenceEmpty`.
-pub async fn submit_evidence(trade_id: String, text: String) -> Result<()> {
+/// **Errors**: `EvidenceEmpty`, `NoOpenDispute`, `AdminNotAssigned`,
+/// `TradeNotFound`.
+pub async fn submit_evidence(
+    trade_id: String,
+    text: String,
+) -> Result<crate::api::types::ChatMessage> {
     if text.trim().is_empty() {
         bail!("EvidenceEmpty: text must not be empty");
     }
+    let (trade_index, admin_pubkey) = solver_conversation(&trade_id).await?;
 
+    // Same envelope as the peer chat, keyed to the solver instead of the
+    // counterparty: inner kind 1 signed by our trade key, NIP-44 under K_conv,
+    // inside a kind 14 signed with K_sign and p-tagged to pub(K_conv). No gift
+    // wrap and no ephemeral key — see
+    // <https://mostro.network/protocol/dispute_chat.html>.
+    //
+    // The text travels as the message itself rather than a hand-rolled
+    // {"type":"evidence"} JSON: this is a conversation with the solver, and
+    // that shape had no reader on the other side of the envelope.
+    let ctx = crate::api::messages::admin_chat_context(trade_index, &admin_pubkey).await?;
+    let inner = crate::api::messages::publish_chat_payload_for(&ctx, &text).await?;
+
+    // Record it locally so the dispute conversation has history, exactly as a
+    // peer message does. Keyed by the inner event id, so our own echo arriving
+    // from a relay dedups against this record instead of duplicating it.
+    let msg =
+        crate::api::messages::store_outgoing_admin_message(&trade_id, &ctx, &text, &inner).await;
+
+    log::info!("[disputes] evidence submitted for trade={trade_id}");
+    Ok(msg)
+}
+
+/// Encrypt, upload and send an image or PDF to the solver (#589 phase 3).
+///
+/// The peer chat's `send_file`, keyed to the solver: the file key is the raw
+/// ECDH between our trade key and the solver's pubkey, as v1 encrypts files
+/// in the dispute chat. The solver is not a push client, so nobody is woken.
+/// `on_attachment_progress(upload_id)` reports progress.
+///
+/// **Errors**: `FileTooLarge`, `UnsupportedFileType`, `InvalidImage`,
+/// `NoOpenDispute`, `AdminNotAssigned`, `TradeNotFound`, `UploadFailed`,
+/// `SendFailed`.
+pub async fn send_dispute_file(
+    trade_id: String,
+    file_bytes: Vec<u8>,
+    file_name: String,
+    upload_id: String,
+) -> Result<crate::api::types::ChatMessage> {
+    let target = async {
+        let (trade_key_index, admin_pubkey) = solver_conversation(&trade_id).await?;
+        Ok(crate::api::messages::AttachmentTarget {
+            trade_key_index,
+            counterpart_hex: admin_pubkey.to_hex(),
+            channel: crate::api::messages::ChatChannel::Dispute,
+        })
+    };
+    crate::api::messages::send_attachment(&trade_id, file_bytes, file_name, &upload_id, target)
+        .await
+}
+
+/// Our trade key index and the solver's pubkey, for a dispute that can still
+/// be written to: open, not resolved, and taken by a solver.
+async fn solver_conversation(trade_id: &str) -> Result<(u32, nostr_sdk::prelude::PublicKey)> {
     let dispute = dispute_store()
-        .get(&trade_id)
+        .get(trade_id)
         .await
         .ok_or_else(|| anyhow!("NoOpenDispute: no dispute for trade {trade_id}"))?;
 
@@ -425,29 +483,10 @@ pub async fn submit_evidence(trade_id: String, text: String) -> Result<()> {
         .map_err(|e| anyhow!("invalid admin pubkey: {e}"))?;
 
     // Look up the trade key index.
-    let trade_index = crate::api::orders::trade_key_for_order(&trade_id)
+    let trade_index = crate::api::orders::trade_key_for_order(trade_id)
         .await
         .ok_or_else(|| anyhow!("TradeNotFound: no trade key for {trade_id}"))?;
-
-    // Same envelope as the peer chat, keyed to the solver instead of the
-    // counterparty: inner kind 1 signed by our trade key, NIP-44 under K_conv,
-    // inside a kind 14 signed with K_sign and p-tagged to pub(K_conv). No gift
-    // wrap and no ephemeral key — see
-    // <https://mostro.network/protocol/dispute_chat.html>.
-    //
-    // The text travels as the message itself rather than a hand-rolled
-    // {"type":"evidence"} JSON: this is a conversation with the solver, and
-    // that shape had no reader on the other side of the envelope.
-    let ctx = crate::api::messages::admin_chat_context(trade_index, &admin_pubkey).await?;
-    let inner = crate::api::messages::publish_chat_payload_for(&ctx, &text).await?;
-
-    // Record it locally so the dispute conversation has history, exactly as a
-    // peer message does. Keyed by the inner event id, so our own echo arriving
-    // from a relay dedups against this record instead of duplicating it.
-    crate::api::messages::store_outgoing_admin_message(&trade_id, &ctx, &text, &inner).await;
-
-    log::info!("[disputes] evidence submitted for trade={trade_id}");
-    Ok(())
+    Ok((trade_index, admin_pubkey))
 }
 
 /// Record a dispute the daemon accepted after `open_dispute` had already
@@ -1773,6 +1812,41 @@ mod tests {
         assert!(
             err.to_string().contains("AdminNotAssigned"),
             "expected AdminNotAssigned, got: {err}"
+        );
+    }
+
+    /// #589 phase 3: a file goes to the solver only once one took the
+    /// dispute, and never to a dispute that does not exist.
+    #[tokio::test]
+    async fn send_dispute_file_needs_a_solver() {
+        let pdf = b"%PDF-1.4\n%%EOF".to_vec();
+        let trade_id = format!("t-{}", uuid::Uuid::new_v4());
+        let err = send_dispute_file(trade_id.clone(), pdf.clone(), "r.pdf".into(), "u".into())
+            .await
+            .unwrap_err();
+        assert!(err.to_string().starts_with("NoOpenDispute"), "got: {err}");
+
+        seed_dispute(&trade_id, None).await;
+        let err = send_dispute_file(trade_id, pdf, "r.pdf".into(), "u".into())
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string().starts_with("AdminNotAssigned"),
+            "got: {err}"
+        );
+    }
+
+    /// The file is judged before the dispute: what could never be sent is
+    /// refused as such, like in the peer chat.
+    #[tokio::test]
+    async fn send_dispute_file_checks_the_file_first() {
+        let trade_id = format!("t-{}", uuid::Uuid::new_v4());
+        let err = send_dispute_file(trade_id, b"MZ\x90\x00".to_vec(), "r.pdf".into(), "u".into())
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string().starts_with("UnsupportedFileType"),
+            "got: {err}"
         );
     }
 

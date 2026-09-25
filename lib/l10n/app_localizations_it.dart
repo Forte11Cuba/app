@@ -65,11 +65,8 @@ class AppLocalizationsIt extends AppLocalizations {
   String get disputeLoadError => 'Impossibile caricare le dispute. Riprova.';
 
   @override
-  String get disputeMessagingComingSoon =>
-      'Messaggistica per controversie in arrivo';
-
-  @override
-  String get disputeAttachmentsComingSoon => 'Allegati file in arrivo';
+  String get disputeSolverNotAssigned =>
+      'Nessun mediatore ha ancora preso in carico questa controversia. Potrai scrivere quando qualcuno lo farà.';
 
   @override
   String get disputeNotFound => 'Controversia non trovata.';
@@ -3739,6 +3736,10 @@ class AppLocalizationsIt extends AppLocalizations {
   @override
   String get attachSheetBody =>
       'Viene cifrato sul tuo dispositivo. Solo la tua controparte può aprirlo.';
+
+  @override
+  String get attachSheetBodySolver =>
+      'Viene cifrato sul tuo dispositivo. Solo il mediatore può aprirlo.';
 
   @override
   String get attachSourcePhoto => 'Foto';

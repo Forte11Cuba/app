@@ -8,9 +8,11 @@ import 'package:mostro/shared/widgets/mostro_modal.dart';
 /// Asks where the file comes from. Resolves to null when dismissed.
 ///
 /// The camera row is offered only where there is one ([showCamera]).
+/// [note] says who can open the file; the P2P chat's by default.
 Future<AttachmentSource?> showAttachSheet(
   BuildContext context, {
   required bool showCamera,
+  String? note,
 }) {
   return showMostroSheet<AttachmentSource>(
     context: context,
@@ -39,7 +41,7 @@ Future<AttachmentSource?> showAttachSheet(
               source: AttachmentSource.pdf,
             ),
             const SizedBox(height: 10),
-            _Note(text: l10n.attachSheetBody),
+            _Note(text: note ?? l10n.attachSheetBody),
           ],
         ),
       );
