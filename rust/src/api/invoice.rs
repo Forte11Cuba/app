@@ -366,15 +366,6 @@ fn next_step_start(
 ///
 /// Splits from the left: the status is a status enum's `Debug`, which carries
 /// no colon, and the fields after it are numbers.
-/// When a stored step-start value says its step opened, in the node's clock.
-///
-/// Exposed so the sweep can tell a step recorded *after* it read the public
-/// status from the one it set out to end: both read `WaitingPayment`, so the
-/// status cannot separate them and the date has to.
-pub(crate) fn step_start_recorded_at(value: &str) -> Option<i64> {
-    parse_step_start(value).map(|(_, ts, _)| ts)
-}
-
 fn parse_step_start(value: &str) -> Option<(&str, i64, Option<u32>)> {
     let mut parts = value.split(':');
     let status = parts.next()?;
