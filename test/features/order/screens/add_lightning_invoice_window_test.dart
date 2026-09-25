@@ -10,6 +10,7 @@ import 'package:mostro/features/order/models/invoice_rules.dart';
 import 'package:mostro/features/order/providers/invoice_providers.dart';
 import 'package:mostro/features/order/providers/trade_state_provider.dart';
 import 'package:mostro/features/order/screens/add_lightning_invoice_screen.dart';
+import 'package:mostro/features/order/widgets/invoice_widgets.dart';
 import 'package:mostro/features/settings/providers/nwc_provider.dart';
 import 'package:mostro/features/trades/providers/trades_providers.dart';
 import 'package:mostro/l10n/app_localizations.dart';
@@ -18,6 +19,24 @@ import 'package:mostro/src/rust/api/types.dart' show TradeUpdate;
 Finder _semantics(String identifier) => find.byWidgetPredicate(
   (widget) => widget is Semantics && widget.properties.identifier == identifier,
 );
+
+/// The word on `invoice.check`, or null when no verdict is published.
+///
+/// Read off the widget rather than the merged node: that the label reaches
+/// the semantics node the accessibility bridge exposes is pinned in
+/// `invoice_check_readout_test.dart`, on the same row builder. Here the
+/// question is only which word, if any, the screen publishes.
+String? _checkWord(WidgetTester tester) {
+  final found = _semantics('invoice.check').evaluate();
+  if (found.isEmpty) return null;
+  return (found.first.widget as Semantics).properties.label;
+}
+
+bool _canSubmit(WidgetTester tester) =>
+    tester
+        .widget<InvoicePrimaryButton>(find.byType(InvoicePrimaryButton))
+        .onPressed !=
+    null;
 
 /// The node's `invoice_expiration_window` rule reaches the row: an invoice
 /// that is live but expires inside the window is refused with the minutes
@@ -300,6 +319,107 @@ void main() {
         reason: 'the window it was refused against is being replaced',
       );
       expect(served, 2, reason: 'the refetch really started');
+    } finally {
+      semantics.dispose();
+    }
+  });
+
+  // Withdrawing a verdict is only half a transition. A screen that retired
+  // the word and never published one again would satisfy both tests above
+  // while leaving a harness waiting for a word that can no longer come —
+  // the failure this contract exists to make loud. So: all the way round,
+  // onto a node whose answer is the opposite of the first one's.
+  testWidgets('the verdict comes back judged against the new node', (
+    tester,
+  ) async {
+    final semantics = tester.ensureSemantics();
+    final fetches = <Completer<MostroInstance?>>[
+      Completer<MostroInstance?>(),
+      Completer<MostroInstance?>(),
+    ];
+    var served = 0;
+    try {
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            isWalletConnectedProvider.overrideWithValue(false),
+            tradeAmountProvider.overrideWith(
+              (ref, orderId) => Stream.value(BigInt.from(250)),
+            ),
+            tradeUpdatesProvider.overrideWith(
+              (ref) => const Stream<TradeUpdate>.empty(),
+            ),
+            tradeInfoProvider.overrideWith((ref, orderId) async => null),
+            mostroNodeProvider.overrideWith((ref) => fetches[served++].future),
+            // Stands in for the core, which skips the expiry rule when the
+            // request carries no window — so the same invoice is refused by
+            // the node that demands an hour and accepted by the one that
+            // asks for nothing.
+            invoiceCheckerProvider.overrideWithValue(
+              (request) async =>
+                  request.minRemainingSecs != null
+                      ? const InvoiceCheckError(
+                        InvoiceProblem.expiresTooSoon,
+                        minRemainingSecs: 3600,
+                      )
+                      : const InvoiceCheckValid(250),
+            ),
+          ],
+          child: MaterialApp(
+            theme: buildDarkTheme(),
+            localizationsDelegates: AppLocalizations.localizationsDelegates,
+            supportedLocales: AppLocalizations.supportedLocales,
+            locale: const Locale('en'),
+            home: const AddLightningInvoiceScreen(orderId: 'order-1'),
+          ),
+        ),
+      );
+      await tester.pump();
+
+      fetches[0].complete(
+        const MostroInstance(
+          pubKey: 'node-a',
+          lndNetworks: 'mainnet',
+          invoiceExpirationWindow: 3600,
+        ),
+      );
+      await tester.pump();
+
+      await tester.enterText(find.byType(TextField), 'lnbc2500u1soon');
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pump();
+
+      expect(_checkWord(tester), 'expires-too-soon');
+      expect(_canSubmit(tester), isFalse, reason: 'refused by node A');
+
+      ProviderScope.containerOf(
+        tester.element(find.byType(AddLightningInvoiceScreen)),
+      ).invalidate(mostroNodeProvider);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pump();
+
+      expect(_checkWord(tester), isNull, reason: 'node A no longer answers');
+      // The policy this readout must not quietly change: an invoice this side
+      // cannot judge is the daemon's to refuse, so the buyer is not locked out
+      // while the capabilities are in flight.
+      expect(
+        _canSubmit(tester),
+        isTrue,
+        reason: 'an unjudged invoice is still submittable',
+      );
+
+      // Node B asks for no window, so the invoice node A refused is fine.
+      fetches[1].complete(
+        const MostroInstance(pubKey: 'node-b', lndNetworks: 'mainnet'),
+      );
+      // Two frames: the first sees the context key move and schedules the
+      // re-judge, the second publishes what it returned.
+      await tester.pump(const Duration(milliseconds: 200));
+      await tester.pump(const Duration(milliseconds: 200));
+
+      expect(_checkWord(tester), 'valid');
+      expect(_canSubmit(tester), isTrue);
     } finally {
       semantics.dispose();
     }
