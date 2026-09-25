@@ -66,8 +66,8 @@ fails the build when an identifier is declared and attached to nothing.
 | `trade.bondSlashed` | The durable line on the trade detail once this user's own bond was slashed, labelled with the cause (`dispute` / `timeout`); absent otherwise. |
 | `trade.cancelRequest` | The pending cooperative-cancel request on the trade detail (protocol `cancel.md`), this side's or the counterparty's, while the trade is `active` or `fiat-sent`; absent otherwise. |
 | `invoice.nwc.text` | The buyer invoice NWC generated, for payment correlation. |
-| `invoice.check` | The app's **own** verdict on what is in the invoice field, as a stable word: `expires-too-soon`, `wrong-amount`, `wrong-network`, `expired`, `malformed`, `unrecognized`, `valid`, `address`. Any word but the last two also means `invoice.submit` is disabled — the invoice is never sent. **Absent is "not judged yet", never "fine"**: the amount arrives with the trade and the expiry floor with the node's capabilities, so a good invoice reads nothing until both land. Wait for the word expected; do not read once, and do not treat absence as acceptance. |
-| `invoice.error` | The reason the daemon refused the last submitted buyer invoice. Present only after a rejection, until the next submission; the manual form stays open behind it. In the wallet-generated (NWC) branch, which has no form, the readout comes with `invoice.manual` so the buyer can switch to manual entry. Unlike every other readout here its label is **translated prose**, not a machine word, so assert that it exists — never what it says. `invoice.check` and this are drawn in the same slot and never together. |
+| `invoice.check` | The app's **own** verdict on what is in the invoice field, as a stable word: `expires-too-soon`, `wrong-amount`, `wrong-network`, `expired`, `malformed`, `unrecognized`, `valid`, `address`. Any word but the last two also means `invoice.submit` is disabled — the invoice is never sent. **Absent is never "fine."** It is absent while the verdict is still open (nothing typed, the check still running, or the trade amount and the node's capabilities not yet fetched — the expiry floor and the network cannot be tested without them, so no pass is claimed), and also whenever `invoice.error` is present, which takes the same slot and hides this readout even after the local verdict resolves. So: wait for the word expected, never read once, never treat absence as acceptance — and do not wait for a word at all while `invoice.error` is on screen. |
+| `invoice.error` | The reason the daemon refused the last submitted buyer invoice. Present after a rejection until the next submission **or any edit of the invoice field**, whichever comes first — the verdict was about the text that was sent, so typing clears it; the manual form stays open behind it. In the wallet-generated (NWC) branch, which has no form, the readout comes with `invoice.manual` so the buyer can switch to manual entry. Unlike every other readout here its label is **translated prose**, not a machine word, so assert that it exists — never what it says. `invoice.check` and this are drawn in the same slot and never together. |
 | `settings.relays.item.<url>` | The relay's URL. |
 
 There is deliberately **no** identifier for the seed phrase. A stable readout
@@ -265,13 +265,21 @@ submission returns to the matching trade detail (`order.id` and `order.status`).
 **The app judges the invoice before the daemon does.** Amount, network, expiry and the node's
 `invoice_expiration_window` are checked locally, and a failure disables `invoice.submit`: that invoice is
 never sent, so no `invoice.error` follows and nothing changes on the relay. A scenario for one of those
-rules asserts `invoice.check`, not the daemon's refusal. Two consequences for how it is read. The local
-check needs facts that arrive asynchronously — the trade's amount, and the expiry floor with the node's
-Kind 38385 capabilities — so before they land the verdict is open, `invoice.check` is absent and submission
-is *allowed*; the screen re-judges when they arrive and the button then goes dead on its own. A harness must
-therefore wait for the word rather than read once, and accept that a daemon rejection is still reachable in
-that window. Whichever side refuses, the order stays `waiting-invoice` for both parties and the buyer can
-submit again.
+rules asserts `invoice.check`, not the daemon's refusal.
+
+Two of those rules need facts that arrive asynchronously — the trade's amount, and the expiry floor and
+network from the node's Kind 38385 capabilities — and the screen starts that fetch on entry. Until it
+settles no word is published, because a pass those rules could not test is not a pass; submission stays
+*allowed* and the daemon remains the backstop, exactly as for an invoice this side cannot judge at all.
+While the check itself is running, submission is instead held. So a harness waits for the word it expects
+rather than reading once, and accepts that on a cold entry a daemon rejection is still reachable. It must
+not read a missing word as a pass, and it must not conclude anything from the button alone: enabled means
+either "judged good" or "not judged".
+
+A refusal by either side, while both parties are still at the invoice step, leaves the order at
+`waiting-invoice` and the buyer free to submit again. One daemon refusal is different: when the daemon
+reports it no longer expects an invoice, the app starts state recovery and the status that comes back is
+what takes the buyer off the screen. Do not wait for `waiting-invoice` after that one.
 
 Taking a sell order without a configured Lightning address opens the buyer invoice form directly;
 taking a buy order opens the seller's hold-invoice screen directly. These routes need not expose

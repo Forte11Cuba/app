@@ -205,7 +205,8 @@ class _AddLightningInvoiceScreenState
   /// `invoice_expiration_window` (mostrod refuses an invoice with less
   /// lifetime left than this). Both may still be loading.
   _NodeContext _nodeContext() {
-    final node = ref.read(mostroNodeProvider).valueOrNull;
+    final async = ref.read(mostroNodeProvider);
+    final node = async.valueOrNull;
     final networks =
         node?.lndNetworks
             ?.split(',')
@@ -217,6 +218,11 @@ class _AddLightningInvoiceScreenState
       networks: networks,
       minRemainingSecs: node?.invoiceExpirationWindow,
       key: '${networks.join(',')}|${node?.invoiceExpirationWindow}',
+      // Settled either way: a node that publishes no window, or a fetch that
+      // failed, are both answers — only a fetch still in flight is not. The
+      // two are indistinguishable through `valueOrNull`, which is why the
+      // whole AsyncValue is read.
+      factsKnown: async.hasValue || async.hasError,
     );
   }
 
@@ -323,6 +329,15 @@ class _AddLightningInvoiceScreenState
       _checkTimer?.cancel();
       _checkTimer = Timer(Duration.zero, () => _evaluate(input, sats));
       return const InvoiceCheckPending();
+    }
+    if (verdict is InvoiceCheckValid && !node.factsKnown) {
+      // Two of the four rules — the expiry floor and the node's networks —
+      // need facts that are still being fetched, so this pass is only the
+      // absence of a failure they could not test. `valid` is a claim
+      // automation reads off `invoice.check`; say nothing instead, and leave
+      // it to the daemon exactly as for any invoice this side cannot judge.
+      // Submission stays allowed, as it already was while claiming `valid`.
+      return const InvoiceCheckUnverified();
     }
     return verdict;
   }
@@ -903,4 +918,9 @@ class _AddLightningInvoiceScreenState
 /// What the invoice checker needs from the node, plus a key that changes
 /// whenever any of it does.
 typedef _NodeContext =
-    ({List<String> networks, int? minRemainingSecs, String key});
+    ({
+      List<String> networks,
+      int? minRemainingSecs,
+      String key,
+      bool factsKnown,
+    });
