@@ -137,6 +137,21 @@ class _AddLightningInvoiceScreenState
   /// rather than being held for a bridge that is not there.
   bool _checkerAvailable = true;
 
+  /// Which evaluation is the current one. Bumped before each check; a reply
+  /// carrying an older number is dropped, answer or failure alike.
+  ///
+  /// Checks overlap — the input changes, the trade amount arrives, the node's
+  /// capabilities resolve — and the core answers whenever it answers, so a
+  /// reply is not necessarily about what is on screen. Comparing the fields a
+  /// request was built from instead means remembering to extend that
+  /// comparison every time the request grows a dimension; this asks the one
+  /// question those comparisons were approximating.
+  ///
+  /// Not to be confused with [_verdictNodeKey] and friends, which answer a
+  /// different question: whether the verdict now held still fits the screen,
+  /// and so whether to judge again.
+  int _evaluation = 0;
+
   /// Whether `Paste` is offered. Only whether the clipboard holds text is
   /// asked, never its content: reading it would show the OS paste notice
   /// on every visit. On web even that asks the browser for clipboard
@@ -189,15 +204,6 @@ class _AddLightningInvoiceScreenState
   }
 
   String get _input => normalizeInvoiceInput(_invoiceController.text);
-
-  /// The trade amount as known right now, outside build.
-  BigInt? _currentSats() {
-    final fromProvider =
-        ref.read(tradeAmountProvider(widget.orderId)).valueOrNull;
-    if (fromProvider != null) return fromProvider;
-    final fallback = widget.amountSats;
-    return fallback != null ? BigInt.from(fallback) : null;
-  }
 
   /// What the node's kind 38385 says the checker must know: its
   /// `lnd_networks` (an invoice for another chain is refused here rather
@@ -263,6 +269,7 @@ class _AddLightningInvoiceScreenState
   /// for a trade of [sats]. A core that cannot answer leaves the input to
   /// the daemon rather than refusing it for a missing bridge.
   Future<void> _evaluate(String input, BigInt? sats) async {
+    final generation = ++_evaluation;
     final node = _nodeContext();
     final request = (
       input: input,
@@ -277,18 +284,15 @@ class _AddLightningInvoiceScreenState
       verdict = await ref.read(invoiceCheckerProvider)(request);
     } catch (e) {
       debugPrint('[AddLightningInvoiceScreen] checker unavailable: $e');
-      // Only the request for what is on screen now may declare the core
-      // unavailable: an older request failing after a newer one succeeded
-      // must not unlock submission over that newer verdict.
-      if (!mounted ||
-          input != _input ||
-          sats?.toInt() != _currentSats()?.toInt()) {
-        return;
-      }
+      // Only the current request may declare the core unavailable. That flag
+      // is sticky and short-circuits ahead of the re-judge, so an older
+      // failure landing after a newer answer would blank the readout and
+      // unlock submission until the buyer typed again.
+      if (!mounted || generation != _evaluation) return;
       setState(() => _checkerAvailable = false);
       return;
     }
-    if (!mounted || input != _input) return;
+    if (!mounted || generation != _evaluation) return;
     setState(() {
       _checkerAvailable = true;
       _verdictInput = input;

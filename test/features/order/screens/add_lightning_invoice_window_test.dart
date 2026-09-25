@@ -510,4 +510,106 @@ void main() {
       semantics.dispose();
     }
   });
+
+  // Checks overlap whenever a fact lands mid-flight, and the core answers
+  // when it answers. A reply that loses the race is about a question the
+  // screen no longer asks — and the failure path is the one that bites,
+  // because the flag it sets is sticky and short-circuits ahead of the
+  // re-judge: the readout would stay blank, and submission open, until the
+  // buyer typed again.
+  //
+  // The two checks here are started by edits that `normalizeInvoiceInput`
+  // folds onto the same string, so the input a reply was made for is equal
+  // to the input on screen and cannot tell the two apart. Only which
+  // evaluation they belong to can.
+  testWidgets('a check that loses the race is dropped, answer or failure', (
+    tester,
+  ) async {
+    final semantics = tester.ensureSemantics();
+    final pending = <Completer<InvoiceCheck>>[];
+    try {
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            isWalletConnectedProvider.overrideWithValue(false),
+            tradeAmountProvider.overrideWith(
+              (ref, orderId) => Stream.value(BigInt.from(250)),
+            ),
+            tradeUpdatesProvider.overrideWith(
+              (ref) => const Stream<TradeUpdate>.empty(),
+            ),
+            tradeInfoProvider.overrideWith((ref, orderId) async => null),
+            mostroNodeProvider.overrideWith(
+              (ref) async => const MostroInstance(
+                pubKey: 'node-a',
+                lndNetworks: 'mainnet',
+              ),
+            ),
+            // Hands out a future per call and answers none of them, so the
+            // test decides the order they finish in.
+            invoiceCheckerProvider.overrideWithValue((request) {
+              final c = Completer<InvoiceCheck>();
+              pending.add(c);
+              return c.future;
+            }),
+          ],
+          child: MaterialApp(
+            theme: buildDarkTheme(),
+            localizationsDelegates: AppLocalizations.localizationsDelegates,
+            supportedLocales: AppLocalizations.supportedLocales,
+            locale: const Locale('en'),
+            home: const AddLightningInvoiceScreen(orderId: 'order-1'),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+
+      await tester.enterText(find.byType(TextField), 'lnbc2500u1x');
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(pending, hasLength(1));
+
+      // The same invoice pasted with its `lightning:` scheme, which
+      // `normalizeInvoiceInput` strips. A different edit, one invoice: both
+      // checks are now in flight for a single normalized input.
+      await tester.enterText(find.byType(TextField), 'lightning:lnbc2500u1x');
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.enterText(find.byType(TextField), 'LIGHTNING:lnbc2500u1x');
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(pending, hasLength(3), reason: 'three checks are in flight');
+
+      // The newest answers first: this is the verdict that belongs on screen.
+      pending[2].complete(const InvoiceCheckValid(250));
+      await tester.pump(const Duration(milliseconds: 200));
+      expect(_checkWord(tester), 'valid');
+
+      // Now the oldest fails, about text that is still character for
+      // character what the field holds.
+      pending[0].completeError(StateError('the bridge went away'));
+      await tester.pump(const Duration(milliseconds: 200));
+
+      expect(
+        _checkWord(tester),
+        'valid',
+        reason: 'a stale failure must not blank the standing verdict',
+      );
+      expect(_canSubmit(tester), isTrue);
+
+      // And a stale *answer*, which is the half that has nothing else to
+      // catch it: these checks share one node context, so the key comparison
+      // that re-judges a mismatched verdict sees nothing wrong and the older
+      // refusal would simply stand.
+      pending[1].complete(const InvoiceCheckError(InvoiceProblem.expired));
+      await tester.pump(const Duration(milliseconds: 200));
+
+      expect(
+        _checkWord(tester),
+        'valid',
+        reason: 'a stale answer must not replace the newer one',
+      );
+      expect(_canSubmit(tester), isTrue);
+    } finally {
+      semantics.dispose();
+    }
+  });
 }
