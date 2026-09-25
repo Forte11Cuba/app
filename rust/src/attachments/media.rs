@@ -137,7 +137,16 @@ fn encode(image: &DynamicImage, kind: Kind) -> Result<Vec<u8>> {
 /// untrusted — `../../x` must not escape a directory.
 pub fn sanitize_filename(name: &str) -> String {
     let last = name.rsplit(['/', '\\']).next().unwrap_or("");
-    let clean: String = last.chars().filter(|c| !c.is_control() && !is_invisible_format(*c)).collect();
+    // `: * ? " < > |` too: legal on the peer's side, but creating the file
+    // fails on Windows and FAT/exFAT storage.
+    let clean: String = last
+        .chars()
+        .filter(|c| {
+            !c.is_control()
+                && !is_invisible_format(*c)
+                && !matches!(c, ':' | '*' | '?' | '"' | '<' | '>' | '|')
+        })
+        .collect();
     let clean = clean.trim().trim_start_matches('.').trim();
     if clean.is_empty() {
         return "attachment".to_string();
@@ -258,6 +267,7 @@ mod tests {
         assert_eq!(sanitize_filename("../../etc/passwd"), "passwd");
         assert_eq!(sanitize_filename("C:\\Users\\a\\recibo.pdf"), "recibo.pdf");
         assert_eq!(sanitize_filename("foto\u{202e}gpj.exe"), "fotogpj.exe");
+        assert_eq!(sanitize_filename("a:b*c?\"d<e>f|.pdf"), "abcdef.pdf");
         assert_eq!(sanitize_filename("  "), "attachment");
         assert_eq!(sanitize_filename(".."), "attachment");
         let long = format!("{}.pdf", "a".repeat(300));

@@ -173,7 +173,9 @@ Fetch and decrypt an attachment, in memory.
 The encrypted blob comes from the cache or from Blossom — verified against
 the hash in its URL, then cached (still encrypted). Decrypted with the key of
 the conversation it arrived in: the peer's (P2P chat) or the solver's
-(dispute chat). Nothing decrypted is written to disk.
+(dispute chat). Nothing decrypted is written to disk. The key is read from
+the trade row when no session is live, so a finished trade's attachments stay
+openable after a restart. Any failure sets the attachment's status to `Failed`.
 
 **Returns**:
 ```text

@@ -110,7 +110,7 @@ pub fn parse(text: &str) -> Option<IncomingAttachment> {
         }
     };
     let sha256 = blossom::sha256_from_url(&url)?;
-    if !url.starts_with("https://") || encrypted as usize > MAX_BLOB_BYTES {
+    if !url.starts_with("https://") || encrypted > MAX_BLOB_BYTES as u64 {
         return None;
     }
     Some(IncomingAttachment {
@@ -192,6 +192,8 @@ mod tests {
         assert!(parse(&v1_image().replace("https://", "http://")).is_none());
         assert!(parse(&v1_image().replace(HASH, "not-a-hash")).is_none());
         assert!(parse(&v1_image().replace("524316", &(MAX_BLOB_BYTES + 1).to_string())).is_none());
+        // Compared as u64: 2^32 + 1 must not wrap to 1 on a 32-bit target.
+        assert!(parse(&v1_image().replace("524316", "4294967297")).is_none());
     }
 
     #[test]

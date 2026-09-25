@@ -240,7 +240,8 @@ is a decentralized media hosting protocol for Nostr.
 - Size limit: 25MB per file
 
 **Blossom server list** (v1's `BlossomConfig.defaultServers`, chosen because
-they accept opaque blobs and retain them indefinitely):
+they accept opaque blobs; none promises retention or mirroring, so once the
+local cache evicts a blob it is only as available as the one server holding it):
 - cdn.hzrd149.com, nostr.download, blossom-01.uid.ovh
 - files.sovbit.host, blssm.us
 

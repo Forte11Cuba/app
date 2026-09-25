@@ -706,10 +706,22 @@ pub async fn download_attachment(message_id: String) -> Result<AttachmentData> {
         .clone()
         .ok_or_else(|| anyhow!("AttachmentNotFound: message has no attachment"))?;
 
-    let key = attachment_key_for(&msg).await?;
-    let blob = attachment_blob(&message_id, &attachment).await?;
-    let bytes = crate::crypto::file_enc::decrypt_file(&blob, &key)
-        .map_err(|e| anyhow!("DecryptionFailed: {e}"))?;
+    let opened = async {
+        let key = attachment_key_for(&msg).await?;
+        let blob = attachment_blob(&message_id, &attachment).await?;
+        crate::crypto::file_enc::decrypt_file(&blob, &key)
+            .map_err(|e| anyhow!("DecryptionFailed: {e}"))
+    }
+    .await;
+    // Any failure — key, transfer or decryption — must leave a state the UI
+    // can offer a retry on, never a stale Pending / Downloading.
+    let bytes = match opened {
+        Ok(bytes) => bytes,
+        Err(e) => {
+            set_download_status(&message_id, DownloadStatus::Failed).await;
+            return Err(e);
+        }
+    };
 
     set_download_status(&message_id, DownloadStatus::Downloaded).await;
     let mime_type = crate::attachments::media::sniff(&bytes)
@@ -736,10 +748,7 @@ async fn attachment_blob(message_id: &str, attachment: &AttachmentInfo) -> Resul
     .await
     {
         Ok(blob) => blob,
-        Err(e) => {
-            set_download_status(message_id, DownloadStatus::Failed).await;
-            return Err(e);
-        }
+        Err(e) => return Err(e),
     };
     if let Some(db) = db {
         if let Err(e) = db.save_attachment_blob(&attachment.sha256, &blob).await {
@@ -751,20 +760,45 @@ async fn attachment_blob(message_id: &str, attachment: &AttachmentInfo) -> Resul
 
 /// The key an attachment was encrypted with: the raw ECDH between our trade
 /// key and whoever is on the other side of the conversation it arrived in.
+///
+/// Read from the live session, else straight from the trade row — not
+/// through [`session_or_rebuild`], whose [`chat_still_relevant`] gate refuses
+/// finished trades: their history must stay openable after a restart. A row
+/// whose counterparty is wrong only yields a key the AEAD rejects.
 async fn attachment_key_for(msg: &ChatMessage) -> Result<zeroize::Zeroizing<[u8; 32]>> {
-    let session = session_or_rebuild(&msg.trade_id)
-        .await
+    let session = crate::mostro::session::session_manager().get_session(&msg.trade_id).await;
+    let row = match (&session, crate::db::app_db::db()) {
+        (None, Some(db)) => db.get_trade_by_order_id(&msg.trade_id).await?,
+        _ => None,
+    };
+    let (trade_key_index, peer_hex) = conversation_of(session.as_ref(), row.as_ref())
         .ok_or_else(|| anyhow!("SessionNotFound: cannot decrypt without the trade's session"))?;
     let counterpart_hex = match msg.message_type {
-        MessageType::Peer => session.peer_pubkey.clone(),
+        MessageType::Peer => peer_hex,
         MessageType::Admin => crate::api::disputes::solver_pubkey(&msg.trade_id).await,
         MessageType::System => None,
     }
     .ok_or_else(|| anyhow!("PeerUnknown: no counterpart key for this conversation"))?;
     let counterpart = nostr_sdk::prelude::PublicKey::from_hex(&counterpart_hex)
         .map_err(|e| anyhow!("PeerUnknown: invalid counterpart pubkey: {e}"))?;
-    let trade_keys = crate::api::identity::get_active_trade_keys(session.trade_key_index).await?;
+    let trade_keys = crate::api::identity::get_active_trade_keys(trade_key_index).await?;
     crate::crypto::file_enc::attachment_key(&trade_keys, &counterpart)
+}
+
+/// Our trade key index and the peer's pubkey for a conversation: from the
+/// live session, else from the trade row whatever its status.
+fn conversation_of(
+    session: Option<&crate::mostro::session::Session>,
+    row: Option<&crate::api::types::TradeInfo>,
+) -> Option<(u32, Option<String>)> {
+    match (session, row) {
+        (Some(s), _) => Some((s.trade_key_index, s.peer_pubkey.clone())),
+        (None, Some(t)) => Some((
+            t.trade_key_index,
+            Some(t.counterparty_pubkey.clone()).filter(|pk| !pk.is_empty()),
+        )),
+        (None, None) => None,
+    }
 }
 
 /// Record an attachment's download state on its message (memory only: the
@@ -2201,10 +2235,12 @@ mod tests {
         };
         store.add_message(msg).await;
 
-        let result = download_attachment(msg_id).await;
+        let result = download_attachment(msg_id.clone()).await;
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(err.contains("SessionNotFound"), "got: {err}");
+        // A failure leaves a retryable state, not a stale Pending.
+        assert_eq!(get_attachment_status(msg_id).await.unwrap(), Some(DownloadStatus::Failed));
     }
 
     /// Verify that the Rust message store does NOT deduplicate by id.
@@ -2577,6 +2613,22 @@ mod tests {
     /// panic. (Poisoned/terminal/empty rows never reach the derivation at
     /// all: `session_or_rebuild` filters them with `chat_still_relevant`,
     /// covered above.)
+    /// A finished trade's history stays openable after a restart (#590
+    /// review): with no session, the attachment key comes from the row even
+    /// though `chat_still_relevant` refuses to rebuild a chat for it.
+    #[test]
+    fn attachment_conversation_comes_from_a_finished_trade_row() {
+        let peer = nostr_sdk::prelude::Keys::generate().public_key().to_hex();
+        let mut trade = live_trade("o", &peer, 7);
+        trade.order.status = crate::api::types::OrderStatus::Success;
+        assert!(!chat_still_relevant(&trade));
+        assert_eq!(conversation_of(None, Some(&trade)), Some((7, Some(peer))));
+
+        trade.counterparty_pubkey.clear();
+        assert_eq!(conversation_of(None, Some(&trade)), Some((7, None)));
+        assert_eq!(conversation_of(None, None), None);
+    }
+
     #[tokio::test]
     async fn rebuild_session_rejects_unparseable_peer() {
         let order_id = uuid::Uuid::new_v4().to_string();
