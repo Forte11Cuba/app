@@ -581,6 +581,7 @@ pub async fn send_file(
     let progress = |p: f64| {
         let _ = message_store().attachment_tx.send((upload_id.clone(), p));
     };
+    let generation = crate::api::identity::identity_generation().await;
 
     // 1. What it is, decided by the bytes; images leave without metadata.
     let prepared = crate::attachments::media::prepare_for_send(file_bytes)?;
@@ -607,11 +608,8 @@ pub async fn send_file(
     let encrypted_size = encrypted.len() as u64;
     let nonce_hex = hex::encode(&encrypted[..12]);
     let uploaded = blossom::upload_blob(encrypted.clone()).await?;
-    if let Some(db) = crate::db::app_db::db() {
-        if let Err(e) = db.save_attachment_blob(&uploaded.sha256, &encrypted).await {
-            log::warn!("[messages] attachment cache write failed: {e}");
-        }
-    }
+    let db = crate::db::app_db::db();
+    cache_attachment_blob(db, generation, &uploaded.sha256, &encrypted).await;
     progress(0.9);
 
     // 4. The v1 message: JPEG/PNG as `image_encrypted`, the rest as
@@ -706,9 +704,10 @@ pub async fn download_attachment(message_id: String) -> Result<AttachmentData> {
         .clone()
         .ok_or_else(|| anyhow!("AttachmentNotFound: message has no attachment"))?;
 
+    let generation = crate::api::identity::identity_generation().await;
     let opened = async {
         let key = attachment_key_for(&msg).await?;
-        let blob = attachment_blob(&message_id, &attachment).await?;
+        let blob = attachment_blob(&message_id, &attachment, generation).await?;
         crate::crypto::file_enc::decrypt_file(&blob, &key)
             .map_err(|e| anyhow!("DecryptionFailed: {e}"))
     }
@@ -731,7 +730,12 @@ pub async fn download_attachment(message_id: String) -> Result<AttachmentData> {
 }
 
 /// The encrypted blob of an attachment: cached, or downloaded and verified.
-async fn attachment_blob(message_id: &str, attachment: &AttachmentInfo) -> Result<Vec<u8>> {
+/// `generation` is the identity the download started under.
+async fn attachment_blob(
+    message_id: &str,
+    attachment: &AttachmentInfo,
+    generation: Option<u64>,
+) -> Result<Vec<u8>> {
     let db = crate::db::app_db::db();
     if let Some(db) = db {
         match db.get_attachment_blob(&attachment.sha256).await {
@@ -750,12 +754,37 @@ async fn attachment_blob(message_id: &str, attachment: &AttachmentInfo) -> Resul
         Ok(blob) => blob,
         Err(e) => return Err(e),
     };
-    if let Some(db) = db {
-        if let Err(e) = db.save_attachment_blob(&attachment.sha256, &blob).await {
-            log::warn!("[messages] attachment cache write failed: {e}");
-        }
-    }
+    cache_attachment_blob(db, generation, &attachment.sha256, &blob).await;
     Ok(blob)
+}
+
+/// Cache an encrypted blob — only while the identity a transfer started
+/// under (`generation`) is still the active one (PR #590 review).
+///
+/// The transfer awaits the network, and the identity can be deleted
+/// meanwhile: an unguarded write would put the old identity's blob back into
+/// the cache `clear_identity_data` just emptied. Returns whether it wrote.
+async fn cache_attachment_blob<S: crate::db::Storage>(
+    db: Option<&S>,
+    generation: Option<u64>,
+    sha256: &str,
+    blob: &[u8],
+) -> bool {
+    let (Some(db), Some(generation)) = (db, generation) else {
+        return false;
+    };
+    let written = crate::api::identity::while_identity_current(generation, async {
+        if let Err(e) = db.save_attachment_blob(sha256, blob).await {
+            log::warn!("[messages] attachment cache write failed: {e}");
+            return false;
+        }
+        true
+    })
+    .await;
+    if written.is_none() {
+        log::info!("[messages] attachment not cached: its identity was deleted mid-transfer");
+    }
+    written.unwrap_or(false)
 }
 
 /// The key an attachment was encrypted with: the raw ECDH between our trade
@@ -773,16 +802,36 @@ async fn attachment_key_for(msg: &ChatMessage) -> Result<zeroize::Zeroizing<[u8;
     };
     let (trade_key_index, peer_hex) = conversation_of(session.as_ref(), row.as_ref())
         .ok_or_else(|| anyhow!("SessionNotFound: cannot decrypt without the trade's session"))?;
-    let counterpart_hex = match msg.message_type {
-        MessageType::Peer => peer_hex,
+    let live_solver = match msg.message_type {
         MessageType::Admin => crate::api::disputes::solver_pubkey(&msg.trade_id).await,
-        MessageType::System => None,
-    }
-    .ok_or_else(|| anyhow!("PeerUnknown: no counterpart key for this conversation"))?;
+        _ => None,
+    };
+    let counterpart_hex = counterpart_of(msg, peer_hex, live_solver)
+        .ok_or_else(|| anyhow!("PeerUnknown: no counterpart key for this conversation"))?;
     let counterpart = nostr_sdk::prelude::PublicKey::from_hex(&counterpart_hex)
         .map_err(|e| anyhow!("PeerUnknown: invalid counterpart pubkey: {e}"))?;
     let trade_keys = crate::api::identity::get_active_trade_keys(trade_key_index).await?;
     crate::crypto::file_enc::attachment_key(&trade_keys, &counterpart)
+}
+
+/// Who is on the other side of the conversation `msg` arrived in.
+///
+/// For the solver's own messages that is their sender: `mostro_unwrap`
+/// admitted the inner event only as signed by the solver, and the stored
+/// message keeps it after the dispute is resolved and its solver key cleared
+/// — so the history stays openable after a restart (PR #590 review). The
+/// live dispute is the fallback, for our own messages to the solver.
+fn counterpart_of(
+    msg: &ChatMessage,
+    peer_hex: Option<String>,
+    live_solver: Option<String>,
+) -> Option<String> {
+    match msg.message_type {
+        MessageType::Peer => peer_hex,
+        MessageType::Admin if !msg.is_mine => Some(msg.sender_pubkey.clone()),
+        MessageType::Admin => live_solver,
+        MessageType::System => None,
+    }
 }
 
 /// Our trade key index and the peer's pubkey for a conversation: from the
@@ -2627,6 +2676,60 @@ mod tests {
         trade.counterparty_pubkey.clear();
         assert_eq!(conversation_of(None, Some(&trade)), Some((7, None)));
         assert_eq!(conversation_of(None, None), None);
+    }
+
+    /// PR #590 review: once a dispute is resolved its solver key is cleared
+    /// and a restart does not rehydrate it — the solver's attachments are
+    /// still decrypted with the authenticated sender kept on the message.
+    #[test]
+    fn solver_attachment_counterpart_survives_the_resolved_dispute() {
+        let solver = nostr_sdk::prelude::Keys::generate().public_key().to_hex();
+        let peer = nostr_sdk::prelude::Keys::generate().public_key().to_hex();
+        let mut msg = notification_test_message("o", 1);
+        msg.message_type = MessageType::Admin;
+        msg.sender_pubkey = solver.clone();
+
+        // No live dispute (resolved, then restarted): the sender answers.
+        assert_eq!(
+            counterpart_of(&msg, Some(peer.clone()), None),
+            Some(solver.clone())
+        );
+
+        // Our own message to the solver names us as sender: only the live
+        // dispute knows who it went to.
+        msg.is_mine = true;
+        assert_eq!(counterpart_of(&msg, Some(peer.clone()), None), None);
+        assert_eq!(
+            counterpart_of(&msg, Some(peer.clone()), Some(solver.clone())),
+            Some(solver)
+        );
+
+        msg.message_type = MessageType::Peer;
+        assert_eq!(counterpart_of(&msg, Some(peer.clone()), None), Some(peer));
+        msg.message_type = MessageType::System;
+        assert_eq!(counterpart_of(&msg, None, None), None);
+    }
+
+    /// PR #590 review: a transfer that resumes after its identity was
+    /// deleted must not put the blob back into the wiped cache. A generation
+    /// no identity holds stands for the deleted one — the global identity is
+    /// driven only by the identity lifecycle test, which covers the fence.
+    #[tokio::test]
+    async fn a_transfer_of_a_deleted_identity_does_not_refill_the_cache() {
+        let path = std::env::temp_dir().join(format!(
+            "mostro-attachment-fence-{}.db",
+            uuid::Uuid::new_v4()
+        ));
+        let db = crate::db::sqlite::SqliteStorage::open(path.to_str().unwrap())
+            .await
+            .unwrap();
+        let sha = "b".repeat(64);
+
+        assert!(!cache_attachment_blob(Some(&db), Some(u64::MAX), &sha, b"blob").await);
+        assert!(!cache_attachment_blob(Some(&db), None, &sha, b"blob").await);
+        assert_eq!(db.get_attachment_blob(&sha).await.unwrap(), None);
+
+        let _ = std::fs::remove_file(&path);
     }
 
     #[tokio::test]
