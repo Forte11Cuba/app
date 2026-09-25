@@ -52,6 +52,9 @@ base64 = "0.22"
 
 # File attachment encryption (ChaCha20-Poly1305)
 chacha20poly1305 = "0.10"
+# Chat attachments (#589): images are decoded and re-encoded before upload so
+# EXIF/GPS never leaves the device. JPEG and PNG only — what may be sent.
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 rand = { version = "0.8", features = ["getrandom"] }
 
 # Hashing (nym derivation)
@@ -127,3 +130,5 @@ universal-time = { version = "0.3", default-features = false }
 # `local-relay` feature. Native only — it pulls in `tokio/net`.
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 nostr-sdk = { version = "0.45", default-features = false, features = ["local-relay"] }
+# A throwaway HTTP server for the Blossom client tests (nostr/blossom.rs).
+tokio = { version = "1", features = ["net", "io-util"] }

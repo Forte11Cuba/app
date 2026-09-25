@@ -72,13 +72,30 @@ class AppSettings {
           privacyMode == other.privacyMode;
 }
 
+/// An image or file sent in a chat (#589), as read from v1's JSON message.
 class AttachmentInfo {
+  /// Sanitized: the last path component only, safe to show and save under.
   final String fileName;
+
+  /// As declared by the sender; a label only.
   final String mimeType;
+
+  /// Size of the file before encryption, in bytes.
   final BigInt fileSize;
   final FileType fileType;
   final DownloadStatus downloadStatus;
-  final String? localPath;
+
+  /// Where the encrypted blob lives (`https://…/<sha256>`).
+  final String blossomUrl;
+
+  /// Hex SHA-256 of the encrypted blob, from the URL.
+  final String sha256;
+  final BigInt encryptedSize;
+
+  /// Pixel size, for images: lets the bubble keep its shape before the
+  /// image is decrypted.
+  final int? width;
+  final int? height;
 
   const AttachmentInfo({
     required this.fileName,
@@ -86,7 +103,11 @@ class AttachmentInfo {
     required this.fileSize,
     required this.fileType,
     required this.downloadStatus,
-    this.localPath,
+    required this.blossomUrl,
+    required this.sha256,
+    required this.encryptedSize,
+    this.width,
+    this.height,
   });
 
   @override
@@ -96,7 +117,11 @@ class AttachmentInfo {
       fileSize.hashCode ^
       fileType.hashCode ^
       downloadStatus.hashCode ^
-      localPath.hashCode;
+      blossomUrl.hashCode ^
+      sha256.hashCode ^
+      encryptedSize.hashCode ^
+      width.hashCode ^
+      height.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -108,7 +133,11 @@ class AttachmentInfo {
           fileSize == other.fileSize &&
           fileType == other.fileType &&
           downloadStatus == other.downloadStatus &&
-          localPath == other.localPath;
+          blossomUrl == other.blossomUrl &&
+          sha256 == other.sha256 &&
+          encryptedSize == other.encryptedSize &&
+          width == other.width &&
+          height == other.height;
 }
 
 /// What the add-invoice screen needs from a BOLT11 invoice to validate it

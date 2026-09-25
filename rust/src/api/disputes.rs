@@ -183,6 +183,12 @@ fn dispute_store() -> &'static DisputeStore {
     DISPUTE_STORE.get_or_init(DisputeStore::new)
 }
 
+/// The solver's pubkey for `trade_id`'s dispute, once one took it — the
+/// counterpart of the dispute chat, whose attachments are keyed to it (#589).
+pub(crate) async fn solver_pubkey(trade_id: &str) -> Option<String> {
+    dispute_store().get(trade_id).await.and_then(|d| d.admin_pubkey)
+}
+
 /// Forget every dispute of the identity being deleted (issue #533). The
 /// store is in memory by design, so without this the next user keeps seeing
 /// the previous one's disputes until the process restarts.
