@@ -355,33 +355,29 @@ pub(crate) async fn current_bip39_seed() -> Result<zeroize::Zeroizing<[u8; 64]>>
 /// Delete the in-memory identity state. Flutter must also clear
 /// `flutter_secure_storage` after calling this.
 pub async fn delete_identity() -> Result<()> {
-    delete_identity_inner(true, crate::db::app_db::db(), &RealDeleteEffects).await
+    delete_identity_inner(crate::db::app_db::db(), &RealDeleteEffects).await
 }
 
-/// [`delete_identity`], with the store, the side effects and the wipe of the
-/// identity's data switchable.
+/// [`delete_identity`], with the store and the side effects injected.
 ///
 /// The parameters exist for the identity lifecycle test (#553): the database
 /// and the in-memory stores are process-wide, and tests run in parallel
 /// against them, so a real wipe there deletes the rows other tests are
-/// asserting on. The test injects doubles and asserts the wiring instead —
-/// every wipe effect runs for `wipe_data: true`, none for `false` — while
-/// the wipe itself is covered where it can run alone
+/// asserting on. The test injects doubles and asserts the wiring instead,
+/// while the wipe itself is covered where it can run alone
 /// (`clear_identity_data_wipes_the_identity_and_keeps_the_device`,
-/// `clearing_the_store_leaves_no_chats_and_no_unread_count`).
-async fn delete_identity_inner<S: Storage, W: DeleteEffects>(
-    wipe_data: bool,
-    db: Option<&S>,
-    fx: &W,
-) -> Result<()> {
+/// `clearing_the_store_leaves_no_chats_and_no_unread_count`). There is no
+/// switch to skip the wipe: a deletion always wipes, so no argument of
+/// [`delete_identity`] can turn it off while the tests stay green (PR #565
+/// review). The binding of the real store and effects is held by
+/// `deleting_the_identity_binds_the_real_store_and_effects`.
+async fn delete_identity_inner<S: Storage, W: DeleteEffects>(db: Option<&S>, fx: &W) -> Result<()> {
     if identity_lock().read().await.is_none() {
         bail!("NoIdentity");
     }
     // While the identity still exists: its relay subscriptions are given
     // back first, so nothing of the old user's keeps arriving afterwards.
-    if wipe_data {
-        fx.release_identity_subscriptions().await;
-    }
+    fx.release_identity_subscriptions().await;
 
     let mut guard = identity_lock().write().await;
     if guard.is_none() {
@@ -414,15 +410,11 @@ async fn delete_identity_inner<S: Storage, W: DeleteEffects>(
         // next user must find the app as a fresh install would leave it.
         // Same handling as above: the identity is already gone, so a failed
         // wipe is reported, never turned into a failed deletion.
-        if wipe_data {
-            if let Err(e) = db.clear_identity_data().await {
-                log::warn!("[identity] failed to wipe the identity's data: {e}");
-            }
+        if let Err(e) = db.clear_identity_data().await {
+            log::warn!("[identity] failed to wipe the identity's data: {e}");
         }
     }
-    if wipe_data {
-        fx.forget_identity_state().await;
-    }
+    fx.forget_identity_state().await;
 
     // Last, so the cleanup warnings above are dropped too: buffered lines name
     // orders and counterparties of the identity being deleted, and the Logs
@@ -856,6 +848,21 @@ mod tests {
         assert!(body.contains("session_manager().clear()"));
         assert!(body.contains("set_claim_nodes(std::iter::empty())"));
         assert!(body.contains("clear_retained()"));
+    }
+
+    /// PR #565 review: the lifecycle test drives `delete_identity_inner`
+    /// with doubles, so nothing it runs can see what the public entry point
+    /// hands it. Passing no store there would skip every database write of
+    /// the deletion with the suite green; this holds the binding.
+    #[test]
+    fn deleting_the_identity_binds_the_real_store_and_effects() {
+        let source = include_str!("identity.rs");
+        let start = source
+            .find("pub async fn delete_identity()")
+            .expect("the public deletion exists");
+        let body = &source[start..start + source[start..].find("\n}\n").expect("it ends")];
+
+        assert!(body.contains("delete_identity_inner(crate::db::app_db::db(), &RealDeleteEffects)"));
     }
 
     use super::*;
@@ -1498,15 +1505,26 @@ mod tests {
 
         // The deletion wiring (#553), asserted with doubles so the
         // process-wide stores stay untouched — see `delete_identity_inner`.
-        // With `wipe_data: false`, no wipe effect may run.
-        let kept = CallLog::default();
-        delete_identity_inner(false, Some(&SpyStore(&kept)), &SpyEffects(&kept))
+        // Every wipe effect runs (#533's acceptance criteria). Contract in
+        // this sequence: `release_identity_subscriptions` comes first, while
+        // the identity still exists. The rest is today's order, pinned
+        // because a wiring test reads cheapest as a literal transcript — not
+        // because it is semantic.
+        let wiped = CallLog::default();
+        delete_identity_inner(Some(&SpyStore(&wiped)), &SpyEffects(&wiped))
             .await
             .unwrap();
         assert_eq!(
-            kept.calls(),
-            ["unregister_push", "delete_identity", "clear_trade_keys"],
-            "wipe_data: false must skip every wipe effect",
+            wiped.calls(),
+            [
+                "release_identity_subscriptions",
+                "unregister_push",
+                "delete_identity",
+                "clear_trade_keys",
+                "clear_identity_data",
+                "forget_identity_state",
+            ],
+            "a deletion must run every wipe effect",
         );
         assert!(get_identity().await.unwrap().is_none());
         assert_eq!(identity_generation().await, None);
@@ -1538,29 +1556,10 @@ mod tests {
         let reloaded = identity_generation().await.expect("an identity is loaded");
         assert_ne!(reloaded, generation);
         assert!(while_identity_current(generation, async {}).await.is_none());
-
-        // With `wipe_data: true` — what the real `delete_identity()` passes —
-        // all three wipe effects run (#533's acceptance criteria; #553).
-        // Contract in this sequence: `release_identity_subscriptions` comes
-        // first, while the identity still exists. The rest is today's order,
-        // pinned because a wiring test reads cheapest as a literal
-        // transcript — not because it is semantic.
-        let wiped = CallLog::default();
-        delete_identity_inner(true, Some(&SpyStore(&wiped)), &SpyEffects(&wiped))
+        let again = CallLog::default();
+        delete_identity_inner(Some(&SpyStore(&again)), &SpyEffects(&again))
             .await
             .unwrap();
-        assert_eq!(
-            wiped.calls(),
-            [
-                "release_identity_subscriptions",
-                "unregister_push",
-                "delete_identity",
-                "clear_trade_keys",
-                "clear_identity_data",
-                "forget_identity_state",
-            ],
-            "wipe_data: true must run every wipe effect",
-        );
         assert!(get_identity().await.unwrap().is_none());
     }
 }
