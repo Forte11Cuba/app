@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -39,8 +41,9 @@ Future<void> resetIdentityScopedState(ProviderContainer container) async {
   container.invalidate(chatReadStatusProvider);
   // Decrypted attachments of the previous user's chats, in memory.
   container.invalidate(decryptedAttachmentCacheProvider);
-  // And any copy of one still handed to another app.
-  await container.read(attachmentLauncherProvider).sweep();
+  // And any copy of one still handed to another app. Not awaited: disk
+  // cleanup must not hold up the swap, and the sweep never throws.
+  unawaited(container.read(attachmentLauncherProvider).sweep());
   container.invalidate(disputeNotifierProvider);
   // Persisted (sembast), so it needs a real wipe, not just an invalidation.
   final notices = container.read(notificationsProvider).length;

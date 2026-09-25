@@ -26,6 +26,16 @@ void main() {
       expect(safeTempFileName('', 'pdf'), 'attachment.pdf');
     });
 
+    test('never names a copy after a Windows device', () {
+      expect(safeTempFileName('CON.pdf', 'pdf'), '_CON.pdf');
+      expect(safeTempFileName('aux.docx', 'docx'), '_aux.docx');
+      expect(safeTempFileName('COM1.mp4', 'mp4'), '_COM1.mp4');
+      expect(safeTempFileName('Lpt9.backup.pdf', 'pdf'), '_Lpt9.backup.pdf');
+      // Only the whole first part counts.
+      expect(safeTempFileName('console.pdf', 'pdf'), 'console.pdf');
+      expect(safeTempFileName('COM10.pdf', 'pdf'), 'COM10.pdf');
+    });
+
     test('caps a long name', () {
       final name = safeTempFileName('${'x' * 300}.pdf', 'pdf');
       expect(name.length, lessThanOrEqualTo(64));
@@ -95,6 +105,43 @@ void main() {
         Directory(p.join(root.path, kAttachmentTempDir)).existsSync(),
         isFalse,
       );
+    });
+
+    test('a copy no app took is deleted at once', () async {
+      final path = await launcher.writeTempCopy(
+        attachmentData([1], fileName: 'a.pdf', mimeType: 'application/pdf'),
+      );
+
+      launcher.releaseCopy(path, handedOff: false);
+      await pumpEventQueue();
+
+      expect(File(path).parent.existsSync(), isFalse);
+    });
+
+    test('a handed-off copy expires on its own, without a sweep', () async {
+      final shortLived = AttachmentLauncher(
+        tempRoot: () async => root,
+        copyLifetime: const Duration(milliseconds: 20),
+      );
+      final path = await shortLived.writeTempCopy(
+        attachmentData([1], fileName: 'a.pdf', mimeType: 'application/pdf'),
+      );
+
+      shortLived.releaseCopy(path, handedOff: true);
+      expect(File(path).existsSync(), isTrue);
+      await Future<void>.delayed(const Duration(milliseconds: 80));
+
+      expect(File(path).parent.existsSync(), isFalse);
+    });
+
+    test('never deletes outside its own directory', () async {
+      final elsewhere = File(p.join(root.path, 'keep', 'x.pdf'))
+        ..createSync(recursive: true);
+
+      launcher.releaseCopy(elsewhere.path, handedOff: false);
+      await pumpEventQueue();
+
+      expect(elsewhere.existsSync(), isTrue);
     });
 
     test('sweep with nothing to delete is a no-op', () async {

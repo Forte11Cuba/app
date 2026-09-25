@@ -141,7 +141,8 @@ class AttachmentData {
   final String fileName;
 
   /// What the bytes are, sniffed after decrypting (JPEG, PNG, PDF); for any
-  /// other type, the MIME the sender declared.
+  /// other type, the MIME the sender declared — or `application/octet-stream`
+  /// when the sender declared JPEG, PNG or PDF and the bytes are not.
   final String mimeType;
 
   const AttachmentData({

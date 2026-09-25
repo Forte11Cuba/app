@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -36,6 +37,18 @@ const String kAttachmentTempDir = 'chat_attachments_open';
 
 const int _maxStemLength = 60;
 
+/// How long a copy handed to another app is kept. Long enough for the other
+/// app to read it; the lifecycle sweeps cannot be relied on to come sooner
+/// (a share sheet does not suspend the app, a desktop window never does).
+const Duration kTempCopyLifetime = Duration(minutes: 5);
+
+/// Names Windows reserves for devices, with or without an extension:
+/// `CON.pdf` cannot be created as a file.
+final RegExp _windowsReservedName = RegExp(
+  r'^(con|prn|aux|nul|com[0-9¹²³]|lpt[0-9¹²³])$',
+  caseSensitive: false,
+);
+
 /// The name a temporary copy of [fileName] gets: letters, digits, space,
 /// `.`, `_` and `-` only, and the extension of its MIME type, never the one
 /// the sender chose.
@@ -43,7 +56,7 @@ const int _maxStemLength = 60;
 /// Rust already strips paths and control characters; this is stricter
 /// because the name reaches a shell on Windows (`open_filex` runs
 /// `cmd /c start`), where `&` or `|` in a peer's file name would run a
-/// command.
+/// command. A Windows device name (`CON`, `COM1`…) gets a `_` in front.
 String safeTempFileName(String fileName, String extension) {
   final stem =
       p
@@ -53,7 +66,10 @@ String safeTempFileName(String fileName, String extension) {
           .trim();
   final capped =
       stem.length > _maxStemLength ? stem.substring(0, _maxStemLength) : stem;
-  return '${capped.isEmpty ? 'attachment' : capped}.$extension';
+  if (capped.isEmpty) return 'attachment.$extension';
+  // Windows reads the part before the first dot: `CON.backup.pdf` is `CON`.
+  final device = _windowsReservedName.hasMatch(capped.split('.').first.trim());
+  return '${device ? '_' : ''}$capped.$extension';
 }
 
 /// How handing a file to another app went.
@@ -64,14 +80,21 @@ enum LaunchOutcome { done, noApp, failed }
 ///
 /// Both need the plaintext on disk, which the chat otherwise never writes.
 /// So each copy goes to its own directory under the app's cache, named by
-/// [safeTempFileName], and [sweep] deletes them all: when the user comes
-/// back to the app (the other app has read it by then), at start-up, and on
-/// an identity change.
+/// [safeTempFileName], and is deleted:
+///
+/// - at once, when no app took it (nothing to open it, or an error);
+/// - [copyLifetime] after it was handed off, while the app runs;
+/// - by [sweep], with every other copy: when the user comes back to the app,
+///   at start-up and on an identity change — which also catches a copy whose
+///   timer died with the process.
 class AttachmentLauncher {
-  AttachmentLauncher({Future<Directory> Function()? tempRoot})
-    : _tempRoot = tempRoot ?? getTemporaryDirectory;
+  AttachmentLauncher({
+    Future<Directory> Function()? tempRoot,
+    this.copyLifetime = kTempCopyLifetime,
+  }) : _tempRoot = tempRoot ?? getTemporaryDirectory;
 
   final Future<Directory> Function() _tempRoot;
+  final Duration copyLifetime;
 
   /// Whether [data] may be opened or shared: a known type, on a platform
   /// with a file system.
@@ -88,23 +111,61 @@ class AttachmentLauncher {
 
   Future<LaunchOutcome> openWith(messages_api.AttachmentData data) async {
     final path = await writeTempCopy(data);
-    final result = await OpenFilex.open(path, type: data.mimeType);
-    return switch (result.type) {
-      ResultType.done => LaunchOutcome.done,
-      ResultType.noAppToOpen => LaunchOutcome.noApp,
-      _ => LaunchOutcome.failed,
-    };
+    var outcome = LaunchOutcome.failed;
+    try {
+      final result = await OpenFilex.open(path, type: data.mimeType);
+      outcome = switch (result.type) {
+        ResultType.done => LaunchOutcome.done,
+        ResultType.noAppToOpen => LaunchOutcome.noApp,
+        _ => LaunchOutcome.failed,
+      };
+      return outcome;
+    } finally {
+      releaseCopy(path, handedOff: outcome == LaunchOutcome.done);
+    }
   }
 
   /// [origin] anchors the share popover on iPad and macOS.
   Future<void> share(messages_api.AttachmentData data, {Rect? origin}) async {
     final path = await writeTempCopy(data);
-    await SharePlus.instance.share(
-      ShareParams(
-        files: [XFile(path, mimeType: data.mimeType)],
-        sharePositionOrigin: origin,
-      ),
-    );
+    var handedOff = false;
+    try {
+      await SharePlus.instance.share(
+        ShareParams(
+          files: [XFile(path, mimeType: data.mimeType)],
+          sharePositionOrigin: origin,
+        ),
+      );
+      // The target may still be reading it (Android hands over a URI), so
+      // it expires rather than going now, whatever the user picked.
+      handedOff = true;
+    } finally {
+      releaseCopy(path, handedOff: handedOff);
+    }
+  }
+
+  /// Deletes the copy at [path] now, or after [copyLifetime] when another
+  /// app took it and may still be reading it.
+  @visibleForTesting
+  void releaseCopy(String path, {required bool handedOff}) {
+    if (!handedOff) {
+      unawaited(_deleteCopy(path));
+      return;
+    }
+    Timer(copyLifetime, () => unawaited(_deleteCopy(path)));
+  }
+
+  /// Removes a copy with the directory made for it. Never throws: a copy
+  /// still locked by its reader (Windows) is left to the next [sweep].
+  Future<void> _deleteCopy(String path) async {
+    try {
+      final dir = File(path).parent;
+      // Only ever a directory writeTempCopy made.
+      if (p.basename(dir.parent.path) != kAttachmentTempDir) return;
+      if (await dir.exists()) await dir.delete(recursive: true);
+    } catch (e) {
+      debugPrint('[chat] attachment temp copy not deleted yet: $e');
+    }
   }
 
   /// Writes [data] where another app can read it and returns the path.
