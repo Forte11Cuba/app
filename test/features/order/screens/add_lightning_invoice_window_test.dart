@@ -146,4 +146,162 @@ void main() {
       semantics.dispose();
     }
   });
+
+  // A node switch recomputes the capabilities while this screen is open, and
+  // Riverpod hands out the *previous* node's facts during that refetch. The
+  // verdict standing on screen was judged against the node being replaced, so
+  // it has to be withdrawn until the new facts land — otherwise automation
+  // reads, and the buyer acts on, a window and a network that no longer apply.
+  testWidgets('a node refresh withdraws the verdict until it settles again', (
+    tester,
+  ) async {
+    final semantics = tester.ensureSemantics();
+    final fetches = <Completer<MostroInstance?>>[
+      Completer<MostroInstance?>(),
+      Completer<MostroInstance?>(),
+    ];
+    var served = 0;
+    try {
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            isWalletConnectedProvider.overrideWithValue(false),
+            tradeAmountProvider.overrideWith(
+              (ref, orderId) => Stream.value(BigInt.from(250)),
+            ),
+            tradeUpdatesProvider.overrideWith(
+              (ref) => const Stream<TradeUpdate>.empty(),
+            ),
+            tradeInfoProvider.overrideWith((ref, orderId) async => null),
+            mostroNodeProvider.overrideWith((ref) => fetches[served++].future),
+            invoiceCheckerProvider.overrideWithValue(
+              (request) async => const InvoiceCheckValid(250),
+            ),
+          ],
+          child: MaterialApp(
+            theme: buildDarkTheme(),
+            localizationsDelegates: AppLocalizations.localizationsDelegates,
+            supportedLocales: AppLocalizations.supportedLocales,
+            locale: const Locale('en'),
+            home: const AddLightningInvoiceScreen(orderId: 'order-1'),
+          ),
+        ),
+      );
+      await tester.pump();
+
+      fetches[0].complete(
+        const MostroInstance(
+          pubKey: 'node-a',
+          lndNetworks: 'mainnet',
+          invoiceExpirationWindow: 3600,
+        ),
+      );
+      await tester.pump();
+
+      await tester.enterText(find.byType(TextField), 'lnbc2500u1ok');
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pump();
+
+      expect(
+        _semantics('invoice.check'),
+        findsOneWidget,
+        reason: 'settled facts, so the verdict stands',
+      );
+
+      // The switch. The second fetch never answers, so the screen stays in
+      // the refetch for the rest of the test.
+      ProviderScope.containerOf(
+        tester.element(find.byType(AddLightningInvoiceScreen)),
+      ).invalidate(mostroNodeProvider);
+      await tester.pump();
+      await tester.pump();
+
+      expect(
+        _semantics('invoice.check'),
+        findsNothing,
+        reason: 'the verdict belonged to the node being replaced',
+      );
+      expect(served, 2, reason: 'the refetch really started');
+    } finally {
+      semantics.dispose();
+    }
+  });
+
+  // The same withdrawal, for the direction that costs the buyer rather than
+  // the daemon: a refusal judged against the replaced node's window would
+  // keep `invoice.submit` shut on an invoice the new node may well accept.
+  // A stale refusal is not degraded the way a stale pass is — only dropping
+  // the retained facts changes the context key and forces the re-judge.
+  testWidgets('a refusal from the replaced node is withdrawn too', (
+    tester,
+  ) async {
+    final semantics = tester.ensureSemantics();
+    final fetches = <Completer<MostroInstance?>>[
+      Completer<MostroInstance?>(),
+      Completer<MostroInstance?>(),
+    ];
+    var served = 0;
+    try {
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            isWalletConnectedProvider.overrideWithValue(false),
+            tradeAmountProvider.overrideWith(
+              (ref, orderId) => Stream.value(BigInt.from(250)),
+            ),
+            tradeUpdatesProvider.overrideWith(
+              (ref) => const Stream<TradeUpdate>.empty(),
+            ),
+            tradeInfoProvider.overrideWith((ref, orderId) async => null),
+            mostroNodeProvider.overrideWith((ref) => fetches[served++].future),
+            invoiceCheckerProvider.overrideWithValue(
+              (request) async => const InvoiceCheckError(
+                InvoiceProblem.expiresTooSoon,
+                minRemainingSecs: 3600,
+              ),
+            ),
+          ],
+          child: MaterialApp(
+            theme: buildDarkTheme(),
+            localizationsDelegates: AppLocalizations.localizationsDelegates,
+            supportedLocales: AppLocalizations.supportedLocales,
+            locale: const Locale('en'),
+            home: const AddLightningInvoiceScreen(orderId: 'order-1'),
+          ),
+        ),
+      );
+      await tester.pump();
+
+      fetches[0].complete(
+        const MostroInstance(
+          pubKey: 'node-a',
+          lndNetworks: 'mainnet',
+          invoiceExpirationWindow: 3600,
+        ),
+      );
+      await tester.pump();
+
+      await tester.enterText(find.byType(TextField), 'lnbc2500u1soon');
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pump();
+
+      expect(_semantics('invoice.check'), findsOneWidget);
+      expect(find.textContaining('60 minutes'), findsOneWidget);
+
+      ProviderScope.containerOf(
+        tester.element(find.byType(AddLightningInvoiceScreen)),
+      ).invalidate(mostroNodeProvider);
+      await tester.pump();
+      await tester.pump();
+
+      expect(
+        _semantics('invoice.check'),
+        findsNothing,
+        reason: 'the window it was refused against is being replaced',
+      );
+      expect(served, 2, reason: 'the refetch really started');
+    } finally {
+      semantics.dispose();
+    }
+  });
 }

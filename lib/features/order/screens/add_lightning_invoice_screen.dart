@@ -206,7 +206,15 @@ class _AddLightningInvoiceScreenState
   /// lifetime left than this). Both may still be loading.
   _NodeContext _nodeContext() {
     final async = ref.read(mostroNodeProvider);
-    final node = async.valueOrNull;
+    // A fetch still in flight is the only state with nothing to say: a node
+    // that publishes no window and a fetch that failed are both answers.
+    // Riverpod hands out the previous node's facts throughout a refetch
+    // (`copyWithPrevious`, so `hasValue` stays true), and after a node switch
+    // those belong to the node being replaced — judging against them would
+    // apply the old window and network to the new node. One predicate, so the
+    // facts and the flag saying they are known cannot drift apart.
+    final settled = !async.isLoading;
+    final node = settled ? async.valueOrNull : null;
     final networks =
         node?.lndNetworks
             ?.split(',')
@@ -218,11 +226,7 @@ class _AddLightningInvoiceScreenState
       networks: networks,
       minRemainingSecs: node?.invoiceExpirationWindow,
       key: '${networks.join(',')}|${node?.invoiceExpirationWindow}',
-      // Settled either way: a node that publishes no window, or a fetch that
-      // failed, are both answers — only a fetch still in flight is not. The
-      // two are indistinguishable through `valueOrNull`, which is why the
-      // whole AsyncValue is read.
-      factsKnown: async.hasValue || async.hasError,
+      factsKnown: settled,
     );
   }
 
