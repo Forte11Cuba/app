@@ -813,10 +813,7 @@ class _AddLightningInvoiceScreenState
           error,
         ] else if (validation != null) ...[
           const SizedBox(height: 8),
-          InvoiceValidationRow(
-            text: validation,
-            isValid: check is! InvoiceCheckError,
-          ),
+          invoiceCheckRow(check: check, sentence: validation),
         ],
         if (trade != null) ...[
           const SizedBox(height: 12),
