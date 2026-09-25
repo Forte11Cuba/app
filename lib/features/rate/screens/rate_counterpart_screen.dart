@@ -6,6 +6,7 @@ import 'package:mostro/core/app_theme.dart';
 import 'package:mostro/core/automation/automation_id.dart';
 import 'package:mostro/core/automation/automation_ids.dart';
 import 'package:mostro/core/daemon_errors.dart';
+import 'package:mostro/features/account/providers/privacy_mode_provider.dart';
 import 'package:mostro/features/rate/providers/rating_providers.dart';
 import 'package:mostro/features/order/providers/trade_state_provider.dart';
 import 'package:mostro/features/trades/screens/trade_detail_screen.dart';
@@ -47,7 +48,8 @@ class _RateCounterpartScreenState extends ConsumerState<RateCounterpartScreen> {
         ref.read(tradeStatusProvider(widget.orderId)).valueOrNull,
         _isBuyer(read: true),
       ) &&
-      !ref.read(ratedByMeProvider(widget.orderId));
+      !ref.read(ratedByMeProvider(widget.orderId)) &&
+      !ref.read(privacyModeProvider);
 
   /// The user's role, `null` until known. Unknown counts as the buyer: then
   /// only `success` opens the rating, which the daemon accepts from either
@@ -106,11 +108,14 @@ class _RateCounterpartScreenState extends ConsumerState<RateCounterpartScreen> {
     // it: the seller's rating step can last as long as a retrying payout
     // (#586), and a second submit would only meet `AlreadyRated`. Until the
     // local rating has been read, that screen's own `loading` stands in —
-    // no flash of a form that is about to go away.
+    // no flash of a form that is about to go away. Privacy mode sends no
+    // rating at all (Rust refuses it), so it gets the trade screen too, which
+    // withholds the rating the same way.
     final rating = ref.watch(tradeRatingProvider(widget.orderId));
     if (!_atRatingStep(status, _isBuyer()) ||
         (rating.isLoading && !rating.hasValue) ||
-        ref.watch(ratedByMeProvider(widget.orderId))) {
+        ref.watch(ratedByMeProvider(widget.orderId)) ||
+        ref.watch(privacyModeProvider)) {
       return TradeDetailScreen(orderId: widget.orderId);
     }
     final colors = Theme.of(context).extension<AppColors>();

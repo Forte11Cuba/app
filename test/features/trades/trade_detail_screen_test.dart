@@ -6,6 +6,7 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
+import 'package:mostro/features/account/providers/privacy_mode_provider.dart';
 import 'package:mostro/core/app_routes.dart';
 import 'package:mostro/core/app_theme.dart';
 import 'package:mostro/core/automation/automation_ids.dart';
@@ -56,9 +57,14 @@ Future<ProviderContainer> _pumpTradeDetail(
   Future<RatingInfo?> Function()? ratingFetch,
   Locale locale = const Locale('en'),
   List<TradeInfo>? trades,
+  bool privacyMode = false,
 }) async {
   final container = createContainer(
     overrides: [
+      if (privacyMode)
+        privacyModeProvider.overrideWith(
+          (ref) => PrivacyModeNotifier(initialValue: true),
+        ),
       if (releaseOrder != null)
         releaseOrderActionProvider.overrideWithValue(releaseOrder),
       if (trades != null) rawTradesProvider.overrideWith((ref) async => trades),
@@ -653,6 +659,25 @@ void main() {
       expect(find.byType(StarRating), findsNothing);
       expect(find.text(_en.successfulOrder), findsNothing);
       expect(_filledButtonWithText(_en.tradeSendRatingAction), findsNothing);
+    });
+
+    testWidgets('in privacy mode gets no rating form on the rating route', (
+      tester,
+    ) async {
+      // CodeRabbit on #587: the trade screen withholds the rating in privacy
+      // mode (Rust refuses to send one); a direct route must not offer it.
+      await _pumpTradeDetail(
+        tester,
+        orderId: 'order-seller-private',
+        isBuyer: false,
+        status: OrderStatus.settledHoldInvoice,
+        ratingRoute: true,
+        privacyMode: true,
+      );
+      expect(find.text(_en.successfulOrder), findsNothing);
+      expect(_filledButtonWithText(_en.tradeSendRatingAction), findsNothing);
+      expect(find.text(_en.submitUppercaseButton), findsNothing);
+      expect(find.text(_en.rateScreenHeader), findsNothing);
     });
 
     testWidgets('once rated, is done — even before the payout completes', (
