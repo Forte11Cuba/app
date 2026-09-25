@@ -572,14 +572,37 @@ pub enum TradeUpdateReason {
     CooperativeCancelRequestedByPeer,
 }
 
+/// An image or file sent in a chat (#589), as read from v1's JSON message.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AttachmentInfo {
+    /// Sanitized: the last path component only, safe to show and save under.
     pub file_name: String,
+    /// As declared by the sender; a label only.
     pub mime_type: String,
+    /// Size of the file before encryption, in bytes.
     pub file_size: u64,
     pub file_type: FileType,
     pub download_status: DownloadStatus,
-    pub local_path: Option<String>,
+    /// Where the encrypted blob lives (`https://…/<sha256>`).
+    #[serde(default)]
+    pub blossom_url: String,
+    /// Hex SHA-256 of the encrypted blob, from the URL.
+    #[serde(default)]
+    pub sha256: String,
+    #[serde(default)]
+    pub encrypted_size: u64,
+    /// Pixel size, for images: lets the bubble keep its shape before the
+    /// image is decrypted.
+    #[serde(default)]
+    pub width: Option<u32>,
+    #[serde(default)]
+    pub height: Option<u32>,
+    /// For a file we sent: the pubkey it was encrypted to — the peer, or the
+    /// solver in the dispute chat. Never read from the wire. Kept because
+    /// our own message names only us as its sender, and a resolved
+    /// dispute's solver key is gone after a restart (PR #596 review).
+    #[serde(default)]
+    pub counterpart_pubkey: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

@@ -1,9 +1,12 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:mostro/core/app_theme.dart';
+import 'package:mostro/features/chat/attachments/attachment_flow.dart';
+import 'package:mostro/features/chat/attachments/upload_controller.dart';
 import 'package:mostro/features/chat/models/chat_list_rules.dart';
 import 'package:mostro/features/chat/providers/chat_list_provider.dart';
 import 'package:mostro/features/chat/providers/chat_providers.dart';
@@ -11,6 +14,7 @@ import 'package:mostro/features/chat/widgets/info_panels.dart';
 import 'package:mostro/features/chat/widgets/message_bubble.dart';
 import 'package:mostro/features/chat/widgets/message_input.dart';
 import 'package:mostro/features/chat/widgets/trade_state_header.dart';
+import 'package:mostro/features/chat/widgets/upload_bubble.dart';
 import 'package:mostro/features/notifications/models/notification_model.dart';
 import 'package:mostro/features/notifications/providers/notifications_provider.dart';
 import 'package:mostro/features/trades/providers/trades_providers.dart';
@@ -228,19 +232,7 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
         content: text.trim(),
       );
       if (!mounted) return;
-      // Record the id here too: every path that appends to [_messages] must
-      // go through [_seenIds], or an echo of this send arriving on the
-      // stream would render it twice.
-      if (_seenIds.add(sent.id)) {
-        setState(() => _messages.add(sent));
-      }
-      _scrollToBottom();
-      ref.read(chatRoomsNotifierProvider.notifier).upsertRoom(
-            _buildRoomPreview(
-              lastMsg: sent,
-              rooms: ref.read(chatRoomsNotifierProvider),
-            ),
-          );
+      _addOwnMessage(sent);
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -254,11 +246,44 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
     }
   }
 
+  /// Appends a message this device sent and moves the room preview to it.
+  void _addOwnMessage(rust_types.ChatMessage sent) {
+    // Every path that appends to [_messages] must go through [_seenIds], or
+    // an echo of this send arriving on the stream would render it twice.
+    if (_seenIds.add(sent.id)) {
+      setState(() => _messages.add(sent));
+    }
+    _scrollToBottom();
+    ref.read(chatRoomsNotifierProvider.notifier).upsertRoom(
+          _buildRoomPreview(
+            lastMsg: sent,
+            rooms: ref.read(chatRoomsNotifierProvider),
+          ),
+        );
+  }
+
+  /// Paperclip: pick, confirm, then send (#589). The spinner covers the
+  /// pick and the read; the upload shows its own progress in the list.
   Future<void> _onAttach() async {
-    setState(() => _isAttaching = true);
-    // File attachment via send_file is wired in Rust; UI hook deferred.
-    await Future<void>.delayed(const Duration(seconds: 1));
-    if (mounted) setState(() => _isAttaching = false);
+    if (_isAttaching) return;
+    final picked = await pickAttachmentToSend(
+      context,
+      ref,
+      onBusy: (busy) => setState(() => _isAttaching = busy),
+    );
+    if (picked == null || !mounted) return;
+    _scrollToBottom();
+    final sent = await ref
+        .read(chatUploadsProvider(widget.orderId).notifier)
+        .send(picked.name, picked.bytes);
+    if (sent != null && mounted) _addOwnMessage(sent);
+  }
+
+  Future<void> _retryUpload(String uploadId) async {
+    final sent = await ref
+        .read(chatUploadsProvider(widget.orderId).notifier)
+        .retry(uploadId);
+    if (sent != null && mounted) _addOwnMessage(sent);
   }
 
   // ── Incoming stream ───────────────────────────────────────────────────────
@@ -431,6 +456,8 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
       throw StateError('AppColors theme extension must be registered');
     }
 
+    final uploads = ref.watch(chatUploadsProvider(widget.orderId));
+
     final screenWidth = MediaQuery.sizeOf(context).width;
     final showSidePanel = screenWidth >= AppBreakpoints.tablet;
 
@@ -500,7 +527,7 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
         Expanded(
           child: !_historyLoaded
               ? const Center(child: CircularProgressIndicator())
-              : _messages.isEmpty
+              : _messages.isEmpty && uploads.isEmpty
                   ? Center(
                       child: Padding(
                         padding: const EdgeInsets.all(AppSpacing.lg),
@@ -515,8 +542,21 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
                       controller: _scrollController,
                       padding: const EdgeInsets.symmetric(
                           vertical: AppSpacing.sm),
-                      itemCount: _messages.length,
+                      itemCount: _messages.length + uploads.length,
                       itemBuilder: (context, index) {
+                        // Files still on their way out follow the history.
+                        if (index >= _messages.length) {
+                          final upload = uploads[index - _messages.length];
+                          return UploadBubble(
+                            key: ValueKey(upload.id),
+                            upload: upload,
+                            onRetry: () => _retryUpload(upload.id),
+                            onDiscard: () => ref
+                                .read(chatUploadsProvider(widget.orderId)
+                                    .notifier)
+                                .discard(upload.id),
+                          );
+                        }
                         final msg = _messages[index];
                         return MessageBubble(
                           // Adapt the FRB-generated ChatMessage to the
@@ -530,6 +570,7 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
                             hasAttachment: msg.hasAttachment,
                             createdAt: msg.createdAt.toInt(),
                             messageType: _msgTypeStr(msg.messageType),
+                            attachment: msg.attachment,
                           ),
                           peerColorHue: room.peerColorHue,
                         );
@@ -552,7 +593,8 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
             ChatRowState(canCompose: false) => const SizedBox.shrink(),
             _ => MessageInput(
                 onSendText: _onSend,
-                onAttachFile: _onAttach,
+                // Blossom is not wired on the web yet (#150).
+                onAttachFile: kIsWeb ? null : _onAttach,
                 isAttaching: _isAttaching || _isSending,
               ),
           },

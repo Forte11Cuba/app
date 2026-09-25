@@ -73,13 +73,9 @@
   "@disputeLoadError": {
     "description": "Error message shown when disputes fail to load"
   },
-  "disputeMessagingComingSoon": "Dispute messaging coming soon",
-  "@disputeMessagingComingSoon": {
-    "description": "Snackbar shown when user tries to send a dispute message"
-  },
-  "disputeAttachmentsComingSoon": "File attachments coming soon",
-  "@disputeAttachmentsComingSoon": {
-    "description": "Snackbar shown when user tries to attach a file in dispute chat"
+  "disputeSolverNotAssigned": "No resolver has taken this dispute yet. You can write once one does.",
+  "@disputeSolverNotAssigned": {
+    "description": "Shown when the user tries to write in a dispute chat before a solver has taken the dispute"
   },
   "disputeNotFound": "Dispute not found.",
   "@disputeNotFound": {
@@ -207,6 +203,15 @@
   "filterButtonLabel": "Filter",
   "@filterButtonLabel": {
     "description": "Button label to open order book filter options"
+  },
+  "filtersActiveCount": "{count, plural, =1{1 filter on} other{{count} filters on}}",
+  "@filtersActiveCount": {
+    "description": "Screen-reader addition to the order-book filter chip when filters narrow the book; the chip itself shows only the number in a badge. Read after the chip label, e.g. 'Filter, 2 filters on'",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
   },
   "noOrdersAvailable": "No orders available",
   "@noOrdersAvailable": {
@@ -1900,18 +1905,6 @@
   "@sharedKeySafetyNote": {
     "description": "Safety note about the shared key"
   },
-  "attachmentLabel": "[Attachment]",
-  "@attachmentLabel": {
-    "description": "Label shown on a chat bubble that has a file attachment"
-  },
-  "downloadTooltip": "Download",
-  "@downloadTooltip": {
-    "description": "Tooltip for the file download button"
-  },
-  "fileDownloadPlaceholder": "File download wired in Phase 10+",
-  "@fileDownloadPlaceholder": {
-    "description": "Placeholder snackbar for file download (not yet wired)"
-  },
   "fileTypeVideo": "Video",
   "@fileTypeVideo": {
     "description": "File type chip: video"
@@ -1927,14 +1920,6 @@
   "fileTypeFile": "File",
   "@fileTypeFile": {
     "description": "File type chip: generic file"
-  },
-  "tapToDownload": "Tap to download",
-  "@tapToDownload": {
-    "description": "Hint on an encrypted image placeholder"
-  },
-  "imageDownloadPlaceholder": "Image download wired in Phase 10+",
-  "@imageDownloadPlaceholder": {
-    "description": "Placeholder snackbar for image download (not yet wired)"
   },
   "buyingSatsAmount": "Buying {sats} sats",
   "@buyingSatsAmount": {
@@ -4080,5 +4065,69 @@
   "restoreActionNotice": "{count, plural, =1{You have 1 active order waiting for you} other{You have {count} active orders waiting for you}}",
   "@restoreActionNotice": {"description": "Restore summary notice: trades waiting for the user's next step", "placeholders": {"count": {"type": "int"}}},
   "restorePartialNotice": "{missing} of {total} orders couldn't be loaded",
-  "@restorePartialNotice": {"description": "Restore summary warning when some orders' details did not load; missing and total are counts", "placeholders": {"missing": {"type": "int"}, "total": {"type": "int"}}}
+  "@restorePartialNotice": {"description": "Restore summary warning when some orders' details did not load; missing and total are counts", "placeholders": {"missing": {"type": "int"}, "total": {"type": "int"}}},
+  "attachSheetTitle": "Send a file",
+  "@attachSheetTitle": {"description": "Title of the sheet that picks a file to send in the trade chat"},
+  "attachSheetBody": "It is encrypted on your device. Only your counterpart can open it.",
+  "@attachSheetBody": {"description": "Body of the attach sheet: what happens to the file"},
+  "attachSheetBodySolver": "It is encrypted on your device. Only the resolver can open it.",
+  "@attachSheetBodySolver": {"description": "Body of the attach sheet in the dispute chat, where only the solver can open the file"},
+  "attachSourcePhoto": "Photo",
+  "@attachSourcePhoto": {"description": "Attach sheet row: pick a photo from the gallery"},
+  "attachSourceCamera": "Camera",
+  "@attachSourceCamera": {"description": "Attach sheet row: take a photo with the camera"},
+  "attachSourcePdf": "PDF document",
+  "@attachSourcePdf": {"description": "Attach sheet row: pick a PDF document"},
+  "attachConfirmTitle": "Send this file?",
+  "@attachConfirmTitle": {"description": "Title of the dialog confirming a file before it is sent"},
+  "attachConfirmBody": "{fileName} ({size})",
+  "@attachConfirmBody": {"description": "Body of the send confirmation: the file name and its size", "placeholders": {"fileName": {"type": "String"}, "size": {"type": "String"}}},
+  "attachmentTooLarge": "Files can be up to 25 MB.",
+  "@attachmentTooLarge": {"description": "Error: the picked file is over the 25 MB limit"},
+  "attachmentUnsupported": "Only JPEG, PNG and PDF files can be sent.",
+  "@attachmentUnsupported": {"description": "Error: the file is not a type the chat sends"},
+  "attachmentInvalidImage": "This image could not be read.",
+  "@attachmentInvalidImage": {"description": "Error: the image could not be decoded"},
+  "attachmentReadFailed": "The file could not be read.",
+  "@attachmentReadFailed": {"description": "Error: the picked file could not be read from the device"},
+  "attachmentPeerUnknown": "You can send files once someone takes the order.",
+  "@attachmentPeerUnknown": {"description": "Error: no counterpart yet, so there is no one to encrypt the file for"},
+  "attachmentUploadFailed": "The upload failed. Check your connection and try again.",
+  "@attachmentUploadFailed": {"description": "Error: no file server accepted the upload"},
+  "attachmentSendFailed": "The file could not be sent.",
+  "@attachmentSendFailed": {"description": "Error: the file could not be sent, for any other reason"},
+  "attachmentDownloadFailed": "The file could not be downloaded.",
+  "@attachmentDownloadFailed": {"description": "Error: the attachment could not be downloaded"},
+  "attachmentDecryptFailed": "This file could not be decrypted.",
+  "@attachmentDecryptFailed": {"description": "Error: the attachment was downloaded but does not decrypt"},
+  "attachmentWebUnavailable": "Files are not available on the web yet.",
+  "@attachmentWebUnavailable": {"description": "Shown on the web build, where attachments are not supported yet"},
+  "attachmentUploading": "Sending…",
+  "@attachmentUploading": {"description": "Status of a file bubble while it is being encrypted and uploaded"},
+  "attachmentDiscard": "Discard",
+  "@attachmentDiscard": {"description": "Button that drops a failed upload from the chat"},
+  "attachmentSave": "Save",
+  "@attachmentSave": {"description": "Button or tooltip that saves a received file"},
+  "attachmentSaved": "File saved",
+  "@attachmentSaved": {"description": "Snackbar after a file was saved"},
+  "attachmentSaveFailed": "The file could not be saved.",
+  "@attachmentSaveFailed": {"description": "Snackbar when saving a file failed"},
+  "attachmentImageSemantics": "Image: {fileName}",
+  "@attachmentImageSemantics": {"description": "Screen-reader label of an image in the chat", "placeholders": {"fileName": {"type": "String"}}},
+  "attachmentOpenImage": "Open image",
+  "@attachmentOpenImage": {"description": "Screen-reader hint: tapping opens the image full screen"},
+  "attachmentOpenWith": "Open with…",
+  "@attachmentOpenWith": {"description": "Action that hands a received file to another app on the device"},
+  "attachmentShare": "Share",
+  "@attachmentShare": {"description": "Action that opens the system share sheet for a received file"},
+  "attachmentMoreActions": "More options",
+  "@attachmentMoreActions": {"description": "Tooltip of the menu on a file card in the chat"},
+  "attachmentNoAppToOpen": "No app on this device can open this file.",
+  "@attachmentNoAppToOpen": {"description": "Snackbar: no installed app can open the file"},
+  "attachmentOpenFailed": "The file could not be opened.",
+  "@attachmentOpenFailed": {"description": "Snackbar: opening the file in another app failed"},
+  "attachmentShareFailed": "The file could not be shared.",
+  "@attachmentShareFailed": {"description": "Snackbar: sharing the file failed"},
+  "attachmentSaveOnly": "This type of file can only be saved.",
+  "@attachmentSaveOnly": {"description": "Snackbar: the file is of a type the app will not hand to another app"}
 }

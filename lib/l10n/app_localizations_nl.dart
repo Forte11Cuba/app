@@ -66,12 +66,8 @@ class AppLocalizationsNl extends AppLocalizations {
       'De disputen konden niet worden geladen. Probeer het opnieuw.';
 
   @override
-  String get disputeMessagingComingSoon =>
-      'Berichten bij disputen komen binnenkort';
-
-  @override
-  String get disputeAttachmentsComingSoon =>
-      'Bestanden toevoegen komt binnenkort';
+  String get disputeSolverNotAssigned =>
+      'Nog geen solver heeft dit dispuut opgepakt. Je kunt schrijven zodra iemand dat doet.';
 
   @override
   String get disputeNotFound => 'Dispuut niet gevonden.';
@@ -172,6 +168,17 @@ class AppLocalizationsNl extends AppLocalizations {
 
   @override
   String get filterButtonLabel => 'Filter';
+
+  @override
+  String filtersActiveCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count filters actief',
+      one: '1 filter actief',
+    );
+    return '$_temp0';
+  }
 
   @override
   String get noOrdersAvailable => 'Geen orders beschikbaar';
@@ -1484,16 +1491,6 @@ class AppLocalizationsNl extends AppLocalizations {
       'Bewaar je gedeelde sleutel goed: die is nodig om een dispuut op te lossen';
 
   @override
-  String get attachmentLabel => '[Bijlage]';
-
-  @override
-  String get downloadTooltip => 'Downloaden';
-
-  @override
-  String get fileDownloadPlaceholder =>
-      'Downloaden wordt aangesloten in fase 10+';
-
-  @override
   String get fileTypeVideo => 'Video';
 
   @override
@@ -1504,13 +1501,6 @@ class AppLocalizationsNl extends AppLocalizations {
 
   @override
   String get fileTypeFile => 'Bestand';
-
-  @override
-  String get tapToDownload => 'Tik om te downloaden';
-
-  @override
-  String get imageDownloadPlaceholder =>
-      'Afbeeldingen downloaden wordt aangesloten in fase 10+';
 
   @override
   String buyingSatsAmount(String sats) {
@@ -3730,4 +3720,115 @@ class AppLocalizationsNl extends AppLocalizations {
   String restorePartialNotice(int missing, int total) {
     return '$missing van $total orders konden niet worden geladen';
   }
+
+  @override
+  String get attachSheetTitle => 'Bestand versturen';
+
+  @override
+  String get attachSheetBody =>
+      'Het wordt op je apparaat versleuteld. Alleen je tegenpartij kan het openen.';
+
+  @override
+  String get attachSheetBodySolver =>
+      'Het wordt op je apparaat versleuteld. Alleen de solver kan het openen.';
+
+  @override
+  String get attachSourcePhoto => 'Foto';
+
+  @override
+  String get attachSourceCamera => 'Camera';
+
+  @override
+  String get attachSourcePdf => 'PDF-document';
+
+  @override
+  String get attachConfirmTitle => 'Dit bestand versturen?';
+
+  @override
+  String attachConfirmBody(String fileName, String size) {
+    return '$fileName ($size)';
+  }
+
+  @override
+  String get attachmentTooLarge => 'Bestanden mogen maximaal 25 MB zijn.';
+
+  @override
+  String get attachmentUnsupported =>
+      'Alleen JPEG-, PNG- en PDF-bestanden kunnen worden verstuurd.';
+
+  @override
+  String get attachmentInvalidImage =>
+      'Deze afbeelding kon niet worden gelezen.';
+
+  @override
+  String get attachmentReadFailed => 'Het bestand kon niet worden gelezen.';
+
+  @override
+  String get attachmentPeerUnknown =>
+      'Je kunt bestanden versturen zodra iemand de order heeft aangenomen.';
+
+  @override
+  String get attachmentUploadFailed =>
+      'Uploaden mislukt. Controleer je verbinding en probeer het opnieuw.';
+
+  @override
+  String get attachmentSendFailed => 'Het bestand kon niet worden verstuurd.';
+
+  @override
+  String get attachmentDownloadFailed =>
+      'Het bestand kon niet worden gedownload.';
+
+  @override
+  String get attachmentDecryptFailed =>
+      'Dit bestand kon niet worden ontsleuteld.';
+
+  @override
+  String get attachmentWebUnavailable =>
+      'Bestanden zijn nog niet beschikbaar op het web.';
+
+  @override
+  String get attachmentUploading => 'Versturen…';
+
+  @override
+  String get attachmentDiscard => 'Verwijderen';
+
+  @override
+  String get attachmentSave => 'Opslaan';
+
+  @override
+  String get attachmentSaved => 'Bestand opgeslagen';
+
+  @override
+  String get attachmentSaveFailed => 'Het bestand kon niet worden opgeslagen.';
+
+  @override
+  String attachmentImageSemantics(String fileName) {
+    return 'Afbeelding: $fileName';
+  }
+
+  @override
+  String get attachmentOpenImage => 'Afbeelding openen';
+
+  @override
+  String get attachmentOpenWith => 'Openen met…';
+
+  @override
+  String get attachmentShare => 'Delen';
+
+  @override
+  String get attachmentMoreActions => 'Meer opties';
+
+  @override
+  String get attachmentNoAppToOpen =>
+      'Geen app op dit apparaat kan dit bestand openen.';
+
+  @override
+  String get attachmentOpenFailed => 'Het bestand kon niet worden geopend.';
+
+  @override
+  String get attachmentShareFailed => 'Het bestand kon niet worden gedeeld.';
+
+  @override
+  String get attachmentSaveOnly =>
+      'Dit type bestand kan alleen worden opgeslagen.';
 }

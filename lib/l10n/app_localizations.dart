@@ -214,17 +214,11 @@ abstract class AppLocalizations {
   /// **'Failed to load disputes. Please try again.'**
   String get disputeLoadError;
 
-  /// Snackbar shown when user tries to send a dispute message
+  /// Shown when the user tries to write in a dispute chat before a solver has taken the dispute
   ///
   /// In en, this message translates to:
-  /// **'Dispute messaging coming soon'**
-  String get disputeMessagingComingSoon;
-
-  /// Snackbar shown when user tries to attach a file in dispute chat
-  ///
-  /// In en, this message translates to:
-  /// **'File attachments coming soon'**
-  String get disputeAttachmentsComingSoon;
+  /// **'No resolver has taken this dispute yet. You can write once one does.'**
+  String get disputeSolverNotAssigned;
 
   /// Body text shown when a dispute cannot be found by ID
   ///
@@ -393,6 +387,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Filter'**
   String get filterButtonLabel;
+
+  /// Screen-reader addition to the order-book filter chip when filters narrow the book; the chip itself shows only the number in a badge. Read after the chip label, e.g. 'Filter, 2 filters on'
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 filter on} other{{count} filters on}}'**
+  String filtersActiveCount(int count);
 
   /// Empty state message when the order book has no orders
   ///
@@ -2722,24 +2722,6 @@ abstract class AppLocalizations {
   /// **'Keep your shared key safe — it is needed for dispute resolution'**
   String get sharedKeySafetyNote;
 
-  /// Label shown on a chat bubble that has a file attachment
-  ///
-  /// In en, this message translates to:
-  /// **'[Attachment]'**
-  String get attachmentLabel;
-
-  /// Tooltip for the file download button
-  ///
-  /// In en, this message translates to:
-  /// **'Download'**
-  String get downloadTooltip;
-
-  /// Placeholder snackbar for file download (not yet wired)
-  ///
-  /// In en, this message translates to:
-  /// **'File download wired in Phase 10+'**
-  String get fileDownloadPlaceholder;
-
   /// File type chip: video
   ///
   /// In en, this message translates to:
@@ -2763,18 +2745,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'File'**
   String get fileTypeFile;
-
-  /// Hint on an encrypted image placeholder
-  ///
-  /// In en, this message translates to:
-  /// **'Tap to download'**
-  String get tapToDownload;
-
-  /// Placeholder snackbar for image download (not yet wired)
-  ///
-  /// In en, this message translates to:
-  /// **'Image download wired in Phase 10+'**
-  String get imageDownloadPlaceholder;
 
   /// Trade state header amount when buying
   ///
@@ -6213,6 +6183,198 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'{missing} of {total} orders couldn\'t be loaded'**
   String restorePartialNotice(int missing, int total);
+
+  /// Title of the sheet that picks a file to send in the trade chat
+  ///
+  /// In en, this message translates to:
+  /// **'Send a file'**
+  String get attachSheetTitle;
+
+  /// Body of the attach sheet: what happens to the file
+  ///
+  /// In en, this message translates to:
+  /// **'It is encrypted on your device. Only your counterpart can open it.'**
+  String get attachSheetBody;
+
+  /// Body of the attach sheet in the dispute chat, where only the solver can open the file
+  ///
+  /// In en, this message translates to:
+  /// **'It is encrypted on your device. Only the resolver can open it.'**
+  String get attachSheetBodySolver;
+
+  /// Attach sheet row: pick a photo from the gallery
+  ///
+  /// In en, this message translates to:
+  /// **'Photo'**
+  String get attachSourcePhoto;
+
+  /// Attach sheet row: take a photo with the camera
+  ///
+  /// In en, this message translates to:
+  /// **'Camera'**
+  String get attachSourceCamera;
+
+  /// Attach sheet row: pick a PDF document
+  ///
+  /// In en, this message translates to:
+  /// **'PDF document'**
+  String get attachSourcePdf;
+
+  /// Title of the dialog confirming a file before it is sent
+  ///
+  /// In en, this message translates to:
+  /// **'Send this file?'**
+  String get attachConfirmTitle;
+
+  /// Body of the send confirmation: the file name and its size
+  ///
+  /// In en, this message translates to:
+  /// **'{fileName} ({size})'**
+  String attachConfirmBody(String fileName, String size);
+
+  /// Error: the picked file is over the 25 MB limit
+  ///
+  /// In en, this message translates to:
+  /// **'Files can be up to 25 MB.'**
+  String get attachmentTooLarge;
+
+  /// Error: the file is not a type the chat sends
+  ///
+  /// In en, this message translates to:
+  /// **'Only JPEG, PNG and PDF files can be sent.'**
+  String get attachmentUnsupported;
+
+  /// Error: the image could not be decoded
+  ///
+  /// In en, this message translates to:
+  /// **'This image could not be read.'**
+  String get attachmentInvalidImage;
+
+  /// Error: the picked file could not be read from the device
+  ///
+  /// In en, this message translates to:
+  /// **'The file could not be read.'**
+  String get attachmentReadFailed;
+
+  /// Error: no counterpart yet, so there is no one to encrypt the file for
+  ///
+  /// In en, this message translates to:
+  /// **'You can send files once someone takes the order.'**
+  String get attachmentPeerUnknown;
+
+  /// Error: no file server accepted the upload
+  ///
+  /// In en, this message translates to:
+  /// **'The upload failed. Check your connection and try again.'**
+  String get attachmentUploadFailed;
+
+  /// Error: the file could not be sent, for any other reason
+  ///
+  /// In en, this message translates to:
+  /// **'The file could not be sent.'**
+  String get attachmentSendFailed;
+
+  /// Error: the attachment could not be downloaded
+  ///
+  /// In en, this message translates to:
+  /// **'The file could not be downloaded.'**
+  String get attachmentDownloadFailed;
+
+  /// Error: the attachment was downloaded but does not decrypt
+  ///
+  /// In en, this message translates to:
+  /// **'This file could not be decrypted.'**
+  String get attachmentDecryptFailed;
+
+  /// Shown on the web build, where attachments are not supported yet
+  ///
+  /// In en, this message translates to:
+  /// **'Files are not available on the web yet.'**
+  String get attachmentWebUnavailable;
+
+  /// Status of a file bubble while it is being encrypted and uploaded
+  ///
+  /// In en, this message translates to:
+  /// **'Sending…'**
+  String get attachmentUploading;
+
+  /// Button that drops a failed upload from the chat
+  ///
+  /// In en, this message translates to:
+  /// **'Discard'**
+  String get attachmentDiscard;
+
+  /// Button or tooltip that saves a received file
+  ///
+  /// In en, this message translates to:
+  /// **'Save'**
+  String get attachmentSave;
+
+  /// Snackbar after a file was saved
+  ///
+  /// In en, this message translates to:
+  /// **'File saved'**
+  String get attachmentSaved;
+
+  /// Snackbar when saving a file failed
+  ///
+  /// In en, this message translates to:
+  /// **'The file could not be saved.'**
+  String get attachmentSaveFailed;
+
+  /// Screen-reader label of an image in the chat
+  ///
+  /// In en, this message translates to:
+  /// **'Image: {fileName}'**
+  String attachmentImageSemantics(String fileName);
+
+  /// Screen-reader hint: tapping opens the image full screen
+  ///
+  /// In en, this message translates to:
+  /// **'Open image'**
+  String get attachmentOpenImage;
+
+  /// Action that hands a received file to another app on the device
+  ///
+  /// In en, this message translates to:
+  /// **'Open with…'**
+  String get attachmentOpenWith;
+
+  /// Action that opens the system share sheet for a received file
+  ///
+  /// In en, this message translates to:
+  /// **'Share'**
+  String get attachmentShare;
+
+  /// Tooltip of the menu on a file card in the chat
+  ///
+  /// In en, this message translates to:
+  /// **'More options'**
+  String get attachmentMoreActions;
+
+  /// Snackbar: no installed app can open the file
+  ///
+  /// In en, this message translates to:
+  /// **'No app on this device can open this file.'**
+  String get attachmentNoAppToOpen;
+
+  /// Snackbar: opening the file in another app failed
+  ///
+  /// In en, this message translates to:
+  /// **'The file could not be opened.'**
+  String get attachmentOpenFailed;
+
+  /// Snackbar: sharing the file failed
+  ///
+  /// In en, this message translates to:
+  /// **'The file could not be shared.'**
+  String get attachmentShareFailed;
+
+  /// Snackbar: the file is of a type the app will not hand to another app
+  ///
+  /// In en, this message translates to:
+  /// **'This type of file can only be saved.'**
+  String get attachmentSaveOnly;
 }
 
 class _AppLocalizationsDelegate

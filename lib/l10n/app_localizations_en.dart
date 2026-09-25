@@ -65,10 +65,8 @@ class AppLocalizationsEn extends AppLocalizations {
   String get disputeLoadError => 'Failed to load disputes. Please try again.';
 
   @override
-  String get disputeMessagingComingSoon => 'Dispute messaging coming soon';
-
-  @override
-  String get disputeAttachmentsComingSoon => 'File attachments coming soon';
+  String get disputeSolverNotAssigned =>
+      'No resolver has taken this dispute yet. You can write once one does.';
 
   @override
   String get disputeNotFound => 'Dispute not found.';
@@ -168,6 +166,17 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get filterButtonLabel => 'Filter';
+
+  @override
+  String filtersActiveCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count filters on',
+      one: '1 filter on',
+    );
+    return '$_temp0';
+  }
 
   @override
   String get noOrdersAvailable => 'No orders available';
@@ -1470,15 +1479,6 @@ class AppLocalizationsEn extends AppLocalizations {
       'Keep your shared key safe — it is needed for dispute resolution';
 
   @override
-  String get attachmentLabel => '[Attachment]';
-
-  @override
-  String get downloadTooltip => 'Download';
-
-  @override
-  String get fileDownloadPlaceholder => 'File download wired in Phase 10+';
-
-  @override
   String get fileTypeVideo => 'Video';
 
   @override
@@ -1489,12 +1489,6 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get fileTypeFile => 'File';
-
-  @override
-  String get tapToDownload => 'Tap to download';
-
-  @override
-  String get imageDownloadPlaceholder => 'Image download wired in Phase 10+';
 
   @override
   String buyingSatsAmount(String sats) {
@@ -3697,4 +3691,111 @@ class AppLocalizationsEn extends AppLocalizations {
   String restorePartialNotice(int missing, int total) {
     return '$missing of $total orders couldn\'t be loaded';
   }
+
+  @override
+  String get attachSheetTitle => 'Send a file';
+
+  @override
+  String get attachSheetBody =>
+      'It is encrypted on your device. Only your counterpart can open it.';
+
+  @override
+  String get attachSheetBodySolver =>
+      'It is encrypted on your device. Only the resolver can open it.';
+
+  @override
+  String get attachSourcePhoto => 'Photo';
+
+  @override
+  String get attachSourceCamera => 'Camera';
+
+  @override
+  String get attachSourcePdf => 'PDF document';
+
+  @override
+  String get attachConfirmTitle => 'Send this file?';
+
+  @override
+  String attachConfirmBody(String fileName, String size) {
+    return '$fileName ($size)';
+  }
+
+  @override
+  String get attachmentTooLarge => 'Files can be up to 25 MB.';
+
+  @override
+  String get attachmentUnsupported =>
+      'Only JPEG, PNG and PDF files can be sent.';
+
+  @override
+  String get attachmentInvalidImage => 'This image could not be read.';
+
+  @override
+  String get attachmentReadFailed => 'The file could not be read.';
+
+  @override
+  String get attachmentPeerUnknown =>
+      'You can send files once someone takes the order.';
+
+  @override
+  String get attachmentUploadFailed =>
+      'The upload failed. Check your connection and try again.';
+
+  @override
+  String get attachmentSendFailed => 'The file could not be sent.';
+
+  @override
+  String get attachmentDownloadFailed => 'The file could not be downloaded.';
+
+  @override
+  String get attachmentDecryptFailed => 'This file could not be decrypted.';
+
+  @override
+  String get attachmentWebUnavailable =>
+      'Files are not available on the web yet.';
+
+  @override
+  String get attachmentUploading => 'Sending…';
+
+  @override
+  String get attachmentDiscard => 'Discard';
+
+  @override
+  String get attachmentSave => 'Save';
+
+  @override
+  String get attachmentSaved => 'File saved';
+
+  @override
+  String get attachmentSaveFailed => 'The file could not be saved.';
+
+  @override
+  String attachmentImageSemantics(String fileName) {
+    return 'Image: $fileName';
+  }
+
+  @override
+  String get attachmentOpenImage => 'Open image';
+
+  @override
+  String get attachmentOpenWith => 'Open with…';
+
+  @override
+  String get attachmentShare => 'Share';
+
+  @override
+  String get attachmentMoreActions => 'More options';
+
+  @override
+  String get attachmentNoAppToOpen =>
+      'No app on this device can open this file.';
+
+  @override
+  String get attachmentOpenFailed => 'The file could not be opened.';
+
+  @override
+  String get attachmentShareFailed => 'The file could not be shared.';
+
+  @override
+  String get attachmentSaveOnly => 'This type of file can only be saved.';
 }

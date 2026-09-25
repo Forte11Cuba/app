@@ -18,6 +18,7 @@ import 'package:mostro/core/lifecycle/app_lifecycle_service.dart';
 import 'package:mostro/core/lifecycle/resume_resync.dart';
 import 'package:mostro/core/web/bridge_probe.dart';
 import 'package:mostro/core/web/store_probe.dart';
+import 'package:mostro/features/chat/attachments/attachment_launcher.dart';
 import 'package:mostro/features/settings/providers/settings_provider.dart';
 import 'package:mostro/features/settings/widgets/mostro_node_selector.dart';
 import 'package:mostro/features/walkthrough/providers/first_run_provider.dart';
@@ -36,6 +37,7 @@ import 'package:mostro/src/rust/api/identity.dart' as identity_api;
 import 'package:mostro/shared/utils/platform_int64.dart';
 import 'package:mostro/src/rust/api/types.dart'
     show BondClaimPhase, BondClaimUpdate, BondSlashedEvent, SlashCause;
+import 'package:mostro/features/disputes/providers/disputes_providers.dart';
 import 'package:mostro/features/notifications/models/notification_model.dart';
 import 'package:mostro/features/trades/providers/trades_providers.dart'
     show rawTradesProvider;
@@ -243,6 +245,8 @@ Future<void> bootstrapAndRun({List<String> seedRelays = const []}) async {
     isEnabled: (event) => prefs.getBool(event.prefsKey) ?? true,
     identityCreatedAt: IdentityService.createdAt,
     currentLocation: _currentLocation,
+    disputeIdForTrade: (tradeId) =>
+        container.read(disputeByTradeIdProvider(tradeId))?.id,
   );
   pumpEvents('trade-cards', tradeUpdateStream.next, eventCards.onTradeUpdate);
   pumpEvents('chat-cards', chatMessageStream.next, eventCards.onChatMessage);
@@ -252,6 +256,16 @@ Future<void> bootstrapAndRun({List<String> seedRelays = const []}) async {
   // the first suspension is observed too.
   AppLifecycleService(
     onResume: ResumeResync(container: container).run,
+  ).attach();
+
+  // Copies of attachments handed to another app ("open with…", share):
+  // whatever an earlier run left behind goes now, and a resume clears those
+  // past their lifetime — a younger one may still be read (#589).
+  final attachmentLauncher = container.read(attachmentLauncherProvider);
+  unawaited(attachmentLauncher.sweep());
+  AppLifecycleService(
+    onResume: () =>
+        attachmentLauncher.sweep(olderThan: attachmentLauncher.copyLifetime),
   ).attach();
 
   runApp(

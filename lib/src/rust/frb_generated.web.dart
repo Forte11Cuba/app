@@ -576,6 +576,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   AppSettings dco_decode_app_settings(dynamic raw);
 
   @protected
+  AttachmentData dco_decode_attachment_data(dynamic raw);
+
+  @protected
   AttachmentInfo dco_decode_attachment_info(dynamic raw);
 
   @protected
@@ -753,9 +756,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   FiatOrderCount dco_decode_fiat_order_count(dynamic raw);
-
-  @protected
-  FileDownloadResult dco_decode_file_download_result(dynamic raw);
 
   @protected
   FileType dco_decode_file_type(dynamic raw);
@@ -1515,6 +1515,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   AppSettings sse_decode_app_settings(SseDeserializer deserializer);
 
   @protected
+  AttachmentData sse_decode_attachment_data(SseDeserializer deserializer);
+
+  @protected
   AttachmentInfo sse_decode_attachment_info(SseDeserializer deserializer);
 
   @protected
@@ -1726,11 +1729,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   FiatOrderCount sse_decode_fiat_order_count(SseDeserializer deserializer);
-
-  @protected
-  FileDownloadResult sse_decode_file_download_result(
-    SseDeserializer deserializer,
-  );
 
   @protected
   FileType sse_decode_file_type(SseDeserializer deserializer);
@@ -2631,6 +2629,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_app_settings(AppSettings self, SseSerializer serializer);
 
   @protected
+  void sse_encode_attachment_data(
+    AttachmentData self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_attachment_info(
     AttachmentInfo self,
     SseSerializer serializer,
@@ -2927,12 +2931,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_fiat_order_count(
     FiatOrderCount self,
-    SseSerializer serializer,
-  );
-
-  @protected
-  void sse_encode_file_download_result(
-    FileDownloadResult self,
     SseSerializer serializer,
   );
 

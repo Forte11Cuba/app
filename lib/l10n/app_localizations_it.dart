@@ -65,11 +65,8 @@ class AppLocalizationsIt extends AppLocalizations {
   String get disputeLoadError => 'Impossibile caricare le dispute. Riprova.';
 
   @override
-  String get disputeMessagingComingSoon =>
-      'Messaggistica per controversie in arrivo';
-
-  @override
-  String get disputeAttachmentsComingSoon => 'Allegati file in arrivo';
+  String get disputeSolverNotAssigned =>
+      'Nessun mediatore ha ancora preso in carico questa controversia. Potrai scrivere quando qualcuno lo farà.';
 
   @override
   String get disputeNotFound => 'Controversia non trovata.';
@@ -171,6 +168,17 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get filterButtonLabel => 'Filtra';
+
+  @override
+  String filtersActiveCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count filtri attivi',
+      one: '1 filtro attivo',
+    );
+    return '$_temp0';
+  }
 
   @override
   String get noOrdersAvailable => 'Nessun ordine disponibile';
@@ -1484,16 +1492,6 @@ class AppLocalizationsIt extends AppLocalizations {
       'Conserva la tua chiave condivisa al sicuro — è necessaria per la risoluzione delle dispute';
 
   @override
-  String get attachmentLabel => '[Allegato]';
-
-  @override
-  String get downloadTooltip => 'Scarica';
-
-  @override
-  String get fileDownloadPlaceholder =>
-      'Download dei file disponibile nella Fase 10+';
-
-  @override
   String get fileTypeVideo => 'Video';
 
   @override
@@ -1504,13 +1502,6 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get fileTypeFile => 'File';
-
-  @override
-  String get tapToDownload => 'Tocca per scaricare';
-
-  @override
-  String get imageDownloadPlaceholder =>
-      'Download delle immagini disponibile nella Fase 10+';
 
   @override
   String buyingSatsAmount(String sats) {
@@ -3738,4 +3729,112 @@ class AppLocalizationsIt extends AppLocalizations {
   String restorePartialNotice(int missing, int total) {
     return '$missing di $total ordini non sono stati caricati';
   }
+
+  @override
+  String get attachSheetTitle => 'Invia un file';
+
+  @override
+  String get attachSheetBody =>
+      'Viene cifrato sul tuo dispositivo. Solo la tua controparte può aprirlo.';
+
+  @override
+  String get attachSheetBodySolver =>
+      'Viene cifrato sul tuo dispositivo. Solo il mediatore può aprirlo.';
+
+  @override
+  String get attachSourcePhoto => 'Foto';
+
+  @override
+  String get attachSourceCamera => 'Fotocamera';
+
+  @override
+  String get attachSourcePdf => 'Documento PDF';
+
+  @override
+  String get attachConfirmTitle => 'Inviare questo file?';
+
+  @override
+  String attachConfirmBody(String fileName, String size) {
+    return '$fileName ($size)';
+  }
+
+  @override
+  String get attachmentTooLarge => 'I file possono pesare al massimo 25 MB.';
+
+  @override
+  String get attachmentUnsupported =>
+      'Si possono inviare solo file JPEG, PNG e PDF.';
+
+  @override
+  String get attachmentInvalidImage => 'Impossibile leggere questa immagine.';
+
+  @override
+  String get attachmentReadFailed => 'Impossibile leggere il file.';
+
+  @override
+  String get attachmentPeerUnknown =>
+      'Potrai inviare file quando qualcuno avrà preso l\'ordine.';
+
+  @override
+  String get attachmentUploadFailed =>
+      'Il caricamento non è riuscito. Controlla la connessione e riprova.';
+
+  @override
+  String get attachmentSendFailed => 'Impossibile inviare il file.';
+
+  @override
+  String get attachmentDownloadFailed => 'Impossibile scaricare il file.';
+
+  @override
+  String get attachmentDecryptFailed => 'Impossibile decifrare questo file.';
+
+  @override
+  String get attachmentWebUnavailable =>
+      'I file non sono ancora disponibili sul web.';
+
+  @override
+  String get attachmentUploading => 'Invio…';
+
+  @override
+  String get attachmentDiscard => 'Scarta';
+
+  @override
+  String get attachmentSave => 'Salva';
+
+  @override
+  String get attachmentSaved => 'File salvato';
+
+  @override
+  String get attachmentSaveFailed => 'Impossibile salvare il file.';
+
+  @override
+  String attachmentImageSemantics(String fileName) {
+    return 'Immagine: $fileName';
+  }
+
+  @override
+  String get attachmentOpenImage => 'Apri immagine';
+
+  @override
+  String get attachmentOpenWith => 'Apri con…';
+
+  @override
+  String get attachmentShare => 'Condividi';
+
+  @override
+  String get attachmentMoreActions => 'Altre opzioni';
+
+  @override
+  String get attachmentNoAppToOpen =>
+      'Nessuna app di questo dispositivo può aprire questo file.';
+
+  @override
+  String get attachmentOpenFailed => 'Impossibile aprire il file.';
+
+  @override
+  String get attachmentShareFailed => 'Impossibile condividere il file.';
+
+  @override
+  String get attachmentSaveOnly =>
+      'Questo tipo di file può solo essere salvato.';
 }
