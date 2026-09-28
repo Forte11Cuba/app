@@ -249,6 +249,12 @@ class AutomationIds {
   static const String invoiceScan = 'invoice.scan';
   static const String invoiceSubmit = 'invoice.submit';
 
+  /// Readout: the app's own verdict on what is in the invoice field, as a
+  /// stable word (`expires-too-soon`, `wrong-amount`, `valid`, …) — never the
+  /// row's translated sentence. Absent while the verdict is still open, which
+  /// is not the same as valid.
+  static const String invoiceCheck = 'invoice.check';
+
   /// Readout: the daemon's reason for refusing the last submitted invoice.
   /// Present only after a rejection, until the next submission.
   static const String invoiceError = 'invoice.error';
@@ -261,6 +267,7 @@ class AutomationIds {
   static const String bondOrderId = 'bond.order_id';
   static const String bondExplainer = 'bond.explainer';
   static const String bondCancel = 'bond.cancel';
+  static const String bondRemoveFromDevice = 'bond.remove_from_device';
 
   // Payout claim on a slashed bond (docs/ANTI_ABUSE_BOND.md §6.4)
   static const String bondClaimOrderId = 'bond.claim.order_id';

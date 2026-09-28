@@ -6,15 +6,19 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
+import 'package:mostro/features/account/providers/privacy_mode_provider.dart';
 import 'package:mostro/core/app_routes.dart';
 import 'package:mostro/core/app_theme.dart';
 import 'package:mostro/core/automation/automation_ids.dart';
 import 'package:mostro/features/home/providers/home_order_providers.dart';
+import 'package:mostro/features/notifications/models/notification_model.dart';
+import 'package:mostro/features/notifications/providers/notifications_provider.dart';
 import 'package:mostro/features/order/providers/invoice_providers.dart';
 import 'package:mostro/features/order/providers/trade_state_provider.dart';
 import 'package:mostro/features/rate/providers/rating_providers.dart';
 import 'package:mostro/features/rate/screens/rate_counterpart_screen.dart';
 import 'package:mostro/features/rate/widgets/star_rating.dart';
+import 'package:mostro/features/trades/providers/release_pending_provider.dart';
 import 'package:mostro/features/trades/providers/trades_providers.dart';
 import 'package:mostro/features/trades/screens/trade_detail_screen.dart';
 import 'package:mostro/features/trades/widgets/cancel_request_notice.dart';
@@ -56,9 +60,17 @@ Future<ProviderContainer> _pumpTradeDetail(
   Future<RatingInfo?> Function()? ratingFetch,
   Locale locale = const Locale('en'),
   List<TradeInfo>? trades,
+  bool privacyMode = false,
+  NotificationsNotifier? notifications,
 }) async {
   final container = createContainer(
     overrides: [
+      if (notifications != null)
+        notificationsProvider.overrideWith((_) => notifications),
+      if (privacyMode)
+        privacyModeProvider.overrideWith(
+          (ref) => PrivacyModeNotifier(initialValue: true),
+        ),
       if (releaseOrder != null)
         releaseOrderActionProvider.overrideWithValue(releaseOrder),
       if (trades != null) rawTradesProvider.overrideWith((ref) async => trades),
@@ -251,6 +263,54 @@ Finder _anyPopupMenuItem() =>
 final _en = AppLocalizationsEn();
 
 void main() {
+  testWidgets('opening the trade reads its notices, not its chat card (#610)', (
+    tester,
+  ) async {
+    // Arrange
+    final notifications = NotificationsNotifier();
+    final chatCardId = NotificationModel.chatCardId(
+      'order-610',
+      fromSolver: false,
+    );
+    for (final n in [
+      NotificationModel.tradeStatus(
+        orderId: 'order-610',
+        status: 'active',
+        at: DateTime.utc(2026),
+      ),
+      NotificationModel.chatMessages(
+        tradeId: 'order-610',
+        fromSolver: false,
+        count: 1,
+        at: DateTime.utc(2026),
+      ),
+      NotificationModel.tradeStatus(
+        orderId: 'other-order',
+        status: 'active',
+        at: DateTime.utc(2026),
+      ),
+    ]) {
+      await notifications.add(n);
+    }
+
+    // Act
+    await _pumpTradeDetail(
+      tester,
+      orderId: 'order-610',
+      isBuyer: true,
+      status: OrderStatus.active,
+      notifications: notifications,
+    );
+
+    // Assert
+    final read = {for (final n in notifications.state) n.id: n.isRead};
+    expect(read, {
+      'trade-order-610-active': true,
+      chatCardId: false,
+      'trade-other-order-active': false,
+    });
+  });
+
   group('8a · waiting for the counterpart to lock the sats', () {
     testWidgets(
       'buyer: amber chip, no chat, lock note, Cancel trade alone, no dispute',
@@ -488,8 +548,150 @@ void main() {
       expect(find.byType(TradeDetailScreen), findsOneWidget);
       expect(find.text(_en.releaseFailed), findsNothing);
       expect(find.text(_en.tradeCompletedTitle), findsNothing);
-      // Drain the button's success indication before disposing its widget.
-      await tester.pump(const Duration(seconds: 2));
+      // Drain the button's success indication and the release's wait for
+      // the node before disposing the screen.
+      await tester.pump(kReleaseConfirmationTimeout);
+    });
+
+    /// Confirms Release on the sheet and lets the publish land.
+    Future<void> confirmRelease(WidgetTester tester) async {
+      await tester.tap(find.text(_en.confirmReleaseSatsButton));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 350));
+      await tester.tap(find.text(_en.releaseSheetConfirm));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 350));
+    }
+
+    FilledButton filledButton(WidgetTester tester, String label) =>
+        tester.widget<FilledButton>(_filledButtonWithText(label));
+
+    // A seller pressed Release three times: the node took ~30 s to settle
+    // the hold invoice, and the button came back after the first publish.
+    testWidgets('a published release is not offered again while it waits', (
+      tester,
+    ) async {
+      // Arrange
+      final released = <String>[];
+      await _pumpTradeDetail(
+        tester,
+        orderId: 'order-release-wait',
+        isBuyer: false,
+        status: OrderStatus.fiatSent,
+        releaseOrder: (id) async => released.add(id),
+      );
+
+      // Act
+      await confirmRelease(tester);
+      await tester.pump(const Duration(seconds: 5));
+
+      // Assert
+      expect(released, ['order-release-wait']);
+      expect(find.text(_en.releaseSentNotice), findsOneWidget);
+      expect(find.text(_en.confirmReleaseSatsButton), findsNothing);
+      expect(filledButton(tester, _en.releasePendingLabel).onPressed, isNull);
+      await tester.pump(kReleaseConfirmationTimeout);
+    });
+
+    testWidgets('a release that lands after the seller left still waits', (
+      tester,
+    ) async {
+      // Codex / ermeme on #604: the wait was recorded only while the screen
+      // was mounted. Leaving mid-publication dropped it, and reopening the
+      // unchanged fiat-sent trade offered Release again.
+      // Arrange — a publication that is still in flight.
+      final publication = Completer<void>();
+      final container = await _pumpTradeDetail(
+        tester,
+        orderId: 'order-release-left',
+        isBuyer: false,
+        status: OrderStatus.fiatSent,
+        releaseOrder: (_) => publication.future,
+      );
+      await confirmRelease(tester);
+
+      // Act — the seller leaves, then the publication succeeds.
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: const SizedBox.shrink(),
+        ),
+      );
+      publication.complete();
+      await tester.pump();
+
+      // Assert — the wait is recorded, so a reopened screen will not offer
+      // Release while the node settles.
+      expect(
+        container.read(releasePendingProvider)['order-release-left'],
+        ReleaseWait.waiting,
+      );
+      await tester.pump(kReleaseConfirmationTimeout);
+    });
+
+    testWidgets('the wait ends as soon as the order moves', (tester) async {
+      // Arrange: broadcast, because the release re-reads the status and
+      // the screen subscribes again.
+      final updates = StreamController<OrderStatus>.broadcast();
+      addTearDown(() => unawaited(updates.close()));
+      final container = await _pumpTradeDetail(
+        tester,
+        orderId: 'order-release-moves',
+        isBuyer: false,
+        status: OrderStatus.fiatSent,
+        statusUpdates: updates.stream,
+        releaseOrder: (_) async {},
+      );
+      updates.add(OrderStatus.fiatSent);
+      await _settle(tester);
+      await confirmRelease(tester);
+      expect(
+        container.read(releasePendingProvider)['order-release-moves'],
+        ReleaseWait.waiting,
+      );
+
+      // Act: the node settled the hold invoice.
+      updates.add(OrderStatus.settledHoldInvoice);
+      await _settle(tester);
+
+      // Assert
+      expect(
+        container.read(releasePendingProvider),
+        isNot(contains('order-release-moves')),
+      );
+      expect(find.text(_en.releasePendingLabel), findsNothing);
+      await tester.pump(const Duration(seconds: 5));
+    });
+
+    testWidgets('Release comes back when the node never confirms', (
+      tester,
+    ) async {
+      // Arrange
+      final released = <String>[];
+      await _pumpTradeDetail(
+        tester,
+        orderId: 'order-release-overdue',
+        isBuyer: false,
+        status: OrderStatus.fiatSent,
+        releaseOrder: (id) async => released.add(id),
+      );
+      await confirmRelease(tester);
+
+      // Act
+      await tester.pump(kReleaseConfirmationTimeout);
+      // Frames for the earlier snackbar to leave and this one to come in.
+      for (var i = 0; i < 4; i++) {
+        await tester.pump(const Duration(milliseconds: 500));
+      }
+
+      // Assert
+      expect(find.text(_en.releaseUnconfirmedNotice), findsOneWidget);
+      expect(
+        filledButton(tester, _en.confirmReleaseSatsButton).onPressed,
+        isNotNull,
+      );
+      expect(released, hasLength(1));
+      await tester.pump(const Duration(seconds: 5));
     });
 
     testWidgets('Back on the release sheet releases nothing', (tester) async {
@@ -520,39 +722,26 @@ void main() {
   });
 
   group('payout pending', () {
-    for (final isBuyer in [true, false]) {
-      testWidgets(
-        'escrow settlement stays pending for ${isBuyer ? "buyer" : "seller"}',
-        (tester) async {
-          final semantics = tester.ensureSemantics();
-          try {
-            await _pumpTradeDetail(
-              tester,
-              orderId: 'order-payout-pending',
-              isBuyer: isBuyer,
-              status: OrderStatus.settledHoldInvoice,
-              rating: _rating(isMine: true),
-            );
-            expect(
-              tradeStatusFromOrderStatus(
-                OrderStatus.settledHoldInvoice,
-              ).machineName,
-              'payout-pending',
-            );
-            expect(find.bySemanticsLabel('payout-pending'), findsOneWidget);
-            expect(find.text(_en.tradeHeadlinePayoutPending), findsOneWidget);
-            expect(find.text(_en.tradeCompletedTitle), findsNothing);
-            expect(find.byType(TradeCompletedCard), findsNothing);
-            expect(
-              find.byWidgetPredicate((w) => w is FilledButton),
-              findsNothing,
-            );
-          } finally {
-            semantics.dispose();
-          }
-        },
-      );
-    }
+    testWidgets('the buyer waits for the payout after the release', (
+      tester,
+    ) async {
+      final semantics = tester.ensureSemantics();
+      try {
+        await _pumpTradeDetail(
+          tester,
+          orderId: 'order-payout-pending',
+          isBuyer: true,
+          status: OrderStatus.settledHoldInvoice,
+        );
+        expect(find.bySemanticsLabel('payout-pending'), findsOneWidget);
+        expect(find.text(_en.tradeHeadlinePayoutPending), findsOneWidget);
+        expect(find.text(_en.tradeCompletedTitle), findsNothing);
+        expect(find.byType(TradeCompletedCard), findsNothing);
+        expect(find.byWidgetPredicate((w) => w is FilledButton), findsNothing);
+      } finally {
+        semantics.dispose();
+      }
+    });
 
     testWidgets('a successful payout replaces the pending state with rating', (
       tester,
@@ -579,7 +768,7 @@ void main() {
       expect(_filledButtonWithText(_en.tradeSendRatingAction), findsOneWidget);
     });
 
-    testWidgets('a rating notification cannot show success before payout', (
+    testWidgets('a rating notification cannot show the buyer success early', (
       tester,
     ) async {
       final updates = StreamController<OrderStatus>();
@@ -588,11 +777,12 @@ void main() {
       await _pumpTradeDetail(
         tester,
         orderId: 'order-early-rating',
-        isBuyer: false,
+        isBuyer: true,
         status: OrderStatus.settledHoldInvoice,
         statusUpdates: updates.stream,
         ratingRoute: true,
       );
+      // The daemon refuses the buyer's rating until the payout completes.
       expect(find.text(_en.successfulOrder), findsNothing);
       expect(find.byType(StarRating), findsNothing);
       expect(find.text(_en.tradeHeadlinePayoutPending), findsOneWidget);
@@ -602,6 +792,108 @@ void main() {
 
       expect(find.text(_en.successfulOrder), findsOneWidget);
       expect(find.byType(StarRating), findsOneWidget);
+    });
+  });
+
+  /// Once released, the seller's part is over: getting the sats to the buyer
+  /// is Mostro's job, and mostrod asks the seller to rate right away — it
+  /// sends `rate` with the release and accepts the seller's rating at
+  /// `settled-hold-invoice` (#586).
+  group('the seller after the release', () {
+    testWidgets('is asked to rate, not told to wait for the payout', (
+      tester,
+    ) async {
+      final semantics = tester.ensureSemantics();
+      try {
+        await _pumpTradeDetail(
+          tester,
+          orderId: 'order-seller-released',
+          isBuyer: false,
+          status: OrderStatus.settledHoldInvoice,
+        );
+        expect(find.bySemanticsLabel('pending-rating'), findsOneWidget);
+        expect(find.text(_en.tradeHeadlinePayoutPending), findsNothing);
+        expect(find.byType(TradeCompletedCard), findsOneWidget);
+        expect(
+          _filledButtonWithText(_en.tradeSendRatingAction),
+          findsOneWidget,
+        );
+      } finally {
+        semantics.dispose();
+      }
+    });
+
+    testWidgets('reaches the rating screen without waiting for success', (
+      tester,
+    ) async {
+      await _pumpTradeDetail(
+        tester,
+        orderId: 'order-seller-rates',
+        isBuyer: false,
+        status: OrderStatus.settledHoldInvoice,
+        ratingRoute: true,
+      );
+      expect(find.text(_en.successfulOrder), findsOneWidget);
+      expect(find.byType(StarRating), findsOneWidget);
+      expect(find.text(_en.tradeHeadlinePayoutPending), findsNothing);
+    });
+
+    testWidgets('who already rated is not offered the form again', (
+      tester,
+    ) async {
+      // Codex on #587: a seller back on `/rate_user/:id` (say, from the
+      // rating notification) while the payout still retries must see their
+      // rating, not a form whose submit meets `AlreadyRated`.
+      await _pumpTradeDetail(
+        tester,
+        orderId: 'order-seller-rated-route',
+        isBuyer: false,
+        status: OrderStatus.settledHoldInvoice,
+        ratingRoute: true,
+        rating: _rating(isMine: true),
+      );
+      expect(find.byType(StarRating), findsNothing);
+      expect(find.text(_en.successfulOrder), findsNothing);
+      expect(_filledButtonWithText(_en.tradeSendRatingAction), findsNothing);
+    });
+
+    testWidgets('in privacy mode gets no rating form on the rating route', (
+      tester,
+    ) async {
+      // CodeRabbit on #587: the trade screen withholds the rating in privacy
+      // mode (Rust refuses to send one); a direct route must not offer it.
+      await _pumpTradeDetail(
+        tester,
+        orderId: 'order-seller-private',
+        isBuyer: false,
+        status: OrderStatus.settledHoldInvoice,
+        ratingRoute: true,
+        privacyMode: true,
+      );
+      expect(find.text(_en.successfulOrder), findsNothing);
+      expect(_filledButtonWithText(_en.tradeSendRatingAction), findsNothing);
+      expect(find.text(_en.submitUppercaseButton), findsNothing);
+      expect(find.text(_en.rateScreenHeader), findsNothing);
+    });
+
+    testWidgets('once rated, is done — even before the payout completes', (
+      tester,
+    ) async {
+      final semantics = tester.ensureSemantics();
+      try {
+        await _pumpTradeDetail(
+          tester,
+          orderId: 'order-seller-rated',
+          isBuyer: false,
+          status: OrderStatus.settledHoldInvoice,
+          rating: _rating(isMine: true),
+        );
+        expect(find.bySemanticsLabel('rated'), findsOneWidget);
+        expect(find.text(_en.tradeHeadlinePayoutPending), findsNothing);
+        expect(_filledButtonWithText(_en.tradeSendRatingAction), findsNothing);
+      } finally {
+        semantics.dispose();
+      }
     });
   });
 

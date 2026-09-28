@@ -14,6 +14,7 @@ import 'package:mostro/core/order_detail_palette.dart';
 import 'package:mostro/features/about/models/mostro_instance.dart' as instance;
 import 'package:mostro/features/about/providers/mostro_node_provider.dart';
 import 'package:mostro/features/account/providers/privacy_mode_provider.dart';
+import 'package:mostro/features/settings/providers/escrow_mode_provider.dart';
 import 'package:mostro/features/home/providers/home_order_providers.dart';
 import 'package:mostro/features/home/widgets/order_list_item.dart'
     show OrderCardFormats;
@@ -198,15 +199,45 @@ class _TakeOrderScreenState extends ConsumerState<TakeOrderScreen> {
           .read(tradeRoleProvider.notifier)
           .update((map) => {...map, widget.orderId: widget.isBuying});
 
+      // In Cashu mode the flow after a take differs on both sides: there is no
+      // buyer invoice step at all, and the seller locks an escrow instead of
+      // paying a hold invoice. An anti-abuse bond still comes first.
+      //
+      // Awaited, not `read`: the provider is `AsyncLoading` for the first
+      // moments after launch, and a plain read would answer "not Cashu" and
+      // route a seller to a hold invoice that is never coming.
+      //
+      // The take already succeeded, so an unreadable escrow mode must not
+      // reach `_showTakeError` (whose errors mean no trade was created): it
+      // falls back to the Lightning routing, as before Cashu existed.
+      final bondFirst = trade.order.status == OrderStatus.waitingTakerBond;
+      var cashu = false;
+      if (!bondFirst) {
+        try {
+          // The mode, not the gate: a Cashu node sends no hold invoice, so a
+          // seller goes to the escrow screen even when its mint is missing.
+          cashu = (await ref.read(escrowModeProvider.future)).mode == 'cashu';
+        } catch (e, st) {
+          debugPrint('[TakeOrderScreen] escrow mode read failed: $e\n$st');
+        }
+      }
+      if (!mounted) return;
+
       // Straight to the Lightning step. The stack is rebuilt with the trade
       // detail as its base so back/close from the invoice screen lands on
       // the trade, never back here offering an already-taken order (#268).
       // The node asks for an anti-abuse bond first: the Lightning step of
       // the trade only opens once it locks (docs/ANTI_ABUSE_BOND.md §6.1).
-      if (trade.order.status == OrderStatus.waitingTakerBond) {
+      if (bondFirst) {
         navigated = true;
         context.go(AppRoute.tradeDetailPath(widget.orderId));
         context.push(AppRoute.payBondPath(widget.orderId));
+      } else if (cashu) {
+        navigated = true;
+        context.go(AppRoute.tradeDetailPath(widget.orderId));
+        if (!widget.isBuying) {
+          context.push(AppRoute.lockEscrowPath(widget.orderId));
+        }
       } else if (widget.isBuying) {
         // The take is done, so this screen is leaving either way: what is
         // read next only decides where it lands.

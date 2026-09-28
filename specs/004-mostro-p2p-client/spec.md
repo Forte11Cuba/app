@@ -121,7 +121,7 @@ A buyer (taker of a sell order) completes a trade. Without NWC, they manually en
 2. **Given** a buyer has taken a sell order and NWC IS configured, **When** the order is accepted, **Then** the invoice step is skipped entirely and the buyer proceeds to the active trade view.
 3. **Given** the trade is in "active" status, **When** the buyer views Trade Detail, **Then** they see: trade summary, payment method, order ID, instructions to contact the seller, a "Fiat Sent" primary CTA, a secondary row with outlined Cancel and Dispute buttons, and a persistent chat chip for Contact.
 4. **Given** the buyer has sent fiat payment, **When** they tap "Fiat Sent", **Then** the order status changes to "Fiat sent" and the seller sees instructions to verify and release.
-5. **Given** the seller releases sats, **When** the buyer receives the Lightning payment, **Then** both parties are prompted to rate each other.
+5. **Given** the seller releases sats, **When** the daemon settles the hold invoice, **Then** the seller is prompted to rate the buyer right away; the buyer sees the payout as pending and is prompted to rate the seller once the Lightning payment completes (#586).
 
 ---
 
@@ -143,6 +143,7 @@ A seller (taker of a buy order) completes a trade. They must pay a hold Lightnin
 3. **Given** the trade is active, **When** the seller views Trade Detail, **Then** they see instructions to contact the buyer with payment details, a disabled "waiting for the buyer" primary state, a secondary row with outlined Cancel and Dispute buttons, and a persistent chat chip for Contact.
 4. **Given** the buyer confirms "Fiat Sent", **When** the seller views Trade Detail, **Then** the status changes to "Fiat Sent" and a "Release" button becomes available.
 5. **Given** the seller taps "Release", **When** the confirmation modal appears, **Then** tapping "Yes" releases the sats and transitions to the success/rating screen.
+6. **Given** the seller confirmed the release, **When** the daemon has not yet settled the hold invoice (it can take tens of seconds), **Then** Release shows as "Releasing… waiting for the node" and cannot be pressed again; the wait ends when the order moves, and after 90 s without a move Release is offered again with a notice (a retry is safe: a daemon that already released refuses it).
 
 ---
 
@@ -195,7 +196,7 @@ After a trade completes, both parties are prompted to rate each other on a 1–5
 
 **Acceptance Scenarios**:
 
-1. **Given** a seller releases sats, **When** the transaction settles, **Then** the seller is prompted to rate the buyer via a Rate button on the trade screen.
+1. **Given** a seller releases sats, **When** the hold invoice settles (`settled-hold-invoice`), **Then** the seller is prompted to rate the buyer via a Rate button on the trade screen — without waiting for the payout to the buyer, which is Mostro's job and may take long if it retries. mostrod sends the seller `rate` with the release and accepts the seller's rating in that status (#586).
 2. **Given** a buyer receives the Lightning payment, **When** the order reaches "success", **Then** the buyer is prompted to rate the seller.
 3. **Given** the user taps "Rate", **When** the rating screen opens, **Then** 5 tappable stars are shown and the Submit button is disabled until at least 1 star is selected.
 4. **Given** the user selects 4 stars and taps Submit, **When** the rating is sent, **Then** the screen closes and the trade moves to a completed state.
@@ -240,7 +241,7 @@ A user views all their active and historical trades in the My Trades tab. Each c
 
 ### User Story 13 — Notifications Center (Priority: P2)
 
-The user receives in-app notifications for all trade lifecycle events: order taken, payment required, invoice waiting, fiat confirmed, payment settled, rating requested, etc. The notification bell shows a numbered badge for unread items. Tapping a notification navigates to the relevant screen. Users can mark all as read or clear all.
+The user receives in-app notifications for all trade lifecycle events: order taken, payment required, invoice waiting, fiat confirmed, payment settled, rating requested, etc. The notification bell shows a numbered badge for unread items. Tapping a notification navigates to the relevant screen. The Notifications screen is one list with no filter tabs: a trade's notifications share one card, and the trades whose next step is the user's are pinned above the rest. Users can swipe a card away, mark all as read, or clear all (#610).
 
 **Why this priority**: Notifications keep users informed during asynchronous trade steps without requiring them to actively poll.
 
@@ -248,10 +249,15 @@ The user receives in-app notifications for all trade lifecycle events: order tak
 
 **Acceptance Scenarios**:
 
-1. **Given** a trade event occurs, **When** the app receives it, **Then** a notification card appears in the Notifications screen with an icon, title, subtitle, and timestamp.
+1. **Given** a trade event occurs, **When** the app receives it, **Then** it appears in the Notifications screen in its trade's card, with an icon, its whole title, its message and a timestamp. The icon and colour say what the event means to the user: their step, a wait, chat, dispute, or finished. Whose step it is follows the user's side of the trade, so `active` is the buyer's step and the seller's wait. Earlier events of the same trade expand below it as a one-line timeline.
 2. **Given** there are unread notifications, **When** the user looks at the app bar, **Then** the bell shows a numbered badge (pill shape, dark gold) with the unread count and animates.
-3. **Given** the user taps a notification, **When** they navigate to the relevant screen, **Then** the notification is marked as read and its indicator disappears.
+3. **Given** the user taps a notification, **When** they navigate to the relevant screen, **Then** the notification is marked as read and its indicator disappears. The only exception is the resolver's chat card: it opens the trade, and only the dispute chat marks it read (#610).
+3a. **Given** a trade has unread notifications, **When** the user taps "Go to trade" on its card, or opens that trade's detail screen from anywhere, **Then** every notification of that trade is marked read except its chat cards. Seeing the trade is not reading its messages: the chat screens own those cards and mark them read when opened (#610).
 4. **Given** the user opens the overflow menu in Notifications, **When** they tap "Mark all as read", **Then** all notifications are marked read and the badge disappears.
+5. **Given** the user opens Notifications, **When** the list renders, **Then** there are no filter tabs. Trade cards and notifications that belong to no trade share one list, newest first, and a dispute stays in its trade's card, marked in red.
+6. **Given** a trade's next step is the user's, as My Trades decides it from the trade's **current** state, **When** the list renders, **Then** that trade's card sits under a "Needs your action" header above a "Recent" header, and it carries the step (e.g. "Add invoice", "Release sats"). An old notification about a step already taken never pins its trade. With no such trade, neither header is shown.
+7. **Given** a trade card, **When** it renders, **Then** its header names the trade: the user's side, the fiat amount and currency, the sats when fixed, and the payment method with the short order id. When the trade row is gone, the header is the short order id.
+8. **Given** a card in Notifications, **When** the user swipes it away, **Then** it disappears at once and a snack bar offers Undo. A trade card deletes all its notifications. They are deleted only once the snack bar closes without Undo; Undo brings the card back and deletes nothing. There is no per-notification menu.
 
 ---
 
@@ -363,7 +369,17 @@ Users manage their cryptographic identity from the Account screen: view their 12
 **P2P Chat**
 
 - **FR-035**: Each active trade MUST have a dedicated encrypted chat room accessible from the Trade Detail screen via the Contact button.
-- **FR-036**: The chat MUST support text messages, encrypted image attachments, and encrypted file attachments.
+- **FR-036**: The chat MUST support text messages, encrypted image attachments, and encrypted file attachments, **interoperable with v1** in both directions (#589):
+  - **Sent**: JPEG, PNG and PDF, recognised by their content (never by name or claimed MIME), up to 25 MB. Images are re-encoded before upload, with the orientation applied to the pixels, so EXIF/GPS metadata never leaves the device.
+  - **Received**: everything v1 sends (`image_encrypted`, and `file_encrypted` with `file_type` image, video or document).
+  - **Encryption**: ChaCha20-Poly1305 under the raw ECDH secret with the counterpart — the peer's trade key in the P2P chat, the solver in the dispute chat — the key v1 uses. Files are uploaded to Blossom (BUD-02 `/upload`), each upload signed by a throwaway key, never the identity.
+  - **Download**: verified against the blob hash in its URL before decrypting.
+  - **Storage**: the device caches the encrypted blob only, in an identity-scoped, size-bounded cache; decrypted content stays in memory.
+  - **Solver access**: a solver given `K_conv` reads the P2P chat but cannot open its files, as in v1. Changing that needs a protocol change adopted by both clients.
+  - **Sending (UI)**: the paperclip offers Photo, Camera (where the device has one) and PDF. A file over 25 MB is refused before it is read, and every file is confirmed (name and size) before it is sent. The upload shows as the sender's own bubble with its progress; a failed one says why and offers Retry (when retrying can succeed) and Discard. An upload cannot be cancelled once started. The web build offers Photo and PDF (no camera) since #589 phase 4.
+  - **Viewing (UI)**: a received image is downloaded and decrypted on arrival, as in v1, and drawn at the shape the sender declared; tapping it opens a full-screen viewer with pinch-zoom and Save. Any other file shows a card (name, size, type) and is downloaded only when the user taps Save. Save goes through the system save dialog, where the user chooses; on the web, where there is none, the browser downloads the file.
+  - **Dispute chat (UI)**: the same paperclip, bubbles, viewer and hand-off, keyed to the solver (`send_dispute_file`); the attach sheet says only the solver can open the file. The composer shows only once a solver has taken the dispute (#589 phase 3).
+  - **Handing off (UI)**: a file of a type v1 sends (JPEG, PNG, PDF, DOC, DOCX, MP4, MOV, AVI — judged by the type Rust reports, not the name; a file declared JPEG, PNG or PDF whose bytes are not is reported as `application/octet-stream`) can also be opened in another app ("Open with…", the default tap on a file card) and shared; any other type can only be saved. Both write a temporary copy, under the app's cache, named from a safe character set with the extension of its type; a copy no app took is deleted at once, one handed off expires after 5 minutes; all are swept at start-up and on an identity change, and those past the 5 minutes when the user returns to the app. These copies and Save are the only ways decrypted content reaches disk.
 - **FR-037**: The chat room MUST display the peer's avatar, handle, and provide access to a Trade Information panel and a User Information panel.
 - **FR-038**: The User Information panel MUST display the shared ECDH encryption key as a copyable value so it can optionally be shared with a dispute admin.
 - **FR-039**: Messages MUST appear optimistically immediately after send, before relay confirmation.
@@ -373,7 +389,7 @@ Users manage their cryptographic identity from the Account screen: view their 12
 
 - **FR-041**: Users MUST be able to open a dispute from the Trade Detail screen when the trade is in "active" or "fiat-sent" status.
 - **FR-042**: All disputes MUST appear in a dedicated "Disputes" sub-tab within the Chat screen.
-- **FR-043**: Each dispute MUST have a separate encrypted chat room for communication between the user and the assigned admin.
+- **FR-043**: Each dispute MUST have a separate encrypted chat room for communication between the user and the assigned admin. It shows only the dispute channel's messages (never the peer's), text and attachments; the user can write once a solver has taken the dispute, and its status (solver assigned, resolution) updates live (#143).
 - **FR-044**: The dispute chat input MUST be hidden once the dispute is resolved or closed; the chat becomes read-only with a visible lock message.
 - **FR-045**: The seller MUST be able to voluntarily release sats from the Trade Detail screen even while a dispute is active.
 - **FR-046**: The system MUST display the dispute resolution outcome clearly (admin released sats vs. admin refunded seller).

@@ -49,6 +49,7 @@ TradeInfo listTrade({
   counterpartyPubkey: counterparty,
   currentStep: const TradeStep.disputed(),
   tradeKeyIndex: 0,
+  cashuRejectedEscrowTokens: const [],
   startedAt: _ago(ago),
   ratedAt: ratedAt,
 );

@@ -88,6 +88,12 @@ other end: the subscription never existed, and the `NOTICE` names none.
    reconnect and then proceeds whatever the state (`online=false` is a normal outcome). Nothing
    it does may depend on a relay being connected at that moment; what it could not deliver must
    be recoverable on the `Connected` / `Online` transitions (subscription repair, outbox flush).
+   **`connect()` does not wake a dropped relay.** The OS cuts every socket while the app is in
+   the background, and each relay's connection task then sleeps its retry interval (10 s,
+   growing to 60 s) before trying again; nostr-sdk's `connect()` only starts relays with no
+   task. So `resync()` first bounces every `Disconnected` relay
+   (`relay_probe::reconnect_disconnected_now`), or a daemon message sent while the user was in
+   another app — paying a bond in their wallet — arrives only when that interval runs out.
 7. **Publishing: read `output.failed`, not just `Ok`.** Same shape as subscribe. Requests that
    expect a reply register their pending record *before* publishing and hold a subscription that
    is already live (`subscribe_daemon_messages` is awaited first).
@@ -124,6 +130,7 @@ In the app log (`/logs`, or `adb logcat -s mostro flutter`):
 | `Kind 14 received (global\|per-trade) … age=Ns` | `age` ≈ 0 is live delivery; minutes or more is a replay. |
 | `drop ev=… reason=duplicate` | Normal: the global and per-trade loops saw the same event. |
 | `[lifecycle] resync: online=false` | Resume ran before the sockets were back (rule 6). |
+| `resume: reconnecting N dropped relay(s) now` | The resume bounced relays the OS had cut, instead of leaving them asleep in their retry interval (rule 6). Their `Disconnected→Connected` should follow within about a second. |
 
 A daemon message that shows up on the counterparty's log but on neither of yours, while your
 relays read `Connected`, means a subscription is missing on them: check for the `eose` line.

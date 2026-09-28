@@ -4,7 +4,7 @@ Auto-generated from all feature plans. Last updated: 2026-09-17
 
 ## Active Technologies
 - Rust stable 1.94+ (core); Dart 3.x / Flutter 3.x (UI shell) (004-mostro-p2p-client)
-- nostr-sdk 0.45+, mostro-core 0.14.6, flutter_rust_bridge 2.11.1, Riverpod (state),
+- nostr-sdk 0.45+, mostro-core 0.16.0, flutter_rust_bridge 2.11.1, Riverpod (state),
   go_router (navigation), sqlx (SQLite, native) / indexed_db_futures (IndexedDB, web),
   sembast (Dart UI-layer state), bip32/bip39 (keys), chacha20poly1305 (file encryption)
 - Sembast (Dart, all platforms) for UI-layer state; SQLite via `sqlx` (Rust, native) /
@@ -65,6 +65,9 @@ flutter gen-l10n                            # after editing lib/l10n/*.arb
   (no-op off web) — rename that flag on one side only and the check silently never fires.
   The CI run also sets `SMOKE_BOND_STORE=1`: it seeds bond rows (`test/web/smoke/seed/`) into
   IndexedDB, reloads, and compares them with what `lib/core/web/store_probe.dart` read back.
+  And `SMOKE_ATTACHMENTS=1`: it serves a Blossom endpoint on a **second origin** and waits for
+  `lib/core/web/attachment_probe.dart` to report an encrypted upload, verified download and
+  IndexedDB cache round trip — the one check that a CORS fetch from the isolated page works.
 - **The FCM messaging worker is a second service worker**, `web/firebase-messaging-sw.js`,
   registered from `web/index.html` and `web_push_web.dart` **relative to the base path** under
   the scope `firebase-cloud-messaging-push-scope` — Firebase's default is the origin root, a 404
@@ -232,8 +235,9 @@ bridged by flutter_rust_bridge.
   user's session. The stores are process-wide and tests run in parallel, which is why the
   identity lifecycle test calls `delete_identity_inner(false)`.
 - **`OrderInfo::created_at` is when the order was created, not the event's time.** It comes from
-  the NIP-69 `created_at` tag (mostro#971), capped at the event's time and falling back to it on
-  older nodes. The event's own `created_at` moves on every revision of the addressable event, so
+  the NIP-69 `published_at` tag (mostro#1000), then the legacy `created_at` tag (daemon builds
+  between mostro#971 and #1000), then the event's time on older nodes; a tag value is capped at
+  the event's time. The event's own `created_at` moves on every revision of the addressable event, so
   anything that must pick the **newest revision** has to read the event, not the order —
   `node_stats::dedup_latest` carries it alongside as `Revision`.
 - **Order book is sourced only from daemon Kind 38383 events.** `create_order` waits for daemon

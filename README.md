@@ -177,7 +177,7 @@ Mostro App uses a **split-architecture** model: all cryptography, protocol logic
 │                  Rust Core                  │
 │                                             │
 │  nostr-sdk 0.45   →  relay pool, NIP-44     │
-│  mostro-core 0.14.6 →  protocol FSM, types,   │
+│  mostro-core 0.16.0 →  protocol FSM, types,   │
 │                      transport              │
 │  bip32 / bip39    →  HD key derivation      │
 │  k256             →  secp256k1 ECDH         │

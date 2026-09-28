@@ -73,10 +73,22 @@ pub fn parse_order_event(event: &Event, my_pubkey: Option<&PublicKey>) -> Option
         .map(|t| &t.as_slice()[1..])
         .unwrap_or(&[]);
     let (fiat_amount, fiat_amount_min, fiat_amount_max) = parse_fiat_amounts(fa_values);
-    let amount_sats: Option<u64> = get("amt").and_then(|v| v.parse().ok());
+    // A range is priced at market when taken: it has no sats amount of its
+    // own. mostrod before mostro#986 published the in-flight taker's slice in
+    // `amt` during the taker-bond window (mostro#927), which made a pending
+    // range read as fixed-price; such an `amt` is ignored.
+    let is_range = fiat_amount_min.is_some() && fiat_amount_max.is_some();
+    let amount_sats: Option<u64> = if is_range {
+        None
+    } else {
+        get("amt").and_then(|v| v.parse().ok())
+    };
     // creator_pubkey is the Mostro node's pubkey (the event author).
     let creator_pubkey = event.pubkey.to_hex();
-    let created_at = order_created_at(event, get("created_at").as_deref());
+    let created_at = order_created_at(
+        event,
+        get("published_at").or_else(|| get("created_at")).as_deref(),
+    );
     let expires_at: Option<i64> = get("expiration").and_then(|v| v.parse().ok());
 
     // is_mine is always false for Kind 38383 events: the event author is the
@@ -112,9 +124,11 @@ pub fn parse_order_event(event: &Event, my_pubkey: Option<&PublicKey>) -> Option
 ///
 /// Order events are addressable, so the event's own `created_at` moves on every
 /// revision: a taken-then-reverted order would read as brand new and jump to
-/// the top of the book. The NIP-69 `created_at` tag (MostroP2P/mostro#971)
-/// carries the creation time and stays put. Nodes that predate the tag, or send
-/// one that does not parse, fall back to the event's time.
+/// the top of the book. The NIP-69 `published_at` tag (MostroP2P/mostro#1000)
+/// carries the creation time and stays put. Daemon builds between
+/// MostroP2P/mostro#971 and #1000 sent it as `created_at`, which is read when
+/// `published_at` is absent. Nodes that predate both, or send a value that does
+/// not parse, fall back to the event's time.
 ///
 /// Capped at the event's time: an order cannot have been created after a
 /// revision of it was published, and without the cap a node could pin its
@@ -318,9 +332,9 @@ mod tests {
             .unwrap()
     }
 
-    /// An order event published at `published_at`, with an optional
-    /// `created_at` tag.
-    fn order_event_created(published_at: u64, created_tag: Option<&str>) -> Event {
+    /// An order event whose revision was published at `revision_at`, with
+    /// extra `(name, value)` tags.
+    fn order_event_tagged(revision_at: u64, extra: &[(&str, &str)]) -> Event {
         let keys = Keys::generate();
         let mut tags = vec![
             Tag::parse(["d", "308e1272-d5f4-47e6-bd97-3504baea9c23"]).unwrap(),
@@ -330,14 +344,23 @@ mod tests {
             Tag::parse(["fa", "20"]).unwrap(),
             Tag::parse(["z", "order"]).unwrap(),
         ];
-        if let Some(value) = created_tag {
-            tags.push(Tag::parse(["created_at", value]).unwrap());
+        for (name, value) in extra {
+            tags.push(Tag::parse([*name, *value]).unwrap());
         }
         EventBuilder::new(Kind::from(KIND_ORDER), "")
             .tags(tags)
-            .custom_created_at(Timestamp::from_secs(published_at))
+            .custom_created_at(Timestamp::from_secs(revision_at))
             .finalize(&keys)
             .unwrap()
+    }
+
+    /// An order event published at `revision_at`, with an optional
+    /// `published_at` tag.
+    fn order_event_created(revision_at: u64, published_tag: Option<&str>) -> Event {
+        match published_tag {
+            Some(value) => order_event_tagged(revision_at, &[("published_at", value)]),
+            None => order_event_tagged(revision_at, &[]),
+        }
     }
 
     /// A later revision (published at 5_000) keeps the order's creation time
@@ -355,6 +378,23 @@ mod tests {
             let order = parse_order_event(&order_event_created(5_000, tag), None).unwrap();
             assert_eq!(order.created_at, 5_000, "tag {tag:?}");
         }
+    }
+
+    /// Daemon builds between MostroP2P/mostro#971 and #1000 named the tag
+    /// `created_at`; it is still read when `published_at` is absent.
+    #[test]
+    fn created_at_reads_the_legacy_created_at_tag() {
+        let event = order_event_tagged(5_000, &[("created_at", "1000")]);
+        let order = parse_order_event(&event, None).unwrap();
+        assert_eq!(order.created_at, 1_000);
+    }
+
+    /// With both tags present, `published_at` is the one that counts.
+    #[test]
+    fn created_at_prefers_published_at_over_the_legacy_tag() {
+        let event = order_event_tagged(5_000, &[("created_at", "2000"), ("published_at", "1000")]);
+        let order = parse_order_event(&event, None).unwrap();
+        assert_eq!(order.created_at, 1_000);
     }
 
     /// A creation time later than the revision is impossible; capping it
@@ -414,6 +454,62 @@ mod tests {
         assert_eq!(order.fiat_amount, None);
         assert_eq!(order.fiat_amount_min, Some(20.0));
         assert_eq!(order.fiat_amount_max, Some(60.0));
+    }
+
+    /// mostro#927: a node before mostro#986 publishes a pending range with the
+    /// in-flight taker's slice in `amt`. The range must not read as fixed.
+    #[test]
+    fn a_range_ignores_the_sats_of_a_take_in_flight() {
+        // Arrange
+        let mut event = order_event(&["30", "50"]);
+        let keys = Keys::generate();
+        let tags = event
+            .tags
+            .iter()
+            .map(|t| {
+                if t.as_slice()[0] == "amt" {
+                    Tag::parse(["amt", "17285"]).unwrap()
+                } else {
+                    t.clone()
+                }
+            })
+            .collect::<Vec<_>>();
+        event = EventBuilder::new(Kind::from(KIND_ORDER), "")
+            .tags(tags)
+            .finalize(&keys)
+            .unwrap();
+
+        // Act
+        let order = parse_order_event(&event, None).expect("order");
+
+        // Assert
+        assert_eq!(
+            (order.fiat_amount_min, order.fiat_amount_max),
+            (Some(30.0), Some(50.0))
+        );
+        assert_eq!(order.amount_sats, None);
+    }
+
+    /// The same `amt` on a single amount is the order's own fixed price.
+    #[test]
+    fn a_single_amount_keeps_its_fixed_sats() {
+        let keys = Keys::generate();
+        let event = EventBuilder::new(Kind::from(KIND_ORDER), "")
+            .tags([
+                Tag::parse(["d", "308e1272-d5f4-47e6-bd97-3504baea9c23"]).unwrap(),
+                Tag::parse(["k", "sell"]).unwrap(),
+                Tag::parse(["s", "pending"]).unwrap(),
+                Tag::parse(["f", "PEN"]).unwrap(),
+                Tag::parse(["amt", "17285"]).unwrap(),
+                Tag::parse(["fa", "50"]).unwrap(),
+                Tag::parse(["z", "order"]).unwrap(),
+            ])
+            .finalize(&keys)
+            .unwrap();
+
+        let order = parse_order_event(&event, None).expect("order");
+
+        assert_eq!(order.amount_sats, Some(17285));
     }
 
     #[test]

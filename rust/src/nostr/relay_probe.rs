@@ -199,6 +199,31 @@ pub(crate) async fn force_reconnect(client: &Client, url: &str) {
     }
 }
 
+/// Reconnect now every relay the SDK holds as `Disconnected`, and say how
+/// many there were.
+///
+/// For the resume path. While the app is in the background the OS cuts every
+/// socket, and each relay's connection task then sleeps its retry interval —
+/// 10 s, growing to 60 s after repeated failures — before it tries again.
+/// `Client::connect` cannot shorten that: it only starts relays that have no
+/// connection task (initialized, terminated, sleeping-when-idle). So a daemon
+/// message sent while the user paid a bond in their wallet used to wait out
+/// that interval after they were back. Bouncing the relay ([`force_reconnect`])
+/// replaces the sleeping task with one that connects now; relays connected or
+/// already connecting are left alone. All at once: each bounce waits its own
+/// grace, and one slow relay must not hold the others.
+pub(crate) async fn reconnect_disconnected_now(client: &Client) -> usize {
+    let stale: Vec<String> = client
+        .relays()
+        .await
+        .iter()
+        .filter(|(_, relay)| relay.status() == RelayStatus::Disconnected)
+        .map(|(url, _)| url.to_string())
+        .collect();
+    futures_util::future::join_all(stale.iter().map(|url| force_reconnect(client, url))).await;
+    stale.len()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -209,6 +234,103 @@ mod tests {
     /// The property #324 could not hold: a healthy relay must never be
     /// reconnected, however quiet it is. Asking a real relay is what makes
     /// that safe — it answers whether or not it has anything to send.
+    /// A relay that drops its first connection right after the handshake —
+    /// what the OS does to every socket while the app is in the background —
+    /// and keeps every later one open.
+    async fn relay_that_drops_the_first_connection() -> String {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("ws://{}", listener.local_addr().unwrap());
+        tokio::spawn(async move {
+            let mut first = true;
+            while let Ok((stream, _)) = listener.accept().await {
+                let drop_it = std::mem::replace(&mut first, false);
+                tokio::spawn(async move {
+                    if let Ok(mut ws) = tokio_tungstenite::accept_async(stream).await {
+                        if drop_it {
+                            return;
+                        }
+                        use futures_util::StreamExt;
+                        while ws.next().await.is_some() {}
+                    }
+                });
+            }
+        });
+        url
+    }
+
+    /// Connect `url` and wait for the server to drop it, leaving the SDK's
+    /// connection task asleep in its retry interval.
+    async fn dropped_relay(url: &str) -> Client {
+        let client = Client::new();
+        client.add_relay(url).await.expect("add relay");
+        client
+            .try_connect_relay(url, Duration::from_secs(5))
+            .await
+            .expect("connect");
+        let relay = client
+            .relay(url)
+            .await
+            .expect("relay")
+            .expect("known relay");
+        for _ in 0..50 {
+            if relay.status() == RelayStatus::Disconnected {
+                return client;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        panic!("the relay never dropped: {}", relay.status());
+    }
+
+    async fn connected_within(client: &Client, url: &str, limit: Duration) -> bool {
+        let relay = client
+            .relay(url)
+            .await
+            .expect("relay")
+            .expect("known relay");
+        let deadline = tokio::time::Instant::now() + limit;
+        while tokio::time::Instant::now() < deadline {
+            if relay.status() == RelayStatus::Connected {
+                return true;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        false
+    }
+
+    /// Pins the SDK behaviour this module works around: `Client::connect`
+    /// does nothing for a relay whose connection task is asleep in its retry
+    /// interval (10 s and up), which is every relay the OS cut while the app
+    /// was in the background.
+    #[tokio::test]
+    async fn connect_does_not_wake_a_relay_asleep_in_its_retry() {
+        // Arrange
+        let url = relay_that_drops_the_first_connection().await;
+        let client = dropped_relay(&url).await;
+
+        // Act
+        client.connect().await;
+
+        // Assert
+        assert!(!connected_within(&client, &url, Duration::from_secs(3)).await);
+    }
+
+    /// The resume fix: a relay dropped in the background reconnects at once,
+    /// not when its retry interval runs out — so a daemon message sent while
+    /// the user paid in another app arrives as soon as they are back.
+    #[tokio::test]
+    async fn a_dropped_relay_reconnects_at_once_on_resume() {
+        // Arrange
+        let url = relay_that_drops_the_first_connection().await;
+        let client = dropped_relay(&url).await;
+
+        // Act
+        let woken = reconnect_disconnected_now(&client).await;
+
+        // Assert
+        assert_eq!(woken, 1);
+        assert!(connected_within(&client, &url, Duration::from_secs(3)).await);
+    }
+
     #[tokio::test]
     async fn a_healthy_relay_answers_the_probe() {
         // Arrange: a relay with no traffic at all, which under a silence

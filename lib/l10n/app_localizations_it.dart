@@ -65,11 +65,8 @@ class AppLocalizationsIt extends AppLocalizations {
   String get disputeLoadError => 'Impossibile caricare le dispute. Riprova.';
 
   @override
-  String get disputeMessagingComingSoon =>
-      'Messaggistica per controversie in arrivo';
-
-  @override
-  String get disputeAttachmentsComingSoon => 'Allegati file in arrivo';
+  String get disputeSolverNotAssigned =>
+      'Nessun mediatore ha ancora preso in carico questa controversia. Potrai scrivere quando qualcuno lo farà.';
 
   @override
   String get disputeNotFound => 'Controversia non trovata.';
@@ -232,6 +229,10 @@ class AppLocalizationsIt extends AppLocalizations {
   @override
   String get storageUnavailable =>
       'L\'app non può creare né prendere ordini finché il suo database locale non è disponibile. Riavvia l\'app e riprova';
+
+  @override
+  String get rangeOrderWithSats =>
+      'Un ordine a intervallo non può avere un importo fisso in sats: viene prezzato al mercato quando viene preso.';
 
   @override
   String get orderIdCopied => 'ID ordine copiato';
@@ -769,6 +770,17 @@ class AppLocalizationsIt extends AppLocalizations {
   String get releaseFailed => 'Rilascio fallito. Riprovare.';
 
   @override
+  String get releasePendingLabel => 'Rilascio in corso… in attesa del nodo';
+
+  @override
+  String get releaseSentNotice =>
+      'Rilascio inviato. Il nodo può impiegare fino a un minuto per confermarlo.';
+
+  @override
+  String get releaseUnconfirmedNotice =>
+      'Il nodo non ha ancora confermato il rilascio. Se l\'ordine non si aggiorna, puoi rilasciare di nuovo.';
+
+  @override
   String get cancelTradeButton => 'Annulla scambio';
 
   @override
@@ -1021,6 +1033,10 @@ class AppLocalizationsIt extends AppLocalizations {
   @override
   String get sessionTimeoutMessage =>
       'Nessuna risposta ricevuta, verifica la tua connessione e riprova più tardi';
+
+  @override
+  String get noRelayAcceptedMessage =>
+      'Nessun relay ha accettato il tuo messaggio. Controlla i tuoi relay nelle Impostazioni e riprova';
 
   @override
   String get noIdentityFoundMessage =>
@@ -1495,16 +1511,6 @@ class AppLocalizationsIt extends AppLocalizations {
       'Conserva la tua chiave condivisa al sicuro — è necessaria per la risoluzione delle dispute';
 
   @override
-  String get attachmentLabel => '[Allegato]';
-
-  @override
-  String get downloadTooltip => 'Scarica';
-
-  @override
-  String get fileDownloadPlaceholder =>
-      'Download dei file disponibile nella Fase 10+';
-
-  @override
   String get fileTypeVideo => 'Video';
 
   @override
@@ -1515,13 +1521,6 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get fileTypeFile => 'File';
-
-  @override
-  String get tapToDownload => 'Tocca per scaricare';
-
-  @override
-  String get imageDownloadPlaceholder =>
-      'Download delle immagini disponibile nella Fase 10+';
 
   @override
   String buyingSatsAmount(String sats) {
@@ -1951,23 +1950,21 @@ class AppLocalizationsIt extends AppLocalizations {
   String get tradeWord => 'Operazione';
 
   @override
-  String get notifFilterAll => 'Tutte';
+  String get notifSectionRecent => 'Recenti';
 
   @override
-  String get notifFilterDisputes => 'Dispute';
-
-  @override
-  String notifFilterDisputesCount(int count) {
-    return 'Dispute · $count';
+  String notificationDeletedSnack(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count notifiche eliminate',
+      one: 'Notifica eliminata',
+    );
+    return '$_temp0';
   }
 
   @override
-  String get notifFilterSystem => 'Sistema';
-
-  @override
-  String notifFilterSystemCount(int count) {
-    return 'Sistema · $count';
-  }
+  String get notificationDeletedUndo => 'Annulla';
 
   @override
   String get payingStatus => 'Pagamento in corso...';
@@ -3066,8 +3063,21 @@ class AppLocalizationsIt extends AppLocalizations {
       'In attesa del tuo deposito — non ancora pubblicato';
 
   @override
-  String get bondCancelNotAllowed =>
-      'Questo ordine non può essere annullato finché il deposito è in sospeso. Scartalo dalla schermata del deposito.';
+  String get bondAlreadyLocked =>
+      'Il tuo deposito è già stato pagato, quindi l\'ordine è pubblicato. Annullalo dalla schermata dell\'ordine.';
+
+  @override
+  String get bondCancelRefusedTitle => 'Il nodo non ha annullato il deposito';
+
+  @override
+  String get bondCancelRefusedBody =>
+      'Questo nodo Mostro potrebbe non permettere ancora di annullare un deposito non pagato, oppure il tuo deposito è appena stato pagato. Se non l\'hai pagato, puoi rimuovere l\'ordine da questo dispositivo. Se la fattura viene pagata più tardi, l\'ordine verrà comunque pubblicato.';
+
+  @override
+  String get bondRemoveFromDevice => 'Rimuovi da questo dispositivo';
+
+  @override
+  String get bondKeepWaiting => 'Continua ad aspettare';
 
   @override
   String createOrderBondNoticeEstimate(String sats) {
@@ -3749,4 +3759,361 @@ class AppLocalizationsIt extends AppLocalizations {
   String restorePartialNotice(int missing, int total) {
     return '$missing di $total ordini non sono stati caricati';
   }
+
+  @override
+  String get attachSheetTitle => 'Invia un file';
+
+  @override
+  String get attachSheetBody =>
+      'Viene cifrato sul tuo dispositivo. Solo la tua controparte può aprirlo.';
+
+  @override
+  String get attachSheetBodySolver =>
+      'Viene cifrato sul tuo dispositivo. Solo il mediatore può aprirlo.';
+
+  @override
+  String get attachSourcePhoto => 'Foto';
+
+  @override
+  String get attachSourceCamera => 'Fotocamera';
+
+  @override
+  String get attachSourcePdf => 'Documento PDF';
+
+  @override
+  String get attachConfirmTitle => 'Inviare questo file?';
+
+  @override
+  String attachConfirmBody(String fileName, String size) {
+    return '$fileName ($size)';
+  }
+
+  @override
+  String get attachmentTooLarge => 'I file possono pesare al massimo 25 MB.';
+
+  @override
+  String get attachmentUnsupported =>
+      'Si possono inviare solo file JPEG, PNG e PDF.';
+
+  @override
+  String get attachmentInvalidImage => 'Impossibile leggere questa immagine.';
+
+  @override
+  String get attachmentReadFailed => 'Impossibile leggere il file.';
+
+  @override
+  String get attachmentPeerUnknown =>
+      'Potrai inviare file quando qualcuno avrà preso l\'ordine.';
+
+  @override
+  String get attachmentUploadFailed =>
+      'Il caricamento non è riuscito. Controlla la connessione e riprova.';
+
+  @override
+  String get attachmentSendFailed => 'Impossibile inviare il file.';
+
+  @override
+  String get attachmentDownloadFailed => 'Impossibile scaricare il file.';
+
+  @override
+  String get attachmentDecryptFailed => 'Impossibile decifrare questo file.';
+
+  @override
+  String get attachmentUploading => 'Invio…';
+
+  @override
+  String get attachmentDiscard => 'Scarta';
+
+  @override
+  String get attachmentSave => 'Salva';
+
+  @override
+  String get attachmentSaved => 'File salvato';
+
+  @override
+  String get attachmentSaveFailed => 'Impossibile salvare il file.';
+
+  @override
+  String attachmentImageSemantics(String fileName) {
+    return 'Immagine: $fileName';
+  }
+
+  @override
+  String get attachmentOpenImage => 'Apri immagine';
+
+  @override
+  String get attachmentOpenWith => 'Apri con…';
+
+  @override
+  String get attachmentShare => 'Condividi';
+
+  @override
+  String get attachmentMoreActions => 'Altre opzioni';
+
+  @override
+  String get attachmentNoAppToOpen =>
+      'Nessuna app di questo dispositivo può aprire questo file.';
+
+  @override
+  String get attachmentOpenFailed => 'Impossibile aprire il file.';
+
+  @override
+  String get attachmentShareFailed => 'Impossibile condividere il file.';
+
+  @override
+  String get attachmentSaveOnly =>
+      'Questo tipo di file può solo essere salvato.';
+
+  @override
+  String get cashuWalletTitle => 'Portafoglio Cashu';
+
+  @override
+  String get cashuWalletSubtitle =>
+      'Conserva ecash per gli scambi su questo nodo';
+
+  @override
+  String get cashuBalanceLabel => 'Saldo';
+
+  @override
+  String cashuMintLabel(String mint) {
+    return 'Mint: $mint';
+  }
+
+  @override
+  String get cashuNotConnected => 'Non connesso a una mint';
+
+  @override
+  String get cashuReceiveButton => 'Ricevi';
+
+  @override
+  String get cashuSendButton => 'Invia';
+
+  @override
+  String get cashuReceiveHint => 'Incolla o scansiona un token Cashu';
+
+  @override
+  String get cashuAmountLabel => 'Importo in sats';
+
+  @override
+  String cashuReceived(int sats) {
+    return 'Ricevuti $sats sats';
+  }
+
+  @override
+  String get cashuSyncButton => 'Sincronizza con la mint';
+
+  @override
+  String get cashuSynced => 'Sincronizzato con la mint';
+
+  @override
+  String get cashuTokenTitle => 'Il tuo token';
+
+  @override
+  String get cashuTokenWarning =>
+      'Chi riscuote questo token tiene i fondi. Trattalo come contante: invialo una sola volta, a una sola persona.';
+
+  @override
+  String get cashuCopyToken => 'Copia';
+
+  @override
+  String get cashuTokenCopied => 'Token copiato';
+
+  @override
+  String get cashuWalletExplanation =>
+      'Questo portafoglio contiene ecash emesso dalla mint che usa il tuo nodo Mostro. Serve a finanziare e incassare scambi su quel nodo: non è un portafoglio generico.';
+
+  @override
+  String get cashuErrorNotEnabled =>
+      'Questo nodo Mostro non liquida gli scambi con Cashu.';
+
+  @override
+  String get cashuErrorNotConnected =>
+      'Il portafoglio non è ancora connesso a una mint.';
+
+  @override
+  String get cashuErrorMintUnreachable =>
+      'Impossibile raggiungere la mint. Controlla la connessione e riprova.';
+
+  @override
+  String get cashuErrorMintUnusable =>
+      'Alla mint di questo nodo mancano funzioni necessarie al deposito, quindi qui non si può scambiare.';
+
+  @override
+  String get cashuErrorUnsupportedOnWeb =>
+      'Il portafoglio Cashu non è ancora disponibile nella versione web.';
+
+  @override
+  String get cashuErrorAmountZero => 'Inserisci un importo maggiore di zero.';
+
+  @override
+  String cashuErrorAmountTooLarge(int sats) {
+    return 'Hai solo $sats sats.';
+  }
+
+  @override
+  String get cashuErrorReceiveFailed =>
+      'Non è stato possibile riscuotere il token. Potrebbe essere di un\'altra mint o già speso.';
+
+  @override
+  String get cashuErrorSendFailed =>
+      'Non è stato possibile creare il token. Potresti non avere fondi sufficienti.';
+
+  @override
+  String get cashuErrorNoIdentity =>
+      'Crea o importa un account prima di usare il portafoglio.';
+
+  @override
+  String get cashuErrorGeneric =>
+      'Qualcosa è andato storto con il portafoglio. Riprova.';
+
+  @override
+  String get cashuLastTokenPending =>
+      'Hai esportato un token. È denaro finché qualcuno non lo riscuote: conservalo finché non sei sicuro che sia arrivato.';
+
+  @override
+  String get cashuShowLastToken => 'Mostralo di nuovo';
+
+  @override
+  String get cashuLastTokenDone => 'L\'ho inviato';
+
+  @override
+  String get cashuTokenTooLargeForQr =>
+      'Questo token è troppo grande per un codice QR. Copialo invece.';
+
+  @override
+  String get cashuErrorMintChanged =>
+      'Il nodo attivo è cambiato e questo portafoglio è legato a un\'altra mint. Torna indietro e riapri il portafoglio.';
+
+  @override
+  String get cashuErrorNoMnemonic =>
+      'Questo account è stato importato da un nsec, quindi non c\'è una frase di recupero da cui derivare il portafoglio. Il portafoglio Cashu richiede un account creato da una frase di recupero.';
+
+  @override
+  String get cashuErrorTokenUnverified =>
+      'Non è stato possibile verificare questo token: non contiene la prova della firma della mint, quindi non è stato accettato.';
+
+  @override
+  String get cashuErrorSendUnresolved =>
+      'L\'invio non è riuscito e il portafoglio non ha potuto confermare che i fondi siano tornati. Sincronizza con la mint prima di riprovare.';
+
+  @override
+  String get lockEscrowTitle => 'Blocca il deposito';
+
+  @override
+  String get lockEscrowExplanation =>
+      'Blocca il tuo ecash in un deposito 2-su-3 presso la mint di questo nodo. Né tu né l\'acquirente potete muoverlo da soli — e se il nodo sparisce potrai recuperarlo tu stesso una volta scaduto il blocco.';
+
+  @override
+  String get lockEscrowAmount => 'Deposito';
+
+  @override
+  String get lockEscrowFee => 'Commissione Mostro';
+
+  @override
+  String get lockEscrowTotal => 'Totale';
+
+  @override
+  String get lockEscrowBalance => 'Il tuo saldo';
+
+  @override
+  String get lockEscrowConfirm => 'Blocca il deposito';
+
+  @override
+  String get lockEscrowFundWallet => 'Ricarica il portafoglio';
+
+  @override
+  String get lockEscrowSubmitted => 'Deposito bloccato e inviato';
+
+  @override
+  String get lockEscrowInsufficientFunds =>
+      'Il tuo portafoglio non copre deposito e commissione.';
+
+  @override
+  String get lockEscrowNotTheSeller =>
+      'Solo il venditore finanzia il deposito.';
+
+  @override
+  String get lockEscrowInvalidToken =>
+      'Non è stato possibile costruire il deposito correttamente. Non è stato inviato nulla.';
+
+  @override
+  String get lockEscrowFailed =>
+      'La mint non ha potuto bloccare il deposito. I tuoi fondi non si sono mossi.';
+
+  @override
+  String lockEscrowMint(String mint) {
+    return 'Mint: $mint';
+  }
+
+  @override
+  String lockEscrowLocktime(int days) {
+    return 'Recuperabile da te dopo $days giorni';
+  }
+
+  @override
+  String get lockEscrowRequestMissing =>
+      'Questo scambio non ha ancora una richiesta di deposito. Attendi che arrivi la presa dell\'acquirente e riprova.';
+
+  @override
+  String get lockEscrowWrongTradeKey =>
+      'Questo dispositivo non ha la chiave con cui è stato preso questo ordine. Ripristina il tuo account sul dispositivo da cui hai iniziato lo scambio.';
+
+  @override
+  String get lockEscrowLocktimeNotReached =>
+      'Il deposito è ancora bloccato. Potrai recuperarlo tu stesso una volta scaduto il blocco.';
+
+  @override
+  String get lockEscrowClockInvalid =>
+      'L\'orologio del tuo dispositivo è errato, quindi il deposito non può essere datato correttamente. Correggi la data e riprova.';
+
+  @override
+  String get lockEscrowRetry => 'Riprova l\'invio';
+
+  @override
+  String get lockEscrowPendingSubmission =>
+      'Il tuo deposito è bloccato ma il nodo non lo ha confermato. Riprovare è sicuro: non verrà bloccato una seconda volta.';
+
+  @override
+  String get lockEscrowMintUnknown =>
+      'Questo nodo non ha pubblicato il suo mint, quindi non c\'è dove bloccare l\'escrow.';
+
+  @override
+  String get lockEscrowNotRecorded =>
+      'L\'escrow è arrivato al nodo, ma questo dispositivo non ha potuto salvarne una copia. Il trade può continuare, ma da questo dispositivo non potrai recuperare l\'escrow.';
+
+  @override
+  String get lockEscrowRejectedToken =>
+      'Il nodo non ha accettato questo escrow. È stato messo da parte — torna a te quando scade il suo blocco — e il prossimo tentativo ne blocca uno nuovo.';
+
+  @override
+  String get lockEscrowRejectedMint =>
+      'Il nodo usa un altro mint. Questo escrow è stato messo da parte — torna a te quando scade il suo blocco. Controlla il mint del nodo prima di riprovare.';
+
+  @override
+  String get lockEscrowMintUnavailableAtNode =>
+      'Il nodo non ha potuto contattare il mint per verificare il tuo escrow. Riprova: viene rinviato lo stesso escrow, niente viene bloccato due volte.';
+
+  @override
+  String get lockEscrowRejectedGeneric =>
+      'Il nodo ha rifiutato l\'escrow. Resta salvato su questo dispositivo; riprova tra un momento.';
+
+  @override
+  String get lockEscrowNoAnswer =>
+      'Il nodo non ha ancora risposto. Il tuo escrow è salvato; riprovare rinvia lo stesso.';
+
+  @override
+  String get lockEscrowOrderMovedOn =>
+      'Il nodo dice che questo ordine non attende più l\'escrow. Il tuo escrow resta salvato su questo dispositivo; lo stato del trade si aggiornerà quando il nodo lo comunicherà.';
+
+  @override
+  String get tradeHeadlineWaitingPaymentSellerCashu =>
+      'Blocca l\'escrow per avviare il trade';
+
+  @override
+  String get tradeWaitingPaymentSellerInstructionCashu =>
+      'Blocca il tuo ecash nell\'escrow presso il mint del nodo. Questo avvia il trade, e torna a te se il nodo scompare.';
+
+  @override
+  String get tradeBodyWaitingPaymentBuyerCashu =>
+      'Stanno bloccando i sats nell\'escrow. Una volta bloccato, tocca a te pagare il fiat.';
 }
