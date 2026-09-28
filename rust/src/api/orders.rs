@@ -1580,8 +1580,9 @@ async fn take_order_once(
 
     // Wait for the daemon's verdict — the trade only exists once the daemon
     // acknowledges the take. On timeout, detach only the waiter and leave the
-    // record: a genuine late reply is logged, a stale replay still can't
-    // consume it, and the record dies with the per-trade subscription.
+    // record: a genuine late reply is reconciled by the dispatcher (#566), a
+    // stale replay still can't consume it, and the record dies with the
+    // per-trade subscription.
     let reply = crate::rt::time::timeout(std::time::Duration::from_secs(10), conf_rx).await;
     if !matches!(reply, Ok(Ok(_))) {
         detach_request_waiter(&trade_pk_hex, request_id);
@@ -1691,6 +1692,18 @@ async fn take_order_once(
         }
     }
     persist_confirmed_take(&trade).await;
+    wire_accepted_take(&mut trade, "take_order").await;
+
+    Ok(trade)
+}
+
+/// Wires up a persisted accepted take the way the chat and book paths expect
+/// it: the single-order watch, the session, and the counterparty a reveal
+/// may already have captured. Shared by the live waiter path and the late
+/// reconcile (#566), so a take that landed late is as operational as one
+/// that landed in time. `ctx` names the caller in the log.
+async fn wire_accepted_take(trade: &mut crate::api::types::TradeInfo, ctx: &str) {
+    let order_id = trade.order.id.clone();
     // Subscribe to d-tag K38383 updates for this specific order so we still
     // see the public buckets the daemon does publish (in-progress once taken,
     // success / canceled at the end); the fine-grained states only ever arrive
@@ -1699,7 +1712,7 @@ async fn take_order_once(
     // Create (or replace, on a retake) the session so the chat API can look
     // up keys immediately. A confirmed take always wins over a session an
     // earlier confirmed take of this order left behind (#335) — a failed or
-    // timed-out take returns above and leaves none.
+    // timed-out take that nothing reconciled leaves none.
     //
     // A session may already exist for two different reasons, and they must not
     // be treated alike: an earlier take whose `Canceled` never reached us left
@@ -1714,15 +1727,12 @@ async fn take_order_once(
         .install_session(
             order_id.clone(),
             trade.role.clone(),
-            trade_index,
+            trade.trade_key_index,
             trade.order.clone(),
         )
         .await
     {
-        crate::api::logging::blog_warn(
-            "orders",
-            format!("take_order: install_session failed: {e}"),
-        );
+        crate::api::logging::blog_warn("orders", format!("{ctx}: install_session failed: {e}"));
     }
     // In the peer-reveal case the reveal ran before the trade row existed, so
     // its durable write was a no-op — replay it from the session now that the
@@ -1737,14 +1747,12 @@ async fn take_order_once(
         if let Some(peer) = session.peer_pubkey.filter(|p| !p.is_empty()) {
             if let Some(db) = crate::db::app_db::db() {
                 if let Err(e) = db.update_trade_counterparty(&order_id, &peer).await {
-                    log::warn!("[orders] take_order: failed to persist counterparty: {e}");
+                    log::warn!("[orders] {ctx}: failed to persist counterparty: {e}");
                 }
             }
             trade.counterparty_pubkey = peer;
         }
     }
-
-    Ok(trade)
 }
 
 /// The trade row for an accepted take: the book order the taker validated
@@ -3628,21 +3636,75 @@ async fn dispatch_mostro_message(
     // newest-first replay the older take reply behind it must not rebuild
     // what the daemon already ended (review round 2). A late take reply that
     // names no order falls back to the record's snapshot (#566).
+    //
+    // A late take proves its own generation: the record is this take's, so a
+    // row left by an EARLIER take of the order (its `Canceled` never reached
+    // us) is superseded the moment the daemon accepts this one — exactly what
+    // `persist_confirmed_take` does on the live path. Left in place, it would
+    // hide the NeverWritten case below, and the reply would be applied to the
+    // earlier take's row — its role, its trade key — or dropped whole by the
+    // terminal guard reading that row's status.
+    if let (Some(pending), RowState::Exists(row), Some(order_id)) =
+        (late_take.as_ref(), &row_state, &kind.id)
+    {
+        if row.trade_key_index < pending.trade_index {
+            let oid = order_id.to_string();
+            if let Some(db) = crate::db::app_db::db() {
+                match db.delete_trade_by_order_id(&oid).await {
+                    Ok(()) => {
+                        crate::api::logging::blog_info(
+                            "orders",
+                            format!(
+                                "late take order={} at trade_index={} supersedes the row of \
+                                 trade_index={} (#566)",
+                                crate::api::logging::short_id(&oid),
+                                pending.trade_index,
+                                row.trade_key_index,
+                            ),
+                        );
+                        crate::api::trade_touch::touch_trade(&oid);
+                        row_state = RowState::NeverWritten;
+                    }
+                    Err(e) => crate::api::logging::blog_warn(
+                        "orders",
+                        format!(
+                            "late take order={}: earlier take's row not removed ({e}) — \
+                             not rebuilding over it",
+                            crate::api::logging::short_id(&oid),
+                        ),
+                    ),
+                }
+            }
+        }
+    }
     if matches!(row_state, RowState::NeverWritten) {
         if let Some(order_id) = &kind.id {
             let oid = order_id.to_string();
             if !status_write_blocked(&oid, &kind.action, event_ts).await {
-                if let Some(rebuilt) =
-                    rebuild_trade_from_dm(kind, &oid, trade_pubkey_hex, trade_index, event_ts)
-                        .await
+                let rebuilt = match rebuild_trade_from_dm(
+                    kind,
+                    &oid,
+                    trade_pubkey_hex,
+                    trade_index,
+                    event_ts,
+                )
+                .await
                 {
-                    row_state = RowState::Exists(Box::new(rebuilt));
-                } else if let Some(pending) = late_take.as_ref() {
-                    if let Some(rebuilt) =
-                        rebuild_trade_from_take_snapshot(pending, kind, &oid, event_ts).await
-                    {
-                        row_state = RowState::Exists(Box::new(rebuilt));
+                    Some(rebuilt) => Some(rebuilt),
+                    None => match late_take.as_ref() {
+                        Some(pending) => {
+                            rebuild_trade_from_take_snapshot(pending, kind, &oid, event_ts).await
+                        }
+                        None => None,
+                    },
+                };
+                if let Some(mut rebuilt) = rebuilt {
+                    // A late take lands wired up like one that landed in
+                    // time: watched, with its session installed (#566).
+                    if late_take.is_some() {
+                        wire_accepted_take(&mut rebuilt, "late take").await;
                     }
+                    row_state = RowState::Exists(Box::new(rebuilt));
                 }
             }
         }
@@ -4058,9 +4120,11 @@ async fn dispatch_mostro_message(
         }
         // Mostro asks the buyer for a Lightning invoice with AddInvoice. A
         // taker's first copy is consumed by the take waiter as the take
-        // reply; this arm covers the maker-buyer, whose buy order was taken
-        // and the hold invoice paid. The message arrives on the global feed
-        // with no trade_index, so the order id is the only usable key.
+        // reply — unless the waiter timed out, when it reaches this arm right
+        // after the prologue rebuilt its row (#566); otherwise this arm
+        // covers the maker-buyer, whose buy order was taken and the hold
+        // invoice paid. The message arrives on the global feed with no
+        // trade_index, so the order id is the only usable key.
         Action::AddInvoice => {
             let order_id = match &kind.id {
                 Some(id) => id.to_string(),
@@ -17695,6 +17759,7 @@ mod tests {
         );
         assert_eq!(row.order.amount_sats, Some(11_514));
         assert_eq!(row.trade_key_index, 98, "the durable key binding is kept");
+        assert_wired_as_accepted_take(&order_id, 98, TradeRole::Buyer).await;
         assert_eq!(
             drain_updates(&mut rx, &order_id),
             vec![crate::api::types::OrderStatus::WaitingBuyerInvoice],
@@ -17720,6 +17785,136 @@ mod tests {
             row.order.status,
             crate::api::types::OrderStatus::WaitingBuyerInvoice
         );
+    }
+
+    /// What the live path leaves behind an accepted take besides its row
+    /// (`wire_accepted_take`): the session the chat API reads keys from, on
+    /// this take's key. A late take must leave the same (#566 review round
+    /// 2). The single-order watch is not asserted: without a relay pool its
+    /// task releases itself as soon as it runs.
+    async fn assert_wired_as_accepted_take(order_id: &str, trade_index: u32, role: TradeRole) {
+        let session = crate::mostro::session::session_manager()
+            .get_session(order_id)
+            .await
+            .expect("the late take installs its session");
+        assert_eq!(session.trade_key_index, trade_index, "session on this take's key");
+        assert_eq!(session.role, role);
+    }
+
+    /// #566 review round 2: a row an EARLIER take of the order left behind —
+    /// its `Canceled` never reached us, the order went back to the book and
+    /// was taken again — must not absorb the late reply of the new take. The
+    /// new take's record proves its generation, so its row replaces the old
+    /// one, as `persist_confirmed_take` does on the live path, and the old
+    /// take's session gives way to this one's.
+    async fn late_retake_supersedes_older_row(
+        old_status: crate::api::types::OrderStatus,
+        trade_pk: &str,
+        request_id: u64,
+    ) {
+        let path = std::env::temp_dir().join(format!(
+            "mostro_late_retake_{}_{}.db",
+            trade_pk,
+            std::process::id()
+        ));
+        let _ = crate::db::app_db::init_db(path.to_str().unwrap()).await;
+        let db = crate::db::app_db::db().expect("store initialised");
+
+        let order_uuid = uuid::Uuid::new_v4();
+        let order_id = order_uuid.to_string();
+        let book_order = taken_book_order(&order_id, crate::api::types::OrderKind::Sell);
+        // Current timestamps, unlike the other #566 tests: rows this recent
+        // stay inside the stale sweep's age gate, so a sweep another test
+        // runs meanwhile leaves them alone.
+        let now = crate::rt::unix_now();
+
+        // Take N (97), as its seller — a different role on purpose, so a row
+        // or session that survived would show.
+        let old = trade_row_for_accepted_take(
+            &book_order,
+            TradeRole::Seller,
+            None,
+            97,
+            Some(old_status),
+            None,
+            None,
+            None,
+            crate::mostro::pending::TradePubkeys::default(),
+            now - 60,
+        );
+        persist_trade_row(db, &old).await.expect("seed the older take's row");
+        crate::mostro::session::session_manager()
+            .install_session(order_id.clone(), TradeRole::Seller, 97, book_order.clone())
+            .await
+            .expect("seed the older take's session");
+
+        // Take N+1 (98), as its buyer, whose reply outlives the waiter.
+        let (conf_tx, conf_rx) = tokio::sync::oneshot::channel::<Wake>();
+        pending_requests().lock().unwrap().insert(
+            trade_pk.to_string(),
+            PendingRequest {
+                request_id,
+                trade_index: 98,
+                kind: PendingRequestKind::Take {
+                    order: Box::new(book_order),
+                    role: TradeRole::Buyer,
+                    fiat_amount: None,
+                },
+                tx: Some(conf_tx),
+            },
+        );
+        drop(conf_rx);
+        detach_request_waiter(trade_pk, request_id);
+
+        let mut rx = trade_updates_tx().subscribe();
+        dispatch_mostro_message(
+            late_take_reply(order_uuid, request_id, now as u64),
+            "test-late-retake",
+            trade_pk,
+            98,
+        )
+        .await;
+
+        let row = db
+            .get_trade_by_order_id(&order_id)
+            .await
+            .expect("lookup")
+            .expect("the accepted retake lands its row");
+        assert_ne!(row.id, old.id, "the older take's row is replaced, not mutated");
+        assert_eq!(row.role, TradeRole::Buyer, "the retake's role, not the older take's");
+        assert_eq!(row.trade_key_index, 98, "the retake's key, not the older take's");
+        assert_eq!(
+            row.order.status,
+            crate::api::types::OrderStatus::WaitingBuyerInvoice
+        );
+        assert_eq!(
+            drain_updates(&mut rx, &order_id),
+            vec![crate::api::types::OrderStatus::WaitingBuyerInvoice],
+        );
+        assert_wired_as_accepted_take(&order_id, 98, TradeRole::Buyer).await;
+    }
+
+    #[tokio::test]
+    async fn a_late_retake_replaces_an_older_takes_live_row() {
+        late_retake_supersedes_older_row(
+            crate::api::types::OrderStatus::WaitingPayment,
+            "ff00ff47",
+            6_100_000_001,
+        )
+        .await;
+    }
+
+    /// The terminal flavour: the older take's row reads `Canceled`, which the
+    /// terminal guard would otherwise read as this order's status and drop
+    /// the retake's reply whole — the #566 symptom again.
+    #[tokio::test]
+    async fn a_late_retake_replaces_an_older_takes_canceled_row() {
+        late_retake_supersedes_older_row(
+            crate::api::types::OrderStatus::Canceled,
+            "ff00ff48",
+            6_100_000_002,
+        )
+        .await;
     }
 
     /// The race inside the take's timeout (#566): `timeout()` has dropped
@@ -17854,6 +18049,7 @@ mod tests {
         );
         assert_eq!(row.order.fiat_code, "EUR", "the snapshot's order data is kept");
         assert_eq!(row.trade_key_index, 96, "the durable key binding is kept");
+        assert_wired_as_accepted_take(&order_id, 96, TradeRole::Buyer).await;
         assert_eq!(
             drain_updates(&mut rx, &order_id),
             vec![crate::api::types::OrderStatus::WaitingPayment],

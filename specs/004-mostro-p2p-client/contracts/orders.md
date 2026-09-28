@@ -49,6 +49,18 @@ a stale replay:
   does carry the order. A late `pay-bond-invoice` is the exception on both
   arms: the rebuild excludes it on purpose (its amount is the bond, not the
   order) and the daemon's idempotent re-send owns that recovery.
+  A late take lands exactly like a live one (`wire_accepted_take`, shared
+  with `take_order`): the single-order watch is opened, the session is
+  installed on this take's trade key, and a counterparty an earlier reveal
+  captured is written to the row. The record also proves the take's
+  generation: a row an **earlier** take of the same order left behind (a
+  lower `trade_key_index` — its `Canceled` never reached us) is deleted
+  before the rebuild, as `persist_confirmed_take` does on the live path, so
+  the reply is never applied to the earlier take's role and key, nor dropped
+  by the terminal guard reading its status. The record is consumed before
+  the rebuild and not restored if it fails: the daemon message was already
+  marked seen by the dedup window, so no in-session redelivery could use it,
+  and it does not survive a restart.
 - **add-invoice**: acknowledged and passed through — the reply doubles as a
   status update, which the per-action arms process as usual.
 - **dispute**: reconciled — `record_late_acceptance` persists the accepted
@@ -603,7 +615,7 @@ what rebuilds sessions after one.
 | Action                             | Payload variant                                     | Effect on the local trade row                                                    |
 |------------------------------------|-----------------------------------------------------|----------------------------------------------------------------------------------|
 | `WaitingBuyerInvoice`              | (status sync)                                       | `status → WaitingBuyerInvoice`                                                   |
-| `AddInvoice`                       | `Payload::Order(small_order)`                       | Maker-buyer path (a taker's nonce-correlated copy is consumed by the take interception, even when late): `status → WaitingBuyerInvoice` (payload status, fallback `status_for_action`), `amount_sats ← small_order.amount` when > 0 — synced to book **and** DB so `tradeAmountProvider` sees the sats. Keyed by the message's order id (`trade_index` is `None`). The follow-up `AddInvoice` with a `Payload::Peer` (counterparty reputation) is ignored. A payload status of `settled-hold-invoice` is the payout-failure replacement request (mostrod `check_failure_retries`, retries exhausted) and also maps to `WaitingBuyerInvoice` — persisting the settled status would hide the request and strand the payout. |
+| `AddInvoice`                       | `Payload::Order(small_order)`                       | Maker-buyer path, and a late taker copy right after the prologue rebuilt its row (#566; a live taker copy is consumed by the take interception): `status → WaitingBuyerInvoice` (payload status, fallback `status_for_action`), `amount_sats ← small_order.amount` when > 0 — synced to book **and** DB so `tradeAmountProvider` sees the sats. Keyed by the message's order id (`trade_index` is `None`). The follow-up `AddInvoice` with a `Payload::Peer` (counterparty reputation) is ignored. A payload status of `settled-hold-invoice` is the payout-failure replacement request (mostrod `check_failure_retries`, retries exhausted) and also maps to `WaitingBuyerInvoice` — persisting the settled status would hide the request and strand the payout. |
 | `InvoiceUpdated`                   | (status sync)                                       | `status → SettledHoldInvoice`: mostrod sends this only from `pay_new_invoice`, when the buyer's replacement payout invoice is accepted on a settled escrow — the payout is pending again on the new invoice |
 | `PayInvoice`                       | `Payload::PaymentRequest(small_order, bolt11, amt)` | `hold_invoice ← bolt11`, `amount_sats ← amt ?? small_order.amount`, `status → WaitingPayment` |
 | `BuyerTookOrder` / `HoldInvoicePaymentAccepted` | `SmallOrder` with `status = active`      | `status → Active` (routed through `map_core_status` kebab-case). The peer reveal happens in the pre-dispatch capture above, not in this arm. |
