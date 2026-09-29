@@ -59,15 +59,28 @@ a stale replay:
   A late take lands exactly like a live one (`wire_accepted_take`, shared
   with `take_order`): the single-order watch is opened, the session is
   installed on this take's trade key, and a counterparty an earlier reveal
-  captured is written to the row. The record also proves the take's
-  generation: a row an **earlier** take of the same order left behind (a
-  lower `trade_key_index` — its `Canceled` never reached us) is deleted
-  before the rebuild, as `persist_confirmed_take` does on the live path, so
-  the reply is never applied to the earlier take's role and key, nor dropped
-  by the terminal guard reading its status. The record is consumed before
-  the rebuild and not restored if it fails: the daemon message was already
-  marked seen by the dedup window, so no in-session redelivery could use it,
-  and it does not survive a restart.
+  captured is written to the row, and the row is announced only once it
+  is durable (`reconcile_late_take`).
+  The record also proves the take's generation: a row an **earlier** take
+  of the same order left behind (a lower `trade_key_index` — its `Canceled`
+  never reached us) is replaced by the new row, as `persist_confirmed_take`
+  does on the live path. **Built first, replaced after**: the new row must
+  exist and the status cursor must admit the reply (only the cursor — the
+  terminal guard would read the earlier row's status as this take's) before
+  the earlier row is deleted. The reply is never applied to the earlier
+  row: when it proves no row of its own (a late `pay-bond-invoice`, a
+  cursor-refused reply) it is dropped with that row left in place, and when
+  the delete fails it is dropped too.
+  A **store failure is retried, not final**: the store unavailable, the
+  earlier row not deleted, or the new row not saved (the earlier row is
+  then saved back, so the order keeps the row it had). The take record goes
+  back into the registry and the event out of the dedup window, so the next
+  delivery of the same event — another relay's copy, or the history a relay
+  replays after a reconnect or a resync — reconciles it again without a
+  restart. That matters most for a reply with no order payload, whose only
+  source of a row is the record. The record still dies with the per-trade
+  subscription, and the binding (`store_trade_key_index`) moves only once
+  the row is saved.
 - **add-invoice**: acknowledged and passed through — the reply doubles as a
   status update, which the per-action arms process as usual.
 - **dispute**: reconciled — `record_late_acceptance` persists the accepted
@@ -226,8 +239,10 @@ and `shared_key` set (same index — kept, since replacing it would drop the
 chat keys that path exists to establish, #334).
 That persistence half runs under the per-order lock (see *Per-order
 serialization*), acquired after the reply and never around the wait for it.
-On rejection or timeout **nothing is persisted** — no phantom trade, and no
-session: a take that fails never leaves one behind.
+On rejection or timeout **nothing is persisted** at that point — no phantom
+trade, and no session. A timeout is not final, though: a genuine reply that
+arrives after it lands the trade later, wired up as this path would have
+(see *Daemon confirmation & request correlation*).
 
 The row is created with an **empty `counterparty_pubkey`**: a book
 order's `creator_pubkey` is the Mostro node (the 38383 event author),
@@ -458,8 +473,11 @@ action requests the user must react to promptly — `WaitingBuyerInvoice` /
 `WaitingPayment` drive the app-wide auto-navigation to the add-invoice /
 pay-invoice screens (`TradeActionListener`, which resolves the trade role
 so the counterparty's informational copy of those statuses never
-navigates). Take replies produce no emission: the take waiter consumes
-them before the dispatch arms run. Screens filter by `order_id`.
+navigates). A take reply consumed by a waiting `take_order` produces no
+emission: the caller persists the row itself, before any dispatch arm runs.
+A late one — its waiter timed out — does: the dispatch prologue lands the
+row and emits its status once, and the arm that follows sees the row
+already holding it (#566). Screens filter by `order_id`.
 
 ```text
 TradeUpdate {
