@@ -2480,6 +2480,7 @@ async fn reconcile_late_take(
     trade_index: u32,
     event_id: &str,
     event_ts: i64,
+    epoch: u64,
 ) -> LateTakeOutcome {
     let retry = |pending: PendingRequest, why: &str| {
         retry_late_take(
@@ -2490,6 +2491,7 @@ async fn reconcile_late_take(
             order_id,
             event_id,
             why,
+            epoch,
         );
         LateTakeOutcome::Retry
     };
@@ -2537,7 +2539,7 @@ async fn reconcile_late_take(
     let Some(db) = crate::db::app_db::db() else {
         return retry(pending, "store unavailable");
     };
-    late_take_test_pause().await;
+    late_take_test_pause("before-write").await;
     let written = match earlier {
         Some(_) => replace_with_late_take_row(db, &trade).await,
         None => save_late_take_row(db, &trade).await,
@@ -2593,17 +2595,9 @@ const LATE_TAKE_RETRY_DELAYS: [std::time::Duration; 3] = [
     std::time::Duration::from_millis(5),
 ];
 
-/// One late take's retry bookkeeping (#566).
-struct LateTakeRetry {
-    /// Attempts scheduled so far.
-    attempts: usize,
-    /// The tasks scheduled for it — normally one; the one running when it
-    /// schedules the next is still finishing its own dispatch.
-    tasks: Vec<LateTakeRetryTask>,
-}
-
 /// A scheduled retry's task, as the identity teardown needs it: to stop it
 /// and to know it has stopped.
+#[flutter_rust_bridge::frb(ignore)]
 struct LateTakeRetryTask {
     abort: futures_util::future::AbortHandle,
     /// Resolves (with an error) once the task's future is gone — finished or
@@ -2611,18 +2605,46 @@ struct LateTakeRetryTask {
     stopped: tokio::sync::oneshot::Receiver<()>,
 }
 
-/// Late takes waiting for another attempt, by event id. Identity-scoped:
-/// [`forget_late_take_retries`] stops them when the identity goes.
+/// The late-take retries (#566), in two parts with two lifetimes.
+///
+/// `frb(ignore)` for the reason `DedupWindow` gives: its `Default` would
+/// otherwise make the codegen bridge this private type.
+#[derive(Default)]
+#[flutter_rust_bridge::frb(ignore)]
+struct LateTakeRetries {
+    /// Attempts scheduled per late take, by event id: the retry bookkeeping,
+    /// which ends when the take is settled — landed, or proven to have
+    /// nothing to land.
+    attempts: HashMap<String, usize>,
+    /// Every retry task still running, by task id. Kept apart from the
+    /// bookkeeping on purpose: a take is settled INSIDE its task's dispatch,
+    /// whose action arm still writes afterwards, so the teardown must be
+    /// able to stop the task until the task itself has finished.
+    tasks: HashMap<u64, LateTakeRetryTask>,
+    next_task: u64,
+    /// Bumped by every identity teardown ([`forget_late_take_retries`]): a
+    /// dispatch that began under an older epoch belongs to a forgotten
+    /// identity and may not schedule a retry.
+    epoch: u64,
+}
+
+/// The current late-take teardown epoch, read by a dispatch as it begins so
+/// a retry it schedules later can be refused if the identity went meanwhile.
+fn late_take_retry_epoch() -> u64 {
+    with_late_take_retries(|retries| retries.epoch)
+}
+
+/// The late-take retries. Identity-scoped: [`forget_late_take_retries`]
+/// stops them when the identity goes.
 ///
 /// Process-wide in the app. Under test it is per thread instead, like the
 /// fault seam: a `#[tokio::test]` runs its retries on its own thread, and
 /// the identity-lifecycle tests running alongside tear the registry down — a
 /// shared one would stop other tests' retries.
-fn with_late_take_retries<R>(f: impl FnOnce(&mut HashMap<String, LateTakeRetry>) -> R) -> R {
+fn with_late_take_retries<R>(f: impl FnOnce(&mut LateTakeRetries) -> R) -> R {
     #[cfg(not(test))]
     {
-        static RETRIES: OnceLock<std::sync::Mutex<HashMap<String, LateTakeRetry>>> =
-            OnceLock::new();
+        static RETRIES: OnceLock<std::sync::Mutex<LateTakeRetries>> = OnceLock::new();
         let mut retries = RETRIES
             .get_or_init(Default::default)
             .lock()
@@ -2632,29 +2654,33 @@ fn with_late_take_retries<R>(f: impl FnOnce(&mut HashMap<String, LateTakeRetry>)
     #[cfg(test)]
     {
         thread_local! {
-            static RETRIES: std::cell::RefCell<HashMap<String, LateTakeRetry>> =
-                std::cell::RefCell::new(HashMap::new());
+            static RETRIES: std::cell::RefCell<LateTakeRetries> =
+                std::cell::RefCell::new(LateTakeRetries::default());
         }
         RETRIES.with(|retries| f(&mut retries.borrow_mut()))
     }
 }
 
-/// Stops every scheduled late-take retry and waits until each has stopped:
-/// they were the forgotten identity's (#533).
+/// Stops every late-take retry task still running and waits until each has
+/// stopped: they were the forgotten identity's (#533). Settled or not — a
+/// retry that already landed its take is still inside its dispatch, whose
+/// action arm writes the order's status cursor, step start and book entry.
 ///
 /// Aborted, not merely unregistered: a retry already past its start would
-/// otherwise run on — through the reconcile's awaits — and land the old
-/// identity's trade, key binding and session in the next identity's state.
+/// otherwise run on — through the dispatch's awaits — and land the old
+/// identity's trade, key binding, session and order state in the next
+/// identity's.
 /// An aborted task is never polled again, and the wait means none is still
 /// running once this returns. So the identity teardown calls this FIRST:
 /// whatever a retry wrote before it stopped, the rest of the teardown
 /// removes, and nothing is written after.
 async fn forget_late_take_retries() {
     let tasks: Vec<LateTakeRetryTask> = with_late_take_retries(|retries| {
-        retries
-            .drain()
-            .flat_map(|(_, retry)| retry.tasks)
-            .collect()
+        // A first attempt already running when the identity goes is no task
+        // of ours to stop: the new epoch refuses the retry it may schedule.
+        retries.epoch += 1;
+        retries.attempts.clear();
+        retries.tasks.drain().map(|(_, task)| task).collect()
     });
     for task in &tasks {
         task.abort.abort();
@@ -2666,9 +2692,11 @@ async fn forget_late_take_retries() {
 }
 
 /// Ends the retry bookkeeping of a late take that no longer needs one — it
-/// landed, or it proved nothing to land.
+/// landed, or it proved nothing to land. Only the bookkeeping: the task
+/// that settled it keeps running its dispatch and stays stoppable until it
+/// finishes.
 fn settle_late_take_retry(event_id: &str) {
-    with_late_take_retries(|retries| retries.remove(event_id));
+    with_late_take_retries(|retries| retries.attempts.remove(event_id));
 }
 
 /// Schedules another attempt at a late take the store failed to land
@@ -2679,6 +2707,14 @@ fn settle_late_take_retry(event_id: &str) {
 /// and logged; a restart's replay then rebuilds what the message itself
 /// proves. The attempt runs as an abortable task the identity teardown
 /// stops ([`forget_late_take_retries`]).
+///
+/// `epoch` is the teardown epoch the dispatch that failed began under
+/// ([`late_take_retry_epoch`]). A teardown since then means that dispatch
+/// was the forgotten identity's — not a retry task the teardown could stop,
+/// but a first attempt already running — so nothing is scheduled for it:
+/// no attempt, no record put back. The check, the count, the record and the
+/// task's registration are one critical section, which the teardown's own
+/// cannot interleave.
 #[allow(clippy::too_many_arguments)]
 fn retry_late_take(
     pending: PendingRequest,
@@ -2688,32 +2724,62 @@ fn retry_late_take(
     order_id: &str,
     event_id: &str,
     why: &str,
+    epoch: u64,
 ) {
-    let attempt = with_late_take_retries(|retries| {
-        let retry = retries
-            .entry(event_id.to_string())
-            .or_insert_with(|| LateTakeRetry {
-                attempts: 0,
-                tasks: Vec::new(),
-            });
-        let attempt = retry.attempts;
-        retry.attempts += 1;
-        if attempt >= LATE_TAKE_RETRY_DELAYS.len() {
-            retries.remove(event_id);
+    enum Scheduled {
+        Attempt { attempt: usize, task_id: u64 },
+        IdentityGone,
+        Exhausted { attempts: usize },
+    }
+    let (abort, registration) = futures_util::future::AbortHandle::new_pair();
+    let (stopped_tx, stopped) = tokio::sync::oneshot::channel::<()>();
+    let scheduled = with_late_take_retries(|retries| {
+        if retries.epoch != epoch {
+            return Scheduled::IdentityGone;
         }
-        attempt
+        let attempts = retries.attempts.entry(event_id.to_string()).or_insert(0);
+        let attempt = *attempts;
+        *attempts += 1;
+        if attempt >= LATE_TAKE_RETRY_DELAYS.len() {
+            retries.attempts.remove(event_id);
+            return Scheduled::Exhausted {
+                attempts: attempt + 1,
+            };
+        }
+        if let Ok(mut map) = pending_requests().lock() {
+            map.entry(trade_pubkey_hex.to_string()).or_insert(pending);
+        }
+        let task_id = retries.next_task;
+        retries.next_task += 1;
+        retries
+            .tasks
+            .insert(task_id, LateTakeRetryTask { abort, stopped });
+        Scheduled::Attempt { attempt, task_id }
     });
-    let Some(delay) = LATE_TAKE_RETRY_DELAYS.get(attempt).copied() else {
-        crate::api::logging::blog_warn(
-            "orders",
-            format!(
-                "late take order={} not reconciled: {why} — giving up after {} attempts",
-                crate::api::logging::short_id(order_id),
-                attempt + 1,
-            ),
-        );
-        return;
+    let (attempt, task_id) = match scheduled {
+        Scheduled::Attempt { attempt, task_id } => (attempt, task_id),
+        Scheduled::IdentityGone => {
+            crate::api::logging::blog_warn(
+                "orders",
+                format!(
+                    "late take order={} not reconciled: {why} — its identity is gone, not retrying",
+                    crate::api::logging::short_id(order_id),
+                ),
+            );
+            return;
+        }
+        Scheduled::Exhausted { attempts } => {
+            crate::api::logging::blog_warn(
+                "orders",
+                format!(
+                    "late take order={} not reconciled: {why} — giving up after {attempts} attempts",
+                    crate::api::logging::short_id(order_id),
+                ),
+            );
+            return;
+        }
     };
+    let delay = LATE_TAKE_RETRY_DELAYS[attempt];
     crate::api::logging::blog_warn(
         "orders",
         format!(
@@ -2722,22 +2788,13 @@ fn retry_late_take(
             delay.as_millis(),
         ),
     );
-    if let Ok(mut map) = pending_requests().lock() {
-        map.entry(trade_pubkey_hex.to_string()).or_insert(pending);
-    }
-    let (abort, registration) = futures_util::future::AbortHandle::new_pair();
-    let (stopped_tx, stopped) = tokio::sync::oneshot::channel::<()>();
-    with_late_take_retries(|retries| {
-        if let Some(retry) = retries.get_mut(event_id) {
-            retry.tasks.push(LateTakeRetryTask { abort, stopped });
-        }
-    });
     let (event_id, trade_pubkey_hex) = (event_id.to_string(), trade_pubkey_hex.to_string());
     let order_id = order_id.to_string();
     let scheduled_attempts = attempt + 1;
     let attempt = async move {
         crate::rt::time::sleep(delay).await;
-        let scheduled = with_late_take_retries(|retries| retries.contains_key(&event_id));
+        let scheduled =
+            with_late_take_retries(|retries| retries.attempts.contains_key(&event_id));
         if !scheduled {
             return;
         }
@@ -2751,11 +2808,9 @@ fn retry_late_take(
         // settled the take nor scheduled another attempt. End it here rather
         // than leave an entry nothing will ever run again.
         let stranded = with_late_take_retries(|retries| {
-            let stranded = retries
-                .get(&event_id)
-                .is_some_and(|retry| retry.attempts == scheduled_attempts);
+            let stranded = retries.attempts.get(&event_id) == Some(&scheduled_attempts);
             if stranded {
-                retries.remove(&event_id);
+                retries.attempts.remove(&event_id);
             }
             stranded
         });
@@ -2774,6 +2829,9 @@ fn retry_late_take(
         // `forget_late_take_retries` waits for.
         let _stopped = stopped_tx;
         let _ = futures_util::future::Abortable::new(attempt, registration).await;
+        // Finished: nothing left to stop. (Aborted, the teardown already
+        // took it out.)
+        with_late_take_retries(|retries| retries.tasks.remove(&task_id));
     });
 }
 
@@ -2833,25 +2891,40 @@ thread_local! {
 
 #[cfg(test)]
 thread_local! {
-    /// An armed pause for the next late-take reconcile on this thread, right
-    /// before its write: the gate it waits on, and the flag it raises once
-    /// it waits (see `arm_late_take_pause`).
+    /// An armed pause for the next late take on this thread to reach the
+    /// named point: the point, the gate it waits on, and the flag it raises
+    /// once it waits.
     static LATE_TAKE_PAUSE: std::cell::RefCell<
-        Option<(std::sync::Arc<tokio::sync::Notify>, std::sync::Arc<std::sync::atomic::AtomicBool>)>,
+        Option<(
+            &'static str,
+            std::sync::Arc<tokio::sync::Notify>,
+            std::sync::Arc<std::sync::atomic::AtomicBool>,
+        )>,
     > = const { std::cell::RefCell::new(None) };
 }
 
-/// The test seam that holds a reconcile at its most exposed point — the
-/// take record consumed, nothing written yet — so a test can run the
-/// identity teardown against it. Nothing in a non-test build.
-async fn late_take_test_pause() {
+/// The test seam that holds a late take at a named exposed point, so a test
+/// can run the identity teardown against it: `"before-write"` (the take
+/// record consumed, nothing written yet) and `"settled"` (the take landed
+/// and settled, its action arm still to write). Nothing in a non-test build.
+async fn late_take_test_pause(point: &'static str) {
     #[cfg(test)]
     {
-        let armed = LATE_TAKE_PAUSE.with(|pause| pause.borrow_mut().take());
-        if let Some((gate, reached)) = armed {
+        let armed = LATE_TAKE_PAUSE.with(|pause| {
+            let mut pause = pause.borrow_mut();
+            match pause.as_ref() {
+                Some((at, _, _)) if *at == point => pause.take(),
+                _ => None,
+            }
+        });
+        if let Some((_, gate, reached)) = armed {
             reached.store(true, std::sync::atomic::Ordering::SeqCst);
             gate.notified().await;
         }
+    }
+    #[cfg(not(test))]
+    {
+        let _ = point;
     }
 }
 
@@ -3606,6 +3679,10 @@ async fn dispatch_mostro_message(
 ) {
     use mostro_core::message::Action;
 
+    // Read before anything else awaits: a late-take retry this dispatch may
+    // schedule is refused if the identity went meanwhile (#566).
+    let late_take_epoch = late_take_retry_epoch();
+
     // The protocol-v2 unwrap exposes two pubkeys:
     //
     //   * `sender`   — the kind-14 event author, whose signature is verified
@@ -4101,10 +4178,12 @@ async fn dispatch_mostro_message(
             trade_index,
             event_id,
             event_ts,
+            late_take_epoch,
         )
         .await;
         if !matches!(outcome, LateTakeOutcome::Retry) {
             settle_late_take_retry(event_id);
+            late_take_test_pause("settled").await;
         }
         match outcome {
             LateTakeOutcome::Landed(trade) => row_state = RowState::Exists(trade),
@@ -18721,7 +18800,7 @@ mod tests {
         format!(
             "record_present={} retry_scheduled={} active_node_is_sender={}",
             pending_requests().lock().unwrap().contains_key(trade_pk),
-            with_late_take_retries(|r| r.contains_key(event_id)),
+            with_late_take_retries(|r| r.attempts.contains_key(event_id)),
             active_mostro_pubkey() == sender_hex,
         )
     }
@@ -18774,7 +18853,7 @@ mod tests {
             "announced once, when it landed"
         );
         assert!(!pending_requests().lock().unwrap().contains_key(trade_pk));
-        assert!(!with_late_take_retries(|r| r.contains_key("test-r5-replace")));
+        assert!(!with_late_take_retries(|r| r.attempts.contains_key("test-r5-replace")));
         assert_wired_as_accepted_take(&order_id, 98, TradeRole::Buyer).await;
     }
 
@@ -18857,7 +18936,7 @@ mod tests {
 
         assert_earlier_row_kept(db, &old).await;
         assert!(drain_updates(&mut rx, &order_id).is_empty());
-        assert!(!with_late_take_retries(|r| r.contains_key("test-r5-giveup")));
+        assert!(!with_late_take_retries(|r| r.attempts.contains_key("test-r5-giveup")));
         assert!(
             !pending_requests().lock().unwrap().contains_key(trade_pk),
             "a given-up take leaves no record behind"
@@ -18925,15 +19004,172 @@ mod tests {
             98,
         )
         .await;
-        assert!(with_late_take_retries(|r| r.contains_key("test-r5-strand")));
+        assert!(with_late_take_retries(|r| r.attempts.contains_key("test-r5-strand")));
         pending_requests().lock().unwrap().remove(trade_pk);
         let_late_take_retries_run().await;
 
         assert!(db.get_trade_by_order_id(&order_id).await.expect("lookup").is_none());
         assert!(
-            !with_late_take_retries(|r| r.contains_key("test-r5-strand")),
+            !with_late_take_retries(|r| r.attempts.contains_key("test-r5-strand")),
             "the stranded retry is ended"
         );
+    }
+
+    /// Arms the late-take pause at `point` and waits until a retry is held
+    /// there; returns the gate that lets it go.
+    async fn pause_late_take_at(point: &'static str) -> std::sync::Arc<tokio::sync::Notify> {
+        let gate = std::sync::Arc::new(tokio::sync::Notify::new());
+        let reached = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        LATE_TAKE_PAUSE
+            .with(|pause| *pause.borrow_mut() = Some((point, gate.clone(), reached.clone())));
+        for _ in 0..400 {
+            if reached.load(std::sync::atomic::Ordering::SeqCst) {
+                return gate;
+            }
+            crate::rt::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        panic!("no late take reached the {point} pause");
+    }
+
+    /// ermeme's round-6 ordering: a retry that already LANDED and settled its
+    /// take, still inside its dispatch with the action arm to run, when the
+    /// identity goes. Settling ends the retry bookkeeping, not the task: the
+    /// teardown still stops it, so the arm's writes never happen after it.
+    ///
+    /// Watched through the order's status cursor: a settings row keyed by
+    /// this test's own order, and the arm's first write — the book update
+    /// comes after it, so no cursor means no book write either. The book
+    /// itself is process-wide and emptied by tests running alongside, so it
+    /// cannot be asserted on here.
+    #[tokio::test]
+    async fn deleting_the_identity_stops_a_settled_retry_before_its_action_arm_writes() {
+        let (db, order_uuid, order_id, book_order, now) = round4_setup("settled").await;
+        let trade_pk = "ff00ff5d";
+        let request_id = 6_300_000_008u64;
+        register_timed_out_take(trade_pk, request_id, &book_order);
+
+        inject_late_take_fault("save");
+        dispatch_mostro_message(
+            late_take_reply(order_uuid, request_id, now as u64),
+            "test-r7-settled",
+            trade_pk,
+            98,
+        )
+        .await;
+
+        let gate = pause_late_take_at("settled").await;
+        assert!(
+            db.get_trade_by_order_id(&order_id).await.expect("lookup").is_some(),
+            "the retry landed its take before the pause"
+        );
+        assert!(
+            !with_late_take_retries(|r| r.attempts.contains_key("test-r7-settled")),
+            "and settled it"
+        );
+        assert!(
+            with_late_take_retries(|r| !r.tasks.is_empty()),
+            "while its task is still running, and still owned"
+        );
+
+        forget_late_take_retries().await;
+        gate.notify_one();
+        let_late_take_retries_run().await;
+
+        assert_eq!(
+            db.get_setting(&crate::db::settings_keys::status_cursor(&order_id))
+                .await
+                .expect("lookup"),
+            None,
+            "the action arm never recorded the status cursor"
+        );
+    }
+
+    /// The control for the test above: the same settled retry, let go with
+    /// the identity still in place, does run its action arm and records the
+    /// order's status cursor. So the test above proves that write was
+    /// stopped, not that it never happens.
+    #[tokio::test]
+    async fn a_settled_retry_runs_its_action_arm_when_nothing_stops_it() {
+        let (db, order_uuid, order_id, book_order, now) = round4_setup("settled-control").await;
+        let trade_pk = "ff00ff5e";
+        let request_id = 6_300_000_009u64;
+        register_timed_out_take(trade_pk, request_id, &book_order);
+
+        inject_late_take_fault("save");
+        dispatch_mostro_message(
+            late_take_reply(order_uuid, request_id, now as u64),
+            "test-r7-settled-control",
+            trade_pk,
+            98,
+        )
+        .await;
+
+        let gate = pause_late_take_at("settled").await;
+        gate.notify_one();
+        let_late_take_retries_run().await;
+
+        assert!(
+            db.get_setting(&crate::db::settings_keys::status_cursor(&order_id))
+                .await
+                .expect("lookup")
+                .is_some(),
+            "the action arm recorded the status cursor"
+        );
+        assert!(
+            with_late_take_retries(|r| r.tasks.is_empty()),
+            "a finished task leaves the registry"
+        );
+    }
+
+    /// The teardown can stop retry TASKS only. A FIRST attempt already
+    /// running when the identity goes is not one: held before its write, the
+    /// identity is torn down, and then its write fails. The retry it would
+    /// schedule belongs to the forgotten identity and is refused — no
+    /// attempt counted, no task, no take record put back, no row later.
+    #[tokio::test]
+    async fn a_first_attempt_running_through_the_teardown_schedules_no_retry() {
+        use mostro_core::message::Action;
+        let (db, order_uuid, order_id, book_order, now) = round4_setup("epoch").await;
+        let trade_pk = "ff00ff5f";
+        let request_id = 6_300_000_010u64;
+        register_timed_out_take(trade_pk, request_id, &book_order);
+
+        inject_late_take_fault("save");
+        let first = tokio::spawn(dispatch_mostro_message(
+            daemon_message_with_nonce(
+                order_uuid,
+                Action::WaitingSellerToPay,
+                None,
+                now as u64,
+                Some(request_id),
+            ),
+            "test-r8-epoch",
+            trade_pk,
+            98,
+        ));
+        let gate = pause_late_take_at("before-write").await;
+
+        forget_late_take_retries().await;
+        gate.notify_one();
+        first.await.expect("the first attempt ran to its end");
+        let_late_take_retries_run().await;
+
+        LATE_TAKE_FAULTS.with(|faults| {
+            assert!(
+                faults.borrow().is_empty(),
+                "the first attempt did reach its write, and failed it"
+            )
+        });
+        assert!(
+            with_late_take_retries(|r| !r.attempts.contains_key("test-r8-epoch")
+                && r.tasks.is_empty()),
+            "no retry scheduled for the forgotten identity"
+        );
+        assert!(
+            !pending_requests().lock().unwrap().contains_key(trade_pk),
+            "and no take record put back"
+        );
+        assert!(db.get_trade_by_order_id(&order_id).await.expect("lookup").is_none());
     }
 
     /// The identity release stops the late-take retries FIRST, awaited: a
@@ -18986,19 +19222,7 @@ mod tests {
         .await;
 
         // The retry is held inside its reconcile, right before the write.
-        let gate = std::sync::Arc::new(tokio::sync::Notify::new());
-        let reached = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-        LATE_TAKE_PAUSE.with(|pause| *pause.borrow_mut() = Some((gate.clone(), reached.clone())));
-        for _ in 0..400 {
-            if reached.load(std::sync::atomic::Ordering::SeqCst) {
-                break;
-            }
-            crate::rt::time::sleep(std::time::Duration::from_millis(5)).await;
-        }
-        assert!(
-            reached.load(std::sync::atomic::Ordering::SeqCst),
-            "the retry reached the reconcile"
-        );
+        let gate = pause_late_take_at("before-write").await;
         assert!(
             !pending_requests().lock().unwrap().contains_key(trade_pk),
             "and consumed its take record"

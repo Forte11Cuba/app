@@ -84,9 +84,15 @@ a stale replay:
   is the record. The attempts are identity-scoped tasks: the identity
   teardown (`release_identity_subscriptions`) first **aborts every one and
   waits until each has stopped** (`forget_late_take_retries`) — also one
-  already inside the reconcile — before it clears anything, so what a retry
-  wrote before it stopped is removed by the rest of the teardown and nothing
-  is written after. Nothing is announced, and the binding
+  already inside the reconcile, and one that already landed and settled its
+  take but is still running its action arm (settling ends the retry
+  bookkeeping, not the task's ownership, which lasts until the task
+  finishes) — before it clears anything, so what a retry wrote before it
+  stopped is removed by the rest of the teardown and nothing is written
+  after. A **first** attempt already running when the identity goes is no
+  task the teardown can stop; the teardown bumps an epoch the dispatch read
+  as it began, and a retry that attempt schedules afterwards is refused —
+  no attempt, no task, no take record put back. Nothing is announced, and the binding
   (`store_trade_key_index`) does not move, before the row is durable.
   On the web the replacement also needs the origin-wide lock (Web Locks):
   its read of the earlier rows cannot join its write transaction, so
