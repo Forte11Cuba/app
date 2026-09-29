@@ -1541,7 +1541,7 @@ async fn take_order_once(
     // Register the pending record BEFORE subscribing/publishing (same
     // ordering as create_order) so the reply cannot race the bookkeeping.
     // The record carries the taken order: a reply that outlives the 10 s
-    // wait and names no order rebuilds the row from it (#566).
+    // wait rebuilds the row from it, as this caller would have (#566).
     let trade_pk_hex = sender_keys.public_key().to_hex();
     let (conf_tx, conf_rx) = tokio::sync::oneshot::channel::<Wake>();
     if let Ok(mut map) = pending_requests().lock() {
@@ -2417,31 +2417,32 @@ async fn rebuild_trade_from_dm(
     Some(trade)
 }
 
-/// #566's payload-less flank: a take-sell that carried a default lightning
-/// address is answered `waiting-seller-to-pay` with no payload (mostrod
-/// skips add-invoice — util.rs, `show_hold_invoice`), so a reply that
-/// outlived its waiter gives [`rebuild_trade_from_dm`] no order to rebuild
-/// from. The consumed take record carries the book order the caller took
-/// for exactly this reply: build the row the same way the live waiter would
-/// have — same book order, same role, same classification of the reply.
+/// The row of a take whose reply outlived its waiter (#566), built the way
+/// the live waiter would have built it: the consumed take record carries
+/// the book order the caller took, its role and a range order's chosen
+/// amount, and [`classify_take_reply`] reads the reply exactly as the
+/// waiter would have — status, sats, hold invoice, trade pubkeys — with or
+/// without an order payload. So a late take gets the live path's row, not
+/// the generic one [`rebuild_trade_from_dm`] rebuilds a replay into: a
+/// fresh id, the taker's first step, the range amount it was taken at, and
+/// `started_at` / `timeout_at` anchored to the reply — a row dated by its
+/// order's creation instead would read as stale to the sweep's age gate
+/// the moment it landed, and be wiped while the book still said `pending`.
+/// It is also the only row a payload-less reply can get: a take-sell that
+/// carried a default lightning address is answered `waiting-seller-to-pay`
+/// with no payload (mostrod skips add-invoice — util.rs,
+/// `show_hold_invoice`).
 ///
-/// A reply that does name an order was `rebuild_trade_from_dm`'s to accept
-/// or refuse, and its verdict stands. A bond request never lands here on
-/// purpose: a late `pay-bond-invoice`'s recovery belongs to the daemon's
-/// idempotent re-send (docs/ANTI_ABUSE_BOND.md Phase 1).
+/// `None` hands the message back to [`rebuild_trade_from_dm`]. A bond
+/// request never lands here on purpose: a late `pay-bond-invoice`'s
+/// recovery belongs to the daemon's idempotent re-send
+/// (docs/ANTI_ABUSE_BOND.md Phase 1).
 async fn rebuild_trade_from_take_snapshot(
     pending: &PendingRequest,
     kind: &mostro_core::message::MessageKind,
     order_id: &str,
     occurred_at: i64,
 ) -> Option<crate::api::types::TradeInfo> {
-    use mostro_core::message::Payload;
-    if matches!(
-        kind.payload,
-        Some(Payload::Order(_)) | Some(Payload::PaymentRequest(Some(_), _, _))
-    ) {
-        return None;
-    }
     let PendingRequestKind::Take {
         order,
         role,
@@ -3447,8 +3448,8 @@ async fn dispatch_mostro_message(
     // timed out instead falls through to the normal dispatch, which owns its
     // effects (#566).
     // A take record consumed for a caller that already timed out: kept for
-    // the reconcile below, where its snapshot rebuilds the row when the
-    // reply itself names no order (#566).
+    // the reconcile below, where its snapshot rebuilds the row the way the
+    // caller would have (#566).
     let mut late_take: Option<PendingRequest> = None;
     if kind.action != Action::CantDo {
         if let Some(mut pending) = take_matching_take(trade_pubkey_hex, kind.request_id) {
@@ -3511,12 +3512,13 @@ async fn dispatch_mostro_message(
             // message is what `rebuild_trade_from_dm` rebuilds the row from
             // on the next start's replay (#394). Fall through to the normal
             // dispatch instead of dropping it: the rebuild, the arms and the
-            // UI push land the trade now, without a restart (#566). A reply
-            // that names no order (waiting-seller-to-pay after a take-sell
-            // with a default lightning address) is rebuilt from the record's
-            // own snapshot instead. Either way the record was consumed
-            // exactly once — a later replay of this message finds nothing
-            // pending and a row that already exists.
+            // UI push land the trade now, without a restart (#566). The row
+            // is built from the record's own snapshot, as the caller would
+            // have built it — also for a reply that names no order
+            // (waiting-seller-to-pay after a take-sell with a default
+            // lightning address). The record was consumed exactly once — a
+            // later replay of this message finds nothing pending and a row
+            // that already exists.
             crate::api::logging::blog_info(
                 "daemon-msg",
                 format!(
@@ -3634,8 +3636,8 @@ async fn dispatch_mostro_message(
     // whose waiter timed out — reach this. Gated on the same cursor the arms
     // consult: a Canceled with no row still advances the cursor, so on a
     // newest-first replay the older take reply behind it must not rebuild
-    // what the daemon already ended (review round 2). A late take reply that
-    // names no order falls back to the record's snapshot (#566).
+    // what the daemon already ended (review round 2). A late take reply is
+    // rebuilt from its record's snapshot, like the live waiter would (#566).
     //
     // A late take proves its own generation: the record is this take's, so a
     // row left by an EARLIER take of the order (its `Canceled` never reached
@@ -3681,22 +3683,21 @@ async fn dispatch_mostro_message(
         if let Some(order_id) = &kind.id {
             let oid = order_id.to_string();
             if !status_write_blocked(&oid, &kind.action, event_ts).await {
-                let rebuilt = match rebuild_trade_from_dm(
-                    kind,
-                    &oid,
-                    trade_pubkey_hex,
-                    trade_index,
-                    event_ts,
-                )
-                .await
-                {
+                // A late take's own record first: it builds the live path's
+                // row. The generic rebuild covers everything else, and
+                // whatever the record declines.
+                let from_take = match late_take.as_ref() {
+                    Some(pending) => {
+                        rebuild_trade_from_take_snapshot(pending, kind, &oid, event_ts).await
+                    }
+                    None => None,
+                };
+                let rebuilt = match from_take {
                     Some(rebuilt) => Some(rebuilt),
-                    None => match late_take.as_ref() {
-                        Some(pending) => {
-                            rebuild_trade_from_take_snapshot(pending, kind, &oid, event_ts).await
-                        }
-                        None => None,
-                    },
+                    None => {
+                        rebuild_trade_from_dm(kind, &oid, trade_pubkey_hex, trade_index, event_ts)
+                            .await
+                    }
                 };
                 if let Some(mut rebuilt) = rebuilt {
                     // A late take lands wired up like one that landed in
@@ -6127,7 +6128,7 @@ pub async fn request_bond_invoice_again(
                 request_id,
                 trade_index,
                 // Snapshot from the existing row. Never read in practice: a
-                // late reply here is the bond bolt11, which the payload-less
+                // late reply here is the bond bolt11, which the late
                 // reconcile excludes, and the row already exists anyway.
                 kind: PendingRequestKind::Take {
                     order: Box::new(trade.order.clone()),
@@ -17700,6 +17701,10 @@ mod tests {
     /// consumed exactly once: the same message again changes nothing.
     #[tokio::test]
     async fn a_late_take_reply_lands_the_trade_without_a_restart() {
+        // Current timestamps: a row this recent stays inside the stale
+        // sweep's age gate, so a sweep another test runs meanwhile leaves it
+        // alone.
+        let now = crate::rt::unix_now();
         let path =
             std::env::temp_dir().join(format!("mostro_late_take_{}.db", std::process::id()));
         let _ = crate::db::app_db::init_db(path.to_str().unwrap()).await;
@@ -17735,7 +17740,7 @@ mod tests {
 
         let mut rx = trade_updates_tx().subscribe();
         dispatch_mostro_message(
-            late_take_reply(order_uuid, request_id, 2_000),
+            late_take_reply(order_uuid, request_id, now as u64),
             "test-late-take-reply",
             trade_pk,
             98,
@@ -17759,6 +17764,7 @@ mod tests {
         );
         assert_eq!(row.order.amount_sats, Some(11_514));
         assert_eq!(row.trade_key_index, 98, "the durable key binding is kept");
+        assert_live_path_row(&row, &order_id, now);
         assert_wired_as_accepted_take(&order_id, 98, TradeRole::Buyer).await;
         assert_eq!(
             drain_updates(&mut rx, &order_id),
@@ -17769,7 +17775,7 @@ mod tests {
         // Replayed (another relay's copy): no record left to match, a row
         // already holding the status — no write, no update.
         dispatch_mostro_message(
-            late_take_reply(order_uuid, request_id, 2_000),
+            late_take_reply(order_uuid, request_id, now as u64),
             "test-late-take-replay",
             trade_pk,
             98,
@@ -17785,6 +17791,162 @@ mod tests {
             row.order.status,
             crate::api::types::OrderStatus::WaitingBuyerInvoice
         );
+    }
+
+    /// The row shape only the live path's builder (`trade_row_for_accepted_take`)
+    /// gives a take, which the generic #394 rebuild does not (#566 review
+    /// round 3): a fresh id rather than the order id, and the escrow window
+    /// anchored to the reply. A row dated by its order's creation with no
+    /// `timeout_at` reads as stale to the sweep's age gate at once.
+    fn assert_live_path_row(
+        row: &crate::api::types::TradeInfo,
+        order_id: &str,
+        reply_ts: i64,
+    ) {
+        assert_ne!(row.id, order_id, "a fresh trade id, as the live path mints");
+        assert_eq!(row.started_at, reply_ts, "dated by the reply, not by the order");
+        assert_eq!(
+            row.timeout_at,
+            Some(reply_ts + 900),
+            "the escrow window the live path opens"
+        );
+    }
+
+    /// #566 review round 3: a late take of a RANGE order keeps the amount it
+    /// was taken at. The reply's payload names the range (min/max), which the
+    /// generic rebuild reads as "no fixed amount" and drops; the take record
+    /// knows the amount the user chose.
+    #[tokio::test]
+    async fn a_late_range_take_reply_keeps_the_amount_it_was_taken_at() {
+        let path =
+            std::env::temp_dir().join(format!("mostro_late_range_{}.db", std::process::id()));
+        let _ = crate::db::app_db::init_db(path.to_str().unwrap()).await;
+        let db = crate::db::app_db::db().expect("store initialised");
+
+        let order_uuid = uuid::Uuid::new_v4();
+        let order_id = order_uuid.to_string();
+        let trade_pk = "ff00ff49";
+        let request_id = 6_200_000_001u64;
+        let now = crate::rt::unix_now();
+
+        let mut book_order = taken_book_order(&order_id, crate::api::types::OrderKind::Sell);
+        book_order.fiat_amount = None;
+        book_order.fiat_amount_min = Some(10.0);
+        book_order.fiat_amount_max = Some(100.0);
+        let (conf_tx, conf_rx) = tokio::sync::oneshot::channel::<Wake>();
+        pending_requests().lock().unwrap().insert(
+            trade_pk.to_string(),
+            PendingRequest {
+                request_id,
+                trade_index: 99,
+                kind: PendingRequestKind::Take {
+                    order: Box::new(book_order),
+                    role: TradeRole::Buyer,
+                    fiat_amount: Some(30.0),
+                },
+                tx: Some(conf_tx),
+            },
+        );
+        drop(conf_rx);
+        detach_request_waiter(trade_pk, request_id);
+
+        use mostro_core::message::{Action, Payload};
+        let so = mostro_core::order::SmallOrder::new(
+            Some(order_uuid),
+            Some(mostro_core::order::Kind::Sell),
+            Some(mostro_core::order::Status::WaitingBuyerInvoice),
+            6_900,
+            "EUR".to_string(),
+            Some(10),
+            Some(100),
+            30,
+            "SEPA".to_string(),
+            0,
+            None,
+            None,
+            None,
+            None,
+            None,
+        );
+        dispatch_mostro_message(
+            daemon_message_with_nonce(
+                order_uuid,
+                Action::AddInvoice,
+                Some(Payload::Order(so)),
+                now as u64,
+                Some(request_id),
+            ),
+            "test-late-range-take",
+            trade_pk,
+            99,
+        )
+        .await;
+
+        let row = db
+            .get_trade_by_order_id(&order_id)
+            .await
+            .expect("lookup")
+            .expect("the late reply persists the trade");
+        assert_eq!(row.order.fiat_amount, Some(30.0), "the amount it was taken at");
+        assert_eq!(row.order.fiat_amount_min, Some(10.0));
+        assert_eq!(row.order.fiat_amount_max, Some(100.0));
+        assert_eq!(row.order.amount_sats, Some(6_900));
+        assert_live_path_row(&row, &order_id, now);
+    }
+
+    /// What the take record declines still lands: a reply naming a different
+    /// order under the take's nonce is nothing the snapshot vouches for, so
+    /// the generic #394 rebuild takes it from the message, as it would on
+    /// the next start's replay (#566 review round 3).
+    #[tokio::test]
+    async fn a_late_take_reply_the_record_declines_falls_back_to_the_message() {
+        let path =
+            std::env::temp_dir().join(format!("mostro_late_fallback_{}.db", std::process::id()));
+        let _ = crate::db::app_db::init_db(path.to_str().unwrap()).await;
+        let db = crate::db::app_db::db().expect("store initialised");
+
+        let order_uuid = uuid::Uuid::new_v4();
+        let order_id = order_uuid.to_string();
+        let trade_pk = "ff00ff4a";
+        let request_id = 6_200_000_002u64;
+        let now = crate::rt::unix_now();
+
+        let (conf_tx, conf_rx) = tokio::sync::oneshot::channel::<Wake>();
+        pending_requests().lock().unwrap().insert(
+            trade_pk.to_string(),
+            PendingRequest {
+                request_id,
+                trade_index: 95,
+                kind: PendingRequestKind::Take {
+                    order: Box::new(taken_book_order(
+                        "some-other-order",
+                        crate::api::types::OrderKind::Sell,
+                    )),
+                    role: TradeRole::Buyer,
+                    fiat_amount: None,
+                },
+                tx: Some(conf_tx),
+            },
+        );
+        drop(conf_rx);
+        detach_request_waiter(trade_pk, request_id);
+
+        dispatch_mostro_message(
+            late_take_reply(order_uuid, request_id, now as u64),
+            "test-late-take-fallback",
+            trade_pk,
+            95,
+        )
+        .await;
+
+        let row = db
+            .get_trade_by_order_id(&order_id)
+            .await
+            .expect("lookup")
+            .expect("the message itself still rebuilds the row");
+        assert_eq!(row.role, TradeRole::Buyer, "add-invoice addresses the buyer");
+        assert_eq!(row.id, order_id, "the generic #394 row, not the take's");
+        assert_eq!(row.trade_key_index, 95);
     }
 
     /// What the live path leaves behind an accepted take besides its row
@@ -17924,6 +18086,10 @@ mod tests {
     /// trade through the normal dispatch.
     #[tokio::test]
     async fn a_take_reply_racing_the_timeouts_detach_still_lands_the_trade() {
+        // Current timestamps: a row this recent stays inside the stale
+        // sweep's age gate, so a sweep another test runs meanwhile leaves it
+        // alone.
+        let now = crate::rt::unix_now();
         let path =
             std::env::temp_dir().join(format!("mostro_late_take_race_{}.db", std::process::id()));
         let _ = crate::db::app_db::init_db(path.to_str().unwrap()).await;
@@ -17955,7 +18121,7 @@ mod tests {
 
         let mut rx = trade_updates_tx().subscribe();
         dispatch_mostro_message(
-            late_take_reply(order_uuid, request_id, 2_000),
+            late_take_reply(order_uuid, request_id, now as u64),
             "test-late-take-race",
             trade_pk,
             99,
@@ -17985,6 +18151,10 @@ mod tests {
     /// The trailing replay asserts the record was consumed exactly once.
     #[tokio::test]
     async fn a_late_waiting_seller_to_pay_reply_lands_the_trade_from_its_take_record() {
+        // Current timestamps: a row this recent stays inside the stale
+        // sweep's age gate, so a sweep another test runs meanwhile leaves it
+        // alone.
+        let now = crate::rt::unix_now();
         use mostro_core::message::Action;
         let path =
             std::env::temp_dir().join(format!("mostro_late_wstp_{}.db", std::process::id()));
@@ -18022,7 +18192,7 @@ mod tests {
                 order_uuid,
                 Action::WaitingSellerToPay,
                 None,
-                2_000,
+                now as u64,
                 Some(request_id),
             ),
             "test-late-wstp",
@@ -18063,7 +18233,7 @@ mod tests {
                 order_uuid,
                 Action::WaitingSellerToPay,
                 None,
-                2_000,
+                now as u64,
                 Some(request_id),
             ),
             "test-late-wstp-replay",
@@ -18089,6 +18259,10 @@ mod tests {
     /// trade the seller cannot pay.
     #[tokio::test]
     async fn a_late_pay_invoice_take_reply_lands_the_trade_with_its_hold_invoice() {
+        // Current timestamps: a row this recent stays inside the stale
+        // sweep's age gate, so a sweep another test runs meanwhile leaves it
+        // alone.
+        let now = crate::rt::unix_now();
         use mostro_core::message::{Action, Payload};
         let path = std::env::temp_dir().join(format!("mostro_late_pay_{}.db", std::process::id()));
         let _ = crate::db::app_db::init_db(path.to_str().unwrap()).await;
@@ -18145,7 +18319,7 @@ mod tests {
                     "lnbcrt115140hold".to_string(),
                     Some(11_514),
                 )),
-                2_000,
+                now as u64,
                 Some(request_id),
             ),
             "test-late-pay-invoice",
@@ -18169,6 +18343,12 @@ mod tests {
             Some("lnbcrt115140hold"),
             "the seller can pay the rebuilt trade"
         );
+        assert_eq!(
+            row.current_step,
+            crate::api::types::TradeStep::Seller(crate::api::types::SellerStep::TakerFound),
+            "the taker's first step, not the maker's OrderPublished"
+        );
+        assert_live_path_row(&row, &order_id, now);
         assert_eq!(
             row.order.status,
             crate::api::types::OrderStatus::WaitingPayment

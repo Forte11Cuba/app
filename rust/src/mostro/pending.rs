@@ -157,10 +157,10 @@ pub(crate) enum PendingRequestKind {
     },
     /// A take-buy / take-sell awaiting the daemon's first reply. Carries the
     /// book order the caller validated and took, so a genuine reply that
-    /// outlives the 10 s wait AND names no order — `waiting-seller-to-pay`
-    /// after a take-sell with a default lightning address, where mostrod
-    /// skips add-invoice and the buyer's reply has no payload — can still
-    /// rebuild the trade row the caller never persisted (#566). The live
+    /// outlives the 10 s wait rebuilds the trade row the caller never
+    /// persisted exactly as the caller would have — even one that names no
+    /// order, `waiting-seller-to-pay` after a take-sell with a default
+    /// lightning address, where mostrod skips add-invoice (#566). The live
     /// path never reads it: the woken `take_order` holds its own copy.
     Take {
         /// The taken book order, as the caller validated it.

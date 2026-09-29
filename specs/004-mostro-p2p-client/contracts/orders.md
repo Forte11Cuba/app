@@ -35,20 +35,27 @@ a stale replay:
   the payload is the published order, min/max included).
 - **take**: reconciled — the nonce-correlated late reply is consumed as the
   take's (so a stale replay still touches nothing) and then falls through to
-  the normal dispatch, which rebuilds the row from the message itself and
-  pushes the UI, with no restart (#566; #394: role from the payload's trade
-  pubkeys, or AddInvoice ⇒ buyer / PayInvoice ⇒ seller where mostrod omits
-  them; never guessed). A reply that names **no order** — mostrod answers a
-  take-sell that carried a default lightning address with
-  `waiting-seller-to-pay` and no payload — is rebuilt from the pending
-  record's own snapshot of the taken book order instead: same order, same
-  role, same classification the live waiter would have applied. That
-  snapshot is in-memory, so this arm only reconciles while the app runs;
-  after a restart the payload-less reply has nothing to rebuild from and
-  the trade lands with the seller's `hold-invoice-payment-accepted`, which
-  does carry the order. A late `pay-bond-invoice` is the exception on both
-  arms: the rebuild excludes it on purpose (its amount is the bond, not the
-  order) and the daemon's idempotent re-send owns that recovery.
+  the normal dispatch, which rebuilds the row and pushes the UI, with no
+  restart (#566). The row is built from the pending record's own snapshot of
+  the taken book order — same order, same role, same range amount, same
+  classification of the reply the live waiter would have applied — through
+  the live path's row builder, so it is the live path's row: a fresh id, the
+  taker's first step, and `started_at` / `timeout_at` anchored to the reply.
+  Not the generic #394 row (dated by the order's creation, no `timeout_at`),
+  which the sweep's age gate would read as stale the moment it landed and
+  wipe while the book still said `pending`. This holds with or without an
+  order payload: mostrod answers a take-sell that carried a default
+  lightning address with `waiting-seller-to-pay` and no payload. What the
+  snapshot declines — a reply naming another order under the same nonce —
+  falls back to the #394 rebuild from the message (role from the payload's
+  trade pubkeys, or AddInvoice ⇒ buyer / PayInvoice ⇒ seller where mostrod
+  omits them; never guessed). The snapshot is in-memory, so it only
+  reconciles while the app runs; after a restart the replay takes the #394
+  rebuild, and a payload-less reply has nothing to rebuild from — the trade
+  lands with the seller's `hold-invoice-payment-accepted`, which does carry
+  the order. A late `pay-bond-invoice` is the exception on both rebuilds:
+  excluded on purpose (its amount is the bond, not the order), the daemon's
+  idempotent re-send owns that recovery.
   A late take lands exactly like a live one (`wire_accepted_take`, shared
   with `take_order`): the single-order watch is opened, the session is
   installed on this take's trade key, and a counterparty an earlier reveal
