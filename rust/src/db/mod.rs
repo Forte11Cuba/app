@@ -366,6 +366,17 @@ pub trait Storage: Send + Sync {
         amount_sats: Option<u64>,
     ) -> Result<()>;
 
+    /// Write the slice a take priced out of a range order — `fiat_amount`
+    /// and `amount_sats` exactly as given, `None` clearing the field — on the
+    /// trade identified by `order.id`. The range bounds are left alone. No-op
+    /// when no matching trade exists.
+    async fn set_trade_range_slice(
+        &self,
+        order_id: &str,
+        fiat_amount: Option<f64>,
+        amount_sats: Option<u64>,
+    ) -> Result<()>;
+
     /// Persist the counterparty (taker) reputation snapshot on a trade
     /// identified by `order.id` (issue #305). No-op when no matching trade
     /// exists. `days` saturates at `u32::MAX`; a full-privacy taker sends no

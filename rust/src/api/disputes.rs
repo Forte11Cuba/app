@@ -576,6 +576,47 @@ pub async fn get_dispute(trade_id: String) -> Result<Option<Dispute>> {
     Ok(dispute_store().get(&trade_id).await)
 }
 
+/// Record a dispute the counterparty opened (`dispute-initiated-by-peer`).
+///
+/// Until a solver takes it the daemon sends nothing else about it, and
+/// without a record here the trade screen cannot open the dispute at all.
+/// Created `Open`, not initiated by us, under the daemon's dispute id. A
+/// notice without that id records nothing: `Dispute.id` is the daemon's, and
+/// a locally minted one would outlive the solver's assignment (contract
+/// `disputes.md`). A record already there wins: `admin-took-dispute` or a
+/// rehydrated one is at least as fresh.
+pub(crate) async fn note_peer_opened_dispute(trade_id: &str, dispute_id: Option<String>) {
+    let Some(dispute_id) = dispute_id else {
+        crate::api::logging::blog_warn(
+            "disputes",
+            format!(
+                "dispute-initiated-by-peer without a dispute id for order={} — not recorded",
+                crate::api::logging::short_id(trade_id),
+            ),
+        );
+        return;
+    };
+    let make_trade_id = trade_id.to_string();
+    let _ = dispute_store()
+        .upsert_or_update(
+            trade_id,
+            || Dispute {
+                id: dispute_id,
+                trade_id: make_trade_id,
+                status: DisputeStatus::Open,
+                initiated_by_me: false,
+                reason: None,
+                admin_pubkey: None,
+                resolution: None,
+                opened_at: unix_now(),
+                resolved_at: None,
+                is_read: false,
+            },
+            |_| Ok(()),
+        )
+        .await;
+}
+
 /// Handle an incoming `adminTookDispute` event.
 ///
 /// Extracts the admin pubkey, marks the dispute as `InReview`, and derives

@@ -1532,6 +1532,14 @@ class AppLocalizationsEn extends AppLocalizations {
       'This order is no longer waiting for an invoice. Updating its status…';
 
   @override
+  String get invoiceAwaitingNode =>
+      'Sent. The node hasn\'t answered yet — you\'ll be taken to the trade as soon as it does.';
+
+  @override
+  String get invoiceAwaitingNodeLong =>
+      'Still no answer from the node. If the trade doesn\'t move on, send it again.';
+
+  @override
   String get invoiceSubmitInFlight =>
       'An invoice for this order is already being sent. Wait for the reply.';
 

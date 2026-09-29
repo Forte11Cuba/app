@@ -171,19 +171,16 @@ class _Header extends StatelessWidget {
       title = '${isDisputeGroup ? l10n.disputeWord : l10n.tradeWord} #$shortId';
       subtitle = row == null ? '' : paymentMethodLabel(row.paymentMethod);
     } else {
-      final amount = formatFiatAmount(
-        amount: row.fiatAmount,
-        min: row.fiatAmountMin,
-        max: row.fiatAmountMax,
+      title = tradeAmountSummary(
+        l10n,
+        isSelling: row.isSelling,
+        fiatAmount: row.fiatAmount,
+        fiatAmountMin: row.fiatAmountMin,
+        fiatAmountMax: row.fiatAmountMax,
+        fiatCode: row.fiatCode,
+        sats: row.amountSats,
         locale: locale,
       );
-      final sats = row.amountSats;
-      title = [
-        row.isSelling ? l10n.tradesDirectionSell : l10n.tradesDirectionBuy,
-        '$amount ${row.fiatCode}',
-        if (sats != null && sats > 0)
-          l10n.satsFigureExact(formatSatsCount(sats, locale)),
-      ].join(' · ');
       subtitle = [
         paymentMethodLabel(row.paymentMethod),
         '#$shortId',

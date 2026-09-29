@@ -2806,6 +2806,18 @@ abstract class AppLocalizations {
   /// **'This order is no longer waiting for an invoice. Updating its status…'**
   String get invoiceNoLongerExpected;
 
+  /// Add-invoice screen: the invoice or lightning address was sent but the node has not answered within the wait (Rust marker InvoiceAwaitingDaemon). Not an error: a late answer still moves the trade on (#615)
+  ///
+  /// In en, this message translates to:
+  /// **'Sent. The node hasn\'t answered yet — you\'ll be taken to the trade as soon as it does.'**
+  String get invoiceAwaitingNode;
+
+  /// Add-invoice screen: invoiceAwaitingNode once a further minute passes with no answer. A late rejection is only logged, so the buyer is invited to send the invoice again (#615)
+  ///
+  /// In en, this message translates to:
+  /// **'Still no answer from the node. If the trade doesn\'t move on, send it again.'**
+  String get invoiceAwaitingNodeLong;
+
   /// Add-invoice screen: a second submission was refused because an earlier one for the same trade is still waiting for the daemon's reply (Rust marker InvoiceSubmitInFlight)
   ///
   /// In en, this message translates to:

@@ -97,6 +97,9 @@ Future<void> bootstrapAndRun({List<String> seedRelays = const []}) async {
   // Before any startup work below, so a failure in it is captured at the
   // verbosity the user asked for rather than the default.
   await settings_api.setLoggingEnabled(enabled: savedSettings.loggingEnabled);
+  // The Rust settings store starts empty at every launch, and the take flow
+  // reads the address from it.
+  await syncLightningAddressToCore(savedSettings.defaultLightningAddress);
 
   // Initialize the persistent store (SQLite file off the web, IndexedDB
   // database on it). Must come before any trade / order operations that read

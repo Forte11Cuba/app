@@ -1550,6 +1550,14 @@ class AppLocalizationsFr extends AppLocalizations {
       'Cet ordre n\'attend plus de facture. Mise à jour de son statut…';
 
   @override
+  String get invoiceAwaitingNode =>
+      'Envoyée. Le nœud n\'a pas encore répondu ; vous serez redirigé vers l\'échange dès qu\'il le fera.';
+
+  @override
+  String get invoiceAwaitingNodeLong =>
+      'Toujours pas de réponse du nœud. Si l\'échange n\'avance pas, renvoyez-la.';
+
+  @override
   String get invoiceSubmitInFlight =>
       'Une facture pour cet ordre est déjà en cours d\'envoi. Attendez la réponse.';
 

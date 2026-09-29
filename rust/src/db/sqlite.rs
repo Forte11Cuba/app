@@ -758,6 +758,27 @@ impl Storage for SqliteStorage {
         Ok(())
     }
 
+    async fn set_trade_range_slice(
+        &self,
+        order_id: &str,
+        fiat_amount: Option<f64>,
+        amount_sats: Option<u64>,
+    ) -> Result<()> {
+        // json(?) so a number stays a JSON number and `None` a JSON null.
+        let sql = "UPDATE trades SET data = json_set(\
+             data, \
+             '$.order.fiat_amount', json(?), \
+             '$.order.amount_sats', json(?)) \
+             WHERE json_extract(data, '$.order.id') = ?";
+        sqlx::query(sql)
+            .bind(serde_json::to_string(&fiat_amount)?)
+            .bind(serde_json::to_string(&amount_sats)?)
+            .bind(order_id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
     async fn update_trade_peer_reputation(
         &self,
         order_id: &str,

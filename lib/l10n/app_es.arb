@@ -451,6 +451,8 @@
   "viewOrderLink": "Ver orden",
   "timeLeftLabel": "Quedan {time}",
   "invoiceNoLongerExpected": "Esta orden ya no espera una factura. Actualizando su estado…",
+  "invoiceAwaitingNode": "Enviada. El nodo aún no responde; te llevaremos a la operación en cuanto lo haga.",
+  "invoiceAwaitingNodeLong": "El nodo sigue sin responder. Si la operación no avanza, envíala de nuevo.",
   "invoiceSubmitInFlight": "Ya se está enviando una factura para esta orden. Espera la respuesta.",
   "waitingForTradeAmount": "Esperando el monto de la operación — inténtalo de nuevo en un momento.",
   "fetchingTradeAmount": "Obteniendo el monto de la operación…",

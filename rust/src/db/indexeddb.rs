@@ -689,6 +689,18 @@ impl Storage for IndexedDbStorage {
         .await
     }
 
+    async fn set_trade_range_slice(
+        &self,
+        order_id: &str,
+        fiat_amount: Option<f64>,
+        amount_sats: Option<u64>,
+    ) -> Result<()> {
+        self.patch_trade_by_order_id(order_id, |doc| {
+            trade_json::set_range_slice(doc, fiat_amount, amount_sats)
+        })
+        .await
+    }
+
     async fn update_trade_peer_reputation(
         &self,
         order_id: &str,
