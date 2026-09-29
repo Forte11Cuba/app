@@ -64,23 +64,26 @@ a stale replay:
   The record also proves the take's generation: a row an **earlier** take
   of the same order left behind (a lower `trade_key_index` — its `Canceled`
   never reached us) is replaced by the new row, as `persist_confirmed_take`
-  does on the live path. **Built first, replaced after**: the new row must
+  does on the live path. **Built first, written after**: the new row must
   exist and the status cursor must admit the reply (only the cursor — the
   terminal guard would read the earlier row's status as this take's) before
-  the earlier row is deleted. The reply is never applied to the earlier
-  row: when it proves no row of its own (a late `pay-bond-invoice`, a
-  cursor-refused reply) it is dropped with that row left in place, and when
-  the delete fails it is dropped too.
-  A **store failure is retried, not final**: the store unavailable, the
-  earlier row not deleted, or the new row not saved (the earlier row is
-  then saved back, so the order keeps the row it had). The take record goes
-  back into the registry and the event out of the dedup window, so the next
-  delivery of the same event — another relay's copy, or the history a relay
-  replays after a reconnect or a resync — reconciles it again without a
-  restart. That matters most for a reply with no order payload, whose only
-  source of a row is the record. The record still dies with the per-trade
-  subscription, and the binding (`store_trade_key_index`) moves only once
-  the row is saved.
+  anything is written. The replacement is **one storage transaction**
+  (`Storage::replace_trades_for_order`): whatever fails, or if the process
+  dies halfway, the order keeps the earlier row. The reply is never applied
+  to the earlier row: when it proves no row of its own (a late
+  `pay-bond-invoice`, a cursor-refused reply) it is dropped with that row
+  left in place.
+  A **store failure is retried locally**, not left to a redelivery: nostr-sdk
+  never notifies an event id its client already saw (the client's shared
+  events tracker), so no relay copy, reconnect or resync brings the same
+  reply back within the session. The reply and its take record are kept and
+  dispatched again after 5 s, 30 s and 2 min (`retry_late_take`), through the
+  whole dispatcher; after the last attempt the take is given up and logged,
+  and a restart's replay rebuilds what the message itself proves. That
+  matters most for a reply with no order payload, whose only source of a row
+  is the record. The scheduled attempts are identity-scoped: forgetting the
+  identity cancels them. Nothing is announced, and the binding
+  (`store_trade_key_index`) does not move, before the row is durable.
 - **add-invoice**: acknowledged and passed through — the reply doubles as a
   status update, which the per-action arms process as usual.
 - **dispute**: reconciled — `record_late_acceptance` persists the accepted
