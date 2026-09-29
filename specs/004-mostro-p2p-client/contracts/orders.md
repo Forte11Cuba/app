@@ -81,9 +81,18 @@ a stale replay:
   whole dispatcher; after the last attempt the take is given up and logged,
   and a restart's replay rebuilds what the message itself proves. That
   matters most for a reply with no order payload, whose only source of a row
-  is the record. The scheduled attempts are identity-scoped: forgetting the
-  identity cancels them. Nothing is announced, and the binding
+  is the record. The attempts are identity-scoped tasks: the identity
+  teardown (`release_identity_subscriptions`) first **aborts every one and
+  waits until each has stopped** (`forget_late_take_retries`) — also one
+  already inside the reconcile — before it clears anything, so what a retry
+  wrote before it stopped is removed by the rest of the teardown and nothing
+  is written after. Nothing is announced, and the binding
   (`store_trade_key_index`) does not move, before the row is durable.
+  On the web the replacement also needs the origin-wide lock (Web Locks):
+  its read of the earlier rows cannot join its write transaction, so
+  without that lock another context could scan the same rows in between.
+  `replace_trades_for_order` then refuses without writing, and the local
+  retry tries again.
 - **add-invoice**: acknowledged and passed through — the reply doubles as a
   status update, which the per-action arms process as usual.
 - **dispute**: reconciled — `record_late_acceptance` persists the accepted

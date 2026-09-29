@@ -338,6 +338,10 @@ pub trait Storage: Send + Sync {
     /// keeps the rows it had — never neither, whatever fails and even if the
     /// process dies halfway. For a new take that supersedes a row an earlier
     /// take of the same order left behind (#566).
+    ///
+    /// May refuse with an `Err` and change nothing when it cannot isolate the
+    /// replacement from other writers — on the web, when the browser grants
+    /// no origin-wide lock. Callers retry.
     async fn replace_trades_for_order(
         &self,
         order_id: &str,

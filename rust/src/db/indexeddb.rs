@@ -628,7 +628,19 @@ impl Storage for IndexedDbStorage {
         // documents are read first; the deletes and the put are then all
         // issued on one read-write transaction with no await in between, so
         // it stays active and commits them together — or none of them.
-        let _section = self.exclusive(TRADES_LOCK).await;
+        //
+        // The read cannot join that transaction (it would go inactive at the
+        // await, see `patch_serial`), so only the origin-wide lock keeps
+        // another context from scanning the same rows in between and leaving
+        // the order two replacements. Without it this refuses rather than
+        // degrading to the in-process mutex as the patches do: its one
+        // caller, the late-take reconcile, retries a failed store (#566).
+        let (_local, origin) = self.exclusive(TRADES_LOCK).await;
+        if origin.is_none() {
+            return Err(anyhow!(
+                "OriginLockUnavailable: no origin-wide lock to isolate the trade replacement"
+            ));
+        }
         let json = serde_json::to_string(trade)?;
         let stale: Vec<String> = self
             .trade_documents()
