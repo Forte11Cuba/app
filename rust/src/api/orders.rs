@@ -6028,7 +6028,8 @@ fn is_maker_waiting_step(status: &OrderStatus) -> bool {
 }
 
 /// The two writes that end a maker's waiting step, **in this order**: the
-/// step start goes first, the row follows.
+/// step start goes first, the row follows. The republish's status cursor is
+/// only written once both are ([`resync_republished_maker_order_in`]).
 ///
 /// They are not one transaction — `trades` and `settings` are separate stores
 /// on both backends — so the order is what makes a partial failure
@@ -6139,6 +6140,18 @@ async fn resync_republished_maker_order(
     kind: &mostro_core::message::MessageKind,
     event_ts: i64,
 ) -> bool {
+    resync_republished_maker_order_in(crate::db::app_db::db(), order_id, kind, event_ts).await
+}
+
+/// [`resync_republished_maker_order`] with the store that ends the step
+/// injected, so a test can make that write fail. The status reads, the guard
+/// and the cursor stay on the app's store.
+async fn resync_republished_maker_order_in(
+    db: Option<&impl Storage>,
+    order_id: &str,
+    kind: &mostro_core::message::MessageKind,
+    event_ts: i64,
+) -> bool {
     let republished_pending = matches!(
         &kind.payload,
         Some(mostro_core::message::Payload::Order(order))
@@ -6156,7 +6169,6 @@ async fn resync_republished_maker_order(
     if status_write_blocked(order_id, &kind.action, event_ts).await {
         return false;
     }
-    record_status_event(order_id, event_ts).await;
     crate::api::logging::blog_info(
         "orders",
         format!(
@@ -6167,8 +6179,21 @@ async fn resync_republished_maker_order(
     order_book()
         .update_order_status(order_id, OrderStatus::Pending)
         .await;
-    if let Some(db) = crate::db::app_db::db() {
-        write_maker_step_end(db, order_id).await;
+    let ended = match db {
+        Some(db) => write_maker_step_end(db, order_id).await,
+        None => false,
+    };
+    // Dated after the write, not before it as every other status write is.
+    // The sweep only ends a maker's step for a `pending` newer than this
+    // cursor (#628). Moved to the republish while the row stayed waiting, the
+    // cursor would make that very `pending` look stale, and nothing would
+    // finish the step again. Left at the take, the sweep retries it. What
+    // this ordering opens is also closed by the sweep: a failed or
+    // interrupted cursor write leaves a `Pending` row that a replayed take
+    // can walk back to waiting, and the republish's `pending` is newer than
+    // that take.
+    if ended {
+        record_status_event(order_id, event_ts).await;
     }
     emit_trade_update_at(order_id, OrderStatus::Pending, None, event_ts);
     true
@@ -13437,14 +13462,18 @@ mod tests {
 
     /// A `Storage` for driving `persist_trade_row` alone, which calls only
     /// `delete_setting` and `save_trade`: its save either fails or parks until
-    /// released. Every other method is `unimplemented!()` — reaching one is a
-    /// test bug, not silent success.
+    /// released. Also for `write_maker_step_end`, which calls
+    /// `delete_setting` then `update_trade_fields`: one of the two fails.
+    /// Every other method is `unimplemented!()` — reaching one is a test bug,
+    /// not silent success.
     enum PersistProbe {
         FailSave,
         PauseSave {
             entered: Arc<tokio::sync::Notify>,
             release: Arc<tokio::sync::Notify>,
         },
+        FailStepStartClear,
+        FailRowWrite,
     }
 
     impl Storage for PersistProbe {
@@ -13471,6 +13500,7 @@ mod tests {
                     release.notified().await;
                     Ok(())
                 }
+                Self::FailStepStartClear | Self::FailRowWrite => unimplemented!(),
             }
         }
         async fn get_trade(&self, _id: &str) -> Result<Option<crate::api::types::TradeInfo>> {
@@ -13606,7 +13636,10 @@ mod tests {
             unimplemented!()
         }
         async fn delete_setting(&self, _key: &str) -> Result<()> {
-            Ok(())
+            match self {
+                Self::FailStepStartClear => anyhow::bail!("injected step start failure"),
+                _ => Ok(()),
+            }
         }
         async fn save_active_mostro_pubkey(&self, _pubkey: &str) -> Result<()> {
             unimplemented!()
@@ -13637,7 +13670,10 @@ mod tests {
             _hold_invoice: Option<String>,
             _amount_sats: Option<u64>,
         ) -> Result<()> {
-            unimplemented!()
+            match self {
+                Self::FailRowWrite => anyhow::bail!("injected row write failure"),
+                _ => unimplemented!(),
+            }
         }
         async fn set_trade_range_slice(
             &self,
@@ -16067,6 +16103,113 @@ mod tests {
         assert_eq!(
             crate::api::invoice::trade_step_started_at(order_id).await,
             None,
+        );
+    }
+
+    /// The daemon's `new-order` putting a maker's order back in the book,
+    /// dated `at`.
+    fn republished(order_id: &str, at: i64) -> mostro_core::message::MessageKind {
+        let uuid = uuid::Uuid::parse_str(order_id).expect("order uuid");
+        daemon_message(
+            uuid,
+            Action::NewOrder,
+            Some(Payload::Order(pending_small_order(uuid))),
+            at as u64,
+        )
+        .message
+        .get_inner_message_kind()
+        .clone()
+    }
+
+    /// PR review: the republish is accepted but the write that ends the step
+    /// fails. The row stays waiting, so the cursor must stay at the take:
+    /// moved to the republish, it would make the republish's own `pending`
+    /// look stale to the sweep for good. Once storage is back, the sweep ends
+    /// the step.
+    async fn a_failed_step_end_is_finished_by_the_sweep(probe: PersistProbe, trade_index: u32) {
+        // Arrange: a maker's buy order taken a while ago.
+        let (order_id, taken_at) = maker_taken_after_a_day(
+            crate::api::types::OrderKind::Buy,
+            Action::PayInvoice,
+            |uuid| {
+                let mut order = pending_small_order(uuid);
+                order.status = Some(mostro_core::order::Status::WaitingPayment);
+                Some(Payload::PaymentRequest(
+                    Some(order),
+                    "lnbc1holdinvoice".into(),
+                    None,
+                ))
+            },
+            SWEEP_MIN_AGE_SECS + 300,
+            trade_index,
+        )
+        .await;
+        let republished_at = taken_at + SWEEP_MIN_AGE_SECS;
+        let kind = republished(&order_id, republished_at);
+
+        // Act: the republish lands on a store that fails to end the step.
+        {
+            let _guard = lock_order(&order_id).await;
+            assert!(
+                resync_republished_maker_order_in(Some(&probe), &order_id, &kind, republished_at)
+                    .await
+            );
+        }
+
+        // Assert: the row is still waiting, the cursor still at the take.
+        assert_eq!(row_status(&order_id).await, OrderStatus::WaitingPayment);
+        assert_eq!(load_status_cursor(&order_id).await, Some(taken_at));
+
+        // Act: storage is back; a relay serves the republish's revision,
+        // published in the same second as the `new-order`.
+        sweep_with_revisions(&[(&order_id, republished_at, OrderStatus::Pending)]).await;
+
+        // Assert
+        assert_eq!(row_status(&order_id).await, OrderStatus::Pending);
+        assert_eq!(
+            crate::api::invoice::trade_step_started_at(order_id).await,
+            None,
+        );
+    }
+
+    #[tokio::test]
+    async fn a_republish_whose_step_start_is_not_cleared_is_finished_by_the_sweep() {
+        a_failed_step_end_is_finished_by_the_sweep(PersistProbe::FailStepStartClear, 636).await;
+    }
+
+    #[tokio::test]
+    async fn a_republish_whose_row_is_not_written_is_finished_by_the_sweep() {
+        a_failed_step_end_is_finished_by_the_sweep(PersistProbe::FailRowWrite, 637).await;
+    }
+
+    /// The other side of the ordering: a republish that is written dates the
+    /// cursor, so an older replay of the take cannot walk the row back.
+    #[tokio::test]
+    async fn a_written_republish_moves_the_cursor() {
+        // Arrange
+        let (order_id, taken_at) = maker_taken_after_a_day(
+            crate::api::types::OrderKind::Buy,
+            Action::WaitingSellerToPay,
+            |_| None,
+            SWEEP_MIN_AGE_SECS + 300,
+            638,
+        )
+        .await;
+        let republished_at = taken_at + SWEEP_MIN_AGE_SECS;
+        let kind = republished(&order_id, republished_at);
+
+        // Act
+        {
+            let _guard = lock_order(&order_id).await;
+            assert!(resync_republished_maker_order(&order_id, &kind, republished_at).await);
+        }
+
+        // Assert
+        assert_eq!(row_status(&order_id).await, OrderStatus::Pending);
+        assert_eq!(load_status_cursor(&order_id).await, Some(republished_at));
+        assert!(
+            status_write_blocked(&order_id, &Action::WaitingSellerToPay, taken_at).await,
+            "a replay of the take must not walk the republished order back"
         );
     }
 
