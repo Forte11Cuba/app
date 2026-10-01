@@ -3904,6 +3904,15 @@ class AppLocalizationsNl extends AppLocalizations {
   String get cashuReceiveHint => 'Plak of scan een Cashu-token';
 
   @override
+  String get cashuPasteTokenOption => 'Token plakken';
+
+  @override
+  String get cashuPasteTokenHint => 'Plak een Cashu-token';
+
+  @override
+  String get cashuScanUnavailable => 'Niet beschikbaar op dit apparaat';
+
+  @override
   String get cashuAmountLabel => 'Bedrag in sats';
 
   @override

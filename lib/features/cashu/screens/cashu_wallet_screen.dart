@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show defaultTargetPlatform, kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -100,21 +101,7 @@ class _CashuWalletScreenState extends ConsumerState<CashuWalletScreen> {
 
   Future<void> _receive() async {
     final l10n = AppLocalizations.of(context);
-    final token = await _prompt(
-      () => showMostroSheet<String>(
-        context: context,
-        builder:
-            (sheetContext) => Padding(
-              padding: EdgeInsets.only(
-                bottom: MediaQuery.of(sheetContext).viewInsets.bottom,
-              ),
-              child: PlatformAwareQrScanner(
-                hint: l10n.cashuReceiveHint,
-                onDetected: (value) => Navigator.of(sheetContext).pop(value),
-              ),
-            ),
-      ),
-    );
+    final token = await _prompt(_askForToken);
 
     if (token == null || token.trim().isEmpty || !mounted) return;
 
@@ -124,6 +111,51 @@ class _CashuWalletScreenState extends ConsumerState<CashuWalletScreen> {
           .receiveToken(token.trim());
       if (mounted) _showMessage(l10n.cashuReceived(amount.toInt()));
     });
+  }
+
+  /// Where the token comes from: the camera or the clipboard. A token is
+  /// mostly shared as text — and one too large for a QR has no other way in —
+  /// so pasting is never hidden behind the camera. Both options show on every
+  /// device; where there is no camera, scanning is disabled and says why.
+  Future<String?> _askForToken() async {
+    final source = await showMostroSheet<_TokenSource>(
+      context: context,
+      builder:
+          (_) => _TokenSourceSheet(
+            canScan:
+                qrInputFor(kIsWeb, defaultTargetPlatform) == QrInput.camera,
+          ),
+    );
+    if (!mounted) return null;
+    return switch (source) {
+      null => null,
+      _TokenSource.scan => _scanToken(),
+      _TokenSource.paste => _pasteToken(),
+    };
+  }
+
+  Future<String?> _scanToken() {
+    return Navigator.of(context).push<String>(
+      MaterialPageRoute(
+        builder: (routeContext) {
+          final l10n = AppLocalizations.of(routeContext);
+          return Scaffold(
+            appBar: AppBar(title: Text(l10n.scanQrCodeTitle)),
+            body: PlatformAwareQrScanner(
+              hint: l10n.cashuReceiveHint,
+              onDetected: (value) => Navigator.of(routeContext).pop(value),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Future<String?> _pasteToken() {
+    return showMostroDialog<String>(
+      context: context,
+      builder: (_) => const _PasteTokenDialog(),
+    );
   }
 
   Future<void> _send(int balanceSats) async {
@@ -200,7 +232,7 @@ class _CashuWalletScreenState extends ConsumerState<CashuWalletScreen> {
               Expanded(
                 child: FilledButton.icon(
                   onPressed: _busy ? null : _receive,
-                  icon: const Icon(Icons.qr_code_scanner),
+                  icon: const Icon(Icons.download_outlined),
                   label: Text(l10n.cashuReceiveButton),
                 ),
               ),
@@ -345,6 +377,123 @@ class _BalanceCard extends StatelessWidget {
             ),
         ],
       ),
+    );
+  }
+}
+
+enum _TokenSource { scan, paste }
+
+/// Receive's choice: scan a QR or paste the token.
+class _TokenSourceSheet extends StatelessWidget {
+  const _TokenSourceSheet({required this.canScan});
+
+  /// False where mobile_scanner has no camera (see `qrInputFor`).
+  final bool canScan;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    final colors = Theme.of(context).extension<AppColors>()!;
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.all(AppSpacing.lg),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  OutlinedButton.icon(
+                    onPressed:
+                        canScan
+                            ? () => Navigator.of(context).pop(_TokenSource.scan)
+                            : null,
+                    icon: const Icon(Icons.qr_code_scanner),
+                    label: Text(l10n.scanQrButtonLabel),
+                  ),
+                  if (!canScan) ...[
+                    const SizedBox(height: AppSpacing.xs),
+                    Text(
+                      l10n.cashuScanUnavailable,
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: colors.textSubtle, fontSize: 12),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            const SizedBox(width: AppSpacing.md),
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed: () => Navigator.of(context).pop(_TokenSource.paste),
+                icon: const Icon(Icons.content_paste),
+                label: Text(l10n.pasteButtonLabel),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// The token to redeem, as text. Pops it trimmed; an empty field is refused
+/// here rather than sent to the mint.
+class _PasteTokenDialog extends StatefulWidget {
+  const _PasteTokenDialog();
+
+  @override
+  State<_PasteTokenDialog> createState() => _PasteTokenDialogState();
+}
+
+class _PasteTokenDialogState extends State<_PasteTokenDialog> {
+  final _controller = TextEditingController();
+  String? _error;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    final token = _controller.text.trim();
+    if (token.isEmpty) {
+      setState(() => _error = AppLocalizations.of(context).enterValueError);
+      return;
+    }
+    Navigator.of(context).pop(token);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    return MostroDialog(
+      title: l10n.cashuPasteTokenOption,
+      content: TextField(
+        controller: _controller,
+        // Focused, so a desktop paste shortcut lands without a click first.
+        autofocus: true,
+        autocorrect: false,
+        enableSuggestions: false,
+        minLines: 1,
+        maxLines: 4,
+        style: const TextStyle(fontSize: 12),
+        decoration: InputDecoration(
+          hintText: l10n.cashuPasteTokenHint,
+          errorText: _error,
+        ),
+        onChanged: (_) {
+          if (_error != null) setState(() => _error = null);
+        },
+      ),
+      secondary: ModalAction(
+        label: l10n.cancel,
+        onPressed: () => Navigator.of(context).pop(),
+      ),
+      primary: ModalAction(label: l10n.cashuReceiveButton, onPressed: _submit),
     );
   }
 }

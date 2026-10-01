@@ -6490,6 +6490,24 @@ abstract class AppLocalizations {
   /// **'Paste or scan a Cashu token'**
   String get cashuReceiveHint;
 
+  /// Cashu wallet — Receive option that takes the token from the clipboard, next to Scan QR
+  ///
+  /// In en, this message translates to:
+  /// **'Paste token'**
+  String get cashuPasteTokenOption;
+
+  /// Cashu wallet — dimmed placeholder of the paste field; disappears once something is pasted or typed
+  ///
+  /// In en, this message translates to:
+  /// **'Paste a Cashu token'**
+  String get cashuPasteTokenHint;
+
+  /// Cashu wallet — under the disabled Scan QR option where the device has no usable camera (desktop, web)
+  ///
+  /// In en, this message translates to:
+  /// **'Not available on this device'**
+  String get cashuScanUnavailable;
+
   /// Cashu wallet — amount field when exporting a token
   ///
   /// In en, this message translates to:

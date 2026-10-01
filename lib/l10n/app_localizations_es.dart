@@ -3899,6 +3899,15 @@ class AppLocalizationsEs extends AppLocalizations {
   String get cashuReceiveHint => 'Pega o escanea un token Cashu';
 
   @override
+  String get cashuPasteTokenOption => 'Pegar token';
+
+  @override
+  String get cashuPasteTokenHint => 'Pega un token Cashu';
+
+  @override
+  String get cashuScanUnavailable => 'No disponible en este dispositivo';
+
+  @override
   String get cashuAmountLabel => 'Monto en sats';
 
   @override
