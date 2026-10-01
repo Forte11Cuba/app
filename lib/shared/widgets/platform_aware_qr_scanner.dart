@@ -1,10 +1,28 @@
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart'
+    show TargetPlatform, defaultTargetPlatform, kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
 import 'package:mostro/core/app_theme.dart';
 import 'package:mostro/l10n/app_localizations.dart';
+
+/// How [PlatformAwareQrScanner] takes its input on a platform.
+enum QrInput {
+  /// The device camera, through `mobile_scanner`.
+  camera,
+
+  /// A text field the user pastes or types into.
+  paste,
+}
+
+/// Which [QrInput] a platform gets.
+///
+/// Callers pass `kIsWeb` and `defaultTargetPlatform`. `kIsWeb` is a parameter
+/// rather than read here because it is a compile-time constant: a test could
+/// otherwise never reach the web branch.
+QrInput qrInputFor(bool isWeb, TargetPlatform platform) =>
+    isWeb ? QrInput.paste : QrInput.camera;
 
 /// Platform-aware QR scanner.
 ///
@@ -73,7 +91,7 @@ class _PlatformAwareQrScannerState extends State<PlatformAwareQrScanner> {
 
   @override
   Widget build(BuildContext context) {
-    if (kIsWeb) {
+    if (qrInputFor(kIsWeb, defaultTargetPlatform) == QrInput.paste) {
       return _WebFallback(
         controller: _controller,
         errorText: _errorText,
