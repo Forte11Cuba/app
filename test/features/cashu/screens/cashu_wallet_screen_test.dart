@@ -3,11 +3,13 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mobile_scanner/mobile_scanner.dart';
 
 import 'package:mostro/core/app_theme.dart';
 import 'package:mostro/features/cashu/providers/cashu_wallet_provider.dart';
 import 'package:mostro/features/cashu/screens/cashu_wallet_screen.dart';
 import 'package:mostro/l10n/app_localizations.dart';
+import 'package:mostro/shared/widgets/mostro_modal.dart';
 import 'package:mostro/src/rust/api/types.dart';
 
 import '../../../support/provider_harness.dart';
@@ -20,11 +22,15 @@ class _FakeController extends CashuWalletController {
     this.connectError,
     this.createTokenError,
     this.token = 'cashuBtesttoken',
+    this.received,
   });
 
   final Object? connectError;
   final Object? createTokenError;
   final String token;
+
+  /// Every token handed to [receiveToken], when the test wants to see them.
+  final List<String>? received;
 
   @override
   Future<CashuWalletStatus> connect() async {
@@ -33,7 +39,10 @@ class _FakeController extends CashuWalletController {
   }
 
   @override
-  Future<BigInt> receiveToken(String encoded) async => BigInt.zero;
+  Future<BigInt> receiveToken(String encoded) async {
+    received?.add(encoded);
+    return BigInt.zero;
+  }
 
   @override
   Future<String> createToken(BigInt amountSats) async {
@@ -90,7 +99,124 @@ Future<void> _pump(
   await tester.pump();
 }
 
+/// The Receive button of the paste dialog, not the screen's own.
+Finder _dialogReceive() => find.descendant(
+  of: find.byType(MostroDialog),
+  matching: find.text('Receive'),
+);
+
+/// The Scan QR button of the Receive sheet.
+ButtonStyleButton _scanButton(WidgetTester tester) => tester.widget(
+  find.ancestor(
+    of: find.text('Scan QR'),
+    matching: find.byWidgetPredicate((w) => w is ButtonStyleButton),
+  ),
+);
+
 void main() {
+  group('CashuWalletScreen receive', () {
+    testWidgets(
+      'receive offers scanning or pasting a token',
+      (tester) async {
+        await _pump(tester, status: _status(connected: true, balance: 0));
+
+        await tester.tap(find.text('Receive'));
+        await tester.pumpAndSettle();
+
+        expect(_scanButton(tester).onPressed, isNotNull);
+        expect(find.text('Paste'), findsOneWidget);
+        expect(find.text('Not available on this device'), findsNothing);
+        // Choosing comes first: no camera opens on its own.
+        expect(find.byType(MobileScanner), findsNothing);
+      },
+      variant: TargetPlatformVariant.only(TargetPlatform.android),
+    );
+
+    testWidgets(
+      'a pasted token is received trimmed',
+      (tester) async {
+        final received = <String>[];
+        await _pump(
+          tester,
+          status: _status(connected: true, balance: 0),
+          controller: _FakeController(received: received),
+        );
+
+        await tester.tap(find.text('Receive'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Paste'));
+        await tester.pumpAndSettle();
+
+        // Empty, with a dimmed hint that goes once something is pasted.
+        expect(find.text('Paste a Cashu token'), findsOneWidget);
+
+        await tester.enterText(find.byType(TextField), '  cashuBpasted  ');
+        await tester.pump();
+        expect(received, isEmpty);
+
+        await tester.tap(_dialogReceive());
+        await tester.pumpAndSettle();
+
+        expect(received, ['cashuBpasted']);
+        expect(find.text('Received 0 sats'), findsOneWidget);
+      },
+      variant: TargetPlatformVariant.only(TargetPlatform.android),
+    );
+
+    testWidgets(
+      'an empty token is refused without reaching the wallet',
+      (tester) async {
+        final received = <String>[];
+        await _pump(
+          tester,
+          status: _status(connected: true, balance: 0),
+          controller: _FakeController(received: received),
+        );
+
+        await tester.tap(find.text('Receive'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Paste'));
+        await tester.pumpAndSettle();
+        await tester.tap(_dialogReceive());
+        await tester.pumpAndSettle();
+
+        expect(find.text('Please enter a value'), findsOneWidget);
+        expect(received, isEmpty);
+      },
+      variant: TargetPlatformVariant.only(TargetPlatform.android),
+    );
+
+    testWidgets(
+      'without a camera scanning is offered disabled, with the reason',
+      (tester) async {
+        final received = <String>[];
+        await _pump(
+          tester,
+          status: _status(connected: true, balance: 0),
+          controller: _FakeController(received: received),
+        );
+
+        await tester.tap(find.text('Receive'));
+        await tester.pumpAndSettle();
+
+        // Same choice as on a phone, so the user learns why there is no
+        // camera instead of wondering where scanning went.
+        expect(_scanButton(tester).onPressed, isNull);
+        expect(find.text('Not available on this device'), findsOneWidget);
+        expect(find.byType(MobileScanner), findsNothing);
+
+        await tester.tap(find.text('Paste'));
+        await tester.pumpAndSettle();
+        await tester.enterText(find.byType(TextField), 'cashuBdesktop');
+        await tester.tap(_dialogReceive());
+        await tester.pumpAndSettle();
+
+        expect(received, ['cashuBdesktop']);
+      },
+      variant: TargetPlatformVariant.only(TargetPlatform.linux),
+    );
+  });
+
   group('CashuWalletScreen', () {
     testWidgets('a connected wallet shows its balance and mint', (tester) async {
       await _pump(tester, status: _status(connected: true, balance: 1234));
