@@ -21,16 +21,29 @@ enum QrInput {
 /// Callers pass `kIsWeb` and `defaultTargetPlatform`. `kIsWeb` is a parameter
 /// rather than read here because it is a compile-time constant: a test could
 /// otherwise never reach the web branch.
-QrInput qrInputFor(bool isWeb, TargetPlatform platform) =>
-    isWeb ? QrInput.paste : QrInput.camera;
+QrInput qrInputFor(bool isWeb, TargetPlatform platform) {
+  // On web `platform` is the browser's OS: a phone browser reports android.
+  if (isWeb) return QrInput.paste;
+  return switch (platform) {
+    TargetPlatform.android || TargetPlatform.iOS => QrInput.camera,
+    // mobile_scanner implements Android, iOS, macOS and web only: on Linux
+    // and Windows every channel call is a MissingPluginException and the
+    // scanner renders nothing (#458). macOS has the plugin, but the sandboxed
+    // app lacks `com.apple.security.device.camera` and
+    // `NSCameraUsageDescription`, so it pastes until someone with a Mac
+    // enables and tests the camera there.
+    _ => QrInput.paste,
+  };
+}
 
 /// Platform-aware QR scanner.
 ///
-/// On **iOS, Android, and desktop** (non-web): opens the device camera using
-/// `mobile_scanner`.
-/// On **web**: shows a paste-from-clipboard text field — camera access
-/// requires HTTPS and a user gesture that differs across browsers; clipboard
-/// paste is the reliable fallback.
+/// On **Android and iOS**: opens the device camera using `mobile_scanner`. If
+/// the camera cannot start — no camera, or the permission refused — the paste
+/// field below takes its place.
+/// On **web and desktop**: shows a paste-from-clipboard text field. On web,
+/// camera access requires HTTPS and a user gesture that differs across
+/// browsers; on desktop, see [qrInputFor].
 ///
 /// [onDetected] is called exactly once with the decoded string as soon as a
 /// QR code is scanned or the user submits pasted content.
@@ -44,7 +57,7 @@ class PlatformAwareQrScanner extends StatefulWidget {
   /// Called with the raw string value when a QR code is detected or submitted.
   final void Function(String value) onDetected;
 
-  /// Placeholder text shown in the paste field (web only).
+  /// Placeholder text shown in the paste field.
   final String hint;
 
   @override
@@ -89,56 +102,58 @@ class _PlatformAwareQrScannerState extends State<PlatformAwareQrScanner> {
     _emitOnce(text);
   }
 
+  Widget _pasteForm() {
+    return _PasteFallback(
+      controller: _controller,
+      errorText: _errorText,
+      hint: widget.hint,
+      onChanged: (_) {
+        if (_errorText != null) setState(() => _errorText = null);
+      },
+      onPaste: _pasteFromClipboard,
+      onSubmit: _submit,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     if (qrInputFor(kIsWeb, defaultTargetPlatform) == QrInput.paste) {
-      return _WebFallback(
-        controller: _controller,
-        errorText: _errorText,
-        hint: widget.hint,
-        onChanged: (_) {
-          if (_errorText != null) setState(() => _errorText = null);
-        },
-        onPaste: _pasteFromClipboard,
-        onSubmit: _submit,
-      );
+      return _pasteForm();
     }
-    return _CameraScanner(onDetected: widget.onDetected);
+    return _CameraScanner(onDetected: _emitOnce, onError: _pasteForm);
   }
 }
 
-// ── Camera scanner (native / desktop) ────────────────────────────────────────
+// ── Camera scanner (Android / iOS) ───────────────────────────────────────────
 
-class _CameraScanner extends StatefulWidget {
-  const _CameraScanner({required this.onDetected});
+class _CameraScanner extends StatelessWidget {
+  const _CameraScanner({required this.onDetected, required this.onError});
+
+  /// Guarded by the parent's `_emitOnce`, so a code held in front of the
+  /// camera for several frames is reported once.
   final void Function(String) onDetected;
 
-  @override
-  State<_CameraScanner> createState() => _CameraScannerState();
-}
-
-class _CameraScannerState extends State<_CameraScanner> {
-  bool _detected = false;
+  /// What replaces the preview when the camera cannot start.
+  final Widget Function() onError;
 
   @override
   Widget build(BuildContext context) {
     return MobileScanner(
+      // Without this, a refused permission or a device without a camera shows
+      // mobile_scanner's black error box and nothing else to do.
+      errorBuilder: (_, _) => onError(),
       onDetect: (capture) {
-        if (_detected) return;
         final raw = capture.barcodes.firstOrNull?.rawValue?.trim();
-        if (raw != null && raw.isNotEmpty) {
-          _detected = true;
-          widget.onDetected(raw);
-        }
+        if (raw != null && raw.isNotEmpty) onDetected(raw);
       },
     );
   }
 }
 
-// ── Web fallback (paste / type) ───────────────────────────────────────────────
+// ── Paste fallback (web, desktop, camera unavailable) ────────────────────────
 
-class _WebFallback extends StatelessWidget {
-  const _WebFallback({
+class _PasteFallback extends StatelessWidget {
+  const _PasteFallback({
     required this.controller,
     required this.errorText,
     required this.hint,
