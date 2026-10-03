@@ -116,7 +116,7 @@ New tokens take these values (DS-COL-8). Format: dark / light.
 | ID | Rule | Check |
 |---|---|---|
 | DS-COL-9 | **MUST.** Colors keep one meaning each. Lime means the user's turn, success or valid. Amber means waiting or a warning. Red (`sell`/`danger`) means the sell side, an error or danger. Neutral grey means closed, done or inactive. A dispute is red. No color is used against its meaning: a red success, or a lime warning. | review |
-| DS-COL-10 | **MUST.** Color is never the only signal. A status also has a word or an icon, so a colorblind user and a screen reader get it too. | review |
+| DS-COL-10 | **MUST.** Color is never the only signal. A status also has a visible word, or an icon that carries a semantic label (`semanticLabel`, or `Semantics(label: …)`), so a colorblind user and a screen reader both get it. An icon without a label fixes the first and not the second. | review |
 
 ---
 
@@ -185,7 +185,7 @@ falls back to Material defaults and is not allowed in new code.
 
 | ID | Rule | Check |
 |---|---|---|
-| DS-SPC-1 | **MUST.** Screen content is inset **18** from the side edges (`redesignSidePadding`). The drawer is the exception, with its own 22/14. | review |
+| DS-SPC-1 | **MUST.** Screen content is inset **18** from the side edges (`redesignSidePadding`). The drawer predates the rule with its own 22/14 (§14). | review |
 | DS-SPC-2 | **MUST.** Paddings, gaps and margins come from the 2-pt scale **2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 24, 28, 32**. Odd values are not allowed, except 1 for a hairline. | auto |
 | DS-SPC-3 | **SHOULD.** Card inner padding is 14. Rows in a list are 12 apart, sections 18–24 apart. A label sits 6–8 above its field. | review |
 | DS-SPC-4 | **MUST.** Breakpoints come from `AppBreakpoints` (600 tablet, 1200 desktop); no other width threshold. Mobile has 1 column, a bottom bar and an overlay drawer. Tablet has 2 columns. Desktop has 3 columns and a persistent drawer, and no bottom bar. | auto, review |
@@ -208,7 +208,7 @@ Reuse before building (principle 4). These are the parts a new screen is assembl
 
 | ID | Rule | Check |
 |---|---|---|
-| DS-CMP-3 | **MUST.** A screen state has at most **one** primary call to action: filled lime, `onLime` ink, radius 16, 15/w600, vertical padding 14–15. When the user can only wait, it has none (`TradeActionBar`). Reuse `OrderPrimaryButton`, `TradeActionBar` or `InvoicePrimaryButton`. | review |
+| DS-CMP-3 | **MUST.** A screen state has at most **one** primary call to action: filled lime, `onLime` ink, radius 16, 15/w600, vertical padding 14. When the user can only wait, it has none (`TradeActionBar`). Reuse `OrderPrimaryButton`, `TradeActionBar` or `InvoicePrimaryButton`. | review |
 | DS-CMP-4 | **MUST.** Secondary actions are outlined (`border` token, `textBody` ink) with the same radius as their primary. Cancel and dispute are never two red buttons of the same weight. A dismissal ("Close", "Not now") is a text link. | review |
 | DS-CMP-5 | **MUST.** A filled red button is used only for the answer to an irreversible question inside a modal (DS-CMP-2). On a page, danger is an outlined or link action in `danger` ink. | review |
 | DS-CMP-6 | **MUST.** Every tappable target is at least **48 × 48** dp. A small glyph is padded out to it, as `_OrderBookAppBar` does with `_target = 48`. | review |
@@ -219,7 +219,7 @@ Reuse before building (principle 4). These are the parts a new screen is assembl
 | ID | Rule | Check |
 |---|---|---|
 | DS-CMP-8 | **MUST.** A card or row sits on `surface`, has radius 18, padding 14 and no elevation. When tappable, it is `Material` + `InkWell`, so the ripple follows the radius. | review |
-| DS-CMP-9 | **MUST.** A status chip is a pill: 6-px dot, upper-case 10-sp label, padding about 8–9 × 3, with a tinted fill and border from the area's `chip*` tokens (`TradeListChip`, `TradeStatusChip`). The legacy `StatusChip` / `RoleBadge` with `AppColors.status*` is not used in new code. | review |
+| DS-CMP-9 | **MUST.** A status chip is a pill: 6-px dot, upper-case 10-sp label, padding 8 × 4 (horizontal × vertical), 6 between dot and label, with a tinted fill and border from the area's `chip*` tokens (`TradeListChip`, `TradeStatusChip`). The legacy `StatusChip` / `RoleBadge` with `AppColors.status*` is not used in new code. | review |
 
 ### 6.4 Inputs
 
@@ -307,7 +307,8 @@ judged against this guide, the description also gives:
 1. **Rules touched**: the IDs that apply ("DS-CMP-3, DS-COL-6"), and any SHOULD it departs from,
    with the reason.
 2. **New tokens**: name and both values, and the contrast test that covers them.
-3. **Screenshots** in dark and light, and at 2× text scale when a layout changed.
+3. **Screenshots** as CONTRIBUTING asks: before and after, in dark and light for a change of
+   colour, contrast or layout, and one at 2× text scale when a layout changed.
 4. **Reference**: the issue's mockup or handoff the change implements (CONTRIBUTING: a UI change
    needs an accepted issue that shows the intended result).
 
@@ -333,6 +334,7 @@ Each gap below is debt. A change in the same code SHOULD close it, and MUST NOT 
 | `AppRadius.card` is 12, while redesigned cards use 18. `AppRadius.button` (8) is unused by the redesign, which uses 16. About 180 literal radii, including 4, 11, 13, 20, 26 and 28. | §4 | DS-SHP-1, DS-SHP-2 |
 | No spacing grid in practice: about 70% of padding literals are on the 2-pt scale, and odd values (11, 13, 9, 15…) are common. `AppSpacing.xxl` is unused. | §5 | DS-SPC-2 |
 | Odd icon sizes (13, 15, 17, 19) are common. | §6.6 | DS-ICO-3 |
+| Chips are padded 9 × 3 or 8 × 3 with a 5 gap, and in-page calls to action use vertical padding 15 in places (`_TakeButton`, `TradeActionBar`), all off the spacing scale. The drawer insets its content 22. | §5, §6 | DS-SPC-1, DS-SPC-2, DS-CMP-3, DS-CMP-9 |
 | Reds differ across palettes: `E4685D` (invoice, about), `F27868` (restore), `B0352F`, `A8262B`, `9E2B26` in light. `AppColors.sellColor` is `FF8A8A` against `sell` `FF8B8B`. | §2.3 | DS-COL-8 |
 | `RestorePalette` redefines its own surfaces (`sheet` `#161C28`) instead of extending `OrderBookPalette`. | §2.2 | DS-COL-2 |
 | Chat: `AppColors.systemMessage` (`#2A2D35`) is used as a **text** color on the dark background, which is illegible. The dispute chat's received bubble is a literal `#2D3142`. Bubble colors have no contrast test. | §2 | DS-COL-1, DS-COL-6 |

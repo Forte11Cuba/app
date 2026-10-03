@@ -121,6 +121,7 @@ If you could not build or run the app, say so in the pull request instead of cla
 
 - Any visible change carries **before** (`main`) and **after** (your branch) screenshots of the same screen with the same data.
 - A change of colour, contrast or layout adds both themes, and a phone width when the layout reflows.
+- A change of layout adds one screenshot at 2× text scale (the [design guide](.specify/DESIGN_SYSTEM.md) §12).
 - A change of copy shows English and at least one other locale.
 - A change inside a flow (several screens, an animation, a timing) is a short screen recording instead.
 - With no visible change, write `No visible change`. Writing it for a change that is visible is a description that does not match its diff.
