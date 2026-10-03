@@ -1,0 +1,410 @@
+@TestOn('vm')
+library;
+
+import 'dart:io';
+
+import 'package:flutter_test/flutter_test.dart';
+
+import '../../tool/design/design_check.dart';
+
+/// The "Design guide" CI job runs `tool/design_check.dart` on the lines a
+/// pull request adds or changes under `lib/`, and fails on every break of a
+/// rule `.specify/DESIGN_SYSTEM.md` marks *auto*. A rule that misses a break
+/// lets a second design system in; one that flags a legal line blocks a
+/// pull request for nothing. Both are tested here, rule by rule.
+void main() {
+  /// The rules [source] breaks, as `rule@line`.
+  List<String> breaks(String source, {Set<int>? lines}) => [
+    for (final v in scan('lib/features/x/x.dart', source, lines: lines))
+      '${v.rule}@${v.line}',
+  ];
+
+  group('which lines a diff adds', () {
+    test('reads the new-side range of every hunk', () {
+      const diff = '''
+diff --git a/lib/a.dart b/lib/a.dart
+index 1..2 100644
+--- a/lib/a.dart
++++ b/lib/a.dart
+@@ -3,0 +4,2 @@ class A {
++  x
++  y
+@@ -10 +12 @@ class A {
+-  old
++  new
+@@ -20,3 +23,0 @@ class A {
+-  gone
+-  gone
+-  gone
+diff --git a/lib/b.dart b/lib/b.dart
+new file mode 100644
+--- /dev/null
++++ b/lib/b.dart
+@@ -0,0 +1,3 @@
++a
++b
++c
+diff --git a/lib/c.dart b/lib/c.dart
+deleted file mode 100644
+--- a/lib/c.dart
++++ /dev/null
+@@ -1 +0,0 @@
+-x
+''';
+      expect(addedLines(diff), {
+        'lib/a.dart': {4, 5, 12},
+        'lib/b.dart': {1, 2, 3},
+      });
+    });
+  });
+
+  group('which files it reads', () {
+    test('UI source under lib/', () {
+      expect(isChecked('lib/features/order/widgets/x.dart'), isTrue);
+      expect(isChecked('lib/shared/widgets/x.dart'), isTrue);
+    });
+
+    test('not the token layer, generated code or other files', () {
+      expect(isChecked('lib/core/order_book_palette.dart'), isFalse);
+      expect(isChecked('lib/src/rust/api/orders.dart'), isFalse);
+      expect(isChecked('lib/l10n/app_localizations_de.dart'), isFalse);
+      expect(isChecked('lib/features/x/model.g.dart'), isFalse);
+      expect(isChecked('lib/features/x/model.freezed.dart'), isFalse);
+      expect(isChecked('test/features/x_test.dart'), isFalse);
+      expect(isChecked('lib/features/x/README.md'), isFalse);
+    });
+  });
+
+  group('DS-COL-1: no color literal', () {
+    test('flags hex colors, ARGB/RGBO and Material swatches', () {
+      expect(
+        breaks('''
+final a = Color(0xFF92D64F);
+final b = const Color(0x80FFFFFF);
+final c = Color.fromARGB(255, 1, 2, 3);
+final d = Color.fromRGBO(1, 2, 3, 1);
+final e = Colors.white;
+final f = Colors.red.shade200;
+final g = material.Colors.black54;
+'''),
+        [
+          'DS-COL-1@1',
+          'DS-COL-1@2',
+          'DS-COL-1@3',
+          'DS-COL-1@4',
+          'DS-COL-1@5',
+          'DS-COL-1@6',
+          'DS-COL-1@7',
+        ],
+      );
+    });
+
+    test('allows transparent and palette tokens', () {
+      expect(
+        breaks('''
+final a = Colors.transparent;
+final b = AppColors.statusPending;
+final c = pal.lime;
+final d = MyColor(1);
+'''),
+        isEmpty,
+      );
+    });
+  });
+
+  group('DS-TYP-1: fonts through AppFonts', () {
+    test('flags a family named in a string, and Google Fonts', () {
+      expect(
+        breaks('''
+final a = TextStyle(fontFamily: 'Manrope');
+final b = TextStyle(fontFamily: "Roboto");
+final c = GoogleFonts.inter();
+'''),
+        ['DS-TYP-1@1', 'DS-TYP-1@2', 'DS-TYP-1@3'],
+      );
+    });
+
+    test('allows the tokens and monospace for machine strings', () {
+      expect(
+        breaks('''
+final a = TextStyle(fontFamily: AppFonts.figures);
+final b = TextStyle(fontFamily: 'monospace');
+'''),
+        isEmpty,
+      );
+    });
+  });
+
+  group('DS-TYP-4: font sizes on the scale', () {
+    test('allows every size of the scale', () {
+      for (final size in fontSizes) {
+        expect(breaks('final s = TextStyle(fontSize: $size);'), isEmpty);
+      }
+      expect(breaks('final s = TextStyle(fontSize: 13.0);'), isEmpty);
+    });
+
+    test('flags half points, sizes under 10 and sizes off the scale', () {
+      expect(
+        breaks('''
+final a = TextStyle(fontSize: 12.5);
+final b = TextStyle(fontSize: 9);
+final c = TextStyle(fontSize: 16);
+final d = TextStyle(fontSize: alone ? 15 : 18);
+'''),
+        ['DS-TYP-4@1', 'DS-TYP-4@2', 'DS-TYP-4@3', 'DS-TYP-4@4'],
+      );
+    });
+
+    test('leaves derived sizes to review', () {
+      expect(
+        breaks('''
+final a = TextStyle(fontSize: base * 0.8);
+final b = TextStyle(fontSize: theme.fontSize);
+'''),
+        isEmpty,
+      );
+    });
+  });
+
+  group('DS-TYP-7: text scaling stays on', () {
+    test('flags turning it off or clamping it', () {
+      expect(
+        breaks('''
+final a = MediaQuery.of(c).copyWith(textScaler: TextScaler.noScaling);
+final b = Text('x', textScaleFactor: 1);
+final c = s.clamp(maxScaleFactor: 1.3);
+'''),
+        ['DS-TYP-7@1', 'DS-TYP-7@2', 'DS-TYP-7@3'],
+      );
+    });
+
+    test('allows reading the scaler to measure text', () {
+      expect(
+        breaks(
+          'final p = TextPainter(textScaler: MediaQuery.textScalerOf(c));',
+        ),
+        isEmpty,
+      );
+    });
+  });
+
+  group('DS-SHP-1: radii on the scale', () {
+    test('allows the scale, square corners and tokens', () {
+      expect(
+        breaks('''
+final a = BorderRadius.circular(18);
+final b = Radius.circular(999);
+final c = BorderRadius.all(Radius.circular(14));
+final d = Radius.circular(0);
+final e = BorderRadius.circular(AppRadius.modal);
+final f = Radius.circular(AppRadius.bubble - 4);
+'''),
+        isEmpty,
+      );
+    });
+
+    test('flags any other radius', () {
+      expect(
+        breaks('''
+final a = BorderRadius.circular(13);
+final b = BorderRadius.only(topLeft: Radius.circular(20));
+'''),
+        ['DS-SHP-1@1', 'DS-SHP-1@2'],
+      );
+    });
+  });
+
+  group('DS-SPC-2: spacing on the 2-pt scale', () {
+    test('allows the scale, hairlines and tokens', () {
+      expect(
+        breaks('''
+final a = EdgeInsets.symmetric(horizontal: 18, vertical: 14);
+final b = EdgeInsets.fromLTRB(0, 1, 2, 32);
+final c = EdgeInsets.only(left: redesignSidePadding);
+const d = SizedBox(height: 12);
+final e = Row(spacing: 8, children: []);
+final f = EdgeInsetsDirectional.only(start: 4);
+'''),
+        isEmpty,
+      );
+    });
+
+    test('flags odd and off-scale values in paddings, gaps and spacing', () {
+      expect(
+        breaks('''
+final a = EdgeInsets.symmetric(horizontal: 14, vertical: 13);
+final b = EdgeInsets.all(22);
+const c = SizedBox(width: 5);
+final d = Wrap(runSpacing: 7, children: []);
+'''),
+        ['DS-SPC-2@1', 'DS-SPC-2@2', 'DS-SPC-2@3', 'DS-SPC-2@4'],
+      );
+    });
+
+    test('reads a constructor split over several lines', () {
+      expect(
+        breaks('''
+final a = EdgeInsets.fromLTRB(
+  18,
+  11,
+  18,
+  14,
+);
+'''),
+        ['DS-SPC-2@3'],
+      );
+    });
+
+    test('a SizedBox with a child or both sides is a size, not a gap', () {
+      expect(
+        breaks('''
+final a = SizedBox(width: 300, child: x);
+final b = SizedBox(width: 38, height: 4);
+'''),
+        isEmpty,
+      );
+    });
+  });
+
+  group('DS-SPC-4: breakpoints through AppBreakpoints', () {
+    test('flags a width compared with a number', () {
+      expect(
+        breaks('''
+final a = constraints.maxWidth < 700;
+final b = MediaQuery.sizeOf(c).width >= 900;
+'''),
+        ['DS-SPC-4@1', 'DS-SPC-4@2'],
+      );
+    });
+
+    test('allows the tokens and a zero check', () {
+      expect(
+        breaks('''
+final a = constraints.maxWidth >= AppBreakpoints.desktop;
+final b = width <= 0;
+'''),
+        isEmpty,
+      );
+    });
+  });
+
+  group('DS-ICO-3: icon sizes', () {
+    test('allows the scale', () {
+      expect(
+        breaks('''
+final a = Icon(Icons.bolt, size: 16);
+final b = Icon(Icons.check, color: c, size: 44);
+final c = IconButton(iconSize: 24, onPressed: f, icon: x);
+'''),
+        isEmpty,
+      );
+    });
+
+    test('flags any other size', () {
+      expect(
+        breaks('''
+final a = Icon(Icons.bolt, size: 13);
+final b = IconButton(iconSize: 17, onPressed: f, icon: x);
+'''),
+        ['DS-ICO-3@1', 'DS-ICO-3@2'],
+      );
+    });
+  });
+
+  group('what it does not read', () {
+    test('comments and strings', () {
+      expect(
+        breaks('''
+// Color(0xFF000000) was the v1 green.
+/* BorderRadius.circular(13) */
+/// Uses `Colors.white` on purpose.
+final s = 'EdgeInsets.all(13) Colors.red';
+final t = """fontSize: 9""";
+'''),
+        isEmpty,
+      );
+    });
+
+    test('lines the pull request did not touch', () {
+      const source = '''
+final a = EdgeInsets.all(13);
+final b = EdgeInsets.all(11);
+''';
+      expect(breaks(source, lines: {2}), ['DS-SPC-2@2']);
+      expect(breaks(source, lines: {}), isEmpty);
+    });
+  });
+
+  group('an ignore comment', () {
+    test('silences one rule on its own line, or on the next when alone', () {
+      expect(
+        breaks('''
+final a = EdgeInsets.all(13); // design-check: ignore DS-SPC-2 — optical centre of the glyph
+// design-check: ignore DS-COL-1 — QR codes must be pure black on white
+final b = Colors.black;
+'''),
+        isEmpty,
+      );
+    });
+
+    test(
+      'does nothing without a reason, for another rule, or further down',
+      () {
+        expect(
+          breaks('''
+final a = EdgeInsets.all(13); // design-check: ignore DS-SPC-2
+final b = EdgeInsets.all(13); // design-check: ignore DS-COL-1 — wrong rule
+final c = EdgeInsets.all(13); // design-check: ignore DS-SPC-2 — only this line
+final d = EdgeInsets.all(13);
+'''),
+          ['DS-SPC-2@1', 'DS-SPC-2@2', 'DS-SPC-2@4'],
+        );
+      },
+    );
+  });
+
+  /// The guide is what a reviewer reads; the scales below are what CI
+  /// enforces. A value added to one and not the other makes the guide lie.
+  group('agrees with .specify/DESIGN_SYSTEM.md', () {
+    final guide = File('.specify/DESIGN_SYSTEM.md').readAsStringSync();
+
+    Set<num> numbersIn(String text) => {
+      for (final m in RegExp(r'\b\d+(?:\.\d+)?\b').allMatches(text))
+        num.parse(m[0]!),
+    };
+
+    /// The first cell of every row of the table that follows [heading].
+    Set<num> firstColumn(String heading) {
+      final start = guide.indexOf(heading);
+      expect(start, isNot(-1), reason: 'guide has no "$heading"');
+      final rows = guide
+          .substring(start)
+          .split('\n')
+          .skipWhile((l) => !l.startsWith('|'))
+          .takeWhile((l) => l.startsWith('|'))
+          .skip(2);
+      return {for (final row in rows) ...numbersIn(row.split('|')[1])};
+    }
+
+    String ruleRow(String id) =>
+        guide.split('\n').firstWhere((l) => l.startsWith('| $id |'));
+
+    test('font sizes (§3.2)', () {
+      expect(firstColumn('### 3.2 Scale'), fontSizes);
+    });
+
+    test('radii (§4)', () {
+      expect(firstColumn('## 4. Shape and elevation'), radii.difference({0}));
+    });
+
+    test('spacing (DS-SPC-2)', () {
+      final bold = RegExp(r'\*\*([\d, ]+)\*\*').firstMatch(ruleRow('DS-SPC-2'));
+      expect({...numbersIn(bold![1]!), 0, 1}, spacing);
+    });
+
+    test('icon sizes (DS-ICO-3)', () {
+      final row = ruleRow('DS-ICO-3').split('|')[2];
+      expect(numbersIn(row.substring(row.indexOf('sizes:'))), iconSizes);
+    });
+  });
+}
