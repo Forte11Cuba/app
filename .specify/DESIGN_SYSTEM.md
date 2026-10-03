@@ -16,8 +16,10 @@ information architecture. It does not keep v1's look.
 - **MUST** is a requirement: breaking it rejects the change. **SHOULD** is the default; a change
   that departs from it says why in the pull request. **MAY** is allowed, not required.
 - **Check** says who catches a break:
-  - *auto*: a source scan in CI. It is being added after this guide; until it lands, the
-    reviewer checks these by hand.
+  - *auto*: the **Design guide** CI job (`tool/design_check.dart`) fails the pull request and
+    marks the line. It reads only the lines the pull request adds or changes under `lib/`
+    (outside `lib/core/`, where tokens are defined), and judges literal values only: a value
+    derived from a token is left to review. Run it locally with `dart tool/design_check.dart`.
   - *test*: an existing test fails.
   - *review*: a reviewer reads the diff and the screenshots.
 - **Scope.** The rules apply to every line a pull request adds or changes under `lib/`. Code
@@ -317,13 +319,27 @@ judged against this guide, the description also gives:
 The guide changes in its own pull request, or in the same pull request as the first code that
 needs the change, with the guide diff called out in the description. A maintainer approves it.
 Changing a value (a new size, radius or spacing step) also updates the check that enforces it,
-so the guide and CI never disagree.
+so the guide and CI never disagree: `test/ci/design_check_test.dart` fails while the scales in
+§3.2, §4, DS-SPC-2 and DS-ICO-3 differ from the ones `tool/design/design_check.dart` enforces.
+
+A line that breaks an *auto* rule on purpose takes a comment naming the rule and the reason,
+on that line or alone on the line above:
+
+```dart
+// design-check: ignore DS-COL-1 — a QR code must be pure black on white to scan
+color: Colors.black,
+```
+
+Without a reason the comment silences nothing. The reviewer judges the reason; it is not a way
+around a rule the change could keep.
 
 ---
 
 ## 14. Known gaps (code that predates this guide)
 
-Each gap below is debt. A change in the same code SHOULD close it, and MUST NOT copy it.
+Each gap below is debt. A change in the same code SHOULD close it, and MUST NOT copy it. The
+CI check reports a gap once a pull request touches its line. `dart tool/design_check.dart --all`
+lists every one the check can see (440 when this guide was written).
 
 | Gap | Where | Rule |
 |---|---|---|
