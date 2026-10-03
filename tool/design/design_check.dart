@@ -324,9 +324,12 @@ List<Violation> scan(String path, String source, {Set<int>? lines}) {
     final styled = args.any(
       (a) => RegExp(r'^\s*style\s*:').hasMatch(code.substring(a.$1, a.$2)),
     );
-    final colored = RegExp(
-      r'\bcolor\s*:',
-    ).hasMatch(code.substring(m.end, _close(code, m.end - 1)));
+    // Only the label counts: a colored icon leaves the label lime.
+    final colored = args.any((a) {
+      final arg = code.substring(a.$1, a.$2);
+      return RegExp(r'^\s*(?:child|label)\s*:').hasMatch(arg) &&
+          RegExp(r'\bcolor\s*:').hasMatch(arg);
+    });
     if (!styled && !colored) {
       report(
         m.start,
@@ -338,7 +341,7 @@ List<Violation> scan(String path, String source, {Set<int>? lines}) {
     }
   }
   requireArg(
-    RegExp(r'\b(?:Sliver)?AppBar\s*\('),
+    RegExp(r'\b(?:Sliver)?AppBar(?:\.(?:medium|large))?\s*\('),
     RegExp(r'^\s*backgroundColor\s*:'),
     'DS-CMP-12',
     '`AppBar` without `backgroundColor` takes the v1 theme: use '
@@ -352,25 +355,42 @@ List<Violation> scan(String path, String source, {Set<int>? lines}) {
         '(#1B1E28): set the palette\'s `bg`',
   );
 
-  // DS-CMP-19: a text field draws its own border; the theme's is v1's
-  // filled underline.
+  // DS-CMP-19: a field sets every part of its decoration the theme would
+  // otherwise fill in with v1's. Measured under the app theme, anything
+  // short of enabledBorder + focusedBorder + filled still paints the #252A3A
+  // fill and #9A9A9C underline: `border:` is only the fallback for states
+  // the theme leaves unset, and InputDecoration.collapsed cannot set them.
+  // A decoration built elsewhere (a helper, a variable) is left to review.
+  const fieldParts = ['enabledBorder', 'focusedBorder', 'filled'];
   for (final m in RegExp(
     r'\b(?:TextField|TextFormField)\s*\(',
   ).allMatches(code)) {
-    final args = code.substring(m.end, _close(code, m.end - 1));
-    final ownBorder = RegExp(
-      r'\b(?:border|enabledBorder|focusedBorder)\s*:'
-      r'|\bInputBorder\.none\b|\bInputDecoration\.collapsed\b',
+    final decoration =
+        _args(code, m.end - 1)
+            .map((a) => code.substring(a.$1, a.$2))
+            .where((arg) => RegExp(r'^\s*decoration\s*:').hasMatch(arg))
+            .firstOrNull;
+    final value = decoration?.substring(decoration.indexOf(':') + 1).trim();
+    final inline =
+        value != null &&
+        RegExp(r'^(?:const\s+)?InputDecoration\b').hasMatch(value);
+    if (value != null && !inline) continue;
+    final missing =
+        value == null || value.contains('InputDecoration.collapsed')
+            ? fieldParts
+            : [
+              for (final part in fieldParts)
+                if (!RegExp('\\b$part\\s*:').hasMatch(value)) part,
+            ];
+    if (missing.isEmpty) continue;
+    report(
+      m.start,
+      'DS-CMP-19',
+      'a text field that leaves ${missing.map((p) => '`$p`').join(', ')} to '
+          'the theme paints v1\'s filled underline, even with '
+          '`border: InputBorder.none`: set them as `InvoiceInputField` does '
+          '(DS-CMP-10, DS-CMP-11)',
     );
-    if (!ownBorder.hasMatch(args)) {
-      report(
-        m.start,
-        'DS-CMP-19',
-        'a text field without its own border takes the v1 theme decoration: '
-            'follow `UnderlineAmountField` (DS-CMP-10) or `InvoiceInputField` '
-            '(DS-CMP-11)',
-      );
-    }
   }
 
   found.sort(

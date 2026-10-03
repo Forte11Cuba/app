@@ -237,7 +237,7 @@ Reuse before building (principle 4). These are the parts a new screen is assembl
 |---|---|---|
 | DS-CMP-10 | **MUST.** A single-value form field (amount, address, name) is an underline field. The label sits above in `fieldLabel`, turning `fieldLabelFocus` on focus. The underline turns lime on focus and red on error. The error text sits underneath at 12 sp. `UnderlineAmountField` is the reference. | review |
 | DS-CMP-11 | **MUST.** A multi-line or pasted value (invoice, chat composer, search) is a boxed field at radius 14 on the area's field fill (`inset`, `textareaFill`). The invoice field (`InvoiceInputField`) is the reference. | review |
-| DS-CMP-19 | **MUST.** A `TextField` draws its own border (`border`, `enabledBorder`, `InputBorder.none` inside a styled container, or `InputDecoration.collapsed`). The theme's decoration is v1's filled underline. | auto |
+| DS-CMP-19 | **MUST.** A `TextField`'s `InputDecoration` sets `enabledBorder`, `focusedBorder` and `filled` (`false`, or `true` with a palette `fillColor`), as `InvoiceInputField` does. Whatever it leaves out comes from the theme, which is v1's: measured under the app theme, `border: InputBorder.none`, `isCollapsed` and `InputDecoration.collapsed` all still paint the `#252A3A` fill and `#9A9A9C` underline, because `border:` is only the fallback for states the theme leaves unset. A decoration built by a helper is left to review. | auto |
 
 ### 6.5 Bars, feedback and states
 
@@ -349,7 +349,7 @@ around a rule the change could keep.
 
 Each gap below is debt. A change in the same code SHOULD close it, and MUST NOT copy it. The
 CI check reports a gap once a pull request touches its line. `dart tool/design_check.dart --all`
-lists every one the check can see (589 when the theme-default rules were added).
+lists every one the check can see (595 when the theme-default rules were added).
 
 | Gap | Where | Rule |
 |---|---|---|
@@ -370,7 +370,7 @@ lists every one the check can see (589 when the theme-default rules were added).
 | No test checks 3:1 for non-text, and none uses Flutter's `meetsGuideline` for tap targets or labels. | §8 | DS-COL-7, DS-CMP-6 |
 | `app_theme.dart` cites `test/core/accent_consistency_test.dart`, which does not exist. The check lives in `modal_contrast_test.dart`. | §2.1 | — |
 | About 100 reads of `AppColors` in the legacy areas and in a few redesigned files. | §2.2 | DS-COL-11 |
-| `ThemeData` holds v1's defaults: scaffold background `#1B1E28`, app bar, filled-underline input decoration, and no button themes (so a bare button is a stadium). 16 unstyled Material buttons, 11 app bars and 11 scaffolds on the theme background, and 8 text fields on the theme decoration rely on them, mostly in the Cashu, chat, dispute and notification screens and in error states. Moving the theme's defaults to the redesign values would make a bare widget look right and retire most of these. | §1 | DS-CMP-12, DS-CMP-17 to DS-CMP-19 |
+| `ThemeData` holds v1's defaults: scaffold background `#1B1E28`, app bar, filled-underline input decoration, and no button themes (so a bare button is a stadium). 16 unstyled Material buttons, 11 app bars and 11 scaffolds on the theme background, and 14 text fields that leave part of their decoration to the theme rely on them, mostly in the Cashu, chat, dispute and notification screens and in error states. Redesigned fields are among them: `UnderlineAmountField` and the premium field in `price_section.dart` set only `border: InputBorder.none`, so the v1 fill shows behind the amount (`add_order_5b_single_fixed_dark.png`). Moving the theme's defaults to the redesign values would make a bare widget look right and retire most of these. | §1 | DS-CMP-12, DS-CMP-17 to DS-CMP-19 |
 
 ---
 
