@@ -103,7 +103,6 @@ final g = material.Colors.black54;
       expect(
         breaks('''
 final a = Colors.transparent;
-final b = AppColors.statusPending;
 final c = pal.lime;
 final d = MyColor(1);
 '''),
@@ -316,6 +315,181 @@ final b = IconButton(iconSize: 17, onPressed: f, icon: x);
         ['DS-ICO-3@1', 'DS-ICO-3@2'],
       );
     });
+  });
+
+  group('DS-COL-11: no v1 color layer', () {
+    test('flags reading AppColors in any form', () {
+      expect(
+        breaks('''
+final colors = Theme.of(context).extension<AppColors>()!;
+final (bg, ink) = AppColors.statusPending;
+'''),
+        ['DS-COL-11@1', 'DS-COL-11@2'],
+      );
+    });
+
+    test('allows the redesign palettes', () {
+      expect(
+        breaks('''
+final book = OrderBookPalette.of(context);
+// Was AppColors before the redesign.
+'''),
+        isEmpty,
+      );
+    });
+  });
+
+  /// What makes a screen look like v1 is mostly what it leaves out: a
+  /// Material widget with no style of its own takes the theme's defaults,
+  /// and the theme still carries v1's (#657).
+  group('DS-CMP-17: Material buttons carry their own style', () {
+    test('flags a button that leaves its style to the theme', () {
+      expect(
+        breaks('''
+final a = OutlinedButton.icon(onPressed: f, icon: i, label: l);
+final b = FilledButton(onPressed: f, child: Text('x', style: s));
+final c = TextButton(onPressed: f, child: c);
+final d = ElevatedButton(onPressed: f, child: c);
+'''),
+        ['DS-CMP-17@1', 'DS-CMP-17@2', 'DS-CMP-17@3', 'DS-CMP-17@4'],
+      );
+    });
+
+    test('allows a styled button and an icon button', () {
+      expect(
+        breaks('''
+final a = FilledButton(
+  onPressed: f,
+  style: FilledButton.styleFrom(backgroundColor: book.lime),
+  child: c,
+);
+final b = IconButton(onPressed: f, icon: i);
+final s = FilledButton.styleFrom(backgroundColor: book.lime);
+'''),
+        isEmpty,
+      );
+    });
+  });
+
+  group('DS-CMP-12: app bars', () {
+    test('flags an AppBar that takes the theme background', () {
+      expect(breaks('final a = AppBar(title: Text(t));'), ['DS-CMP-12@1']);
+    });
+
+    test('allows one on a palette background, and the shared builders', () {
+      expect(
+        breaks('''
+final a = AppBar(backgroundColor: book.bg, title: t);
+final b = redesignAppBar(context, title: t);
+'''),
+        isEmpty,
+      );
+    });
+  });
+
+  group('DS-CMP-18: scaffolds', () {
+    test('flags a Scaffold that takes the theme background', () {
+      expect(breaks('final a = Scaffold(body: b);'), ['DS-CMP-18@1']);
+    });
+
+    test('allows one on a palette background', () {
+      expect(
+        breaks('final a = Scaffold(backgroundColor: book.bg, body: b);'),
+        isEmpty,
+      );
+    });
+  });
+
+  group('DS-CMP-19: text fields', () {
+    test('flags a field that takes the theme decoration', () {
+      expect(
+        breaks('''
+final a = TextField(controller: c);
+final b = TextField(decoration: InputDecoration(hintText: h));
+'''),
+        ['DS-CMP-19@1', 'DS-CMP-19@2'],
+      );
+    });
+
+    test('allows a field that draws its own border', () {
+      expect(
+        breaks('''
+final a = TextField(decoration: InputDecoration(border: InputBorder.none));
+final b = TextField(
+  decoration: InputDecoration(
+    enabledBorder: UnderlineInputBorder(borderSide: side),
+  ),
+);
+final c = TextField(decoration: const InputDecoration.collapsed(hintText: h));
+'''),
+        isEmpty,
+      );
+    });
+  });
+
+  /// The code of #657 (Cashu "Receive": scan or paste a token), the pull
+  /// request that passed the first version of this check while looking like
+  /// v1: a theme-default scaffold and app bar, the v1 color layer, two
+  /// stadium-shaped outlined buttons and a theme-default field.
+  test('catches what made #657 look like v1', () {
+    expect(
+      breaks('''
+Future<String?> _scanToken() {
+  return Navigator.of(context).push<String>(
+    MaterialPageRoute(
+      builder: (routeContext) {
+        final l10n = AppLocalizations.of(routeContext);
+        return Scaffold(
+          appBar: AppBar(title: Text(l10n.scanQrCodeTitle)),
+          body: PlatformAwareQrScanner(
+            hint: l10n.cashuReceiveHint,
+            onDetected: (value) => Navigator.of(routeContext).pop(value),
+          ),
+        );
+      },
+    ),
+  );
+}
+Widget build(BuildContext context) {
+  final l10n = AppLocalizations.of(context);
+  final colors = Theme.of(context).extension<AppColors>()!;
+  return Row(
+    children: [
+      OutlinedButton.icon(
+        onPressed: canScan ? () => Navigator.of(context).pop(scan) : null,
+        icon: const Icon(Icons.qr_code_scanner),
+        label: Text(l10n.scanQrButtonLabel),
+      ),
+      Text(
+        l10n.cashuScanUnavailable,
+        style: TextStyle(color: colors.textSubtle, fontSize: 12),
+      ),
+      OutlinedButton.icon(
+        onPressed: () => Navigator.of(context).pop(paste),
+        icon: const Icon(Icons.content_paste),
+        label: Text(l10n.pasteButtonLabel),
+      ),
+    ],
+  );
+}
+final field = TextField(
+  controller: _controller,
+  style: const TextStyle(fontSize: 12),
+  decoration: InputDecoration(
+    hintText: l10n.cashuPasteTokenHint,
+    errorText: _error,
+  ),
+);
+'''),
+      [
+        'DS-CMP-18@6',
+        'DS-CMP-12@7',
+        'DS-COL-11@19',
+        'DS-CMP-17@22',
+        'DS-CMP-17@31',
+        'DS-CMP-19@39',
+      ],
+    );
   });
 
   group('what it does not read', () {
