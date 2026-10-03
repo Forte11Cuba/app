@@ -278,6 +278,121 @@ List<Violation> scan(String path, String source, {Set<int>? lines}) {
     );
   }
 
+  // DS-COL-11: AppColors is the v1 layer; new code reads a redesign palette.
+  for (final m in RegExp(r'\bAppColors\b').allMatches(code)) {
+    report(
+      m.start,
+      'DS-COL-11',
+      '`AppColors` is the v1 color layer: read the area\'s redesign palette '
+          '(guide §2.2), `OrderBookPalette` where the area has none',
+    );
+  }
+
+  // What the rules below catch is an absence: a Material widget with no
+  // style of its own takes the theme's defaults, and the theme still holds
+  // v1's (#657). Each constructor must pass the named argument.
+  void requireArg(
+    RegExp constructor,
+    RegExp argument,
+    String rule,
+    String message,
+  ) {
+    for (final m in constructor.allMatches(code)) {
+      final args = _args(code, m.end - 1);
+      if (!args.any((a) => argument.hasMatch(code.substring(a.$1, a.$2)))) {
+        report(m.start, rule, message);
+      }
+    }
+  }
+
+  requireArg(
+    RegExp(
+      r'\b(?:FilledButton|OutlinedButton|ElevatedButton)'
+      r'(?:\.(?:icon|tonal|tonalIcon))?\s*\(',
+    ),
+    RegExp(r'^\s*style\s*:'),
+    'DS-CMP-17',
+    'a Material button without `style:` takes the theme default, a stadium '
+        'shape in v1 colors: use `OrderPrimaryButton` or a `ModalAction`, or '
+        'style it as DS-CMP-3/DS-CMP-4 say (radius 16, palette colors)',
+  );
+  // A text button has no shape at rest, so a link that colors its label
+  // from the palette is v2 (DS-CMP-4). One that sets neither shows the
+  // theme's lime, which fails AA on a light surface.
+  for (final m in RegExp(r'\bTextButton(?:\.icon)?\s*\(').allMatches(code)) {
+    final args = _args(code, m.end - 1);
+    final styled = args.any(
+      (a) => RegExp(r'^\s*style\s*:').hasMatch(code.substring(a.$1, a.$2)),
+    );
+    // Only the label counts: a colored icon leaves the label lime.
+    final colored = args.any((a) {
+      final arg = code.substring(a.$1, a.$2);
+      return RegExp(r'^\s*(?:child|label)\s*:').hasMatch(arg) &&
+          RegExp(r'\bcolor\s*:').hasMatch(arg);
+    });
+    if (!styled && !colored) {
+      report(
+        m.start,
+        'DS-CMP-17',
+        'a `TextButton` with neither `style:` nor a palette color on its label '
+            'shows the theme\'s lime: use a `ModalLink`, or color the label '
+            'from the palette',
+      );
+    }
+  }
+  requireArg(
+    RegExp(r'\b(?:Sliver)?AppBar(?:\.(?:medium|large))?\s*\('),
+    RegExp(r'^\s*backgroundColor\s*:'),
+    'DS-CMP-12',
+    '`AppBar` without `backgroundColor` takes the v1 theme: use '
+        '`redesignAppBar()`, or set the palette\'s `bg`',
+  );
+  requireArg(
+    RegExp(r'\bScaffold\s*\('),
+    RegExp(r'^\s*backgroundColor\s*:'),
+    'DS-CMP-18',
+    '`Scaffold` without `backgroundColor` takes the v1 background '
+        '(#1B1E28): set the palette\'s `bg`',
+  );
+
+  // DS-CMP-19: a field sets every part of its decoration the theme would
+  // otherwise fill in with v1's. Measured under the app theme, anything
+  // short of enabledBorder + focusedBorder + filled still paints the #252A3A
+  // fill and #9A9A9C underline: `border:` is only the fallback for states
+  // the theme leaves unset, and InputDecoration.collapsed cannot set them.
+  // A decoration built elsewhere (a helper, a variable) is left to review.
+  const fieldParts = ['enabledBorder', 'focusedBorder', 'filled'];
+  for (final m in RegExp(
+    r'\b(?:TextField|TextFormField)\s*\(',
+  ).allMatches(code)) {
+    final decoration =
+        _args(code, m.end - 1)
+            .map((a) => code.substring(a.$1, a.$2))
+            .where((arg) => RegExp(r'^\s*decoration\s*:').hasMatch(arg))
+            .firstOrNull;
+    final value = decoration?.substring(decoration.indexOf(':') + 1).trim();
+    final inline =
+        value != null &&
+        RegExp(r'^(?:const\s+)?InputDecoration\b').hasMatch(value);
+    if (value != null && !inline) continue;
+    final missing =
+        value == null || value.contains('InputDecoration.collapsed')
+            ? fieldParts
+            : [
+              for (final part in fieldParts)
+                if (!RegExp('\\b$part\\s*:').hasMatch(value)) part,
+            ];
+    if (missing.isEmpty) continue;
+    report(
+      m.start,
+      'DS-CMP-19',
+      'a text field that leaves ${missing.map((p) => '`$p`').join(', ')} to '
+          'the theme paints v1\'s filled underline, even with '
+          '`border: InputBorder.none`: set them as `InvoiceInputField` does '
+          '(DS-CMP-10, DS-CMP-11)',
+    );
+  }
+
   found.sort(
     (a, b) => a.line != b.line ? a.line - b.line : a.rule.compareTo(b.rule),
   );
