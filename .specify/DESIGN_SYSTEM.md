@@ -1,711 +1,371 @@
-# Mostro Mobile v2 — Design System
+# Mostro v2 — Design Guide
 
-> ⚠️ **CRITICAL**: v2 inherits v1's palette and vocabulary — it does not copy v1's screens.
-> This document holds the exact values extracted from v1 screenshots; they are the baseline
-> and the fallback. Where a v2 redesign has shipped, the redesign wins, and the code is the
-> specification (see §1.1).
+This guide is the standard a UI change is judged against. A proposal that keeps every **MUST**
+here can be accepted on its design; a proposal that breaks one is rejected, or it changes this
+guide first (§13). Every rule has an ID, so a review can say "breaks DS-COL-3" instead of
+arguing taste.
 
-**Status:** v1 baseline from screenshots + v2 additions; superseded in the redesigned areas
-**Visual Reference:** Screenshots from `https://github.com/MostroP2P/mobile/tree/main/assets/images/`
+The values come from the shipped redesign (the code under `lib/core/` and the screens built on
+it), not from v1. v2 keeps v1's brand, the lime and the sell red on dark backgrounds, and its
+information architecture. It does not keep v1's look.
 
 ---
 
-## 1. Core Principles
+## 0. How to read this guide
 
-### 1.1 Visual Continuity
-v2 must be **recognizable** as Mostro, not identical to v1. What carries over is the palette
-(the lime brand, the sell red, the dark backgrounds), the naming, and the information
-architecture: the same screens hold the same things in the same places, so a v1 user is never
-lost.
+- **MUST** is a requirement: breaking it rejects the change. **SHOULD** is the default; a change
+  that departs from it says why in the pull request. **MAY** is allowed, not required.
+- **Check** says who catches a break:
+  - *auto*: a source scan in CI. It is being added after this guide; until it lands, the
+    reviewer checks these by hand.
+  - *test*: an existing test fails.
+  - *review*: a reviewer reads the diff and the screenshots.
+- **Scope.** The rules apply to every line a pull request adds or changes under `lib/`. Code
+  that predates them is listed in §14 as known gaps. A gap is debt to pay down, never a
+  precedent: "the next screen already does it" does not answer a break.
+- **Redesigned and legacy areas.** Most screens are built on the redesign palettes (§2.2). A few
+  still run on the v1 layer, `AppColors` and the theme's `textTheme`: the chat room and its
+  message bubbles, disputes, notifications, the walkthrough, rating and the Cashu wallet. A change
+  inside a legacy area may keep that area's layer, or migrate the whole screen. It never mixes
+  the two on one screen, and it never adds a literal (§2.1).
 
-The look itself is deliberately not the same. v2 is a redesign — more modern, more finished,
-and held to standards v1 was not: AA contrast on every text role, one radius and one button
-per job, light mode as a first-class theme. Put the two side by side and they are easy to
-tell apart, and that is the intent.
+---
 
-So this document is the baseline, not the ceiling. Where a redesign has shipped, its own
-palette and components are the specification and this document defers to them:
+## 1. Principles
 
-| Area | Where the truth lives |
+1. **One accent.** Lime `#92D64F` is the only accent and means "your move", "go" or "good".
+   Nothing else is green.
+2. **Legible first.** Every text color passes WCAG AA on the surface it really sits on, in both
+   themes. A color that fails is adjusted until it passes, even when a handoff specifies it.
+3. **Tokens, not numbers.** A widget reads its colors, fonts and radii from `lib/core/`. A literal
+   in a widget is the beginning of a second design system.
+4. **One component per job.** There is one way to show a dialog, one primary button, one chip
+   shape. Before a new widget is built, the existing one is reused or extended.
+5. **Both themes, every locale, every text size.** Dark is the default, and light is a full theme,
+   not a fallback. Each screen holds up in German at 320 dp wide with text scaled to 2×.
+6. **Calm.** Surfaces are flat. Motion is short. A screen in a waiting state has no call to
+   action that shouts.
+
+---
+
+## 2. Color
+
+### 2.1 Where colors come from
+
+| ID | Rule | Check |
+|---|---|---|
+| DS-COL-1 | **MUST.** Outside `lib/core/`, no color literal: no `Color(0x…)`, `Color.fromARGB/fromRGBO`, or `Colors.<name>` other than `Colors.transparent`. Every color is a token of a palette in `lib/core/`. | auto |
+| DS-COL-2 | **MUST.** A widget reads the palette of its area (§2.2). A screen in a new area reuses `OrderBookPalette` or adds `lib/core/<area>_palette.dart`, with a `dark` and a `light` constant, `of(context)`, and a contrast test (DS-COL-6). | review |
+| DS-COL-3 | **MUST.** No new green. The accent is `lime` `#92D64F` everywhere, `AppColors.mostroGreen` included (`modal_contrast_test.dart`: "the app has exactly one accent"). | test |
+| DS-COL-4 | **MUST.** A shape filled with an accent carries that accent's ink, never white: `onLime` `#12161F` on `lime` (10.6:1; white is 2.05:1), and `onSell` `#2A1015` on `sell`. | test, review |
+| DS-COL-5 | **MUST.** On a light surface, lime as text or as a thin stroke uses the light ink, `limeText` `#3E6B1C` for text and `#5C9130` for dots and borders. Lime itself on white is 1.76:1. | review |
+| DS-COL-6 | **MUST.** Every new text color in a palette is asserted at **4.5:1** against each surface it renders on, in dark and light, in that palette's `test/core/*_contrast_test.dart`. A translucent fill is first flattened onto its real surface with `flatten()`. | test |
+| DS-COL-7 | **SHOULD.** Non-text elements that carry meaning (status dots, input borders, focus rings, meaningful icons) reach **3:1** against their surface (WCAG 1.4.11). No test checks this yet. | review |
+| DS-COL-8 | **MUST.** A new token reuses a canonical value (§2.3). It differs only where a contrast test forces it, with a comment that says so (as `textFaint` does). | review |
+
+### 2.2 Palette per area
+
+| Area | Palette (`lib/core/`) |
 |---|---|
-| Order book, order detail, create order, trades, settings, account, backup | The per-feature palettes in `lib/core/*_palette.dart` (`OrderBookPalette` and friends), against the handoffs in `.specify/` |
-| Modals — every dialog and bottom sheet | `lib/shared/widgets/mostro_modal.dart` plus `dialogTheme` / `bottomSheetTheme` (#534); `test/features/shared/goldens/modal_gallery_*.png` shows them |
+| Order book, shell (bottom bar, app bars, create-order button), modals | `order_book_palette.dart` (`OrderBookPalette`, the base the others extend) |
+| Order detail, take order, my order | `order_detail_palette.dart` |
+| Create order, payment-method picker | `create_order_palette.dart` |
+| Invoices and bonds | `invoice_palette.dart` |
+| Trade detail, timeline, action bar | `trade_palette.dart` |
+| Trades list, chat list, disputes list, notification groups, bond banner | `activity_palette.dart` |
+| Settings, relays, wallet, logs | `settings_palette.dart` |
+| Node selector | `node_selector_palette.dart` |
+| Account and backup | `backup_palette.dart` |
+| Restore | `restore_palette.dart` |
+| About | `about_palette.dart` |
+| Drawer | `DrawerPalette` in `app_theme.dart` |
+| Legacy areas (§0) | `AppColors` (`Theme.of(context).extension<AppColors>()`) |
 
-Nothing below is licence to hardcode: §1.2 holds everywhere, redesign or not.
+All dialogs and sheets render on `OrderBookPalette.surface` with `OrderBookPalette.scrim`. The
+theme applies this through `dialogTheme` and `bottomSheetTheme`, so no modal sets it itself.
 
-### 1.2 Single Source of Truth
-ALL colors must be defined in the theme layer — `AppColors`, the per-feature palettes in
-`lib/core/*_palette.dart`, and the modal tokens the two surfaces read. Zero hardcoded colors
-in widgets. Which of those a widget reads is decided by its area (§1.1); that it reads one of
-them is not optional.
+### 2.3 Canonical values
 
-### 1.3 Semantic Naming
-Use names that describe purpose, not appearance:
-- ✅ `mostroGreen`, `backgroundCard`, `statusError`
-- ❌ `lightGreen`, `darkGray`, `red2`
+New tokens take these values (DS-COL-8). Format: dark / light.
 
----
+| Role | Value | Typical token |
+|---|---|---|
+| Page background | `#12161F` / `#F4F6F4` | `bg` |
+| Card and modal surface | `#1A2030` / `#FFFFFF` | `surface` |
+| Bottom bar and action bar | `#151A24` / `#FFFFFF` | `surfaceNav` |
+| Scrim | `#080B10` at 82% (both) | `scrim` |
+| Accent fill + ink | `#92D64F` + `#12161F` (both) | `lime`, `onLime` |
+| Accent as text | `#92D64F` / `#3E6B1C` | `limeText` |
+| Soft accent ink (chips, valid) | `#C6F09A` / `#3E6B1C` | `limeInk`, `*ActiveInk`, `validInk` |
+| Accent icon | `#B7E38A` / `#4E7D28` | `limeIcon` |
+| Accent dot or stroke | `#92D64F` / `#5C9130` | `*Dot`, `online` |
+| Sell fill + ink | `#FF8B8B` + `#2A1015` (both) | `sell`, `onSell` |
+| Sell-side text | `#FFB4B4` / `#9A2F2A` | `sellInk` |
+| Danger and error text | `#FF8B8B` / `#C2403A` | `danger`, `error` |
+| Waiting and warning text | `#F7DE72` / `#7A5D00` | `*WaitInk`, `warnInk` |
+| Waiting and warning dot | `#F2D14B` / `#D8AF19` | `*Dot` |
+| Neutral and closed text | `#A6B0C2` / `#3F4756` | `*DoneInk`, `neutralInk` |
+| Neutral and offline dot | `#5D6879` / `#8A94A6` | `offline`, `muted` |
+| Text, primary | `#EEF1F6` / `#12161F` | `textPrimary` |
+| Text, body | `#D6DCE8` / `#2A303C` | `textBody` |
+| Text, secondary | `#8B97AD` / `#5A6474` | `textSecondary` |
+| Text, labels and group headers | `#808A9E` / `#5F6979` | `fieldLabel`, `groupHeader` |
 
-## 2. Color Palette (Exact from v1)
+### 2.4 What the colors mean
 
-### 2.1 Background Hierarchy
-
-| Level | Name | Hex | RGB | Usage |
-|-------|------|-----|-----|-------|
-| 0 | backgroundDark | `#1B1E28` | (27, 30, 40) | Main screen background |
-| 1 | backgroundCard | `#1E2230` | (30, 34, 48) | Cards, elevated surfaces |
-| 2 | backgroundInput | `#252A3A` | (37, 42, 58) | Input fields, interactive |
-| 3 | backgroundElevated | `#2A2D35` | (42, 45, 53) | Message input (no longer modals — see below) |
-
-Since #534 every dialog and bottom sheet renders on `OrderBookPalette.surface` (`#1A2030`
-dark, `#FFFFFF` light) with the shared scrim `rgba(8, 11, 16, 0.82)`, applied through
-`dialogTheme` and `bottomSheetTheme` rather than per modal.
-
-### 2.2 Brand & Action Colors
-
-| Name | Hex | RGB | Usage |
-|------|-----|-----|-------|
-| mostroGreen | `#92D64F` | (146, 214, 79) | Primary brand, buy, success, FAB |
-| mostroGreenBright | `#A5FF00` | (165, 255, 0) | Highlighted active states |
-| sellColor | `#FF8A8A` | (255, 138, 138) | Sell actions, negative (the redesign's `sell` is `#FF8B8B` — one unit apart, not yet unified as the greens were) |
-| destructiveRed | `#D84D4D` | (216, 77, 77) | Cancel, dispute, errors |
-| purpleButton | `#8359C2` | (131, 89, 194) | Submit buttons, sent messages |
-| tealAccent | `#2DA69D` | (45, 166, 157) | "Taken by you" badge |
-| blueAccent | `#35485E` | (53, 72, 94) | "Active" badge background |
-
-`mostroGreen` was v1's `#8CC63F`; since #534 it **is** `OrderBookPalette.lime` `#92D64F`, so
-the app has one accent rather than two near-equal greens (a test holds them equal). Never
-write white on it: the readable pair is `lime` on `onLime` `#12161F` (10.6:1). White was
-2.05:1 and shipped on eight confirm buttons.
-
-### 2.3 Text Colors
-
-| Name | Hex | Opacity | Usage |
-|------|-----|---------|-------|
-| textPrimary | `#FFFFFF` | 100% | Headings, primary content |
-| textSecondary | `#B0B3C6` | 100% | Labels, supporting text |
-| textSubtle | `#9A9A9C` | 100% | Timestamps, hints, placeholders |
-| textDisabled | `#6C757D` | 100% | Disabled states |
-| textLink | `#92D64F` | 100% | Links, interactive text (light mode: `#6A9E00` — 3.23:1 on white, under the 4.5:1 §11 asks for: #539) |
-
-### 2.4 Chat Colors
-
-| Element | Hex | Usage |
-|---------|-----|-------|
-| messageSent | `#8359C2` | Sent message bubbles (purple) |
-| messageReceived | `#4B6349` | Received message bubbles (dark green) |
-| systemMessage | `#2A2D35` | System/info messages |
-
-### 2.5 Status Chip Colors
-
-| Status | Background | Text |
-|--------|------------|------|
-| Pending | `#854D0E` | `#FCD34D` |
-| Waiting | `#7C2D12` | `#FED7AA` |
-| Active | `#1E3A8A` | `#93C5FD` |
-| Success | `#065F46` | `#6EE7B7` |
-| Dispute | `#7F1D1D` | `#FCA5A5` |
-| Settled | `#581C87` | `#C084FC` |
-| Inactive | `#1F2937` | `#D1D5DB` |
-
-### 2.6 Role Chip Colors
-
-| Role | Background | Text |
-|------|------------|------|
-| Created by you | `#1565C0` | white |
-| Taken by you | `#2DA69D` | white |
-| Positive premium | `#388E3C` | white |
-| Negative premium | `#C62828` | white |
+| ID | Rule | Check |
+|---|---|---|
+| DS-COL-9 | **MUST.** Colors keep one meaning each. Lime means the user's turn, success or valid. Amber means waiting or a warning. Red (`sell`/`danger`) means the sell side, an error or danger. Neutral grey means closed, done or inactive. A dispute is red. No color is used against its meaning: a red success, or a lime warning. | review |
+| DS-COL-10 | **MUST.** Color is never the only signal. A status also has a word or an icon, so a colorblind user and a screen reader get it too. | review |
 
 ---
 
 ## 3. Typography
 
-### 3.1 Font Family
-- **Primary:** System sans-serif (SF Pro on iOS, Roboto on Android)
-- **Fallback:** Roboto Condensed
-- **Weights:** 400 (Regular), 500 (Medium), 700 (Bold)
+### 3.1 Families
 
-### 3.2 Text Scale
+| ID | Rule | Check |
+|---|---|---|
+| DS-TYP-1 | **MUST.** Two families, both through `AppFonts`: `AppFonts.ui` (Outfit) for interface text, which is the theme default and needs no setting, and `AppFonts.figures` (Manrope). No family is named as a string literal. Machine strings (invoices, keys, hashes, event ids) MAY use `'monospace'`. | auto |
+| DS-TYP-2 | **MUST.** Figures that line up or get compared use `AppFonts.figures`, with tabular digits: amounts, sats, fiat, premiums, ratings, counters, countdowns. | review |
+| DS-TYP-3 | **MUST.** Manrope always sets `fontWeight` explicitly to 500, 600 or 700. Only those weights are bundled; an unset (400) weight renders as Medium. | review |
 
-| Style | Size | Weight | Line Height | Usage |
-|-------|------|--------|-------------|-------|
-| displayLarge | 32sp | Bold | 1.2 | Hero amounts |
-| headingLarge | 24sp | Bold | 1.3 | Screen titles |
-| headingMedium | 20sp | Bold | 1.3 | Section headers |
-| headingSmall | 18sp | Medium | 1.4 | Card titles, prices |
-| bodyLarge | 16sp | Regular | 1.5 | Primary body text |
-| bodyMedium | 14sp | Regular | 1.5 | Secondary body, labels |
-| bodySmall | 12sp | Regular | 1.4 | Captions, timestamps |
-| labelLarge | 14sp | Medium | 1.3 | Button text |
-| labelSmall | 11sp | Medium | 1.2 | Chip text, badges |
+### 3.2 Scale
 
-### 3.3 Amount Display
+The redesign writes sizes per role rather than reading `textTheme`. These are the sizes in use,
+and the only ones allowed:
 
-```text
-┌─────────────────────────────────────┐
-│  1,500 - 80,000                     │  ← headingSmall, bold, textPrimary
-│  🇻🇪 VES                            │  ← bodySmall, flag + currency code
-│  Market price: 0.12% above          │  ← bodySmall, textSecondary, mostroGreen for %
-└─────────────────────────────────────┘
-```
+| Size (sp) | Role |
+|---|---|
+| 10 | Chip and caps labels, bottom-bar labels, badges. **The minimum.** |
+| 11 | Meta text, captions, group headers, timestamps |
+| 12 | Secondary body, helper and error text under a field |
+| 13 | Body inside cards and rows, compact buttons, links |
+| 14 | Primary body, dialog body |
+| 15 | Buttons, app-bar title, card title |
+| 17 | Dialog and sheet title, section title |
+| 19 | Screen headline, headline figure in a list |
+| 22 | Hero title (walkthrough, empty states, sheets that open a flow) |
+| 26, 38 | Hero figures only (`AppFonts.figures`): an amount that is the screen's subject |
 
----
+| ID | Rule | Check |
+|---|---|---|
+| DS-TYP-4 | **MUST.** A literal `fontSize` is one of the sizes above. No half points and nothing under 10. | auto |
+| DS-TYP-5 | **SHOULD.** Weights: 400 for running text, 500 for labels and secondary buttons, 600 for titles, primary buttons and emphasis (the default for emphasis), 700 for hero figures. Write `FontWeight.wNNN`. | review |
+| DS-TYP-6 | **SHOULD.** Multi-line body text uses a line height of 1.4–1.5. Letter spacing is reserved for caps labels (0.3–0.6) and large figures (negative). | review |
+| DS-TYP-7 | **MUST.** Text scaling is never disabled or clamped: no `TextScaler.noScaling`, and no `MediaQuery` override of `textScaler`. A button label stays on one line and may shrink to fit (`FittedBox(fit: BoxFit.scaleDown)`, as `OrderPrimaryButton` does). Body text wraps. | auto, review |
 
-## 4. Component Specifications
-
-### 4.1 Order Card (from v1 screenshots)
-
-```text
-┌─────────────────────────────────────────────────────┐
-│  ┌─────────┐                                        │
-│  │BUY BTC  │  ← Chip: mostroGreen bg, white text    │
-│  └─────────┘                                        │
-│                                                     │
-│  1,500 - 80,000     🇻🇪                             │
-│  ← headingSmall     ← Flag icon (16x12)             │
-│                                                     │
-│  VES · Market price 0.12% ↑                         │
-│  ← bodySmall, textSecondary, mostroGreen for %      │
-│                                                     │
-│  ⭐ 4.8 (12)  ·  15 trades                          │
-│  ← Rating + trade count, bodySmall                  │
-│                                                     │
-│  └── Payment methods: Mercado Pago, Zinli...        │
-│      ← bodySmall, textSubtle, truncated             │
-└─────────────────────────────────────────────────────┘
-
-Specs:
-- Background: backgroundCard (#1E2230)
-- Border radius: 12px
-- Padding: 16px
-- Margin between cards: 12px
-- Shadow: none (flat design)
-```
-
-### 4.2 Buttons
-
-| Type | Background | Text | Border Radius | Height | Padding |
-|------|------------|------|---------------|--------|---------|
-| Primary (Buy) | `#92D64F` | `#12161F` | 8px | 48px | 16px horizontal |
-| Primary (Sell) | `#FF8A8A` | `#2A1015` | 8px | 48px | 16px horizontal |
-| Secondary | `#8359C2` | white | 8px | 48px | 16px horizontal |
-| Destructive | `#D84D4D` | white | 8px | 48px | 16px horizontal |
-| Ghost | transparent | textSecondary | 8px | 40px | 12px horizontal |
-| FAB | `#92D64F` | dark icon | 50% (circle) | 56px | centered |
-
-These are **in-page** buttons. A button inside a modal is not styled here — it is a
-`ModalAction` handed to `MostroDialog` / `MostroSheet`, which owns its shape:
-
-| Role | Background | Text | Border Radius | Height |
-|------|------------|------|---------------|--------|
-| Primary (the answer) | `lime` `#92D64F` | `onLime` `#12161F` | `AppRadius.cta` (14px) | 48px |
-| Primary, destructive | `sell` | `onSell` | `AppRadius.cta` (14px) | 48px |
-| Secondary (the way out) | transparent, hairline border | `textBody` | `AppRadius.cta` (14px) | 48px |
-| Link (`ModalLink`) | none | `limeText` | — | — |
-
-The pair shares one row with the answer on the right, and stacks — answer on top — when
-neither label fits half the row, so a long German confirm or a large text scale never
-truncates a verb.
-
-The ink on a filled button is dark, not white, in both tables: white on either accent is
-around 2:1 and fails AA.
-
-### 4.3 Input Fields
-
-#### 4.3.1 Text Input (Underline Style)
-
-```text
-┌─────────────────────────────────────┐
-│  Amount                             │  ← Label: bodySmall, textSecondary
-│  ┌─────────────────────────────────┐│
-│  │ 50,000                          ││  ← Input: bodyLarge, textPrimary
-│  │ _____________________________   ││  ← Underline: mostroGreen when focused
-│  └─────────────────────────────────┘│
-└─────────────────────────────────────┘
-
-Specs:
-- Background: backgroundInput (#252A3A)
-- Border: none (underline style)
-- Underline color: mostroGreen when focused, textSubtle when unfocused
-- Border radius: 8px top only
-- Padding: 12px
-- Height: 56px
-```
-
-#### 4.3.2 Dropdown Select (Underline Style)
-
-```text
-┌─────────────────────────────────────┐
-│  Currency                           │  ← Label: bodySmall, textSecondary
-│  ┌─────────────────────────────────┐│
-│  │ VES                           ▼ ││  ← Selected value + dropdown caret
-│  │ _____________________________   ││  ← Underline: mostroGreen when focused
-│  └─────────────────────────────────┘│
-└─────────────────────────────────────┘
-
-Specs:
-- Same as Text Input
-- Caret icon: 16px, textSubtle, right-aligned
-- Tap opens bottom sheet or dropdown menu
-```
-
-### 4.4 Chips/Badges
-
-```text
-┌──────────────┐
-│  BUY BTC     │
-└──────────────┘
-
-Specs:
-- Background: varies by type (see colors)
-- Text: labelSmall, bold
-- Border radius: 6px
-- Padding: 4px 8px
-- Height: 24px
-```
-
-### 4.5 Bottom Navigation Bar
-
-```text
-┌─────────────────────────────────────────────────────┐
-│                                                     │
-│   📖          📋          💬                        │
-│  Order Book   My Trades   Chat                      │
-│                                                     │
-│  (inactive)   (active)    (inactive)                │
-│  textDisabled mostroGreen textDisabled              │
-│                                                     │
-└─────────────────────────────────────────────────────┘
-
-Specs:
-- Background: backgroundDark (#1B1E28)
-- Height: 64px
-- Icon size: 24px
-- Label: bodySmall
-- Active color: mostroGreen (#92D64F) — dark mode only; on a light surface this is 1.76:1
-  (#539). `BottomNavigationBar` is unused in `lib/`: the redesign shell has its own nav.
-- Inactive color: textDisabled (#6C757D)
-- Border top: 1px solid backgroundCard
-
-Note: Chat tab appears when inside a trade. On main screens (Order Book, My Trades),
-the third tab is Settings. See Section 6.1 for navigation context rules.
-```
-
-### 4.6 App Bar
-
-```text
-┌─────────────────────────────────────────────────────┐
-│  ☰                              🔔                  │
-│  (hamburger)                    (notifications)     │
-└─────────────────────────────────────────────────────┘
-
-Specs:
-- Background: backgroundDark (#1B1E28)
-- Height: 56px
-- Icon size: 24px
-- Icon color: textPrimary
-- Elevation: 0 (flat)
-```
-
-### 4.7 Chat Message Bubbles
-
-```text
-Sent (right-aligned):
-                    ┌─────────────────────┐
-                    │ Payment sent! ✓     │
-                    └─────────────────────┘
-                    Background: #8359C2 (purple)
-                    Border radius: 16px 16px 4px 16px
-                    Max width: 75% of screen
-                    Padding: 12px 16px
-
-Received (left-aligned):
-┌─────────────────────┐
-│ Got it, releasing   │
-└─────────────────────┘
-Background: #4B6349 (dark green)
-Border radius: 16px 16px 16px 4px
-Max width: 75% of screen
-Padding: 12px 16px
-```
-
-### 4.8 List Items (Settings)
-
-```text
-┌─────────────────────────────────────────────────────┐
-│  🌐  Language                                    ▼  │
-│      English                                        │
-├─────────────────────────────────────────────────────┤
-│  💱  Currency                                    ▼  │
-│      VES                                            │
-└─────────────────────────────────────────────────────┘
-
-Specs:
-- Icon: 24px, colored (mostroGreen for language, blueAccent for currency)
-- Title: bodyLarge, textPrimary
-- Subtitle: bodyMedium, textSecondary
-- Chevron: 16px, textSubtle
-- Divider: 1px, backgroundCard
-- Height: 64px
-- Padding: 16px horizontal
-```
+In legacy areas the theme's `textTheme` roles (`bodySmall`, `bodyMedium`, …) remain in use and
+are allowed there. A role the theme does not define (`titleMedium`, `titleLarge`, `labelMedium`)
+falls back to Material defaults and is not allowed in new code.
 
 ---
 
-## 5. Layout & Spacing
+## 4. Shape and elevation
 
-### 5.1 Spacing Scale
+| Radius | Use |
+|---|---|
+| 999 (pill) | Chips, segmented controls, count badges, sheet grabber |
+| 24 | Dialog and sheet containers (`AppRadius.modal`, applied by the theme) |
+| 18 | Cards, list rows, grouped settings sections, drawer rows |
+| 16 | In-page call to action (primary and its outlined sibling) |
+| 14 | Modal actions (`AppRadius.cta`), compact secondary buttons, boxed inputs |
+| 12 | Tiles inside a card, snackbars, small containers |
+| 8 | Thumbnails, QR frames, small insets |
 
-| Token | Value | Usage |
-|-------|-------|-------|
-| xs | 4px | Tight spacing, between badge elements |
-| sm | 8px | Compact spacing, chip padding |
-| md | 12px | Default between list items |
-| lg | 16px | Card padding, section spacing |
-| xl | 24px | Between major sections |
-| xxl | 32px | Screen edge padding on tablets |
-
-### 5.2 Screen Padding
-
-| Breakpoint | Horizontal Padding |
-|------------|-------------------|
-| Mobile (<600px) | 16px |
-| Tablet (600-1200px) | 24px |
-| Desktop (>1200px) | 32px |
-
-### 5.3 Card Grid
-
-```text
-Mobile (single column):
-┌─────────────────────────┐
-│         Card 1          │
-└─────────────────────────┘
-         12px gap
-┌─────────────────────────┐
-│         Card 2          │
-└─────────────────────────┘
-
-Tablet (2 columns):
-┌───────────┐  12px  ┌───────────┐
-│   Card 1  │  gap   │   Card 2  │
-└───────────┘        └───────────┘
-
-Desktop (3 columns):
-┌─────────┐ 12px ┌─────────┐ 12px ┌─────────┐
-│  Card 1 │ gap  │  Card 2 │ gap  │  Card 3 │
-└─────────┘      └─────────┘      └─────────┘
-```
+| ID | Rule | Check |
+|---|---|---|
+| DS-SHP-1 | **MUST.** A radius is one of the values above. | auto |
+| DS-SHP-2 | **SHOULD.** Through a named constant, an `AppRadius` token or a file-level `const`, rather than a bare number in a `BorderRadius`. | review |
+| DS-SHP-3 | **MUST.** Surfaces are flat: no `elevation` above 0 and no shadow, except the primary call to action's `ctaShadow` and the dialog's own shadow. Depth comes from the surface color, `inset` and the 1-px `border` tokens. | review |
 
 ---
 
-## 6. Navigation Patterns
+## 5. Spacing and layout
 
-### 6.1 Bottom Navigation (Mobile)
-
-**Context-dependent tabs:**
-
-| Context | Tab 1 | Tab 2 | Tab 3 |
-|---------|-------|-------|-------|
-| Global screens | Order Book | My Trades | Settings |
-| Inside a trade | Order Book | My Trades | Chat |
-
-- **Order Book**: Browse buy/sell orders (always visible)
-- **My Trades**: Active and past trades (always visible)
-- **Settings**: Profile, preferences, about (shown on global screens)
-- **Chat**: Trade conversation (replaces Settings when inside an active trade)
-
-The third tab changes based on navigation context. When user is viewing
-a specific trade, Chat becomes available. On main screens, Settings is shown.
-
-### 6.2 Drawer Menu (Mobile)
-
-Accessed via hamburger icon. Contains:
-- Profile info
-- Settings
-- About
-- Logout
-
-### 6.3 Navigation Rail (Desktop)
-
-Same 3 sections as bottom nav, but vertical on left side.
+| ID | Rule | Check |
+|---|---|---|
+| DS-SPC-1 | **MUST.** Screen content is inset **18** from the side edges (`redesignSidePadding`). The drawer is the exception, with its own 22/14. | review |
+| DS-SPC-2 | **MUST.** Paddings, gaps and margins come from the 2-pt scale **2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 24, 28, 32**. Odd values are not allowed, except 1 for a hairline. | auto |
+| DS-SPC-3 | **SHOULD.** Card inner padding is 14. Rows in a list are 12 apart, sections 18–24 apart. A label sits 6–8 above its field. | review |
+| DS-SPC-4 | **MUST.** Breakpoints come from `AppBreakpoints` (600 tablet, 1200 desktop); no other width threshold. Mobile has 1 column, a bottom bar and an overlay drawer. Tablet has 2 columns. Desktop has 3 columns and a persistent drawer, and no bottom bar. | auto, review |
+| DS-SPC-5 | **MUST.** Every screen works from 320 dp wide. Content that can outgrow the screen scrolls, and the action bar stays pinned at the bottom inside a `SafeArea`. | test, review |
 
 ---
 
-## 7. Responsive Breakpoints
+## 6. Components
 
-| Name | Width | Layout |
-|------|-------|--------|
-| Mobile | <600px | Single column, BottomNav |
-| Tablet | 600-1200px | Master-detail optional |
-| Desktop | >1200px | Multi-panel, NavigationRail |
+Reuse before building (principle 4). These are the parts a new screen is assembled from.
 
-### 7.1 Layout Shells
+### 6.1 Modals
 
-```text
-Mobile:
-┌─────────────────────────┐
-│        AppBar           │
-├─────────────────────────┤
-│                         │
-│        Content          │
-│                         │
-├─────────────────────────┤
-│      BottomNav          │
-└─────────────────────────┘
+| ID | Rule | Check |
+|---|---|---|
+| DS-CMP-1 | **MUST.** Every dialog and bottom sheet goes through `showMostroDialog` / `showMostroSheet` with `MostroDialog` / `MostroSheet` (`lib/shared/widgets/mostro_modal.dart`). Buttons are `ModalAction`s and links are `ModalLink`s. | test (`modal_guard_test.dart`) |
+| DS-CMP-2 | **MUST.** A modal has at most one primary action, "the answer", on the right or on top when the actions stack. The secondary is "the way out". An irreversible answer uses `ModalTone.destructive`. While it runs, the action shows `busy`; the modal is not swapped for a spinner. | review |
 
-Tablet:
-┌─────────────────────────────────────┐
-│              AppBar                  │
-├──────────────┬──────────────────────┤
-│   List       │      Detail          │
-│   Panel      │      Panel           │
-├──────────────┴──────────────────────┤
-│           BottomNav                  │
-└─────────────────────────────────────┘
+### 6.2 Buttons
 
-Desktop:
-┌─────────────────────────────────────────────────┐
-│                   TopBar                         │
-├─────────┬───────────────┬───────────────────────┤
-│         │               │                        │
-│  Nav    │   Order List  │    Trade Detail        │
-│  Rail   │               │                        │
-│         │               │                        │
-└─────────┴───────────────┴───────────────────────┘
-```
+| ID | Rule | Check |
+|---|---|---|
+| DS-CMP-3 | **MUST.** A screen state has at most **one** primary call to action: filled lime, `onLime` ink, radius 16, 15/w600, vertical padding 14–15. When the user can only wait, it has none (`TradeActionBar`). Reuse `OrderPrimaryButton`, `TradeActionBar` or `InvoicePrimaryButton`. | review |
+| DS-CMP-4 | **MUST.** Secondary actions are outlined (`border` token, `textBody` ink) with the same radius as their primary. Cancel and dispute are never two red buttons of the same weight. A dismissal ("Close", "Not now") is a text link. | review |
+| DS-CMP-5 | **MUST.** A filled red button is used only for the answer to an irreversible question inside a modal (DS-CMP-2). On a page, danger is an outlined or link action in `danger` ink. | review |
+| DS-CMP-6 | **MUST.** Every tappable target is at least **48 × 48** dp. A small glyph is padded out to it, as `_OrderBookAppBar` does with `_target = 48`. | review |
+| DS-CMP-7 | **MUST.** An icon-only button has a `tooltip` or a semantic label. | review |
 
----
+### 6.3 Cards, rows and chips
 
-## 8. Iconography
+| ID | Rule | Check |
+|---|---|---|
+| DS-CMP-8 | **MUST.** A card or row sits on `surface`, has radius 18, padding 14 and no elevation. When tappable, it is `Material` + `InkWell`, so the ripple follows the radius. | review |
+| DS-CMP-9 | **MUST.** A status chip is a pill: 6-px dot, upper-case 10-sp label, padding about 8–9 × 3, with a tinted fill and border from the area's `chip*` tokens (`TradeListChip`, `TradeStatusChip`). The legacy `StatusChip` / `RoleBadge` with `AppColors.status*` is not used in new code. | review |
 
-### 8.1 Icon Library
-- **Primary:** Lucide Icons (`lucide_icons` package)
-- **Flags:** Country flag emojis or `flag_icons` package
+### 6.4 Inputs
 
-### 8.2 Icon Sizes
+| ID | Rule | Check |
+|---|---|---|
+| DS-CMP-10 | **MUST.** A single-value form field (amount, address, name) is an underline field. The label sits above in `fieldLabel`, turning `fieldLabelFocus` on focus. The underline turns lime on focus and red on error. The error text sits underneath at 12 sp. `UnderlineAmountField` is the reference. | review |
+| DS-CMP-11 | **MUST.** A multi-line or pasted value (invoice, chat composer, search) is a boxed field at radius 14 on the area's field fill (`inset`, `textareaFill`). The invoice field (`InvoiceInputField`) is the reference. | review |
 
-| Context | Size |
-|---------|------|
-| Navigation | 24px |
-| Inline with text | 16px |
-| Large buttons | 20px |
-| FAB | 24px |
-| List item leading | 24px |
+### 6.5 Bars, feedback and states
 
-### 8.3 Icon Colors
-- Active nav: mostroGreen
-- Inactive nav: textSubtle
-- Action buttons: textPrimary (white)
-- Info icons: mostroGreen, blueAccent, etc. (match semantic tokens)
+| ID | Rule | Check |
+|---|---|---|
+| DS-CMP-12 | **MUST.** A pushed screen uses `redesignAppBar()`. A tab root uses `TabAppBar`. The bottom bar is `BottomNavBar`. No new `AppBar` is styled by hand. | review |
+| DS-CMP-13 | **MUST.** A list that loads shows a shimmer skeleton in the shape of its rows (`OrderListSkeleton`), never a centered spinner. A button that works shows its own spinner and keeps its size. | review |
+| DS-CMP-14 | **MUST.** An empty list explains itself: the mascot, a title, the reason, and the action that fixes it when there is one (`OrderListEmpty`). | review |
+| DS-CMP-15 | **SHOULD.** A snackbar confirms something that already happened ("Copied"). It is floating, on `surface`, radius 12, about 2 s (`showOrderDetailSnackBar`). It never carries an error the user must act on; that belongs in the screen or a modal. | review |
+| DS-CMP-16 | **MUST.** A pseudonym avatar is `NymAvatar`, with the glyph always white on its hue (FR-011c). | review |
+
+### 6.6 Icons
+
+| ID | Rule | Check |
+|---|---|---|
+| DS-ICO-1 | **MUST.** Material `Icons` only; no other icon package. Images come from bundled assets. | review |
+| DS-ICO-2 | **SHOULD.** One style per screen, `_rounded` or `_outlined`, not mixed with the plain style. | review |
+| DS-ICO-3 | **MUST.** Icon sizes: 12, 14, 16, 18, 20, 22, 24 for interface icons; 32, 44 or 48 for an illustration or a dialog's icon. | auto |
 
 ---
 
-## 9. Loading States
+## 7. Motion
 
-### 9.1 Skeleton Loading (Shimmer Effect)
-
-Use skeleton placeholders instead of spinners. Shows content structure while loading.
-
-```text
-Loading:                          Loaded:
-┌─────────────────────────┐      ┌─────────────────────────┐
-│ ░░░░░░░░░░░░            │      │ BUY BTC                 │
-│ ░░░░░░░░░░░░░░░░░░░░░░  │  →   │ 1,500 - 80,000 🇻🇪      │
-│ ░░░░░░░░░░              │      │ VES · 0.12% above       │
-└─────────────────────────┘      └─────────────────────────┘
-
-(shimmer animation sweeps left→right)
-```
-
-**Implementation:**
-
-```yaml
-# pubspec.yaml
-dependencies:
-  shimmer: ^3.0.0
-```
-
-```dart
-import 'package:shimmer/shimmer.dart';
-
-// Order card skeleton
-Widget buildOrderCardSkeleton() {
-  return Shimmer.fromColors(
-    baseColor: Color(0xFF1E2230),      // backgroundCard
-    highlightColor: Color(0xFF2A2D35), // backgroundElevated
-    child: Container(
-      height: 100,
-      margin: EdgeInsets.symmetric(vertical: 6),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-      ),
-    ),
-  );
-}
-
-// List of skeletons while loading
-Widget buildOrderListSkeleton() {
-  return ListView.builder(
-    itemCount: 5, // Show 5 placeholder cards
-    itemBuilder: (_, __) => buildOrderCardSkeleton(),
-  );
-}
-```
-
-**Skeleton Colors:**
-
-| Element | Color | Hex |
-|---------|-------|-----|
-| Base (static) | backgroundCard | `#1E2230` |
-| Highlight (shimmer) | backgroundElevated | `#2A2D35` |
-| Animation duration | — | 1500ms |
-
-**When to Use:**
-- ✅ Order book loading
-- ✅ Trade list loading
-- ✅ Profile/settings loading
-- ✅ Chat history loading
-- ❌ Button loading (use disabled state + spinner)
-- ❌ Form submission (use button spinner)
-
-### 9.2 Other Loading States
-
-| Context | Pattern |
-|---------|---------|
-| Initial app load | Splash screen with logo |
-| Button action | Disabled + CircularProgressIndicator inside |
-| Pull-to-refresh | RefreshIndicator (standard Flutter) |
-| Infinite scroll | Skeleton row at bottom |
-| Image loading | Shimmer placeholder → fade in |
+| ID | Rule | Check |
+|---|---|---|
+| DS-MOT-1 | **MUST.** No page transitions; the theme disables them on purpose (`_NoTransitionBuilder`). A screen does not add its own. | review |
+| DS-MOT-2 | **SHOULD.** Durations: 150 ms for fades and micro feedback, 200 ms for swaps and openings, 240 ms for moves. Curves: `easeOut`, or `easeInOut` for back-and-forth. | review |
+| DS-MOT-3 | **MUST.** A looping or decorative animation (pulse, shimmer, mascot, blinking cursor) stops when `MediaQuery.disableAnimationsOf(context)` is true. | review |
 
 ---
 
-## 10. Animation & Motion
+## 8. Accessibility
 
-### 10.1 Durations
+Contrast is in §2 (DS-COL-6, DS-COL-7, DS-COL-10), target size and labels in §6.2 (DS-CMP-6,
+DS-CMP-7), and text scaling in §3 (DS-TYP-7). In addition:
 
-| Type | Duration | Curve |
-|------|----------|-------|
-| Micro (hover, press) | 100ms | easeOut |
-| Fast (toggles, chips) | 150ms | easeInOut |
-| Normal (page transitions) | 300ms | easeInOut |
-| Slow (modals, drawers) | 400ms | easeInOut |
-
-### 9.2 Transitions
-- Page transitions: Slide from right (forward), slide from left (back)
-- Modal: Fade + scale up from center
-- Bottom sheet: Slide up from bottom
-- List items: Staggered fade in (50ms delay between items)
+| ID | Rule | Check |
+|---|---|---|
+| DS-A11Y-1 | **MUST.** A custom tappable widget (an `InkWell` or `GestureDetector` that is not a Material button) is wrapped in `Semantics(button: true, label: …)`, with `enabled` reflecting its state. | review |
+| DS-A11Y-2 | **MUST.** A status that changes while the user watches (a countdown result, a payment received) is announced through `liveRegion` or `SemanticsService`. | review |
+| DS-A11Y-3 | **MUST.** Focus and reading order follow the visual order. Decoration is excluded with `ExcludeSemantics`. | review |
+| DS-A11Y-4 | **MUST.** A new screen, or a changed action bar or modal, has a widget test at 2× text scale and 320 dp wide in German that expects no overflow (`tester.takeException()` is null). Precedents: `order_detail_golden_test.dart`, `trade_detail_screen_test.dart`. | test |
 
 ---
 
-## 11. Accessibility
+## 9. Copy and localization
 
-### 10.1 Contrast Ratios
-- Text on backgrounds: Minimum 4.5:1 ✓
-- Large text (>18sp): Minimum 3:1 ✓
-- Interactive elements: Minimum 3:1 ✓
-
-### 10.2 Touch Targets
-- Minimum: 44x44px
-- Recommended: 48x48px
-- FAB: 56x56px
-
-### 10.3 Screen Reader Support
-- All interactive elements have semantic labels
-- Images have alt text
-- Focus order follows visual order
-- Announcements for state changes
+| ID | Rule | Check |
+|---|---|---|
+| DS-L10N-1 | **MUST.** Every user-facing string comes from `AppLocalizations`, in all six ARB files (en, es, fr, de, it, nl). CI fails on an untranslated key. | test |
+| DS-L10N-2 | **MUST.** A layout is sized for the longest translation, usually German, never for English. A button label fits or scales down, and never truncates a verb. | review |
+| DS-L10N-3 | **MUST.** Numbers, amounts and dates are formatted for the locale, never by hand. | review |
 
 ---
 
-## 12. Theme Support
+## 10. Themes
 
-### 11.1 Dark Mode (Default)
-All colors in this document are for dark mode, which is the primary theme.
-
-### 11.2 Light Mode (Optional)
-
-| Semantic Color | Dark | Light |
-|----------------|------|-------|
-| backgroundDark | `#1B1E28` | `#FFFFFF` |
-| backgroundCard | `#1E2230` | `#F5F5F5` |
-| backgroundInput | `#252A3A` | `#EEEEEE` |
-| textPrimary | `#FFFFFF` | `#1A1A1A` |
-| textSecondary | `#B0B3C6` | `#666666` |
-| mostroGreen | `#92D64F` | `#92D64F` |
-| sellColor | `#FF8A8A` | `#FF8A8A` |
-
-### 11.3 Implementation
-- Wrap app in `ThemeProvider` (Riverpod)
-- All colors via `Theme.of(context).extension<AppColors>()`
-- Never hardcode colors in widgets
-- System preference detection via `MediaQuery.platformBrightness`
+| ID | Rule | Check |
+|---|---|---|
+| DS-THM-1 | **MUST.** Every change is designed and checked in dark (the default) and light. A palette token always has both values. | review |
+| DS-THM-2 | **MUST.** A golden for a new or changed component covers both themes (`pumpForGolden(..., brightness:)`). Goldens are regenerated only by the `update-goldens.yml` workflow (`docs/golden-tests.md`). | test, review |
 
 ---
 
-## 13. v1 Screenshot Reference
+## 11. Automation identifiers
 
-The following screenshots from v1 should be used as the visual reference:
-
-| Screen | Description | Key Elements |
-|--------|-------------|--------------|
-| Order Book | Main list of buy/sell orders | Order cards, filter button, FAB |
-| Order Detail | Single order expanded | Price, payment methods, rating |
-| Create Order | Form for new order | Inputs, dropdowns, submit button |
-| Settings | Profile and preferences | List items, icons, toggles |
-| About | App information | Links, version, documentation |
-| My Trades | User's active trades | Trade cards, status badges |
-| Chat | Trade conversation | Message bubbles, input field |
-| Invoice Entry | Lightning invoice input | Text input, amount display |
+A widget a test or tool drives carries `.withAutomationId(...)`. Renaming one is a contract
+change (`docs/automation-contract.md`). It is not a design rule, but a UI change must not drop
+one.
 
 ---
 
-## 14. Quick Reference Card
+## 12. What a UI pull request shows
 
-```
-COLORS (copy-paste ready)
-─────────────────────────
-Background:     #1B1E28
-Card:           #1E2230
-Input:          #252A3A
-Elevated:       #2A2D35
+The template's **Screenshots** section asks for before and after screenshots. For a UI change
+judged against this guide, the description also gives:
 
-Brand Green:    #92D64F  (on #12161F, never white)
-Sell Red:       #FF8A8A
-Purple:         #8359C2
-Destructive:    #D84D4D
+1. **Rules touched**: the IDs that apply ("DS-CMP-3, DS-COL-6"), and any SHOULD it departs from,
+   with the reason.
+2. **New tokens**: name and both values, and the contrast test that covers them.
+3. **Screenshots** in dark and light, and at 2× text scale when a layout changed.
+4. **Reference**: the issue's mockup or handoff the change implements (CONTRIBUTING: a UI change
+   needs an accepted issue that shows the intended result).
 
-Text Primary:   #FFFFFF
-Text Secondary: #B0B3C6
-Text Subtle:    #9A9A9C
+## 13. Changing this guide
 
-Chat Sent:      #8359C2
-Chat Received:  #4B6349
+The guide changes in its own pull request, or in the same pull request as the first code that
+needs the change, with the guide diff called out in the description. A maintainer approves it.
+Changing a value (a new size, radius or spacing step) also updates the check that enforces it,
+so the guide and CI never disagree.
 
-Modal surface:  #1A2030  (light: #FFFFFF)
-Modal scrim:    rgba(8, 11, 16, 0.82)
+---
 
-SPACING
-─────────────────────────
-xs: 4px   sm: 8px   md: 12px
-lg: 16px  xl: 24px  xxl: 32px
+## 14. Known gaps (code that predates this guide)
 
-RADIUS
-─────────────────────────
-Cards: 12px
-Buttons: 8px
-Chips: 6px
-Bubbles: 16px
-Modals: 24px (AppRadius.modal)
-Modal actions: 14px (AppRadius.cta)
+Each gap below is debt. A change in the same code SHOULD close it, and MUST NOT copy it.
 
-TYPOGRAPHY
-─────────────────────────
-Display: 32sp bold
-Heading: 20sp bold
-Body: 16sp regular
-Caption: 12sp regular
-```
+| Gap | Where | Rule |
+|---|---|---|
+| About 50 `Color(0x…)` literals in 21 files and about 86 `Colors.<name>` in 30 files. Many are v1 fallbacks (`#8CC63F`), mostly in notifications, chat attachments and the walkthrough. | §2.1 | DS-COL-1 |
+| `ThemeData` defines no button, chip, snackbar or switch theme; every button styles itself. | §6.2 | DS-CMP-3 |
+| `textTheme` (32/24/20/18/16/14/12) does not match the redesign scale. 13 half-point sizes and three 9-sp labels exist. | §3.2 | DS-TYP-4 |
+| `'Manrope'` is written as a literal in `tab_app_bar.dart`. | §3.1 | DS-TYP-1 |
+| `AppRadius.card` is 12, while redesigned cards use 18. `AppRadius.button` (8) is unused by the redesign, which uses 16. About 180 literal radii, including 4, 11, 13, 20, 26 and 28. | §4 | DS-SHP-1, DS-SHP-2 |
+| No spacing grid in practice: about 70% of padding literals are on the 2-pt scale, and odd values (11, 13, 9, 15…) are common. `AppSpacing.xxl` is unused. | §5 | DS-SPC-2 |
+| Odd icon sizes (13, 15, 17, 19) are common. | §6.6 | DS-ICO-3 |
+| Reds differ across palettes: `E4685D` (invoice, about), `F27868` (restore), `B0352F`, `A8262B`, `9E2B26` in light. `AppColors.sellColor` is `FF8A8A` against `sell` `FF8B8B`. | §2.3 | DS-COL-8 |
+| `RestorePalette` redefines its own surfaces (`sheet` `#161C28`) instead of extending `OrderBookPalette`. | §2.2 | DS-COL-2 |
+| Chat: `AppColors.systemMessage` (`#2A2D35`) is used as a **text** color on the dark background, which is illegible. The dispute chat's received bubble is a literal `#2D3142`. Bubble colors have no contrast test. | §2 | DS-COL-1, DS-COL-6 |
+| `AppColors.status*` chip tuples are the same in light and dark and have no contrast test. `RoleBadge` is never used. | §6.3 | DS-CMP-9 |
+| Most of the 87 `showSnackBar` calls are not floating and are styled by hand; there is no shared helper. | §6.5 | DS-CMP-15 |
+| Only three widgets honour `disableAnimations` (restore sheet, invoice field, mascot). | §7 | DS-MOT-3 |
+| No test checks 3:1 for non-text, and none uses Flutter's `meetsGuideline` for tap targets or labels. | §8 | DS-COL-7, DS-CMP-6 |
+| `app_theme.dart` cites `test/core/accent_consistency_test.dart`, which does not exist. The check lives in `modal_contrast_test.dart`. | §2.1 | — |
+
+---
+
+## 15. Review checklist
+
+For the reviewer of a UI change. Each line is a MUST unless marked.
+
+- [ ] No color, font family, font size, radius, spacing or icon-size literal outside the
+      allowed values (DS-COL-1, DS-TYP-1, DS-TYP-4, DS-SHP-1, DS-SPC-2, DS-ICO-3).
+- [ ] Colors come from the area's palette; new tokens use canonical values and have a 4.5:1
+      test in both themes (DS-COL-2, DS-COL-6, DS-COL-8).
+- [ ] Lime is the only green; filled lime and sell carry their dark inks (DS-COL-3, DS-COL-4,
+      DS-COL-5).
+- [ ] Colors keep their meaning and never carry it alone (DS-COL-9, DS-COL-10).
+- [ ] Figures use Manrope with an explicit weight (DS-TYP-2, DS-TYP-3).
+- [ ] At most one primary call to action; secondaries outlined; danger not a filled page button
+      (DS-CMP-3, DS-CMP-4, DS-CMP-5).
+- [ ] Modals through `mostro_modal.dart`; one answer (DS-CMP-1, DS-CMP-2).
+- [ ] Targets at least 48 dp; icon buttons labelled; custom tappables have semantics
+      (DS-CMP-6, DS-CMP-7, DS-A11Y-1).
+- [ ] Existing components reused: app bars, chips, cards, inputs, skeletons, empty states
+      (DS-CMP-8 to DS-CMP-14).
+- [ ] Works at 320 dp, at 2× text and in German, with a test that proves it (DS-SPC-5,
+      DS-TYP-7, DS-A11Y-4, DS-L10N-2).
+- [ ] Dark and light screenshots; goldens in both themes from the workflow (DS-THM-1,
+      DS-THM-2).
+- [ ] Animations short; loops honour reduced motion (DS-MOT-2 SHOULD, DS-MOT-3).
+- [ ] The description names the rules touched and any SHOULD it departs from (§12).

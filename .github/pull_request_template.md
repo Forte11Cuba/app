@@ -54,7 +54,8 @@ For a fix, one step must fail on `main`. -->
 <!-- Required for any visible change: before (main) and after (this
 branch), same screen, same data. Light and dark theme when colours
 change. A screen recording for a change in a flow. Write
-"No visible change" otherwise. -->
+"No visible change" otherwise. For a visible change, also list the
+design-guide rules it touches (.specify/DESIGN_SYSTEM.md §12). -->
 
 ## Automated tests
 

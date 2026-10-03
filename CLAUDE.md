@@ -176,6 +176,9 @@ bridged by flutter_rust_bridge.
   `specs/004` + `.specify/*` = **prescriptive for v2** (what/how to build). Specs are a
   **living artifact** — update the matching spec/contract as part of any behavior/contract change.
 - For **curated reference docs** (`.specify/v1-reference/`, `.specify/*`): **propose edits first**.
+- **UI changes are judged against `.specify/DESIGN_SYSTEM.md`**, whose rules have IDs (`DS-COL-1`…).
+  New UI code keeps every MUST; its §14 lists the older code that does not, as debt, never as
+  a precedent to copy. A change that needs a different value changes the guide first.
 - Update this `CLAUDE.md` when guidelines, tooling, or core tech change.
 
 ## Reference checkouts (when in doubt)
