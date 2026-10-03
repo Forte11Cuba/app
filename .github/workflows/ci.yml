@@ -150,6 +150,36 @@ jobs:
       - name: Test
         run: flutter test
 
+  # UI changes are judged against .specify/DESIGN_SYSTEM.md. This runs the
+  # rules it marks *auto* (color literals, fonts, sizes, radii, spacing,
+  # breakpoints, icon sizes) on the lines the pull request adds or changes
+  # under lib/, and annotates each break on its line. Older code is the
+  # guide's §14 debt and is reported only once a change touches it. The
+  # checker's own tests run in the flutter job (test/ci/design_check_test.dart).
+  design:
+    name: Design guide
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          # The diff is taken from the merge base with the target branch.
+          fetch-depth: 0
+
+      # Only its Dart SDK is used; the checker needs no packages.
+      - name: Install Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Check changed UI code against the design guide
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: dart tool/design_check.dart --base "origin/$BASE_REF"
+
   # Web is a first-class target (constitution, specs/004/plan.md), and its
   # failure mode is a blank page that every static check passes. Building and
   # smoke-testing it here means a PR that breaks the web target fails before it
