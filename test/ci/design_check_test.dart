@@ -349,9 +349,20 @@ final book = OrderBookPalette.of(context);
 final a = OutlinedButton.icon(onPressed: f, icon: i, label: l);
 final b = FilledButton(onPressed: f, child: Text('x', style: s));
 final c = TextButton(onPressed: f, child: c);
+final e = TextButton.icon(
+  onPressed: f,
+  icon: Icon(i, color: pal.limeIcon),
+  label: Text(t),
+);
 final d = ElevatedButton(onPressed: f, child: c);
 '''),
-        ['DS-CMP-17@1', 'DS-CMP-17@2', 'DS-CMP-17@3', 'DS-CMP-17@4'],
+        [
+          'DS-CMP-17@1',
+          'DS-CMP-17@2',
+          'DS-CMP-17@3',
+          'DS-CMP-17@4',
+          'DS-CMP-17@9',
+        ],
       );
     });
 
@@ -377,7 +388,13 @@ final s = FilledButton.styleFrom(backgroundColor: book.lime);
 
   group('DS-CMP-12: app bars', () {
     test('flags an AppBar that takes the theme background', () {
-      expect(breaks('final a = AppBar(title: Text(t));'), ['DS-CMP-12@1']);
+      expect(
+        breaks('''
+final a = AppBar(title: Text(t));
+final b = SliverAppBar.large(title: Text(t));
+'''),
+        ['DS-CMP-12@1', 'DS-CMP-12@2'],
+      );
     });
 
     test('allows one on a palette background, and the shared builders', () {
@@ -404,27 +421,66 @@ final b = redesignAppBar(context, title: t);
     });
   });
 
+  /// Measured under the app theme (#673): every decoration below still
+  /// paints v1's #252A3A fill and #9A9A9C underline. `border:` is only the
+  /// fallback for states the theme leaves unset, and the theme sets
+  /// `enabledBorder`, `focusedBorder` and `filled: true`.
   group('DS-CMP-19: text fields', () {
-    test('flags a field that takes the theme decoration', () {
+    test('flags a field that leaves any of them to the theme', () {
       expect(
         breaks('''
 final a = TextField(controller: c);
 final b = TextField(decoration: InputDecoration(hintText: h));
+final c = TextField(decoration: InputDecoration(border: InputBorder.none));
+final d = TextField(
+  decoration: const InputDecoration(
+    isCollapsed: true,
+    border: InputBorder.none,
+  ),
+);
+final e = TextField(decoration: const InputDecoration.collapsed(hintText: h));
+final f = TextField(
+  decoration: InputDecoration(focusedBorder: InputBorder.none, filled: false),
+);
+final g = TextField(
+  decoration: InputDecoration(
+    enabledBorder: InputBorder.none,
+    focusedBorder: InputBorder.none,
+  ),
+);
 '''),
-        ['DS-CMP-19@1', 'DS-CMP-19@2'],
+        [
+          'DS-CMP-19@1',
+          'DS-CMP-19@2',
+          'DS-CMP-19@3',
+          'DS-CMP-19@4',
+          'DS-CMP-19@10',
+          'DS-CMP-19@11',
+          'DS-CMP-19@14',
+        ],
       );
     });
 
-    test('allows a field that draws its own border', () {
+    test('allows a field that sets its borders and fill, or delegates', () {
       expect(
         breaks('''
-final a = TextField(decoration: InputDecoration(border: InputBorder.none));
-final b = TextField(
+final a = TextField(
   decoration: InputDecoration(
-    enabledBorder: UnderlineInputBorder(borderSide: side),
+    filled: false,
+    border: InputBorder.none,
+    enabledBorder: InputBorder.none,
+    focusedBorder: InputBorder.none,
   ),
 );
-final c = TextField(decoration: const InputDecoration.collapsed(hintText: h));
+final b = TextField(
+  decoration: InputDecoration(
+    filled: true,
+    fillColor: pal.inset,
+    enabledBorder: OutlineInputBorder(borderSide: side),
+    focusedBorder: OutlineInputBorder(borderSide: focus),
+  ),
+);
+final c = TextField(decoration: _fieldDecoration(pal));
 '''),
         isEmpty,
       );
