@@ -339,7 +339,7 @@ around a rule the change could keep.
 
 Each gap below is debt. A change in the same code SHOULD close it, and MUST NOT copy it. The
 CI check reports a gap once a pull request touches its line. `dart tool/design_check.dart --all`
-lists every one the check can see (440 when this guide was written).
+lists every one the check can see (442 when this guide was written).
 
 | Gap | Where | Rule |
 |---|---|---|

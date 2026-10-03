@@ -173,8 +173,13 @@ final b = TextStyle(fontSize: theme.fontSize);
 final a = MediaQuery.of(c).copyWith(textScaler: TextScaler.noScaling);
 final b = Text('x', textScaleFactor: 1);
 final c = s.clamp(maxScaleFactor: 1.3);
+final d = MediaQuery.of(c).copyWith(textScaler: const TextScaler.linear(1));
+final e = MediaQuery.of(c).copyWith(
+  padding: p,
+  textScaler: fixed,
+);
 '''),
-        ['DS-TYP-7@1', 'DS-TYP-7@2', 'DS-TYP-7@3'],
+        ['DS-TYP-7@1', 'DS-TYP-7@2', 'DS-TYP-7@3', 'DS-TYP-7@4', 'DS-TYP-7@7'],
       );
     });
 
@@ -237,8 +242,9 @@ final a = EdgeInsets.symmetric(horizontal: 14, vertical: 13);
 final b = EdgeInsets.all(22);
 const c = SizedBox(width: 5);
 final d = Wrap(runSpacing: 7, children: []);
+final e = BackupFillViewport(gap: 13, children: []);
 '''),
-        ['DS-SPC-2@1', 'DS-SPC-2@2', 'DS-SPC-2@3', 'DS-SPC-2@4'],
+        ['DS-SPC-2@1', 'DS-SPC-2@2', 'DS-SPC-2@3', 'DS-SPC-2@4', 'DS-SPC-2@5'],
       );
     });
 

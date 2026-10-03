@@ -179,13 +179,33 @@ List<Violation> scan(String path, String source, {Set<int>? lines}) {
 
   // DS-TYP-7: text scaling is never turned off or clamped.
   for (final m in RegExp(
-    r'\bTextScaler\.noScaling\b|\b(?:textScaleFactor|maxScaleFactor)(?=\s*:)',
+    r'\bTextScaler\.noScaling\b|\bMediaQuery\.with(?:No|Clamped)TextScaling\b'
+    r'|\b(?:textScaleFactor|maxScaleFactor)(?=\s*:)',
   ).allMatches(code)) {
     report(
       m.start,
       'DS-TYP-7',
       '`${m[0]}` turns off or clamps text scaling; let the layout wrap or scale down instead',
     );
+  }
+  // Replacing the scaler a subtree inherits overrides the user's setting,
+  // whatever it is replaced with. Reading it (`TextPainter(textScaler:
+  // MediaQuery.textScalerOf(c))`) is fine.
+  for (final m in RegExp(
+    r'(?:\.copyWith|\bMediaQueryData)\s*\(',
+  ).allMatches(code)) {
+    for (final (from, to) in _args(code, m.end - 1)) {
+      final arg = code.substring(from, to);
+      // `TextScaler.noScaling` is already reported above.
+      if (RegExp(r'^\s*textScaler\s*:').hasMatch(arg) &&
+          !arg.contains('TextScaler.noScaling')) {
+        report(
+          from + arg.indexOf('textScaler'),
+          'DS-TYP-7',
+          'replaces the inherited text scaler, overriding the user\'s text size',
+        );
+      }
+    }
   }
 
   // DS-SHP-1: radii on the scale.
@@ -219,7 +239,7 @@ List<Violation> scan(String path, String source, {Set<int>? lines}) {
     checkLiterals(from + gap.end, to, spacing, 'DS-SPC-2', 'gap');
   }
   for (final m in RegExp(
-    r'\b(?:spacing|runSpacing|mainAxisSpacing|crossAxisSpacing)\s*:',
+    r'\b(?:spacing|runSpacing|mainAxisSpacing|crossAxisSpacing|gap)\s*:',
   ).allMatches(code)) {
     checkLiterals(m.end, _exprEnd(code, m.end), spacing, 'DS-SPC-2', 'spacing');
   }
