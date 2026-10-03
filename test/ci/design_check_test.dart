@@ -364,6 +364,10 @@ final a = FilledButton(
   child: c,
 );
 final b = IconButton(onPressed: f, icon: i);
+final l = TextButton(
+  onPressed: f,
+  child: Text(t, style: TextStyle(color: pal.textSecondary)),
+);
 final s = FilledButton.styleFrom(backgroundColor: book.lime);
 '''),
         isEmpty,

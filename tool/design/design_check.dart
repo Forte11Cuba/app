@@ -278,6 +278,101 @@ List<Violation> scan(String path, String source, {Set<int>? lines}) {
     );
   }
 
+  // DS-COL-11: AppColors is the v1 layer; new code reads a redesign palette.
+  for (final m in RegExp(r'\bAppColors\b').allMatches(code)) {
+    report(
+      m.start,
+      'DS-COL-11',
+      '`AppColors` is the v1 color layer: read the area\'s redesign palette '
+          '(guide §2.2), `OrderBookPalette` where the area has none',
+    );
+  }
+
+  // What the rules below catch is an absence: a Material widget with no
+  // style of its own takes the theme's defaults, and the theme still holds
+  // v1's (#657). Each constructor must pass the named argument.
+  void requireArg(
+    RegExp constructor,
+    RegExp argument,
+    String rule,
+    String message,
+  ) {
+    for (final m in constructor.allMatches(code)) {
+      final args = _args(code, m.end - 1);
+      if (!args.any((a) => argument.hasMatch(code.substring(a.$1, a.$2)))) {
+        report(m.start, rule, message);
+      }
+    }
+  }
+
+  requireArg(
+    RegExp(
+      r'\b(?:FilledButton|OutlinedButton|ElevatedButton)'
+      r'(?:\.(?:icon|tonal|tonalIcon))?\s*\(',
+    ),
+    RegExp(r'^\s*style\s*:'),
+    'DS-CMP-17',
+    'a Material button without `style:` takes the theme default, a stadium '
+        'shape in v1 colors: use `OrderPrimaryButton` or a `ModalAction`, or '
+        'style it as DS-CMP-3/DS-CMP-4 say (radius 16, palette colors)',
+  );
+  // A text button has no shape at rest, so a link that colors its label
+  // from the palette is v2 (DS-CMP-4). One that sets neither shows the
+  // theme's lime, which fails AA on a light surface.
+  for (final m in RegExp(r'\bTextButton(?:\.icon)?\s*\(').allMatches(code)) {
+    final args = _args(code, m.end - 1);
+    final styled = args.any(
+      (a) => RegExp(r'^\s*style\s*:').hasMatch(code.substring(a.$1, a.$2)),
+    );
+    final colored = RegExp(
+      r'\bcolor\s*:',
+    ).hasMatch(code.substring(m.end, _close(code, m.end - 1)));
+    if (!styled && !colored) {
+      report(
+        m.start,
+        'DS-CMP-17',
+        'a `TextButton` with neither `style:` nor a palette color on its label '
+            'shows the theme\'s lime: use a `ModalLink`, or color the label '
+            'from the palette',
+      );
+    }
+  }
+  requireArg(
+    RegExp(r'\b(?:Sliver)?AppBar\s*\('),
+    RegExp(r'^\s*backgroundColor\s*:'),
+    'DS-CMP-12',
+    '`AppBar` without `backgroundColor` takes the v1 theme: use '
+        '`redesignAppBar()`, or set the palette\'s `bg`',
+  );
+  requireArg(
+    RegExp(r'\bScaffold\s*\('),
+    RegExp(r'^\s*backgroundColor\s*:'),
+    'DS-CMP-18',
+    '`Scaffold` without `backgroundColor` takes the v1 background '
+        '(#1B1E28): set the palette\'s `bg`',
+  );
+
+  // DS-CMP-19: a text field draws its own border; the theme's is v1's
+  // filled underline.
+  for (final m in RegExp(
+    r'\b(?:TextField|TextFormField)\s*\(',
+  ).allMatches(code)) {
+    final args = code.substring(m.end, _close(code, m.end - 1));
+    final ownBorder = RegExp(
+      r'\b(?:border|enabledBorder|focusedBorder)\s*:'
+      r'|\bInputBorder\.none\b|\bInputDecoration\.collapsed\b',
+    );
+    if (!ownBorder.hasMatch(args)) {
+      report(
+        m.start,
+        'DS-CMP-19',
+        'a text field without its own border takes the v1 theme decoration: '
+            'follow `UnderlineAmountField` (DS-CMP-10) or `InvoiceInputField` '
+            '(DS-CMP-11)',
+      );
+    }
+  }
+
   found.sort(
     (a, b) => a.line != b.line ? a.line - b.line : a.rule.compareTo(b.rule),
   );
