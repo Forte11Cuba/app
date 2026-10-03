@@ -868,6 +868,18 @@ mod tests {
     use std::sync::Mutex;
 
     const NOW: i64 = 1_800_000_000;
+
+    /// The web Settings line `pushWebStopsWithTab` promises push for 30 to
+    /// 48 h after the tab last ran: the server keeps a registration 48 h, and
+    /// a running tab re-sends one only once it is `REFRESH_SECS` old, which
+    /// the timer notices up to `TIMER_SECS` late. Changing either constant
+    /// changes that copy.
+    #[test]
+    fn web_push_outlives_the_tab_by_the_window_settings_states() {
+        const SERVER_TTL_SECS: i64 = 48 * 3600;
+        let oldest_at_close = crate::mostro::push::REFRESH_SECS + TIMER_SECS as i64;
+        assert_eq!(SERVER_TTL_SECS - oldest_at_close, 30 * 3600);
+    }
     const NODE_A: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
     const NODE_B: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
     const K1: &str = "1111111111111111111111111111111111111111111111111111111111111111";

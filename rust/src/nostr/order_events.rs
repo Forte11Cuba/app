@@ -97,7 +97,8 @@ pub fn parse_order_event(event: &Event, my_pubkey: Option<&PublicKey>) -> Option
     let is_mine = false;
     let _ = my_pubkey; // unused — kept in signature for future use
 
-    let (rating, total_reviews, days_active) = parse_rating_tag(get("rating").as_deref());
+    let (rating, total_reviews, days_active, maker_since) =
+        parse_rating_tag(get("rating").as_deref());
 
     Some(OrderInfo {
         id,
@@ -117,6 +118,7 @@ pub fn parse_order_event(event: &Event, my_pubkey: Option<&PublicKey>) -> Option
         rating,
         total_reviews,
         days_active,
+        maker_since,
     })
 }
 
@@ -140,16 +142,23 @@ fn order_created_at(event: &Event, tag: Option<&str>) -> i64 {
         .map_or(revision_at, |t| t.min(revision_at))
 }
 
-/// Parse the `rating` tag value into `(total_rating, total_reviews, days)`.
+/// Parse the `rating` tag value into
+/// `(total_rating, total_reviews, days, since)`.
 ///
 /// The daemon publishes the maker's reputation snapshot on each order event:
 /// `"none"` for full-privacy makers, otherwise a JSON object
 /// `{"total_reviews":47,"total_rating":4.9,"last_rating":5,"max_rate":5,
-/// "min_rate":1,"days":312}` (mostro-core `Rating`). Some deployments wrap it
-/// as `["rating", {…}]` — v1 accepts both shapes, so we do too. Missing tag or
-/// malformed JSON degrades to zeros rather than dropping the order.
-fn parse_rating_tag(value: Option<&str>) -> (f64, u32, u32) {
-    const EMPTY: (f64, u32, u32) = (0.0, 0, 0);
+/// "min_rate":1,"days":312,"since":1699920000}` (mostro-core `Rating`). Some
+/// deployments wrap it as `["rating", {…}]` — v1 accepts both shapes, so we do
+/// too. Missing tag or malformed JSON degrades to zeros rather than dropping
+/// the order.
+///
+/// `since` is the Unix timestamp of the maker's first trade, truncated to its
+/// UTC day start; it supersedes the deprecated `days`, a count that is stale on
+/// any event that sits on relays. Daemons that predate it omit it, so it is
+/// `None` there and the UI falls back to `days`.
+fn parse_rating_tag(value: Option<&str>) -> (f64, u32, u32, Option<i64>) {
+    const EMPTY: (f64, u32, u32, Option<i64>) = (0.0, 0, 0, None);
     let Some(raw) = value else { return EMPTY };
     if raw == "none" {
         return EMPTY;
@@ -183,6 +192,10 @@ fn parse_rating_tag(value: Option<&str>) -> (f64, u32, u32) {
             .and_then(|v| v.as_u64())
             .and_then(|value| u32::try_from(value).ok())
             .unwrap_or(0),
+        // A positive whole number of seconds Dart can hold, or no date at all.
+        obj.get("since")
+            .and_then(|v| v.as_u64())
+            .and_then(crate::mostro::reputation::since_from_wire),
     )
 }
 
@@ -566,6 +579,84 @@ mod tests {
     }
 
     #[test]
+    fn rating_tag_since_is_read_in_both_shapes() {
+        // Bare object, as a current daemon publishes it next to `days`.
+        let order = parse_order_event(
+            &order_event_with_rating(
+                r#"{"total_reviews":12,"total_rating":4.5,"days":10,"since":1699920000}"#,
+            ),
+            None,
+        )
+        .unwrap();
+        assert_eq!(order.maker_since, Some(1699920000));
+        assert_eq!(order.days_active, 10);
+
+        // Array-wrapped form.
+        let order = parse_order_event(
+            &order_event_with_rating(
+                r#"["rating",{"total_reviews":12,"total_rating":4.5,"days":10,"since":1699920000}]"#,
+            ),
+            None,
+        )
+        .unwrap();
+        assert_eq!(order.maker_since, Some(1699920000));
+        assert_eq!(order.total_reviews, 12);
+    }
+
+    #[test]
+    fn rating_tag_since_at_the_dart_date_limit_is_kept() {
+        // The last second Dart's `DateTime` can hold is still a date.
+        let order = parse_order_event(
+            &order_event_with_rating(
+                r#"{"total_reviews":12,"total_rating":4.5,"days":10,"since":8640000000000}"#,
+            ),
+            None,
+        )
+        .unwrap();
+        assert_eq!(order.maker_since, Some(8_640_000_000_000));
+    }
+
+    #[test]
+    fn rating_tag_without_since_keeps_the_day_count() {
+        // A daemon that predates `since`: the deprecated `days` is the
+        // fallback, so it must still be read.
+        let order = parse_order_event(
+            &order_event_with_rating(r#"{"total_reviews":12,"total_rating":4.5,"days":10}"#),
+            None,
+        )
+        .unwrap();
+        assert_eq!(order.maker_since, None);
+        assert_eq!(order.days_active, 10);
+    }
+
+    #[test]
+    fn invalid_rating_tag_since_is_absent() {
+        // Zero, negative, string and fractional values are not a date; each
+        // leaves `since` absent without touching the other fields.
+        // Past 8_640_000_000_000 s the date is outside what Dart's `DateTime`
+        // can hold, and building one throws instead of falling back.
+        for since in [
+            "0",
+            "-1699920000",
+            r#""1699920000""#,
+            "1699920000.5",
+            "8640000000001",
+            "9223372036854775807",
+        ] {
+            let order = parse_order_event(
+                &order_event_with_rating(&format!(
+                    r#"{{"total_reviews":12,"total_rating":4.5,"days":10,"since":{since}}}"#
+                )),
+                None,
+            )
+            .unwrap();
+            assert_eq!(order.maker_since, None, "since={since}");
+            assert_eq!(order.days_active, 10, "since={since}");
+            assert_eq!(order.total_reviews, 12, "since={since}");
+        }
+    }
+
+    #[test]
     fn full_privacy_rating_none_yields_zeros() {
         let order = parse_order_event(&order_event_with_rating("none"), None).unwrap();
         assert_eq!(order.rating, 0.0);
@@ -647,6 +738,7 @@ mod tests {
         assert_eq!(order.rating, 0.0);
         assert_eq!(order.total_reviews, 0);
         assert_eq!(order.days_active, 0);
+        assert_eq!(order.maker_since, None);
     }
 
     #[test]

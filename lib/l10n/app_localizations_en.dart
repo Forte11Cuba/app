@@ -2542,6 +2542,10 @@ class AppLocalizationsEn extends AppLocalizations {
       'Wakes the app when a trade or chat message arrives. The notification itself carries nothing.';
 
   @override
+  String get pushWebStopsWithTab =>
+      'Stops 30 to 48 h after this tab last ran Mostro';
+
+  @override
   String get pushStatusOff =>
       'Off — nothing is registered with the push server';
 

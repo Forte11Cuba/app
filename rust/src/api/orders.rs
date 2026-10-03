@@ -1194,6 +1194,7 @@ async fn create_order_once(params: NewOrderParams) -> Result<OrderInfo> {
         rating: 0.0,
         total_reviews: 0,
         days_active: 0,
+        maker_since: None,
     };
 
     // Compatibility preflight (PR #252 review): refuse an unsupported node
@@ -1398,6 +1399,7 @@ async fn create_order_once(params: NewOrderParams) -> Result<OrderInfo> {
         peer_rating: None,
         peer_reviews: None,
         peer_days: None,
+        peer_since: None,
         rated_at: None,
         bond,
         // Populated only once a Cashu escrow is actually locked (C5).
@@ -1679,6 +1681,7 @@ async fn take_order_once(
         peer_rating: None,
         peer_reviews: None,
         peer_days: None,
+        peer_since: None,
         rated_at: None,
         bond,
         // From the daemon's reply, not from the order book: this is the only
@@ -2104,6 +2107,7 @@ fn trade_row_from_small_order(
         rating: 0.0,
         total_reviews: 0,
         days_active: 0,
+        maker_since: None,
     };
     let step = match role {
         TradeRole::Seller => {
@@ -2132,6 +2136,7 @@ fn trade_row_from_small_order(
         peer_rating: None,
         peer_reviews: None,
         peer_days: None,
+        peer_since: None,
         rated_at: None,
         bond: None,
         // Cashu escrow (C5): learned later from the escrow request.
@@ -3929,8 +3934,9 @@ async fn dispatch_mostro_message(
                 // Peer payload: the counterparty's (taker's) reputation
                 // snapshot (issue #305). Persist it so the add-invoice screen
                 // and trade detail can show who took the order.
-                if let Some((rating, reviews, days)) = peer_reputation(&kind.payload) {
-                    persist_peer_reputation(&order_id, rating, reviews, days, event_ts).await;
+                if let Some((rating, reviews, days, since)) = peer_reputation(&kind.payload) {
+                    persist_peer_reputation(&order_id, rating, reviews, days, since, event_ts)
+                        .await;
                 } else {
                     log::debug!(
                         "[orders] daemon-msg AddInvoice for order={order_id}: no Order or Peer payload, ignoring"
@@ -4029,8 +4035,10 @@ async fn dispatch_mostro_message(
                     // payload carrying the counterparty's (taker's) reputation
                     // (issue #305). Persist it for the pay-invoice screen and
                     // trade detail rather than discarding the whole message.
-                    if let Some((rating, reviews, days)) = peer_reputation(&kind.payload) {
-                        persist_peer_reputation(&order_id, rating, reviews, days, event_ts).await;
+                    if let Some((rating, reviews, days, since)) = peer_reputation(&kind.payload)
+                    {
+                        persist_peer_reputation(&order_id, rating, reviews, days, since, event_ts)
+                            .await;
                     } else {
                         log::warn!(
                             "[orders] daemon-msg PayInvoice payload is not a PaymentRequest"
@@ -4837,6 +4845,7 @@ fn restored_bond_row(
         rating: 0.0,
         total_reviews: 0,
         days_active: 0,
+        maker_since: None,
     });
     order.status = status;
     order.is_mine = maker;
@@ -4861,6 +4870,7 @@ fn restored_bond_row(
         peer_rating: None,
         peer_reviews: None,
         peer_days: None,
+        peer_since: None,
         rated_at: None,
         bond: Some(BondInfo {
             role: if maker { BondRole::Maker } else { BondRole::Taker },
@@ -9142,18 +9152,19 @@ async fn persist_peer_reputation(
     rating: f64,
     reviews: u32,
     days: u32,
+    since: Option<i64>,
     occurred_at: i64,
 ) {
     crate::api::logging::blog_info(
         "orders",
         format!(
-            "peer-reputation order={} rating={rating} reviews={reviews} days={days}",
+            "peer-reputation order={} rating={rating} reviews={reviews} days={days} since={since:?}",
             crate::api::logging::short_id(order_id),
         ),
     );
     if let Some(db) = crate::db::app_db::db() {
         if let Err(e) = db
-            .update_trade_peer_reputation(order_id, rating, reviews, days)
+            .update_trade_peer_reputation(order_id, rating, reviews, days, since)
             .await
         {
             log::warn!("[orders] failed to persist peer reputation for order={order_id}: {e}");
@@ -14021,9 +14032,6 @@ mod tests {
                 }
             }
         }
-        async fn get_trade(&self, _id: &str) -> Result<Option<crate::api::types::TradeInfo>> {
-            unimplemented!()
-        }
         async fn list_trades(&self) -> Result<Vec<crate::api::types::TradeInfo>> {
             unimplemented!()
         }
@@ -14066,6 +14074,7 @@ mod tests {
             _rating: f64,
             _reviews: u32,
             _days: u32,
+            _since: Option<i64>,
         ) -> Result<()> {
             unimplemented!()
         }
@@ -14318,6 +14327,7 @@ mod tests {
             peer_rating: None,
             peer_reviews: None,
             peer_days: None,
+            peer_since: None,
             rated_at: None,
             bond: None,
             buyer_trade_pubkey: None,
@@ -15662,6 +15672,7 @@ mod tests {
             peer_rating: None,
             peer_reviews: None,
             peer_days: None,
+            peer_since: None,
             rated_at: None,
             bond: None,
             buyer_trade_pubkey: None,
@@ -15786,6 +15797,7 @@ mod tests {
             peer_rating: None,
             peer_reviews: None,
             peer_days: None,
+            peer_since: None,
             rated_at: None,
             bond: None,
             buyer_trade_pubkey: None,
@@ -15905,6 +15917,7 @@ mod tests {
             peer_rating: None,
             peer_reviews: None,
             peer_days: None,
+            peer_since: None,
             rated_at: None,
             bond: None,
             buyer_trade_pubkey: None,
@@ -16565,6 +16578,7 @@ mod tests {
                 peer_rating: None,
                 peer_reviews: None,
                 peer_days: None,
+                peer_since: None,
                 rated_at: None,
                 bond: None,
                 buyer_trade_pubkey: None,
@@ -17046,6 +17060,7 @@ mod tests {
             rating: 0.0,
             total_reviews: 0,
             days_active: 0,
+            maker_since: None,
         }
     }
 
@@ -17483,6 +17498,7 @@ mod tests {
             peer_rating: None,
             peer_reviews: None,
             peer_days: None,
+            peer_since: None,
             rated_at: None,
             bond: None,
             buyer_trade_pubkey: None,
@@ -17751,6 +17767,7 @@ mod tests {
             peer_rating: None,
             peer_reviews: None,
             peer_days: None,
+            peer_since: None,
             rated_at: None,
             bond: None,
             buyer_trade_pubkey: None,
@@ -22462,6 +22479,7 @@ mod bond_window_tests {
             rating: 0.0,
             total_reviews: 0,
             days_active: 0,
+            maker_since: None,
         }
     }
 

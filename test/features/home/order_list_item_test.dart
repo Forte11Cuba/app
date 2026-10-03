@@ -151,6 +151,26 @@ void main() {
       );
     });
 
+    testWidgets(
+      'counts the days from the maker\'s first trade, not the stale count',
+      (tester) async {
+        // The event's `days` (10) was frozen when the daemon published it;
+        // `since` puts the first trade 300 days before now.
+        await _pumpCard(
+          tester,
+          fakeOrder(
+            rating: 4.78,
+            tradeCount: 16,
+            daysActive: 10,
+            makerSince: DateTime.utc(2025, 3, 7),
+          ),
+        );
+
+        expect(find.text('300 days', findRichText: true), findsOneWidget);
+        expect(find.text('10 days', findRichText: true), findsNothing);
+      },
+    );
+
     testWidgets('marks a maker without trades as new', (tester) async {
       await _pumpCard(
         tester,

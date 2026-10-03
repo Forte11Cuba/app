@@ -840,6 +840,7 @@
   "notificationsPrivacyFootnote": "Les notifications ne contiennent ni montants ni contreparties. Un push passe par les serveurs de Google ou d’Apple et signale seulement qu’il y a quelque chose à voir.",
   "pushMasterToggleTitle": "Notifications push",
   "pushMasterToggleSubtitle": "Réveille l’app quand une mise à jour d’échange ou un message arrive. La notification elle-même ne contient rien.",
+  "pushWebStopsWithTab": "S’arrête 30 à 48 h après la dernière ouverture de Mostro dans cet onglet",
   "pushStatusOff": "Désactivées : rien n’est enregistré auprès du serveur push",
   "pushStatusCleanupPending": "{count, plural, =1{Désactivées — suppression de 1 inscription push en attente} other{Désactivées — suppression de {count} inscriptions push en attente}}",
   "pushStatusNoToken": "En attente du jeton push de cet appareil",

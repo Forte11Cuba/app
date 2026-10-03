@@ -23,6 +23,7 @@ import 'package:mostro/features/settings/providers/nwc_provider.dart';
 import 'package:mostro/features/trades/providers/trades_providers.dart'
     show refreshTrades, tradeInfoProvider;
 import 'package:mostro/l10n/app_localizations.dart';
+import 'package:mostro/shared/utils/reputation_age.dart';
 import 'package:mostro/shared/widgets/mostro_modal.dart';
 import 'package:mostro/src/rust/api/orders.dart' as orders_api;
 import 'package:mostro/src/rust/api/types.dart'
@@ -327,7 +328,7 @@ class _PayLightningInvoiceScreenState
                     PeerReputationCard(
                       rating: peerTrade!.peerRating!,
                       reviews: peerTrade.peerReviews ?? 0,
-                      days: peerTrade.peerDays ?? 0,
+                      days: peerTrade.peerDaysOnMostro,
                       counterpartIsBuyer: true,
                     ),
                     const SizedBox(height: AppSpacing.lg),

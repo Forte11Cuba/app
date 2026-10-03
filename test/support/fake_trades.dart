@@ -24,6 +24,7 @@ TradeInfo fakeTrade({
   double? peerRating,
   int? peerReviews,
   int? peerDays,
+  int? peerSince,
   BondInfo? bond,
   CooperativeCancelState? cooperativeCancelState,
 }) {
@@ -60,6 +61,7 @@ TradeInfo fakeTrade({
     peerRating: peerRating,
     peerReviews: peerReviews,
     peerDays: peerDays,
+    peerSince: peerSince,
     bond: bond,
     cooperativeCancelState: cooperativeCancelState,
   );

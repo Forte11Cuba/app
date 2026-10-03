@@ -167,6 +167,7 @@ class _PushMasterRowState extends ConsumerState<_PushMasterRow> {
             ? null
             : pushStatusLine(status, now: clock.now());
     final title = l10n.pushMasterToggleTitle;
+    final expiresWithTab = ref.watch(pushExpiresWithTabProvider);
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
@@ -202,6 +203,19 @@ class _PushMasterRowState extends ConsumerState<_PushMasterRow> {
                     color: book.textSecondary,
                   ),
                 ),
+                // The web cannot renew the registration once the tab is
+                // closed, so say how long a wake keeps working (§9.1).
+                if (expiresWithTab) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    l10n.pushWebStopsWithTab,
+                    style: TextStyle(
+                      fontSize: 11,
+                      height: 1.4,
+                      color: book.textSecondary,
+                    ),
+                  ),
+                ],
                 if (line != null) ...[
                   const SizedBox(height: 4),
                   Text(

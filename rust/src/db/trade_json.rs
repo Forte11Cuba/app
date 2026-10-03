@@ -62,17 +62,20 @@ pub(crate) fn set_range_slice(
     Ok(())
 }
 
-/// Stores the counterparty reputation snapshot as JSON numbers.
+/// Stores the counterparty reputation snapshot as JSON numbers; an absent
+/// `since` is stored as null.
 pub(crate) fn set_peer_reputation(
     trade: &mut Value,
     rating: f64,
     reviews: u32,
     days: u32,
+    since: Option<i64>,
 ) -> Result<()> {
     *field(trade, &["peer_rating"])? =
         serde_json::Number::from_f64(rating).map_or(Value::Null, Value::Number);
     *field(trade, &["peer_reviews"])? = Value::from(reviews);
     *field(trade, &["peer_days"])? = Value::from(days);
+    *field(trade, &["peer_since"])? = Value::from(since);
     Ok(())
 }
 
@@ -199,11 +202,20 @@ mod tests {
     #[test]
     fn numbers_stay_numbers_so_the_row_deserialises_again() {
         let mut t = trade();
-        set_peer_reputation(&mut t, 4.5, 12, 300).unwrap();
+        set_peer_reputation(&mut t, 4.5, 12, 300, Some(1699920000)).unwrap();
         mark_rated(&mut t, 1700000123).unwrap();
         assert!(t["peer_rating"].is_f64());
         assert!(t["peer_reviews"].is_u64() && t["peer_days"].is_u64());
+        assert_eq!(t["peer_since"], 1699920000);
         assert!(t["rated_at"].is_i64());
+    }
+
+    #[test]
+    fn an_absent_peer_since_is_stored_as_null() {
+        let mut t = trade();
+        set_peer_reputation(&mut t, 4.5, 12, 300, None).unwrap();
+        assert!(t["peer_since"].is_null());
+        assert_eq!(t["peer_days"], 300);
     }
 
     #[test]

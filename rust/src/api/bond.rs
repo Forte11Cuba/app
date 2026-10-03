@@ -600,6 +600,7 @@ mod tests {
             rating: 0.0,
             total_reviews: 0,
             days_active: 0,
+            maker_since: None,
         };
         let trade = TradeInfo {
             id: "t1".into(),
@@ -618,6 +619,7 @@ mod tests {
             peer_rating: None,
             peer_reviews: None,
             peer_days: None,
+            peer_since: None,
             rated_at: None,
             bond: Some(BondInfo {
                 role: BondRole::Taker,

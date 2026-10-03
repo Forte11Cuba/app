@@ -2563,6 +2563,10 @@ class AppLocalizationsEs extends AppLocalizations {
       'Despierta la app cuando llega una actualización de operación o un mensaje. La notificación en sí no lleva nada.';
 
   @override
+  String get pushWebStopsWithTab =>
+      'Se detiene entre 30 y 48 h después de la última vez que esta pestaña abrió Mostro';
+
+  @override
   String get pushStatusOff =>
       'Desactivadas: nada registrado en el servidor push';
 

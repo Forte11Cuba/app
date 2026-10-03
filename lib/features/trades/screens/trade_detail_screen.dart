@@ -39,6 +39,7 @@ import 'package:mostro/features/trades/widgets/bond_claim_banner.dart';
 import 'package:mostro/features/trades/widgets/bond_slashed_notice.dart';
 import 'package:mostro/features/trades/widgets/cancel_request_notice.dart';
 import 'package:mostro/l10n/app_localizations.dart';
+import 'package:mostro/shared/utils/reputation_age.dart';
 import 'package:mostro/shared/widgets/mostro_modal.dart';
 import 'package:mostro/shared/utils/platform_int64.dart';
 import 'package:mostro/shared/widgets/counterpart_reputation_row.dart';
@@ -798,7 +799,7 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen>
             CounterpartReputationRow(
               rating: peerRating,
               reviews: trade!.peerReviews ?? 0,
-              days: trade.peerDays ?? 0,
+              days: trade.peerDaysOnMostro,
               counterpartIsBuyer: !isBuyer,
             ),
           ],

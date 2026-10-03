@@ -410,7 +410,10 @@ Three things make it work on a static host that cannot set HTTP headers:
   asset 404s and the page is blank.
 - **`--pwa-strategy=none`** — Flutter's own (deprecated) service worker would register over
   the same scope and evict the isolation shim, silently un-isolating the page. Offline
-  caching is the trade-off.
+  caching is the trade-off. The app is still installable from the browser (Install app,
+  or Add to Home Screen on iOS): that comes from `web/manifest.json` and its icons, not
+  from that worker. The icons are generated from the Mostro art by `flutter_launcher_icons`
+  (see its `web` block in `pubspec.yaml`).
 
 The shim registers a service worker, which browsers only allow in a **secure context** — the
 site has to be reachable over HTTPS (Pages: *Settings → Pages → Enforce HTTPS*), or the page

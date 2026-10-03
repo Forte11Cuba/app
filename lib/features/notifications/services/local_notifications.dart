@@ -12,6 +12,10 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 const kPushChannelId = 'mostro_notifications';
 const kPushChannelName = 'Mostro';
 
+/// The small icon of every notification on Android, the chat-wake notice and
+/// (through the manifest) the server's trade update alike.
+const kNotificationIcon = '@drawable/ic_notification';
+
 final FlutterLocalNotificationsPlugin _plugin =
     FlutterLocalNotificationsPlugin();
 
@@ -25,7 +29,9 @@ const _kChatWakeTag = 'mostro-chat';
 /// app is alive; the background isolate passes none.
 Future<void> _initialize({VoidCallback? onTap}) => _plugin.initialize(
   const InitializationSettings(
-    android: AndroidInitializationSettings('@mipmap/ic_launcher'),
+    // A white silhouette: the launcher icon is opaque and would render as a
+    // solid square (see the FCM default icon in AndroidManifest.xml).
+    android: AndroidInitializationSettings(kNotificationIcon),
     // Permission is asked by the push service, not here.
     iOS: DarwinInitializationSettings(
       requestAlertPermission: false,

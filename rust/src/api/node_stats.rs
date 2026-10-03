@@ -669,6 +669,7 @@ mod tests {
             rating: 0.0,
             total_reviews: 0,
             days_active: 0,
+            maker_since: None,
         }
     }
 

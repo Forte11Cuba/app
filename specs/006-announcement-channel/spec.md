@@ -2,7 +2,9 @@
 
 **Feature Branch**: `006-announcement-channel`
 **Created**: 2026-08-26
-**Status**: Draft — nothing is built
+**Status**: In progress — steps 1 and 2 of §10 are built: parsing and the allowlist in
+`rust/src/nostr/announcements.rs`, the reader and its cache in
+`rust/src/nostr/announcement_reader.rs`
 **Input**: Give the project one authenticated way to reach people already running the
 app — "update to 2.1", "the node is down for maintenance", "this relay is gone" —
 without a backend, an account, an email address, or a push token.
@@ -139,7 +141,7 @@ reader (§5), and nothing else in this document may contradict it.
 |---|---|
 | Kind | `38387` — addressable, **reserved in the Mostro protocol's `3838x` block for this and nothing else** |
 | Author | one of the keys in §4.1, and nothing else |
-| `d` tag | announcement id: stable, opaque, unique per announcement |
+| `d` tag | announcement id: stable, opaque, unique per announcement, never empty |
 | `expiration` tag | NIP-40, **required** — see §5.5 |
 | `content` | the JSON of §3.2 |
 
@@ -234,9 +236,9 @@ way to fail it.
 | `v` | yes | schema version, `1` today. An unknown `v` is **ignored**, never rendered best-effort |
 | `severity` | yes | one of `info`, `warning`, `critical` — see §3.4 |
 | `locales` | yes | must contain **exactly** `en`, `es`, `fr`, `de`, `it`, `nl`. A missing one, or an unknown extra one, makes the announcement **invalid** |
-| `locales[x].title` | yes | ≤ 80 characters after trimming |
-| `locales[x].body` | yes | ≤ 500 characters after trimming |
-| `url` | no | exactly one action link, `https` scheme only |
+| `locales[x].title` | yes | not blank, ≤ 80 characters after trimming |
+| `locales[x].body` | yes | not blank, ≤ 500 characters after trimming |
+| `url` | no | exactly one action link, `https` scheme only, no credentials (`user@`); the app keeps the URL as parsed, not as sent |
 
 All six required is deliberately stricter than "must contain `en`". A fallback to English
 is a bug that ships quietly: the Italian reader gets English, nothing is logged, and the
@@ -340,7 +342,7 @@ Three rules:
    key the app derives (`m/44'/1237'/38383'/0/N`).
 2. **The constant holds `npub`, not hex.** It is what a human checks against the value
    published on mostro.network or in the README. Decoding goes through `nostr-sdk`
-   (`PublicKey::parse`) in Rust — never a Dart bech32 implementation, per the golden rule.
+   (`PublicKey::from_bech32`, which refuses hex) in Rust — never a Dart bech32 implementation, per the golden rule.
 3. **An entry that fails to decode is dropped with a `log::warn!`, and the rest still
    work.** A typo in one constant must not silence the channel.
 
@@ -417,9 +419,11 @@ Filter::new()
 needed on the relay pool.** With an empty allowlist the filter has no authors and the
 subscription is not opened at all.
 
-The subscription lives as long as the app is in the foreground and is closed when it
-leaves, matching what the order-book subscription already does. There is no background
-work of any kind (§11).
+The subscription lives as long as the app is in the foreground, matching what the
+order-book subscription already does: it is opened on every `Online` of the relay pool and
+re-checked on every resume (`resync()`), and nothing closes it on the way to the
+background — the OS freezes the process and its sockets die with it, and the resume
+re-issues it through `nostr::live_subs`. There is no background work of any kind (§11).
 
 ### 5.2 The single door
 
@@ -479,14 +483,17 @@ the wrong maintenance window, dismissed it, and the fix arrives already dismisse
 
 Verified events are persisted in the **protocol layer**, not the Dart layer: a new
 `announcements` table in `rust/src/db/schema.rs` (SQLite native, IndexedDB web), bumping
-`SCHEMA_VERSION` from 3 to 4. Capped at the **20 most recent** by `created_at`; each row
+`SCHEMA_VERSION` from 4 to 5 and the IndexedDB `DB_VERSION` from 5 to 6 (version 4 went
+to bond payout claims while this spec waited). The table is device-scoped: an identity
+wipe (`clear_identity_data`) keeps it, since announcements are addressed to the install,
+not to a user. Capped at the **20 most recent** by `created_at`; each row
 holds the raw signed event JSON plus its address, revision and read/dismissed state.
 
 Cached announcements are shown offline. They are the last thing the project said, and that
 stays true whether or not a relay answers today.
 
 **But the cache is re-checked against the clock, not against the network.** On every
-restore and every foreground, each cached event is re-run through §5.2 with the current
+restore and every foreground (each pool `Online` and each resume), each cached event is re-run through §5.2 with the current
 time. Anything now older than 30 days, or now past its `expiration`, is dropped from the
 list *and deleted from the database* in the same pass.
 
@@ -499,6 +506,17 @@ becomes permanent, and a promise that only holds while online is not one.
 
 Dropping an announcement drops its read and dismissed state with it. Nothing may reference
 an address that is no longer in the cache.
+
+The sweep trusts the device clock, as every other freshness rule here does. A clock set
+more than 30 days ahead empties the cache, read state included; once the clock is fixed,
+whatever relays still serve comes back unread. That is the accepted cost of a sweep that
+works offline.
+
+The sweep also runs before every arrival is stored, so a row that expired since the last
+sweep neither counts against the cap nor stands in for the revision a new one is compared
+with. Every pass that rewrites the cache — arrival, sweep, and the read/dismiss writes of
+§6.1 — holds one exclusive section: a process mutex and, on the web, the origin-wide Web
+Lock, since every tab shares one IndexedDB store.
 
 ### 5.5 Expiry
 

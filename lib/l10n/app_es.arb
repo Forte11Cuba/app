@@ -840,6 +840,7 @@
   "notificationsPrivacyFootnote": "Las notificaciones no incluyen montos ni contrapartes. Un push pasa por los servidores de Google o de Apple y solo dice que hay algo que ver.",
   "pushMasterToggleTitle": "Notificaciones push",
   "pushMasterToggleSubtitle": "Despierta la app cuando llega una actualización de operación o un mensaje. La notificación en sí no lleva nada.",
+  "pushWebStopsWithTab": "Se detiene entre 30 y 48 h después de la última vez que esta pestaña abrió Mostro",
   "pushStatusOff": "Desactivadas: nada registrado en el servidor push",
   "pushStatusCleanupPending": "{count, plural, =1{Desactivadas — queda 1 registro push por eliminar} other{Desactivadas — quedan {count} registros push por eliminar}}",
   "pushStatusNoToken": "Esperando el token push de este dispositivo",

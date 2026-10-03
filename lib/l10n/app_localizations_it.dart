@@ -2563,6 +2563,10 @@ class AppLocalizationsIt extends AppLocalizations {
       'Risveglia l’app quando arriva un aggiornamento di scambio o un messaggio. La notifica in sé non contiene nulla.';
 
   @override
+  String get pushWebStopsWithTab =>
+      'Si ferma tra 30 e 48 h dopo l’ultima volta che questa scheda ha aperto Mostro';
+
+  @override
   String get pushStatusOff => 'Disattivate: nulla è registrato sul server push';
 
   @override

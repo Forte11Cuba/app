@@ -55,6 +55,18 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+        <!-- The small icon of the push server's trade update, which FCM renders
+             itself. Android draws it from the alpha channel only, so it must be
+             a white silhouette on transparent: the launcher icon is opaque and
+             shows as a solid square. -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_icon"
+            android:resource="@drawable/ic_notification" />
+        <!-- The channel FCM uses for a push that names none
+             (local_notifications.dart, kPushChannelId). -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="mostro_notifications" />
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and

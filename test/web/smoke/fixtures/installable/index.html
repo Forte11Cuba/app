@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<!--
+  The healthy fixture plus what makes a page installable: a manifest with a
+  name, a start URL inside its scope, standalone display and a 192 and a 512
+  icon. Pairs with healthy, which has no manifest, to hold the SMOKE_INSTALLABLE
+  check down from both sides.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="icon" href="data:," />
+    <link rel="manifest" href="manifest.json" />
+    <title>smoke fixture — installable</title>
+  </head>
+  <body>
+    <flutter-view></flutter-view>
+    <script>
+      window.mostroBridgeReady = true;
+    </script>
+  </body>
+</html>

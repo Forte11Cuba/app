@@ -2561,6 +2561,10 @@ class AppLocalizationsNl extends AppLocalizations {
       'Wekt de app zodra er een trade-gebeurtenis of chatbericht binnenkomt. De melding zelf bevat niets.';
 
   @override
+  String get pushWebStopsWithTab =>
+      'Stopt 30 tot 48 uur nadat dit tabblad Mostro voor het laatst draaide';
+
+  @override
   String get pushStatusOff =>
       'Uit: er staat niets geregistreerd bij de push-server';
 

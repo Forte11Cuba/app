@@ -252,8 +252,15 @@ pub trait Storage: Send + Sync {
     async fn delete_order(&self, id: &str) -> Result<()>;
     async fn list_orders(&self) -> Result<Vec<crate::api::types::OrderInfo>>;
 
+    /// Insert or replace the row keyed by [`TradeInfo::id`] — the row's own
+    /// id, **not** the order's, and sometimes but not always a different
+    /// value (see [`crate::api::types::TradeInfo::id`]). This is the only
+    /// method that keys on it: everything that looks a trade up does so by
+    /// `order.id`, which is correct whether or not the two happen to match.
+    /// Replacing a row therefore requires the same `id` the row was saved
+    /// with, which is why a rebuild carries it forward rather than minting a
+    /// new one.
     async fn save_trade(&self, trade: &crate::api::types::TradeInfo) -> Result<()>;
-    async fn get_trade(&self, id: &str) -> Result<Option<crate::api::types::TradeInfo>>;
     async fn list_trades(&self) -> Result<Vec<crate::api::types::TradeInfo>>;
 
     async fn save_message(&self, msg: &crate::api::types::ChatMessage) -> Result<()>;
@@ -390,13 +397,16 @@ pub trait Storage: Send + Sync {
     /// Persist the counterparty (taker) reputation snapshot on a trade
     /// identified by `order.id` (issue #305). No-op when no matching trade
     /// exists. `days` saturates at `u32::MAX`; a full-privacy taker sends no
-    /// snapshot, so this is only called when one was carried.
+    /// snapshot, so this is only called when one was carried. `since` is the
+    /// Unix timestamp of the taker's first trade (`None` from daemons that
+    /// predate it), stored as `peer_since` next to `peer_days`.
     async fn update_trade_peer_reputation(
         &self,
         order_id: &str,
         rating: f64,
         reviews: u32,
         days: u32,
+        since: Option<i64>,
     ) -> Result<()>;
 
     /// Replace the anti-abuse bond attached to a trade (`$.bond`), keeping
@@ -462,6 +472,33 @@ pub trait Storage: Send + Sync {
 
     /// Remove one claim. No-op when absent.
     async fn delete_bond_claim(&self, node_pubkey: &str, order_id: &str) -> Result<()>;
+
+    // ── Announcements (specs/006-announcement-channel §5.4) ─────────────────
+    //
+    // Device-scoped: [`Self::clear_identity_data`] leaves them alone, since
+    // they are addressed to the install, not to a user. The defaults keep
+    // nothing, for stores with no cache: announcements then show only while
+    // a relay serves them. SQLite and IndexedDB both implement all three.
+
+    /// Insert or replace the announcement at its address.
+    async fn save_announcement(
+        &self,
+        _announcement: &crate::nostr::announcement_reader::StoredAnnouncement,
+    ) -> Result<()> {
+        Ok(())
+    }
+
+    /// Every stored announcement, newest `created_at` first.
+    async fn list_announcements(
+        &self,
+    ) -> Result<Vec<crate::nostr::announcement_reader::StoredAnnouncement>> {
+        Ok(Vec::new())
+    }
+
+    /// Remove the announcement at `address`. No-op when absent.
+    async fn delete_announcement(&self, _address: &str) -> Result<()> {
+        Ok(())
+    }
 
     // ── Chat attachment cache (#589) ──────────────────────────────────────────
 

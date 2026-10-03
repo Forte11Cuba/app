@@ -56,7 +56,7 @@ pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -1351531358;
 
 // Section: executor
 
-flutter_rust_bridge::frb_generated_default_handler!();
+pub use crate::api::bridge_handler::FLUTTER_RUST_BRIDGE_HANDLER;
 
 // Section: wire_funcs
 
@@ -9191,6 +9191,7 @@ impl SseDecode for crate::api::types::OrderInfo {
         let mut var_rating = <f64>::sse_decode(deserializer);
         let mut var_totalReviews = <u32>::sse_decode(deserializer);
         let mut var_daysActive = <u32>::sse_decode(deserializer);
+        let mut var_makerSince = <Option<i64>>::sse_decode(deserializer);
         return crate::api::types::OrderInfo {
             id: var_id,
             kind: var_kind,
@@ -9209,6 +9210,7 @@ impl SseDecode for crate::api::types::OrderInfo {
             rating: var_rating,
             total_reviews: var_totalReviews,
             days_active: var_daysActive,
+            maker_since: var_makerSince,
         };
     }
 }
@@ -9529,6 +9531,7 @@ impl SseDecode for crate::api::types::TradeInfo {
         let mut var_peerRating = <Option<f64>>::sse_decode(deserializer);
         let mut var_peerReviews = <Option<u32>>::sse_decode(deserializer);
         let mut var_peerDays = <Option<u32>>::sse_decode(deserializer);
+        let mut var_peerSince = <Option<i64>>::sse_decode(deserializer);
         let mut var_ratedAt = <Option<i64>>::sse_decode(deserializer);
         let mut var_bond = <Option<crate::api::types::BondInfo>>::sse_decode(deserializer);
         let mut var_buyerTradePubkey = <Option<String>>::sse_decode(deserializer);
@@ -9554,6 +9557,7 @@ impl SseDecode for crate::api::types::TradeInfo {
             peer_rating: var_peerRating,
             peer_reviews: var_peerReviews,
             peer_days: var_peerDays,
+            peer_since: var_peerSince,
             rated_at: var_ratedAt,
             bond: var_bond,
             buyer_trade_pubkey: var_buyerTradePubkey,
@@ -11734,6 +11738,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::types::OrderInfo {
             self.rating.into_into_dart().into_dart(),
             self.total_reviews.into_into_dart().into_dart(),
             self.days_active.into_into_dart().into_dart(),
+            self.maker_since.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -12161,6 +12166,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::types::TradeInfo {
             self.peer_rating.into_into_dart().into_dart(),
             self.peer_reviews.into_into_dart().into_dart(),
             self.peer_days.into_into_dart().into_dart(),
+            self.peer_since.into_into_dart().into_dart(),
             self.rated_at.into_into_dart().into_dart(),
             self.bond.into_into_dart().into_dart(),
             self.buyer_trade_pubkey.into_into_dart().into_dart(),
@@ -14051,6 +14057,7 @@ impl SseEncode for crate::api::types::OrderInfo {
         <f64>::sse_encode(self.rating, serializer);
         <u32>::sse_encode(self.total_reviews, serializer);
         <u32>::sse_encode(self.days_active, serializer);
+        <Option<i64>>::sse_encode(self.maker_since, serializer);
     }
 }
 
@@ -14360,6 +14367,7 @@ impl SseEncode for crate::api::types::TradeInfo {
         <Option<f64>>::sse_encode(self.peer_rating, serializer);
         <Option<u32>>::sse_encode(self.peer_reviews, serializer);
         <Option<u32>>::sse_encode(self.peer_days, serializer);
+        <Option<i64>>::sse_encode(self.peer_since, serializer);
         <Option<i64>>::sse_encode(self.rated_at, serializer);
         <Option<crate::api::types::BondInfo>>::sse_encode(self.bond, serializer);
         <Option<String>>::sse_encode(self.buyer_trade_pubkey, serializer);

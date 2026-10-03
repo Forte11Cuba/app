@@ -10,6 +10,7 @@ pub mod pow;
 pub mod protocol_version;
 pub mod push;
 pub mod rates;
+pub(crate) mod reputation;
 pub mod restore_history;
 pub mod serbero;
 pub mod session;

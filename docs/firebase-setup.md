@@ -93,14 +93,18 @@ the tab is open, hidden or closed (docs/PUSH_NOTIFICATIONS.md §2.6, T4.5).
 | Firebase JS SDK version | the one `firebase_core_web` loads on the page; the same test holds them equal |
 | Registration | `web/index.html` and `web_push_web.dart`, relative to `<base href>` under the scope `firebase-cloud-messaging-push-scope`. Never at the origin root, which is a 404 under `/app/` |
 | VAPID key | `--dart-define=FCM_VAPID_KEY=<key>`, from the repository variable `FCM_VAPID_KEY` in `.github/workflows/web-build.yml` |
-| Switch | `--dart-define=PUSH_WEB_ENABLED=true`, not passed anywhere yet |
+| Switch | `--dart-define=PUSH_WEB_ENABLED=<value>`, from the repository variable `PUSH_WEB_ENABLED` in `.github/workflows/web-build.yml`; only `true` turns it on |
 
-Two things keep web push off today, and both are deliberate:
+Two repository variables turn web push on, and both stay unset until their
+precondition holds:
 
-1. **The push server does not accept web.** It needs `platform: "web"` and CORS for
-   the app's origin (mostro-push-server#44, §3.5). Until that ships, the build does
-   not pass `PUSH_WEB_ENABLED`, and Settings shows web as a platform without push.
-   The worker still registers on every load; without a token it does nothing.
+1. **`PUSH_WEB_ENABLED=true`, once the push server accepts web.** It needs
+   `platform: "web"` and CORS for the app's origin (mostro-push-server#44, §3.5).
+   Set the variable (Settings → Secrets and variables → Actions → Variables) only
+   after that version of the server is deployed; the next deploy of `main` builds
+   with web push on, with no code change. Unset, the build has the switch off and
+   Settings shows web as a platform without push. The worker still registers on
+   every load; without a token it does nothing.
 2. **The VAPID key.** Firebase console → Project settings → Cloud Messaging → **Web
    Push certificates** → generate (or import) a key pair, and copy the **public**
    key into the repository variable `FCM_VAPID_KEY` (Settings → Secrets and
@@ -113,6 +117,8 @@ After a `flutterfire configure`, copy the new web values into the worker's
 
 A closed tab does not refresh the **push server registration**: the server forgets it
 48 h after the last `/api/register`, and only a tab running the app sends another, so
-reopening the app is what refreshes it (§2.6). The browser's service worker is separate
-and does not expire with it. Safari offers push only to an installed PWA, which the
-deployed bundle is not, so it reads as unsupported.
+reopening the app is what refreshes it (§2.6). A running tab renews a registration
+once it is 12 to 18 h old, so push stops 30 to 48 h after the tab last ran, and
+Settings says so under the push toggle on the web. The browser's service worker is separate and does not expire with it.
+Safari offers push only to an installed (home-screen) app; in a plain Safari tab push
+reads as unsupported.

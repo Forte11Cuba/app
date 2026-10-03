@@ -840,6 +840,7 @@
   "notificationsPrivacyFootnote": "Meldingen bevatten geen bedragen en geen tegenpartijen. Een push loopt via de servers van Google of Apple en zegt alleen dát er iets te zien is.",
   "pushMasterToggleTitle": "Pushmeldingen",
   "pushMasterToggleSubtitle": "Wekt de app zodra er een trade-gebeurtenis of chatbericht binnenkomt. De melding zelf bevat niets.",
+  "pushWebStopsWithTab": "Stopt 30 tot 48 uur nadat dit tabblad Mostro voor het laatst draaide",
   "pushStatusOff": "Uit: er staat niets geregistreerd bij de push-server",
   "pushStatusCleanupPending": "{count, plural, =1{Uit: 1 push-registratie wordt nog verwijderd} other{Uit: {count} push-registraties worden nog verwijderd}}",
   "pushStatusNoToken": "Wachten op het push-token van dit apparaat",

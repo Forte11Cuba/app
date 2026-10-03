@@ -705,7 +705,8 @@ class _CounterpartyCard extends StatelessWidget {
     final isNew = order.tradeCount == 0;
     final figure = TextStyle(color: book.textBody, fontWeight: FontWeight.w500);
     final trades = formats.decimal.format(order.tradeCount);
-    final days = formats.decimal.format(order.daysActive);
+    final daysOnMostro = order.makerDaysOnMostro;
+    final days = formats.decimal.format(daysOnMostro);
 
     return OrderDetailCard(
       padding: const EdgeInsets.all(14),
@@ -781,7 +782,7 @@ class _CounterpartyCard extends StatelessWidget {
                         ),
                       const TextSpan(text: ' · '),
                       ...figureSpans(
-                        l10n.counterpartyDaysOnMostro(order.daysActive),
+                        l10n.counterpartyDaysOnMostro(daysOnMostro),
                         days,
                         figure,
                       ),

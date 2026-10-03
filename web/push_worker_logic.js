@@ -44,13 +44,24 @@ async function openNotifications(clients, workerUrl) {
   return clients.openWindow(notificationTarget(workerUrl));
 }
 
-// The notice the worker renders itself, or null. A trade_update carries the
-// server's notification block, which the SDK renders. A chat_wake carries
-// none, and Chrome revokes a subscription whose pushes show nothing.
+// The notice the worker renders itself, or null: its title plus the options
+// for showNotification. A trade_update carries the server's notification
+// block, which the SDK renders. A chat_wake carries none, and Chrome revokes a
+// subscription whose pushes show nothing.
+//
+// Every wake shares one tag, so a new one replaces the last instead of piling
+// up; renotify makes that replacement sound and vibrate again, which a browser
+// otherwise skips.
 function noticeFor(payload, languages) {
   if (payload?.notification) return null;
   if (payload?.data?.type !== 'chat_wake') return null;
-  return { title: CHAT_WAKE_TITLE, body: CHAT_WAKE_BODIES[languageOf(languages)] };
+  return {
+    title: CHAT_WAKE_TITLE,
+    body: CHAT_WAKE_BODIES[languageOf(languages)],
+    tag: 'mostro-chat',
+    renotify: true,
+    icon: 'icons/Icon-192.png',
+  };
 }
 
 function languageOf(languages) {

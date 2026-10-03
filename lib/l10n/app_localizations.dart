@@ -4354,6 +4354,12 @@ abstract class AppLocalizations {
   /// **'Wakes the app when a trade or chat message arrives. The notification itself carries nothing.'**
   String get pushMasterToggleSubtitle;
 
+  /// Extra line under the master push toggle on the web only: with the tab closed nothing renews the registration, and the push server forgets it 48 hours after the last renewal. A running tab renews a registration once it is 12 to 18 hours old, so push stops 30 to 48 hours after the tab last ran
+  ///
+  /// In en, this message translates to:
+  /// **'Stops 30 to 48 h after this tab last ran Mostro'**
+  String get pushWebStopsWithTab;
+
   /// Status line under the master push toggle when push is turned off
   ///
   /// In en, this message translates to:

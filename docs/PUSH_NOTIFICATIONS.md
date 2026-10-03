@@ -1,6 +1,6 @@
 # Push Notifications — Client Implementation Spec & Phased Plan
 
-**Status:** Implemented — Phases 0–4 and PR-6 merged (#463, #464, #466–#468, #470–#473, #479, #483–#485); Phase 5 conditional and not scheduled; T6.3 (UnifiedPush) optional. Closed: [#308](https://github.com/MostroP2P/app/issues/308) app lifecycle, [#133](https://github.com/MostroP2P/app/issues/133) web VAPID key (client side). Open: [#147](https://github.com/MostroP2P/app/issues/147) (desktop half). Pending in other repositories: dispute chat **must** wake ([mostrix#177](https://github.com/MostroP2P/mostrix/issues/177), §7.3), and web push stays off until the server accepts `web` and answers CORS ([mostro-push-server#44](https://github.com/MostroP2P/mostro-push-server/issues/44), §3.5) — then the build passes `PUSH_WEB_ENABLED` and Settings gains the web 48 h line (§9.1). Operator tasks: the `FCM_VAPID_KEY` repository variable and the APNs key in Firebase (`docs/firebase-setup.md`). Not yet verified: an iOS build (no iOS CI job). Measurements still open: §14 items 3, 5 and 11
+**Status:** Implemented — Phases 0–4 and PR-6 merged (#463, #464, #466–#468, #470–#473, #479, #483–#485); Phase 5 conditional and not scheduled; T6.3 (UnifiedPush) optional. Closed: [#308](https://github.com/MostroP2P/app/issues/308) app lifecycle, [#133](https://github.com/MostroP2P/app/issues/133) web VAPID key (client side). Open: [#147](https://github.com/MostroP2P/app/issues/147) (desktop half). Pending in other repositories: dispute chat **must** wake ([mostrix#177](https://github.com/MostroP2P/mostrix/issues/177), §7.3), and web push stays off until the server accepts `web` and answers CORS ([mostro-push-server#44](https://github.com/MostroP2P/mostro-push-server/issues/44), §3.5). The build takes its switch from the repository variable `PUSH_WEB_ENABLED`, and Settings already says on the web when push stops (§9.1). Operator tasks: the `FCM_VAPID_KEY` and, once the server accepting web is deployed, `PUSH_WEB_ENABLED=true` repository variables, and the APNs key in Firebase (`docs/firebase-setup.md`). Not yet verified: an iOS build (no iOS CI job). Measurements still open: §14 items 3, 5 and 11
 **Goal:** let this client be woken by [`mostro-push-server`](https://github.com/MostroP2P/mostro-push-server) when a daemon message, a payout claim or a peer's chat message reaches one of its trade keys while the app is in the background or not running, with the same privacy properties the server was designed for: nobody outside the device ever sees message content, sender or order
 **Audience:** contributors implementing push support in this client (appv2), human and AI reviewers of the PRs that land it
 **Upstream reference:** [`MostroP2P/mostro-push-server`](https://github.com/MostroP2P/mostro-push-server) — `docs/api.md`, `docs/architecture.md`, `SECURITY.md` (the server-side contract, the single source of truth for what a push carries); [MIP-05](https://github.com/MostroP2P/MIPs) (the privacy model it is inspired by)
@@ -193,7 +193,10 @@ tab is open, backgrounded or closed. What the worker may do is narrow by design:
   block, and Chrome requires a push event to end in a visible notification or it
   revokes the subscription after a few silent ones. The worker therefore shows its own
   content-free "New message" for `chat_wake` — the one place the client renders a push
-  itself.
+  itself. Every wake uses one tag (`mostro-chat`), so a new one replaces the last
+  instead of piling up, and sets `renotify: true`, so that replacement alerts again:
+  without it the browser swaps the notice silently, and a user who left the first one
+  unopened never hears about the next message.
 - **Tap.** The worker focuses an existing tab (or opens one) at the app's
   notifications route under the deployed base path (`/app/#/notifications`), and
   the tab's resume path does the rest. The worker never routes on payload fields:
@@ -223,13 +226,19 @@ Three facts shape the plan:
   §7.1 that outlives the process has nothing to run on. The push server
   registration of a web token expires 48 h after the last `/api/register`, and only a
   tab running the app sends one, so reopening the app refreshes it (the browser's
-  service worker registration is unaffected); the Settings copy on web says so.
+  service worker registration is unaffected). A running tab re-sends a registration
+  once it is `REFRESH_SECS` (12 h) old, checked every `TIMER_SECS` (6 h), so when the
+  tab closes the last one can be up to 18 h old: push stops 30 to 48 h after the tab
+  last ran, and the Settings copy on web says so.
 
 Browser support: Chrome, Edge and Firefox on desktop and Android; Safari 16.4+ on
-macOS and iOS only for an installed (home-screen) PWA, which the deployed bundle is
-not today (`--pwa-strategy=none`). Safari is therefore "not available" until that
-changes, and the capability check reads the `Notification` and `PushManager` APIs,
-not the user agent.
+macOS and iOS only for an installed (home-screen) PWA. The deployed bundle is
+installable ([#658](https://github.com/MostroP2P/app/issues/658): manifest, icons and
+the iOS meta tags; `--pwa-strategy=none` only drops Flutter's offline cache, and the
+web smoke test asks Chrome whether it would install the bundle). Push from a
+home-screen Mostro on an iPhone is not yet verified on a device. The capability check
+reads the `Notification` and `PushManager` APIs, not the user agent, so a Safari tab
+that is not installed keeps showing push as unavailable.
 
 ---
 
@@ -331,7 +340,7 @@ Consequences the client must design around:
 |---|---|---|
 | Android | FCM (`google-services.json` for `foundation.mostro.app` is committed) | full |
 | iOS | APNs via FCM — `aps-environment`, `GoogleService-Info.plist` and the `FirebaseApp` registration are in the repository (T4.4); the APNs key in the Firebase project is an operator task (`docs/firebase-setup.md`) | full, once the APNs key is uploaded |
-| Web | FCM Web Push (VAPID) via `web/firebase-messaging-sw.js`; Chrome, Edge, Firefox; Safari only as an installed PWA | client side in place behind `PUSH_WEB_ENABLED` and `FCM_VAPID_KEY` (T4.5); full for the visible wake and the chat wake once the server accepts `web` and answers CORS (§3.5); no refresh outlives the tab |
+| Web | FCM Web Push (VAPID) via `web/firebase-messaging-sw.js`; Chrome, Edge, Firefox; Safari only as an installed PWA | client side in place behind the `PUSH_WEB_ENABLED` and `FCM_VAPID_KEY` repository variables (T4.5); full for the visible wake and the chat wake once the server accepts `web` and answers CORS (§3.5); no refresh outlives the tab |
 | Linux / macOS / Windows | — | none; foreground subscriptions only |
 
 ### 3.5 Server changes web needs
@@ -832,8 +841,8 @@ first row and the contract is rewritten (T1.4).
 - **Unsupported platform** (desktop, or a browser without push, from `isSupported`,
   checked first): the master row is replaced by an info row *"Push notifications are
   not available on this platform"*; the event rows stay. On a supported browser the
-  row is the normal toggle, with one extra line: *"Stops 48 h after this tab last
-  ran Mostro"* — the refresh has nothing to run on when the tab is closed (§2.6). Checked before permission and before the
+  row is the normal toggle, with one extra line: *"Stops 30 to 48 h after this tab
+  last ran Mostro"* — the refresh has nothing to run on when the tab is closed (§2.6). Checked before permission and before the
   token, so a denied permission on a phone keeps its banner and a phone that has
   not handed a token over yet shows the toggle, not unsupported copy.
 - The **privacy footnote** (exists) is kept and extended with the one true sentence
@@ -902,8 +911,8 @@ while the process is alive. Neither ever names an order, an amount or a counterp
 - **Web:** `resync()` runs on `visibilitychange` through the same lifecycle events,
   which is also what runs after a notification tap focuses the tab. The service
   worker rings the bell and shows the notification; the tab does every write. A
-  closed tab has no refresh (§2.6): the registration ages out 48 h after the last
-  run, and the next run re-registers.
+  closed tab has no refresh (§2.6): the registration ages out 30 to 48 h after the
+  last run, and the next run re-registers.
 
 ---
 

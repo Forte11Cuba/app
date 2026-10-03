@@ -2569,6 +2569,10 @@ class AppLocalizationsFr extends AppLocalizations {
       'Réveille l’app quand une mise à jour d’échange ou un message arrive. La notification elle-même ne contient rien.';
 
   @override
+  String get pushWebStopsWithTab =>
+      'S’arrête 30 à 48 h après la dernière ouverture de Mostro dans cet onglet';
+
+  @override
   String get pushStatusOff =>
       'Désactivées : rien n’est enregistré auprès du serveur push';
 

@@ -8349,8 +8349,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   OrderInfo dco_decode_order_info(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 17)
-      throw Exception('unexpected arr length: expect 17 but see ${arr.length}');
+    if (arr.length != 18)
+      throw Exception('unexpected arr length: expect 18 but see ${arr.length}');
     return OrderInfo(
       id: dco_decode_String(arr[0]),
       kind: dco_decode_order_kind(arr[1]),
@@ -8369,6 +8369,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       rating: dco_decode_f_64(arr[14]),
       totalReviews: dco_decode_u_32(arr[15]),
       daysActive: dco_decode_u_32(arr[16]),
+      makerSince: dco_decode_opt_box_autoadd_i_64(arr[17]),
     );
   }
 
@@ -8560,8 +8561,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   TradeInfo dco_decode_trade_info(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 24)
-      throw Exception('unexpected arr length: expect 24 but see ${arr.length}');
+    if (arr.length != 25)
+      throw Exception('unexpected arr length: expect 25 but see ${arr.length}');
     return TradeInfo(
       id: dco_decode_String(arr[0]),
       order: dco_decode_order_info(arr[1]),
@@ -8580,14 +8581,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       peerRating: dco_decode_opt_box_autoadd_f_64(arr[13]),
       peerReviews: dco_decode_opt_box_autoadd_u_32(arr[14]),
       peerDays: dco_decode_opt_box_autoadd_u_32(arr[15]),
-      ratedAt: dco_decode_opt_box_autoadd_i_64(arr[16]),
-      bond: dco_decode_opt_box_autoadd_bond_info(arr[17]),
-      buyerTradePubkey: dco_decode_opt_String(arr[18]),
-      sellerTradePubkey: dco_decode_opt_String(arr[19]),
-      cashuMintUrl: dco_decode_opt_String(arr[20]),
-      cashuEscrowToken: dco_decode_opt_String(arr[21]),
-      cashuLockedAt: dco_decode_opt_box_autoadd_i_64(arr[22]),
-      cashuRejectedEscrowTokens: dco_decode_list_String(arr[23]),
+      peerSince: dco_decode_opt_box_autoadd_i_64(arr[16]),
+      ratedAt: dco_decode_opt_box_autoadd_i_64(arr[17]),
+      bond: dco_decode_opt_box_autoadd_bond_info(arr[18]),
+      buyerTradePubkey: dco_decode_opt_String(arr[19]),
+      sellerTradePubkey: dco_decode_opt_String(arr[20]),
+      cashuMintUrl: dco_decode_opt_String(arr[21]),
+      cashuEscrowToken: dco_decode_opt_String(arr[22]),
+      cashuLockedAt: dco_decode_opt_box_autoadd_i_64(arr[23]),
+      cashuRejectedEscrowTokens: dco_decode_list_String(arr[24]),
     );
   }
 
@@ -11201,6 +11203,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_rating = sse_decode_f_64(deserializer);
     var var_totalReviews = sse_decode_u_32(deserializer);
     var var_daysActive = sse_decode_u_32(deserializer);
+    var var_makerSince = sse_decode_opt_box_autoadd_i_64(deserializer);
     return OrderInfo(
       id: var_id,
       kind: var_kind,
@@ -11219,6 +11222,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       rating: var_rating,
       totalReviews: var_totalReviews,
       daysActive: var_daysActive,
+      makerSince: var_makerSince,
     );
   }
 
@@ -11451,6 +11455,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_peerRating = sse_decode_opt_box_autoadd_f_64(deserializer);
     var var_peerReviews = sse_decode_opt_box_autoadd_u_32(deserializer);
     var var_peerDays = sse_decode_opt_box_autoadd_u_32(deserializer);
+    var var_peerSince = sse_decode_opt_box_autoadd_i_64(deserializer);
     var var_ratedAt = sse_decode_opt_box_autoadd_i_64(deserializer);
     var var_bond = sse_decode_opt_box_autoadd_bond_info(deserializer);
     var var_buyerTradePubkey = sse_decode_opt_String(deserializer);
@@ -11476,6 +11481,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       peerRating: var_peerRating,
       peerReviews: var_peerReviews,
       peerDays: var_peerDays,
+      peerSince: var_peerSince,
       ratedAt: var_ratedAt,
       bond: var_bond,
       buyerTradePubkey: var_buyerTradePubkey,
@@ -14037,6 +14043,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_f_64(self.rating, serializer);
     sse_encode_u_32(self.totalReviews, serializer);
     sse_encode_u_32(self.daysActive, serializer);
+    sse_encode_opt_box_autoadd_i_64(self.makerSince, serializer);
   }
 
   @protected
@@ -14218,6 +14225,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_opt_box_autoadd_f_64(self.peerRating, serializer);
     sse_encode_opt_box_autoadd_u_32(self.peerReviews, serializer);
     sse_encode_opt_box_autoadd_u_32(self.peerDays, serializer);
+    sse_encode_opt_box_autoadd_i_64(self.peerSince, serializer);
     sse_encode_opt_box_autoadd_i_64(self.ratedAt, serializer);
     sse_encode_opt_box_autoadd_bond_info(self.bond, serializer);
     sse_encode_opt_String(self.buyerTradePubkey, serializer);

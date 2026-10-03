@@ -309,8 +309,16 @@ pub struct OrderInfo {
     #[serde(default)]
     pub total_reviews: u32,
     /// Days the maker has been active on this Mostro node (`days`).
+    /// Deprecated on the wire in favour of [`Self::maker_since`]; kept as the
+    /// fallback for daemons that do not publish `since`.
     #[serde(default)]
     pub days_active: u32,
+    /// Unix timestamp (seconds) of the maker's first trade, truncated to its
+    /// UTC day start (the `rating` tag's `since`). `None` from daemons that
+    /// predate it and for users without a date. The UI computes the age at
+    /// display time (now − since) and falls back to [`Self::days_active`].
+    #[serde(default)]
+    pub maker_since: Option<i64>,
 }
 
 /// Parameters for creating a new order via the Mostro protocol.
@@ -335,6 +343,23 @@ pub struct NewOrderParams {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TradeInfo {
+    /// This row's own id — **not** the order's, and not reliably either the
+    /// same or different.
+    ///
+    /// A take made on this device mints a fresh UUID here (`take_order`)
+    /// while `order.id` holds the id the daemon knows, so the two diverge. A
+    /// row rebuilt instead of taken — from a replayed daemon message on a
+    /// fresh device (`trade_row_from_small_order`), or from a restored bond
+    /// (`restored_bond_row`) — reuses the order id for both. So neither
+    /// equality nor inequality says whose row it is, and no code should ask:
+    /// `order.is_mine` and `role` are what carry that.
+    ///
+    /// Nothing looks a trade up by this, whether or not it happens to match.
+    /// Every accessor on [`crate::db::Storage`] keys on `order.id`, and so
+    /// does the chat (`messages.trade_id`); its one job is to be the row's
+    /// primary key, so `save_trade` replaces a row instead of inserting a
+    /// second one. Carry it forward when rebuilding a row, and reach for
+    /// `order.id` when looking one up (issue #395).
     pub id: String,
     pub order: OrderInfo,
     pub role: TradeRole,
@@ -359,6 +384,13 @@ pub struct TradeInfo {
     pub peer_reviews: Option<u32>,
     #[serde(default)]
     pub peer_days: Option<u32>,
+    /// Unix timestamp (seconds) of the counterparty's first trade, truncated
+    /// to its UTC day start (`UserInfo.since` in the Peer DM). `None` from
+    /// daemons that predate it and for users without a date. The UI computes
+    /// the age at display time (now − since) and falls back to
+    /// [`Self::peer_days`].
+    #[serde(default)]
+    pub peer_since: Option<i64>,
     /// Durable "the local user rated this trade" marker (unix seconds), set
     /// after `submit_rating` publishes (issue #339).
     ///
@@ -544,6 +576,9 @@ pub struct TradeUpdate {
 /// below it is already inside the snapshot; applying it could resurrect an
 /// order that was removed since. On [`OrderDelta::Resync`], read a fresh
 /// snapshot and carry on with the same rule.
+// Nearly every delta is an `Upserted`, so boxing the order would add an
+// allocation per delta without making the typical value any smaller.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone)]
 pub enum OrderDelta {
     /// `order` was added or changed.

@@ -2574,6 +2574,10 @@ class AppLocalizationsDe extends AppLocalizations {
       'Weckt die App, wenn ein Trade-Update oder eine Nachricht eintrifft. Die Benachrichtigung selbst enthält nichts.';
 
   @override
+  String get pushWebStopsWithTab =>
+      'Endet 30 bis 48 h, nachdem Mostro zuletzt in diesem Tab lief';
+
+  @override
   String get pushStatusOff => 'Aus – nichts ist beim Push-Server registriert';
 
   @override

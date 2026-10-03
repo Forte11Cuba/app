@@ -1432,7 +1432,15 @@ class OrderInfo {
   final int totalReviews;
 
   /// Days the maker has been active on this Mostro node (`days`).
+  /// Deprecated on the wire in favour of [`Self::maker_since`]; kept as the
+  /// fallback for daemons that do not publish `since`.
   final int daysActive;
+
+  /// Unix timestamp (seconds) of the maker's first trade, truncated to its
+  /// UTC day start (the `rating` tag's `since`). `None` from daemons that
+  /// predate it and for users without a date. The UI computes the age at
+  /// display time (now − since) and falls back to [`Self::days_active`].
+  final PlatformInt64? makerSince;
 
   const OrderInfo({
     required this.id,
@@ -1452,6 +1460,7 @@ class OrderInfo {
     required this.rating,
     required this.totalReviews,
     required this.daysActive,
+    this.makerSince,
   });
 
   @override
@@ -1472,7 +1481,8 @@ class OrderInfo {
       isMine.hashCode ^
       rating.hashCode ^
       totalReviews.hashCode ^
-      daysActive.hashCode;
+      daysActive.hashCode ^
+      makerSince.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -1495,7 +1505,8 @@ class OrderInfo {
           isMine == other.isMine &&
           rating == other.rating &&
           totalReviews == other.totalReviews &&
-          daysActive == other.daysActive;
+          daysActive == other.daysActive &&
+          makerSince == other.makerSince;
 }
 
 /// Shared types exposed to Flutter via flutter_rust_bridge.
@@ -1875,6 +1886,23 @@ enum SolverRole {
 enum ThemeMode { system, dark, light }
 
 class TradeInfo {
+  /// This row's own id — **not** the order's, and not reliably either the
+  /// same or different.
+  ///
+  /// A take made on this device mints a fresh UUID here (`take_order`)
+  /// while `order.id` holds the id the daemon knows, so the two diverge. A
+  /// row rebuilt instead of taken — from a replayed daemon message on a
+  /// fresh device (`trade_row_from_small_order`), or from a restored bond
+  /// (`restored_bond_row`) — reuses the order id for both. So neither
+  /// equality nor inequality says whose row it is, and no code should ask:
+  /// `order.is_mine` and `role` are what carry that.
+  ///
+  /// Nothing looks a trade up by this, whether or not it happens to match.
+  /// Every accessor on [`crate::db::Storage`] keys on `order.id`, and so
+  /// does the chat (`messages.trade_id`); its one job is to be the row's
+  /// primary key, so `save_trade` replaces a row instead of inserting a
+  /// second one. Carry it forward when rebuilding a row, and reach for
+  /// `order.id` when looking one up (issue #395).
   final String id;
   final OrderInfo order;
   final TradeRole role;
@@ -1897,6 +1925,13 @@ class TradeInfo {
   final double? peerRating;
   final int? peerReviews;
   final int? peerDays;
+
+  /// Unix timestamp (seconds) of the counterparty's first trade, truncated
+  /// to its UTC day start (`UserInfo.since` in the Peer DM). `None` from
+  /// daemons that predate it and for users without a date. The UI computes
+  /// the age at display time (now − since) and falls back to
+  /// [`Self::peer_days`].
+  final PlatformInt64? peerSince;
 
   /// Durable "the local user rated this trade" marker (unix seconds), set
   /// after `submit_rating` publishes (issue #339).
@@ -1968,6 +2003,7 @@ class TradeInfo {
     this.peerRating,
     this.peerReviews,
     this.peerDays,
+    this.peerSince,
     this.ratedAt,
     this.bond,
     this.buyerTradePubkey,
@@ -1996,6 +2032,7 @@ class TradeInfo {
       peerRating.hashCode ^
       peerReviews.hashCode ^
       peerDays.hashCode ^
+      peerSince.hashCode ^
       ratedAt.hashCode ^
       bond.hashCode ^
       buyerTradePubkey.hashCode ^
@@ -2026,6 +2063,7 @@ class TradeInfo {
           peerRating == other.peerRating &&
           peerReviews == other.peerReviews &&
           peerDays == other.peerDays &&
+          peerSince == other.peerSince &&
           ratedAt == other.ratedAt &&
           bond == other.bond &&
           buyerTradePubkey == other.buyerTradePubkey &&

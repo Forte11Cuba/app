@@ -24,6 +24,7 @@ import 'package:mostro/features/settings/providers/settings_provider.dart';
 import 'package:mostro/features/trades/providers/trades_providers.dart'
     show refreshTrades, tradeInfoProvider;
 import 'package:mostro/l10n/app_localizations.dart';
+import 'package:mostro/shared/utils/reputation_age.dart';
 import 'package:mostro/shared/widgets/mostro_modal.dart';
 import 'package:mostro/shared/widgets/nwc_invoice_widget.dart';
 import 'package:mostro/shared/widgets/peer_reputation_card.dart';
@@ -783,7 +784,7 @@ class _AddLightningInvoiceScreenState
                 PeerReputationCard(
                   rating: trade!.peerRating!,
                   reviews: trade.peerReviews ?? 0,
-                  days: trade.peerDays ?? 0,
+                  days: trade.peerDaysOnMostro,
                   counterpartIsBuyer: false,
                 ),
                 const SizedBox(height: AppSpacing.lg),

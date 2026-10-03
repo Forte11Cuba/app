@@ -49,6 +49,13 @@ flutter gen-l10n                            # after editing lib/l10n/*.arb
   (`--base-href` for the sub-path, `--pwa-strategy=none` so Flutter's service worker does not
   take the isolation shim's scope). Every one of these, when wrong, yields a **blank page** —
   `test/web/pages_bundle_test.dart` guards them statically.
+- **No Rust runs on a web worker.** FRB's default handler would run every non-async API function
+  on a worker pool and every async one on the main thread (`spawn_local`); a `std::sync` lock
+  contended across the two traps the page with "Atomics.wait cannot be called in this context"
+  (#294), and the lock behind every opaque object is one of them. `rust/src/api/bridge_handler.rs`
+  defines `FLUTTER_RUST_BRIDGE_HANDLER`, which on web runs both kinds on the main thread, and
+  `bridge_does_not_use_the_default_handler` fails if codegen ever goes back to the default.
+  Don't hand work to `FLUTTER_RUST_BRIDGE_HANDLER.thread_pool()` either.
 - `cargo check --target wasm32-unknown-unknown` is **not** a substitute for `build-web.sh`: two
   wasm-only requirements fail later than type-checking. `getrandom` (0.2 via bip32/k256, 0.4 via
   nostr's `rand`) needs its JS backend feature enabled in `rust/Cargo.toml`, and nostr 0.45's
@@ -76,6 +83,13 @@ flutter gen-l10n                            # after editing lib/l10n/*.arb
   `pages_bundle_test.dart` holds equal to `firebase_options.dart` and `firebase_core_web`; CI
   sets `SMOKE_PUSH_WORKER=1` to assert it activates without costing isolation. Web push stays
   off until the build passes `PUSH_WEB_ENABLED` (docs/PUSH_NOTIFICATIONS.md T4.5).
+- **The bundle is an installable app** (#658): `web/manifest.json` (relative `start_url` and
+  `scope`, so it follows the base path, and deliberately no `id`: an `id` resolves against the
+  origin, so "./" would be "/"; without one it is the resolved `start_url`) plus the icons
+  `flutter_launcher_icons` generates.
+  `SMOKE_INSTALLABLE=1` asks Chrome itself (`Page.getInstallabilityErrors`); that needs the
+  full Chromium build and a persistent profile, because the default headless shell calls
+  every page installable and an incognito profile none.
 
 ## Code Style
 
@@ -162,6 +176,11 @@ bridged by flutter_rust_bridge.
   `specs/004` + `.specify/*` = **prescriptive for v2** (what/how to build). Specs are a
   **living artifact** — update the matching spec/contract as part of any behavior/contract change.
 - For **curated reference docs** (`.specify/v1-reference/`, `.specify/*`): **propose edits first**.
+- **UI changes are judged against `.specify/DESIGN_SYSTEM.md`**, whose rules have IDs (`DS-COL-1`…).
+  New UI code keeps every MUST; its §14 lists the older code that does not, as debt, never as
+  a precedent to copy. A change that needs a different value changes the guide first.
+  The **Design guide** CI job runs its *auto* rules on the changed lines of `lib/`
+  (`dart tool/design_check.dart` locally; `--all` lists the whole debt).
 - Update this `CLAUDE.md` when guidelines, tooling, or core tech change.
 
 ## Reference checkouts (when in doubt)

@@ -80,10 +80,12 @@ List<Override> _overrides({
   NwcWalletState? wallet,
   bool permissionDenied = false,
   bool pushSupported = true,
+  bool pushExpiresWithTab = false,
   PushStatus? push,
   PushToggle? toggle,
 }) => [
   pushSupportedProvider.overrideWithValue(pushSupported),
+  pushExpiresWithTabProvider.overrideWithValue(pushExpiresWithTab),
   pushStatusProvider.overrideWith((ref) => Stream.value(push ?? _push())),
   pushToggleProvider.overrideWithValue(toggle ?? _RecordingToggle()),
   relayListLoaderProvider.overrideWithValue(() async => relays ?? _mixedRelays),
@@ -514,6 +516,39 @@ void main() {
         expect(tester.widget<MostroToggle>(_masterToggle).onChanged, isNotNull);
       },
     );
+
+    // Web has no OS job to refresh the registration once the tab is closed,
+    // and the push server forgets it 48 h after the last one, which a running
+    // tab sent 12 to 18 h earlier at most (docs/PUSH_NOTIFICATIONS.md §2.6,
+    // §9.1).
+    testWidgets('on the web the toggle says when push stops', (tester) async {
+      await _pump(
+        tester,
+        const NotificationSettingsScreen(),
+        overrides: _overrides(pushExpiresWithTab: true),
+      );
+
+      expect(
+        find.text('Stops 30 to 48 h after this tab last ran Mostro'),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('off the web the toggle does not mention a tab', (
+      tester,
+    ) async {
+      await _pump(
+        tester,
+        const NotificationSettingsScreen(),
+        overrides: _overrides(),
+      );
+
+      expect(_masterToggle, findsOneWidget);
+      expect(
+        find.text('Stops 30 to 48 h after this tab last ran Mostro'),
+        findsNothing,
+      );
+    });
 
     testWidgets('an unsupported platform shows an info row, not a toggle', (
       tester,

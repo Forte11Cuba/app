@@ -4,6 +4,42 @@ All notable changes to Mostro are documented here, newest first. This file is
 written by the release workflow (docs/RELEASING.md) — do not edit it by hand.
 Versions follow [Semantic Versioning](https://semver.org/).
 
+## [2.0.10] - 2026-10-01
+
+### ✨ Features
+
+- **chat:** draw the animal of each pseudonym on its avatar ([#648](https://github.com/MostroP2P/app/pull/648)) by @grunch
+- **chat:** keep the peer chat open for an hour after a trade completes ([#645](https://github.com/MostroP2P/app/pull/645)) by @grunch
+- **disputes:** show Serbero and the resolver instead of Admin ([#641](https://github.com/MostroP2P/app/pull/641)) by @grunch
+
+### 🐛 Bug Fixes
+
+- **disputes:** drop a dispute cursor no assignment time vouches for ([#640](https://github.com/MostroP2P/app/pull/640)) by @grunch
+- **disputes:** listen to the new solver after a dispute takeover ([#638](https://github.com/MostroP2P/app/pull/638)) by @grunch
+- **startup:** re-attach to a running relay pool instead of hanging on the splash ([#635](https://github.com/MostroP2P/app/pull/635)) by @grunch
+- **disputes:** record the peer's dispute and look it up on View dispute ([#627](https://github.com/MostroP2P/app/pull/627)) by @grunch
+- **invoice:** ask NWC for a lasting invoice, fall back to the form ([#626](https://github.com/MostroP2P/app/pull/626)) by @grunch
+- **account:** persist privacy mode across restarts ([#624](https://github.com/MostroP2P/app/pull/624)) by @grunch
+- **settings:** sync the Lightning address to the Rust core ([#623](https://github.com/MostroP2P/app/pull/623)) by @grunch
+- **trades:** name the amount of a taken range order on the trade and pay screens ([#621](https://github.com/MostroP2P/app/pull/621)) by @grunch
+- **orders:** show the taken amount of a maker's range order ([#620](https://github.com/MostroP2P/app/pull/620)) by @grunch
+
+### 📚 Documentation
+
+- require the Regression step in the triage check ([#653](https://github.com/MostroP2P/app/pull/653)) by @grunch
+- publish the contribution quality bar ([#644](https://github.com/MostroP2P/app/pull/644)) by @grunch
+- **readme:** add Cashu escrow to the progress overview ([#625](https://github.com/MostroP2P/app/pull/625)) by @grunch
+- **readme:** update the progress overview against the code ([#622](https://github.com/MostroP2P/app/pull/622)) by @grunch
+
+### 🧪 Tests
+
+- **disputes:** write the solver last in the rehydration tests ([#652](https://github.com/MostroP2P/app/pull/652)) by @grunch
+- **settings:** stop the node key test from emptying the shared order book ([#646](https://github.com/MostroP2P/app/pull/646)) by @grunch
+
+### 🧹 Chores
+
+- keep LF line endings in every checkout ([#647](https://github.com/MostroP2P/app/pull/647)) by @grunch
+
 ## [2.0.9] - 2026-09-28
 
 ### ✨ Features

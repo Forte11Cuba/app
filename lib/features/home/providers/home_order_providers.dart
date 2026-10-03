@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mostro/features/home/providers/order_book_feed.dart';
 import 'package:mostro/features/home/providers/order_filters_provider.dart';
 import 'package:mostro/shared/utils/platform_int64.dart';
+import 'package:mostro/shared/utils/reputation_age.dart';
 import 'package:mostro/src/rust/api/orders.dart' as orders_api;
 import 'package:mostro/src/rust/api/types.dart';
 
@@ -84,6 +85,7 @@ class OrderItem {
     this.rating = 0.0,
     this.tradeCount = 0,
     this.daysActive = 0,
+    this.makerSince,
     this.status = OrderStatus.pending,
     this.amountSats,
     this.isMine = false,
@@ -113,7 +115,19 @@ class OrderItem {
   final DateTime? expiresAt;
   final double rating;
   final int tradeCount;
+
+  /// The rating tag's deprecated day count, frozen when the daemon published
+  /// the event. Display [makerDaysOnMostro] instead; this is its fallback.
   final int daysActive;
+
+  /// The maker's first trade (the rating tag's `since`, a UTC day start), or
+  /// `null` from daemons that predate it.
+  final DateTime? makerSince;
+
+  /// Days the maker has been on Mostro, computed now from [makerSince] when
+  /// present, otherwise [daysActive].
+  int get makerDaysOnMostro =>
+      daysOnMostro(makerSince, fallbackDays: daysActive);
 
   /// Current order status from the Mostro protocol.
   final OrderStatus status;
@@ -128,12 +142,22 @@ class OrderItem {
 
   bool get isRange => fiatAmountMin != null && fiatAmountMax != null;
 
-  /// [paymentMethod] as the payment-method filter compares it: its
-  /// comma-separated entries, trimmed and lower-cased. Computed on first use
-  /// and kept — an order's methods never change, and the filter walks the
-  /// whole book on every emission and every filter change.
-  late final Set<String> paymentTokens =
-      paymentMethod.split(',').map((t) => t.trim().toLowerCase()).toSet();
+  /// [paymentMethod]'s entries as the maker wrote them: comma-separated,
+  /// trimmed, empty ones dropped. The one place the filter splits the field,
+  /// so the chips it offers ([bookPaymentMethodsProvider]) and the tokens it
+  /// compares ([paymentTokens]) cannot drift apart: a chip that matches no
+  /// order is the bug the book-derived chips exist to fix.
+  List<String> get paymentLabels => [
+    for (final entry in paymentMethod.split(','))
+      if (entry.trim().isNotEmpty) entry.trim(),
+  ];
+
+  /// [paymentLabels] as the payment-method filter compares them: lower-cased.
+  /// Computed on first use and kept — an order's methods never change, and
+  /// the filter walks the whole book on every emission and every filter change.
+  late final Set<String> paymentTokens = {
+    for (final label in paymentLabels) label.toLowerCase(),
+  };
 
   String get displayAmount {
     if (isRange) {
@@ -168,6 +192,7 @@ class OrderItem {
           other.rating == rating &&
           other.tradeCount == tradeCount &&
           other.daysActive == daysActive &&
+          other.makerSince == makerSince &&
           other.status == status &&
           other.amountSats == amountSats &&
           other.isMine == isMine;
@@ -188,6 +213,7 @@ class OrderItem {
     rating,
     tradeCount,
     daysActive,
+    makerSince,
     status,
     amountSats,
     isMine,
@@ -219,6 +245,7 @@ class OrderItem {
     rating: info.rating,
     tradeCount: info.totalReviews,
     daysActive: info.daysActive,
+    makerSince: reputationSince(info.makerSince),
   );
 }
 
@@ -313,6 +340,35 @@ final tabHasOrdersProvider = Provider.autoDispose<bool>((ref) {
       ref.watch(orderBookProvider).valueOrNull ?? const <OrderItem>[];
   final tab = ref.watch(homeOrderTypeProvider);
   return orders.any((order) => _isListedOnTab(order, tab));
+});
+
+/// The payment methods the active tab's orders carry, as the filter dialog
+/// offers them: one entry per method however makers cased it, spelled the
+/// way it first appears, sorted alphabetically. With currencies picked, only
+/// those currencies' orders count: a method no order of theirs carries would
+/// leave the book empty.
+///
+/// Taken from the book rather than a fixed list, because the filter matches
+/// a method exactly: a catalogue chip "SEPA" found no order that says
+/// "SEPA instant" — the name the order form itself offers for EUR.
+final bookPaymentMethodsProvider = Provider.autoDispose<List<String>>((ref) {
+  final orders =
+      ref.watch(orderBookProvider).valueOrNull ?? const <OrderItem>[];
+  final tab = ref.watch(homeOrderTypeProvider);
+  final currencies = ref.watch(
+    orderFiltersProvider.select((filters) => filters.currencies),
+  );
+  final byToken = <String, String>{};
+  for (final order in orders) {
+    if (!_isListedOnTab(order, tab)) continue;
+    if (currencies.isNotEmpty && !currencies.contains(order.fiatCode)) continue;
+    for (final label in order.paymentLabels) {
+      byToken.putIfAbsent(label.toLowerCase(), () => label);
+    }
+  }
+  final methods = byToken.values.toList();
+  methods.sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+  return methods;
 });
 
 /// Filtered orders based on active tab, all filter providers and the selected
