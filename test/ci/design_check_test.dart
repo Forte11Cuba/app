@@ -178,11 +178,12 @@ final c = s.clamp(maxScaleFactor: 1.3);
       );
     });
 
-    test('allows reading the scaler to measure text', () {
+    test('allows reading the scaler, and a framework signature naming it', () {
       expect(
-        breaks(
-          'final p = TextPainter(textScaler: MediaQuery.textScalerOf(c));',
-        ),
+        breaks('''
+final p = TextPainter(textScaler: MediaQuery.textScalerOf(c));
+void paint(PaintingContext c, {required double textScaleFactor}) {}
+'''),
         isEmpty,
       );
     });
