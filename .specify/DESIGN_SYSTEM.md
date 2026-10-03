@@ -26,10 +26,11 @@ information architecture. It does not keep v1's look.
   that predates them is listed in §14 as known gaps. A gap is debt to pay down, never a
   precedent: "the next screen already does it" does not answer a break.
 - **Redesigned and legacy areas.** Most screens are built on the redesign palettes (§2.2). A few
-  still run on the v1 layer, `AppColors` and the theme's `textTheme`: the chat room and its
-  message bubbles, disputes, notifications, the walkthrough, rating and the Cashu wallet. A change
-  inside a legacy area may keep that area's layer, or migrate the whole screen. It never mixes
-  the two on one screen, and it never adds a literal (§2.1).
+  still run on the v1 layer, `AppColors` and the theme's defaults: the chat room and its message
+  bubbles, disputes, notifications, the walkthrough, rating and the Cashu wallet. That code is
+  §14 debt, not a style to match. **New code is v2 everywhere**, a legacy screen included: it
+  reads a redesign palette (DS-COL-11) and never leans on the theme's v1 defaults (§1,
+  principle 7). A change that adds to a legacy screen SHOULD migrate the screen it touches.
 
 ---
 
@@ -47,6 +48,11 @@ information architecture. It does not keep v1's look.
    not a fallback. Each screen holds up in German at 320 dp wide with text scaled to 2×.
 6. **Calm.** Surfaces are flat. Motion is short. A screen in a waiting state has no call to
    action that shouts.
+7. **No theme defaults.** `ThemeData` still carries v1's values: its scaffold background,
+   app bar, input decoration and button shapes (a Material button with no style is a stadium in
+   v1 colors). So a widget that leaves its style to the theme looks like v1 even with no literal
+   in it. Material buttons, app bars, scaffolds and text fields always set their own style from
+   the palette, or come from a shared component that does (DS-CMP-12, DS-CMP-17 to DS-CMP-19).
 
 ---
 
@@ -64,6 +70,7 @@ information architecture. It does not keep v1's look.
 | DS-COL-6 | **MUST.** Every new text color in a palette is asserted at **4.5:1** against each surface it renders on, in dark and light, in that palette's `test/core/*_contrast_test.dart`. A translucent fill is first flattened onto its real surface with `flatten()`. | test |
 | DS-COL-7 | **SHOULD.** Non-text elements that carry meaning (status dots, input borders, focus rings, meaningful icons) reach **3:1** against their surface (WCAG 1.4.11). No test checks this yet. | review |
 | DS-COL-8 | **MUST.** A new token reuses a canonical value (§2.3). It differs only where a contrast test forces it, with a comment that says so (as `textFaint` does). | review |
+| DS-COL-11 | **MUST.** New code never reads `AppColors`, the v1 layer, not even inside a legacy screen. It reads the area's redesign palette, or `OrderBookPalette` where the area has none. | auto |
 
 ### 2.2 Palette per area
 
@@ -81,7 +88,7 @@ information architecture. It does not keep v1's look.
 | Restore | `restore_palette.dart` |
 | About | `about_palette.dart` |
 | Drawer | `DrawerPalette` in `app_theme.dart` |
-| Legacy areas (§0) | `AppColors` (`Theme.of(context).extension<AppColors>()`) |
+| Legacy areas (§0) | Built on `AppColors`, the v1 layer: debt (§14). New code there reads `OrderBookPalette` (DS-COL-11). |
 
 All dialogs and sheets render on `OrderBookPalette.surface` with `OrderBookPalette.scrim`. The
 theme applies this through `dialogTheme` and `bottomSheetTheme`, so no modal sets it itself.
@@ -157,8 +164,8 @@ and the only ones allowed:
 | DS-TYP-6 | **SHOULD.** Multi-line body text uses a line height of 1.4–1.5. Letter spacing is reserved for caps labels (0.3–0.6) and large figures (negative). | review |
 | DS-TYP-7 | **MUST.** Text scaling is never disabled or clamped: no `TextScaler.noScaling`, and no `MediaQuery` override of `textScaler`. A button label stays on one line and may shrink to fit (`FittedBox(fit: BoxFit.scaleDown)`, as `OrderPrimaryButton` does). Body text wraps. | auto, review |
 
-In legacy areas the theme's `textTheme` roles (`bodySmall`, `bodyMedium`, …) remain in use and
-are allowed there. A role the theme does not define (`titleMedium`, `titleLarge`, `labelMedium`)
+In legacy areas the theme's `textTheme` roles (`bodySmall`, `bodyMedium`, …) remain in use; new
+code there sets its sizes from the scale above. A role the theme does not define (`titleMedium`, `titleLarge`, `labelMedium`)
 falls back to Material defaults and is not allowed in new code.
 
 ---
@@ -215,6 +222,7 @@ Reuse before building (principle 4). These are the parts a new screen is assembl
 | DS-CMP-5 | **MUST.** A filled red button is used only for the answer to an irreversible question inside a modal (DS-CMP-2). On a page, danger is an outlined or link action in `danger` ink. | review |
 | DS-CMP-6 | **MUST.** Every tappable target is at least **48 × 48** dp. A small glyph is padded out to it, as `_OrderBookAppBar` does with `_target = 48`. | review |
 | DS-CMP-7 | **MUST.** An icon-only button has a `tooltip` or a semantic label. | review |
+| DS-CMP-17 | **MUST.** A `FilledButton`, `OutlinedButton` or `ElevatedButton` always passes `style:` (radius and palette colors as DS-CMP-3 and DS-CMP-4 say), or comes from a shared component that does (`OrderPrimaryButton`, `ModalAction`). Without one it is the theme's stadium in v1 colors. A `TextButton` used as a link colors its label from the palette, or is a `ModalLink`. | auto |
 
 ### 6.3 Cards, rows and chips
 
@@ -229,12 +237,14 @@ Reuse before building (principle 4). These are the parts a new screen is assembl
 |---|---|---|
 | DS-CMP-10 | **MUST.** A single-value form field (amount, address, name) is an underline field. The label sits above in `fieldLabel`, turning `fieldLabelFocus` on focus. The underline turns lime on focus and red on error. The error text sits underneath at 12 sp. `UnderlineAmountField` is the reference. | review |
 | DS-CMP-11 | **MUST.** A multi-line or pasted value (invoice, chat composer, search) is a boxed field at radius 14 on the area's field fill (`inset`, `textareaFill`). The invoice field (`InvoiceInputField`) is the reference. | review |
+| DS-CMP-19 | **MUST.** A `TextField` draws its own border (`border`, `enabledBorder`, `InputBorder.none` inside a styled container, or `InputDecoration.collapsed`). The theme's decoration is v1's filled underline. | auto |
 
 ### 6.5 Bars, feedback and states
 
 | ID | Rule | Check |
 |---|---|---|
-| DS-CMP-12 | **MUST.** A pushed screen uses `redesignAppBar()`. A tab root uses `TabAppBar`. The bottom bar is `BottomNavBar`. No new `AppBar` is styled by hand. | review |
+| DS-CMP-12 | **MUST.** A pushed screen uses `redesignAppBar()`. A tab root uses `TabAppBar`. The bottom bar is `BottomNavBar`. An `AppBar` built in place sets `backgroundColor` and its icon and title colors from the palette (as `add_order_screen.dart` does); one that leaves them to the theme is v1. | auto, review |
+| DS-CMP-18 | **MUST.** A `Scaffold` sets `backgroundColor` from the palette (`bg`). The theme's is v1's `#1B1E28`. | auto |
 | DS-CMP-13 | **MUST.** A list that loads shows a shimmer skeleton in the shape of its rows (`OrderListSkeleton`), never a centered spinner. A button that works shows its own spinner and keeps its size. | review |
 | DS-CMP-14 | **MUST.** An empty list explains itself: the mascot, a title, the reason, and the action that fixes it when there is one (`OrderListEmpty`). | review |
 | DS-CMP-15 | **SHOULD.** A snackbar confirms something that already happened ("Copied"). It is floating, on `surface`, radius 12, about 2 s (`showOrderDetailSnackBar`). It never carries an error the user must act on; that belongs in the screen or a modal. | review |
@@ -339,7 +349,7 @@ around a rule the change could keep.
 
 Each gap below is debt. A change in the same code SHOULD close it, and MUST NOT copy it. The
 CI check reports a gap once a pull request touches its line. `dart tool/design_check.dart --all`
-lists every one the check can see (442 when this guide was written).
+lists every one the check can see (589 when the theme-default rules were added).
 
 | Gap | Where | Rule |
 |---|---|---|
@@ -359,6 +369,8 @@ lists every one the check can see (442 when this guide was written).
 | Only three widgets honour `disableAnimations` (restore sheet, invoice field, mascot). | §7 | DS-MOT-3 |
 | No test checks 3:1 for non-text, and none uses Flutter's `meetsGuideline` for tap targets or labels. | §8 | DS-COL-7, DS-CMP-6 |
 | `app_theme.dart` cites `test/core/accent_consistency_test.dart`, which does not exist. The check lives in `modal_contrast_test.dart`. | §2.1 | — |
+| About 100 reads of `AppColors` in the legacy areas and in a few redesigned files. | §2.2 | DS-COL-11 |
+| `ThemeData` holds v1's defaults: scaffold background `#1B1E28`, app bar, filled-underline input decoration, and no button themes (so a bare button is a stadium). 16 unstyled Material buttons, 11 app bars and 11 scaffolds on the theme background, and 8 text fields on the theme decoration rely on them, mostly in the Cashu, chat, dispute and notification screens and in error states. Moving the theme's defaults to the redesign values would make a bare widget look right and retire most of these. | §1 | DS-CMP-12, DS-CMP-17 to DS-CMP-19 |
 
 ---
 
@@ -377,6 +389,8 @@ For the reviewer of a UI change. Each line is a MUST unless marked.
 - [ ] At most one primary call to action; secondaries outlined; danger not a filled page button
       (DS-CMP-3, DS-CMP-4, DS-CMP-5).
 - [ ] Modals through `mostro_modal.dart`; one answer (DS-CMP-1, DS-CMP-2).
+- [ ] No v1: no `AppColors`, and no button, app bar, scaffold or text field left to the theme's
+      defaults (DS-COL-11, DS-CMP-12, DS-CMP-17 to DS-CMP-19).
 - [ ] Targets at least 48 dp; icon buttons labelled; custom tappables have semantics
       (DS-CMP-6, DS-CMP-7, DS-A11Y-1).
 - [ ] Existing components reused: app bars, chips, cards, inputs, skeletons, empty states

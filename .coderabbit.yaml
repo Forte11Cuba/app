@@ -16,7 +16,9 @@ reviews:
   path_instructions:
     # UI changes are judged against the design guide. The "Design guide" CI
     # job already enforces its rules marked *auto* (literal colors, fonts,
-    # sizes, radii, spacing, breakpoints, icon sizes) on the changed lines,
+    # sizes, radii, spacing, breakpoints, icon sizes, AppColors, and buttons,
+    # app bars, scaffolds and text fields left to the v1 theme defaults) on
+    # the changed lines,
     # so the review spends its attention on the rules marked *review*.
     - path: "lib/features/**/*.dart"
       instructions: &design_review |
@@ -28,9 +30,10 @@ reviews:
         pull request adds or changes, and never as a pattern to follow.
 
         Focus on the rules no script can check:
-        - DS-COL-2: colors come from the palette of the screen's area (§2.2);
-          a legacy area never mixes `AppColors` with a redesign palette on
-          one screen.
+        - DS-COL-2: colors come from the palette of the screen's area (§2.2).
+          New code is v2 even inside a legacy screen (Cashu, chat,
+          disputes, notifications): it looks like the redesigned screens,
+          never like the v1 code around it.
         - DS-COL-4, DS-COL-5: an accent fill carries its dark ink (`onLime`,
           `onSell`), never white; lime as text on light uses `limeText`.
         - DS-COL-6: every new palette text token has a 4.5:1 assertion in
