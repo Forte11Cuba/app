@@ -13,8 +13,11 @@ This directory contains the specification for **Mostro v2** — the next generat
 **Note:** The following specs are planned but not yet implemented in this repository. They exist in the main project documentation.
 
 - ~~[ARCHITECTURE.md](./ARCHITECTURE.md)~~ — System architecture and component design *(planned)*
-- ~~[DESIGN_SYSTEM.md](./DESIGN_SYSTEM.md)~~ — UI/UX design system and guidelines *(planned)*
 - ~~[PROTOCOL.md](./PROTOCOL.md)~~ — Mostro protocol specification *(see [mostro repo](https://github.com/MostroP2P/mostro))*
+
+### Design
+
+- [DESIGN_SYSTEM.md](./DESIGN_SYSTEM.md) — the design guide: the rules a UI change is judged against
 
 ### v1 Reference Documentation
 
@@ -95,7 +98,7 @@ When migrating features from v1 → v2:
 .specify/
 ├── README.md                    # This file
 ├── ARCHITECTURE.md              # Overall system design
-├── DESIGN_SYSTEM.md             # UI/UX guidelines
+├── DESIGN_SYSTEM.md             # Design guide (rules for UI changes)
 ├── PROTOCOL.md                  # Mostro protocol spec
 ├── NOSTR_EXCHANGE_RATES.md      # v2 feature: Nostr-based rates
 ├── v1-reference/                # Flutter v1 implementation docs

@@ -61,7 +61,7 @@ Every pull request that is not [exempt](#contribution-quality-bar) links an issu
 
 - Link it with a closing keyword in the description (`Closes #123`, `Fixes #123`). A plain mention does not count.
 - Only maintainers apply `status: accepted`, when they agree the problem is real and in scope. An issue opened minutes before the pull request is not accepted until a maintainer says so.
-- A UI or design change needs the issue to show the intended result: a mockup, the v1 screen it matches, or a reference to `docs/design/`.
+- A UI or design change needs the issue to show the intended result: a mockup, the v1 screen it matches, or a reference to `docs/design/`. The result must keep the [design guide](.specify/DESIGN_SYSTEM.md): a proposal that breaks one of its MUST rules is declined, or it changes the guide first.
 - If there is no accepted issue yet, comment on the issue instead of opening the pull request.
 
 ### Pull request template
@@ -121,9 +121,11 @@ If you could not build or run the app, say so in the pull request instead of cla
 
 - Any visible change carries **before** (`main`) and **after** (your branch) screenshots of the same screen with the same data.
 - A change of colour, contrast or layout adds both themes, and a phone width when the layout reflows.
+- A change of layout adds one screenshot at 2× text scale (the [design guide](.specify/DESIGN_SYSTEM.md) §12).
 - A change of copy shows English and at least one other locale.
 - A change inside a flow (several screens, an animation, a timing) is a short screen recording instead.
 - With no visible change, write `No visible change`. Writing it for a change that is visible is a description that does not match its diff.
+- A visible change also names the [design guide](.specify/DESIGN_SYSTEM.md) rules it touches (`DS-CMP-3`, `DS-COL-6`…), any SHOULD it departs from and why, and every new colour token with its contrast test (guide §12).
 
 [Golden tests](docs/golden-tests.md) do not replace screenshots: they catch unintended changes, not whether the new look is the intended one.
 
