@@ -3875,7 +3875,10 @@ class AppLocalizationsEn extends AppLocalizations {
   String get cashuReceiveHint => 'Paste or scan a Cashu token';
 
   @override
-  String get cashuPasteTokenOption => 'Paste token';
+  String get cashuReceiveTitle => 'Receive a token';
+
+  @override
+  String get cashuTokenFieldLabel => 'Cashu token';
 
   @override
   String get cashuPasteTokenHint => 'Paste a Cashu token';

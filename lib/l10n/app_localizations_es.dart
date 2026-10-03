@@ -3903,7 +3903,10 @@ class AppLocalizationsEs extends AppLocalizations {
   String get cashuReceiveHint => 'Pega o escanea un token Cashu';
 
   @override
-  String get cashuPasteTokenOption => 'Pegar token';
+  String get cashuReceiveTitle => 'Recibir un token';
+
+  @override
+  String get cashuTokenFieldLabel => 'Token Cashu';
 
   @override
   String get cashuPasteTokenHint => 'Pega un token Cashu';
