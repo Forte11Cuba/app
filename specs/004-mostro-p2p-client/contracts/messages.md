@@ -152,6 +152,9 @@ reaction no relay accepted is **not** kept, and it wakes nobody. Once
 published it is folded into the target (`ChatMessage.reactions`), persisted
 with it and emitted on `on_message_updated`.
 
+Sends run one at a time, so two quick taps are dated in the order they
+were made.
+
 **Errors**: `ReactionTooLarge`, `MessageNotFound`, `ReactionNotAllowed`,
 `SendFailed`.
 
@@ -160,10 +163,11 @@ with it and emitted on `on_message_updated`.
 one per party, the newest `created_at` holding, ties to the lowest id. A
 reaction to the reactor's own message, or on the dispute channel, is
 dropped. One whose target has not arrived is held in memory — one per
-party and target, at most 256 per trade — until it does. The peer cursor stays
-where it was when the earliest held reaction arrived, whatever arrives after
-it, and catches up once that reaction is stored with its target: the target
-is older than the reaction, so a restart must fetch both again. A reaction
+party and target, at most 256 per trade — until it does. During catch-up, which
+serves the newest events first, the peer cursor goes back to where that
+catch-up started when a reaction is held, and stays there whatever arrives
+after it; it catches up once the reaction is stored with its target. The
+target is older than the reaction, so a restart must fetch both again. A reaction
 held for more than 10 minutes stops holding the cursor back (its target was
 refused by the retention quota, or names nothing) but stays held in case the
 target comes. If the target's write fails, its reactions are held again

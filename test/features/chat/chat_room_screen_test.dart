@@ -377,13 +377,28 @@ void main() {
     setUp(() => updates = StreamController<rust_types.ChatMessage>());
     tearDown(() => updates.close());
 
-    Future<void> pumpRoom(WidgetTester tester) => _pumpChatRoom(
+    Future<void> pumpRoom(
+      WidgetTester tester, {
+      ChatGroup group = ChatGroup.active,
+    }) => _pumpChatRoom(
       tester,
       incoming,
       overrides: [
         messageUpdatesProvider(_orderId).overrideWith((ref) => updates.stream),
+        chatRowStateProvider(_orderId).overrideWithValue(
+          ChatRowState(group: group, tone: ChatAvatarTone.waiting),
+        ),
       ],
     );
+
+    Future<void> hold(WidgetTester tester, String text) async {
+      final gesture = await tester.startGesture(
+        tester.getCenter(find.text(text)),
+      );
+      await tester.pump(const Duration(seconds: 1));
+      await gesture.up();
+      await tester.pumpAndSettle();
+    }
 
     rust_types.ChatMessage shortPeerMessage({
       List<rust_types.ChatReaction> reactions = const [],
@@ -457,16 +472,22 @@ void main() {
       await _leaveRoom(tester);
     });
 
+    testWidgets('a closed chat offers Copy and no reactions', (tester) async {
+      await pumpRoom(tester, group: ChatGroup.closed);
+      await _receive(tester, incoming, [shortPeerMessage()]);
+
+      await hold(tester, 'CBU sent');
+
+      expect(find.text('Copy'), findsOneWidget);
+      expect(find.text('❤️'), findsNothing);
+      await _leaveRoom(tester);
+    });
+
     testWidgets('a reaction that cannot be sent says so', (tester) async {
       await pumpRoom(tester);
       await _receive(tester, incoming, [shortPeerMessage()]);
 
-      final gesture = await tester.startGesture(
-        tester.getCenter(find.text('CBU sent')),
-      );
-      await tester.pump(const Duration(seconds: 1));
-      await gesture.up();
-      await tester.pumpAndSettle();
+      await hold(tester, 'CBU sent');
       // No `RustLib.init()`: the bridge call fails like a relay refusal.
       await tester.tap(find.text('❤️'));
       await tester.pumpAndSettle();

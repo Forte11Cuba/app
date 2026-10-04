@@ -536,6 +536,13 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
 
     final uploads = ref.watch(chatUploadsProvider(widget.orderId));
 
+    // A closed or still-resolving chat takes no reaction, as it takes no
+
+    // message: offering one would only end in a failure.
+
+    final canReact =
+        ref.watch(chatRowStateProvider(widget.orderId)).canCompose;
+
     final screenWidth = MediaQuery.sizeOf(context).width;
     final showSidePanel = screenWidth >= AppBreakpoints.tablet;
 
@@ -634,7 +641,9 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
                   ),
                   peerColorHue: room.peerColorHue,
                   onReact:
-                      msg.isMine ? null : (emoji) => _onReact(msg, emoji),
+                      msg.isMine || !canReact
+                          ? null
+                          : (emoji) => _onReact(msg, emoji),
                 );
               },
             );

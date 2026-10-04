@@ -812,6 +812,12 @@ pub async fn send_reaction(
     if emoji.len() > crate::nostr::transport::MAX_REACTION_BYTES {
         bail!("ReactionTooLarge: {} bytes", emoji.len());
     }
+    // One send at a time: each is dated after the reaction it replaces,
+    // which only holds if the next one reads that reaction once applied.
+    // Two taps in one second would otherwise share a date and be settled by
+    // their ids, not their order.
+    static SENDING: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+    let _sending = SENDING.lock().await;
     let target = message_store()
         .get_messages(&trade_id)
         .await
@@ -1969,6 +1975,10 @@ struct ChatRxState {
     /// the peer chat's stops at a reaction still held (`held_floor`) and
     /// catches up once that is stored.
     wanted: i64,
+    /// The cursor this subscription started from. Catch-up serves the
+    /// newest events first, so by the time a reaction arrives the cursor may
+    /// already be past its older target; this is where both are safe.
+    start_cursor: i64,
     flooded: bool,
     /// The chat claim this state belongs to: cursor writes are gated on it
     /// still owning the chat. `None` only in tests that run no task.
@@ -1985,6 +1995,7 @@ impl ChatRxState {
             live: false,
             cursor,
             wanted: cursor,
+            start_cursor: cursor,
             flooded: false,
             generation,
         }
@@ -2028,6 +2039,24 @@ impl ChatRxState {
     /// On the peer chat the cursor also stops at the earliest reaction still
     /// held for a target that has not arrived: a later event passing it would
     /// lose that reaction on a restart, and its target with it.
+    async fn hold_cursor_at(&mut self, order_id: &str, floor: i64) {
+        // Already past it (a newer event came first): back to it, persisted,
+        // or a restart would never fetch the held reaction and its target.
+        if self.cursor > floor {
+            self.cursor = floor;
+            self.persist_cursor(order_id).await;
+        }
+    }
+
+    async fn persist_cursor(&self, order_id: &str) {
+        match self.generation {
+            Some(generation) => {
+                store_chat_cursor_if_current(self.channel, order_id, generation, self.cursor).await
+            }
+            None => store_chat_cursor(self.channel, order_id, self.cursor).await,
+        }
+    }
+
     async fn advance_cursor(&mut self, order_id: &str, event_ts: i64) {
         self.wanted = self.wanted.max(event_ts.min(unix_now()));
         let floor = match self.channel {
@@ -2037,13 +2066,7 @@ impl ChatRxState {
         let accepted = floor.map_or(self.wanted, |floor| self.wanted.min(floor));
         if accepted > self.cursor {
             self.cursor = accepted;
-            match self.generation {
-                Some(generation) => {
-                    store_chat_cursor_if_current(self.channel, order_id, generation, accepted)
-                        .await
-                }
-                None => store_chat_cursor(self.channel, order_id, accepted).await,
-            }
+            self.persist_cursor(order_id).await;
         }
     }
 }
@@ -2358,9 +2381,19 @@ async fn handle_reaction(
         created_at: inner.created_at.as_secs() as i64,
         event_id: inner.id.to_hex(),
     };
+    // Live events come in order, so a missing target is older than the
+    // cursor only in catch-up, where it is still on its way.
+    let floor = if state.live {
+        state.cursor
+    } else {
+        state.start_cursor
+    };
     let outcome = message_store()
-        .apply_reaction(order_id, &target, reaction, state.cursor)
+        .apply_reaction(order_id, &target, reaction, floor)
         .await;
+    if matches!(outcome, ReactionOutcome::Held) {
+        state.hold_cursor_at(order_id, floor).await;
+    }
     log::debug!("[messages] incoming-chat reaction order={order_id} → {outcome:?}");
     // The cursor passes only what is durably stored, as for a message.
     let passed = match outcome {
@@ -4427,6 +4460,34 @@ mod tests {
             .into_iter()
             .find(|m| m.content == "paid");
         assert_eq!(paid.unwrap().reactions[0].emoji, "👍");
+    }
+
+    #[tokio::test]
+    async fn a_reaction_served_after_a_newer_event_takes_the_cursor_back() {
+        let mut chat = AliceChat::new();
+        let now = unix_now();
+        let (target_outer, target) = crate::nostr::transport::wrap_inner(
+            &chat.alice,
+            &chat.conv,
+            &chat.sign,
+            nostr_sdk::prelude::EventBuilder::new(nostr_sdk::prelude::Kind::TextNote, "paid"),
+            nostr_sdk::prelude::Timestamp::from_secs((now - 20) as u64),
+        )
+        .unwrap();
+        let reaction = chat.bob_reacts_at(&target.id, "👍", now - 10).await;
+        let (newest, _) = chat.message(&chat.bob.clone(), "still there?").await;
+
+        // Catch-up, newest first: the newest message, then the reaction.
+        chat.receive(&newest).await;
+        assert!(chat.state.cursor > 0);
+        chat.receive(&reaction).await;
+
+        assert_eq!(
+            chat.state.cursor, 0,
+            "back to where this catch-up started: a restart fetches all three"
+        );
+        chat.receive(&target_outer).await;
+        assert!(chat.state.cursor >= newest.created_at.as_secs() as i64 - 1);
     }
 
     #[tokio::test]
