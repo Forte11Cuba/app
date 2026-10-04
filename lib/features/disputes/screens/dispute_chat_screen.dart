@@ -13,6 +13,7 @@ import 'package:mostro/features/disputes/providers/dispute_chat_provider.dart';
 import 'package:mostro/features/disputes/providers/disputes_providers.dart';
 import 'package:mostro/features/disputes/widgets/dispute_message_input.dart';
 import 'package:mostro/features/disputes/widgets/dispute_messages_list.dart';
+import 'package:mostro/features/disputes/widgets/share_chat_key_action.dart';
 import 'package:mostro/features/notifications/models/notification_model.dart';
 import 'package:mostro/features/notifications/providers/notifications_provider.dart';
 import 'package:mostro/shared/widgets/redesign_app_bar.dart';
@@ -21,7 +22,8 @@ import 'package:mostro/src/rust/api/types.dart' as rust_types;
 /// Dispute chat screen — Route `/dispute_details/:disputeId`.
 ///
 /// Layout:
-///   - App bar: "Dispute Details", as in v1
+///   - App bar: "Dispute Details", as in v1, and the [ShareChatKeyAction]
+///     once a solver took the dispute (#415)
 ///   - Scrollable [DisputeMessagesList]: the info card ("Dispute with
 ///     [role]: [handle]", status chip, order and dispute ids, instructions
 ///     — #680), the resolved outcome, bubbles and banners
@@ -146,6 +148,22 @@ class _DisputeChatScreenState extends ConsumerState<DisputeChatScreen> {
     }
   }
 
+  /// Key button: confirm, then send the solver the peer chat key (#415). The
+  /// dialog sends it and reports a failure itself.
+  Future<void> _onShareChatKey(String tradeId) async {
+    final gateway = ref.read(disputeChatGatewayProvider);
+    final sent = await showShareChatKeyDialog(
+      context: context,
+      share: () => gateway.shareChatKey(tradeId),
+    );
+    if (!mounted) return;
+    if (sent != null) {
+      ref.read(disputeChatProvider(tradeId).notifier).add(sent);
+    }
+    // Shared now, or already: the record says which the button shows.
+    unawaited(_refreshDispute(tradeId));
+  }
+
   Future<void> _retryUpload(String tradeId, String uploadId) async {
     final sent = await ref
         .read(disputeUploadsProvider(tradeId).notifier)
@@ -221,6 +239,17 @@ class _DisputeChatScreenState extends ConsumerState<DisputeChatScreen> {
         context,
         title: AppLocalizations.of(context).disputeDetailsTitle,
         onBack: () => Navigator.of(context).maybePop(),
+        actions: [
+          if (canWrite) ...[
+            ShareChatKeyAction(
+              shared: dispute.chatKeyShared,
+              onPressed: () => _onShareChatKey(tradeId),
+            ),
+            // Its 48 target pads the 22 glyph by 13; the rest lines the
+            // glyph up with the content below.
+            const SizedBox(width: redesignSidePadding - 13),
+          ],
+        ],
       ),
       body: Column(
         children: [

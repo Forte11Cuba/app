@@ -4178,4 +4178,24 @@ class AppLocalizationsFr extends AppLocalizations {
   @override
   String get tradeBodyWaitingPaymentBuyerCashu =>
       'Ils verrouillent les sats dans l\'escrow. Une fois verrouillé, c\'est à vous de payer le fiat.';
+
+  @override
+  String get shareChatKeyAction => 'Partager la clé du chat avec le médiateur';
+
+  @override
+  String get shareChatKeyTitle => 'Partager la clé du chat avec le médiateur ?';
+
+  @override
+  String get shareChatKeyBody =>
+      'Si vous confirmez, le médiateur de ce litige pourra lire l\'intégralité du chat entre vous et votre contrepartie pour cet ordre, et uniquement ce chat : pas ceux de vos transactions passées ou futures. Cette action est irréversible. Le partage est facultatif, mais il aide le médiateur à résoudre le litige plus vite.';
+
+  @override
+  String get shareChatKeyConfirm => 'Partager';
+
+  @override
+  String get chatKeySharedIndicator => 'Clé du chat partagée avec le médiateur';
+
+  @override
+  String get shareChatKeyUnavailable =>
+      'La clé du chat de cette transaction n\'est pas disponible sur cet appareil.';
 }

@@ -1260,5 +1260,11 @@
   "lockEscrowOrderMovedOn": "De node zegt dat deze order niet meer op de escrow wacht. Je escrow blijft op dit apparaat opgeslagen; de status van de trade wordt bijgewerkt zodra de node die meldt.",
   "tradeHeadlineWaitingPaymentSellerCashu": "Vergrendel de escrow om de trade te starten",
   "tradeWaitingPaymentSellerInstructionCashu": "Vergrendel je ecash in de escrow bij de mint van de node. Dat start de trade, en het komt naar je terug als de node verdwijnt.",
-  "tradeBodyWaitingPaymentBuyerCashu": "Ze vergrendelen de sats in de escrow. Zodra die vergrendeld is, ben jij aan de beurt om de fiat te betalen."
+  "tradeBodyWaitingPaymentBuyerCashu": "Ze vergrendelen de sats in de escrow. Zodra die vergrendeld is, ben jij aan de beurt om de fiat te betalen.",
+  "shareChatKeyAction": "Chatsleutel delen met de solver",
+  "shareChatKeyTitle": "Chatsleutel delen met de solver?",
+  "shareChatKeyBody": "Als je bevestigt, kan de solver van dit dispuut de hele chat tussen jou en je tegenpartij in deze order lezen, en alleen die chat: niet de chats van je eerdere of latere trades. Dit kan niet ongedaan worden gemaakt. Delen is optioneel, maar het helpt de solver het dispuut sneller op te lossen.",
+  "shareChatKeyConfirm": "Delen",
+  "chatKeySharedIndicator": "Chatsleutel gedeeld met de solver",
+  "shareChatKeyUnavailable": "De chatsleutel van deze trade is niet beschikbaar op dit apparaat."
 }

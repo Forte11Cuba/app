@@ -4148,4 +4148,24 @@ class AppLocalizationsNl extends AppLocalizations {
   @override
   String get tradeBodyWaitingPaymentBuyerCashu =>
       'Ze vergrendelen de sats in de escrow. Zodra die vergrendeld is, ben jij aan de beurt om de fiat te betalen.';
+
+  @override
+  String get shareChatKeyAction => 'Chatsleutel delen met de solver';
+
+  @override
+  String get shareChatKeyTitle => 'Chatsleutel delen met de solver?';
+
+  @override
+  String get shareChatKeyBody =>
+      'Als je bevestigt, kan de solver van dit dispuut de hele chat tussen jou en je tegenpartij in deze order lezen, en alleen die chat: niet de chats van je eerdere of latere trades. Dit kan niet ongedaan worden gemaakt. Delen is optioneel, maar het helpt de solver het dispuut sneller op te lossen.';
+
+  @override
+  String get shareChatKeyConfirm => 'Delen';
+
+  @override
+  String get chatKeySharedIndicator => 'Chatsleutel gedeeld met de solver';
+
+  @override
+  String get shareChatKeyUnavailable =>
+      'De chatsleutel van deze trade is niet beschikbaar op dit apparaat.';
 }

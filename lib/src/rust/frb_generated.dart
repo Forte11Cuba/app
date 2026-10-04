@@ -83,7 +83,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.11.1';
 
   @override
-  int get rustContentHash => -1351531358;
+  int get rustContentHash => 1876860606;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -594,6 +594,10 @@ abstract class RustLibApi extends BaseApi {
   Future<void> crateApiSettingsSetTestOrderExpiry({BigInt? secs});
 
   Future<void> crateApiSettingsSetTheme({required ThemeMode theme});
+
+  Future<ChatMessage> crateApiDisputesShareChatKeyWithSolver({
+    required String tradeId,
+  });
 
   Future<SolverRole> crateApiDisputesSolverRole({
     required String tradeId,
@@ -6126,6 +6130,39 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       const TaskConstMeta(debugName: "set_theme", argNames: ["theme"]);
 
   @override
+  Future<ChatMessage> crateApiDisputesShareChatKeyWithSolver({
+    required String tradeId,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(tradeId, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 172,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_chat_message,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiDisputesShareChatKeyWithSolverConstMeta,
+        argValues: [tradeId],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiDisputesShareChatKeyWithSolverConstMeta =>
+      const TaskConstMeta(
+        debugName: "share_chat_key_with_solver",
+        argNames: ["tradeId"],
+      );
+
+  @override
   Future<SolverRole> crateApiDisputesSolverRole({
     required String tradeId,
     required String solverPubkey,
@@ -6139,7 +6176,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 172,
+            funcId: 173,
             port: port_,
           );
         },
@@ -6173,7 +6210,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 173,
+            funcId: 174,
             port: port_,
           );
         },
@@ -6208,7 +6245,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 174,
+            funcId: 175,
             port: port_,
           );
         },
@@ -6243,7 +6280,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 175,
+            funcId: 176,
             port: port_,
           );
         },
@@ -6273,7 +6310,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 176,
+            funcId: 177,
             port: port_,
           );
         },
@@ -6307,7 +6344,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 177,
+            funcId: 178,
             port: port_,
           );
         },
@@ -6339,7 +6376,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 178,
+            funcId: 179,
             port: port_,
           );
         },
@@ -7683,8 +7720,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   Dispute dco_decode_dispute(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 10)
-      throw Exception('unexpected arr length: expect 10 but see ${arr.length}');
+    if (arr.length != 11)
+      throw Exception('unexpected arr length: expect 11 but see ${arr.length}');
     return Dispute(
       id: dco_decode_String(arr[0]),
       tradeId: dco_decode_String(arr[1]),
@@ -7696,6 +7733,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       openedAt: dco_decode_i_64(arr[7]),
       resolvedAt: dco_decode_opt_box_autoadd_i_64(arr[8]),
       isRead: dco_decode_bool(arr[9]),
+      chatKeyShared: dco_decode_bool(arr[10]),
     );
   }
 
@@ -10154,6 +10192,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_openedAt = sse_decode_i_64(deserializer);
     var var_resolvedAt = sse_decode_opt_box_autoadd_i_64(deserializer);
     var var_isRead = sse_decode_bool(deserializer);
+    var var_chatKeyShared = sse_decode_bool(deserializer);
     return Dispute(
       id: var_id,
       tradeId: var_tradeId,
@@ -10165,6 +10204,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       openedAt: var_openedAt,
       resolvedAt: var_resolvedAt,
       isRead: var_isRead,
+      chatKeyShared: var_chatKeyShared,
     );
   }
 
@@ -13092,6 +13132,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_i_64(self.openedAt, serializer);
     sse_encode_opt_box_autoadd_i_64(self.resolvedAt, serializer);
     sse_encode_bool(self.isRead, serializer);
+    sse_encode_bool(self.chatKeyShared, serializer);
   }
 
   @protected

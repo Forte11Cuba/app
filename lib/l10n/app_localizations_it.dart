@@ -4156,4 +4156,27 @@ class AppLocalizationsIt extends AppLocalizations {
   @override
   String get tradeBodyWaitingPaymentBuyerCashu =>
       'Stanno bloccando i sats nell\'escrow. Una volta bloccato, tocca a te pagare il fiat.';
+
+  @override
+  String get shareChatKeyAction =>
+      'Condividi la chiave della chat con il mediatore';
+
+  @override
+  String get shareChatKeyTitle =>
+      'Condividere la chiave della chat con il mediatore?';
+
+  @override
+  String get shareChatKeyBody =>
+      'Se confermi, il mediatore di questa controversia potrà leggere l\'intera chat tra te e la tua controparte in questo ordine, e solo quella chat: non le chat delle tue operazioni precedenti o successive. L\'operazione non può essere annullata. La condivisione è facoltativa, ma aiuta il mediatore a risolvere la controversia più rapidamente.';
+
+  @override
+  String get shareChatKeyConfirm => 'Condividi';
+
+  @override
+  String get chatKeySharedIndicator =>
+      'Chiave della chat condivisa con il mediatore';
+
+  @override
+  String get shareChatKeyUnavailable =>
+      'La chiave della chat di questa operazione non è disponibile su questo dispositivo.';
 }

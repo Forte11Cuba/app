@@ -52,7 +52,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.11.1";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -1351531358;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 1876860606;
 
 // Section: executor
 
@@ -6858,6 +6858,43 @@ fn wire__crate__api__settings__set_theme_impl(
         },
     )
 }
+fn wire__crate__api__disputes__share_chat_key_with_solver_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::SseCodec, _, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "share_chat_key_with_solver",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_trade_id = <String>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| async move {
+                transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
+                    (move || async move {
+                        let output_ok =
+                            crate::api::disputes::share_chat_key_with_solver(api_trade_id).await?;
+                        Ok(output_ok)
+                    })()
+                    .await,
+                )
+            }
+        },
+    )
+}
 fn wire__crate__api__disputes__solver_role_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -8097,6 +8134,7 @@ impl SseDecode for crate::api::types::Dispute {
         let mut var_openedAt = <i64>::sse_decode(deserializer);
         let mut var_resolvedAt = <Option<i64>>::sse_decode(deserializer);
         let mut var_isRead = <bool>::sse_decode(deserializer);
+        let mut var_chatKeyShared = <bool>::sse_decode(deserializer);
         return crate::api::types::Dispute {
             id: var_id,
             trade_id: var_tradeId,
@@ -8108,6 +8146,7 @@ impl SseDecode for crate::api::types::Dispute {
             opened_at: var_openedAt,
             resolved_at: var_resolvedAt,
             is_read: var_isRead,
+            chat_key_shared: var_chatKeyShared,
         };
     }
 }
@@ -10209,18 +10248,24 @@ fn pde_ffi_dispatcher_primary_impl(
             data_len,
         ),
         171 => wire__crate__api__settings__set_theme_impl(port, ptr, rust_vec_len, data_len),
-        172 => wire__crate__api__disputes__solver_role_impl(port, ptr, rust_vec_len, data_len),
-        173 => wire__crate__api__bond__submit_bond_payout_invoice_impl(
+        172 => wire__crate__api__disputes__share_chat_key_with_solver_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        174 => wire__crate__api__disputes__submit_evidence_impl(port, ptr, rust_vec_len, data_len),
-        175 => wire__crate__api__reputation__submit_rating_impl(port, ptr, rust_vec_len, data_len),
-        176 => wire__crate__api__orders__subscribe_orders_impl(port, ptr, rust_vec_len, data_len),
-        177 => wire__crate__api__orders__take_order_impl(port, ptr, rust_vec_len, data_len),
-        178 => {
+        173 => wire__crate__api__disputes__solver_role_impl(port, ptr, rust_vec_len, data_len),
+        174 => wire__crate__api__bond__submit_bond_payout_invoice_impl(
+            port,
+            ptr,
+            rust_vec_len,
+            data_len,
+        ),
+        175 => wire__crate__api__disputes__submit_evidence_impl(port, ptr, rust_vec_len, data_len),
+        176 => wire__crate__api__reputation__submit_rating_impl(port, ptr, rust_vec_len, data_len),
+        177 => wire__crate__api__orders__subscribe_orders_impl(port, ptr, rust_vec_len, data_len),
+        178 => wire__crate__api__orders__take_order_impl(port, ptr, rust_vec_len, data_len),
+        179 => {
             wire__crate__api__invoice__trade_step_started_at_impl(port, ptr, rust_vec_len, data_len)
         }
         _ => unreachable!(),
@@ -11114,6 +11159,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::types::Dispute {
             self.opened_at.into_into_dart().into_dart(),
             self.resolved_at.into_into_dart().into_dart(),
             self.is_read.into_into_dart().into_dart(),
+            self.chat_key_shared.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -13144,6 +13190,7 @@ impl SseEncode for crate::api::types::Dispute {
         <i64>::sse_encode(self.opened_at, serializer);
         <Option<i64>>::sse_encode(self.resolved_at, serializer);
         <bool>::sse_encode(self.is_read, serializer);
+        <bool>::sse_encode(self.chat_key_shared, serializer);
     }
 }
 

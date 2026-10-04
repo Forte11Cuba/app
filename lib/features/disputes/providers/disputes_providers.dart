@@ -73,6 +73,7 @@ class DisputeItem {
     this.resolution,
     this.resolvedAt,
     this.isRead = false,
+    this.chatKeyShared = false,
     this.peerHandle,
     this.peerIconIndex = 0,
     this.peerColorHue = 180,
@@ -91,6 +92,9 @@ class DisputeItem {
   final int? resolvedAt;
   final bool isRead;
 
+  /// Whether the current solver already got the peer chat key (#415).
+  final bool chatKeyShared;
+
   // Peer identity (populated from session when available).
   final String? peerHandle;
   final int peerIconIndex;
@@ -108,6 +112,7 @@ class DisputeItem {
     DisputeResolution? resolution,
     int? resolvedAt,
     bool? isRead,
+    bool? chatKeyShared,
     String? peerHandle,
     int? peerIconIndex,
     int? peerColorHue,
@@ -124,6 +129,7 @@ class DisputeItem {
       resolution: resolution ?? this.resolution,
       resolvedAt: resolvedAt ?? this.resolvedAt,
       isRead: isRead ?? this.isRead,
+      chatKeyShared: chatKeyShared ?? this.chatKeyShared,
       peerHandle: peerHandle ?? this.peerHandle,
       peerIconIndex: peerIconIndex ?? this.peerIconIndex,
       peerColorHue: peerColorHue ?? this.peerColorHue,
@@ -182,6 +188,7 @@ class DisputeNotifier extends StateNotifier<List<DisputeItem>> {
       resolution: fromBridge.resolution,
       resolvedAt: fromBridge.resolvedAt,
       isRead: current.isRead,
+      chatKeyShared: fromBridge.chatKeyShared,
       peerHandle: current.peerHandle,
       peerIconIndex: current.peerIconIndex,
       peerColorHue: current.peerColorHue,
@@ -308,6 +315,7 @@ DisputeItem disputeItemFromRust(rust_types.Dispute dispute) => DisputeItem(
           ? null
           : platformInt64ToInt(dispute.resolvedAt),
   isRead: dispute.isRead,
+  chatKeyShared: dispute.chatKeyShared,
 );
 
 /// Trade statuses under which the bridge cannot hold a dispute: the trade

@@ -4318,5 +4318,17 @@
   "tradeWaitingPaymentSellerInstructionCashu": "Lock your ecash in the escrow at the node's mint. That starts the trade, and it comes back to you if the node disappears.",
   "@tradeWaitingPaymentSellerInstructionCashu": {"description": "Trade screen instruction for the seller on a Cashu node: lock the escrow"},
   "tradeBodyWaitingPaymentBuyerCashu": "They're locking the sats in escrow. Once it's locked, it's your turn to pay the fiat.",
-  "@tradeBodyWaitingPaymentBuyerCashu": {"description": "Trade screen body for the buyer while the seller locks the Cashu escrow"}
+  "@tradeBodyWaitingPaymentBuyerCashu": {"description": "Trade screen body for the buyer while the seller locks the Cashu escrow"},
+  "shareChatKeyAction": "Share the chat key with the resolver",
+  "@shareChatKeyAction": {"description": "Dispute chat app bar: tooltip of the action that sends the solver the peer chat key (#415)"},
+  "shareChatKeyTitle": "Share the chat key with the resolver?",
+  "@shareChatKeyTitle": {"description": "Title of the dialog confirming that the peer chat key goes to the dispute solver"},
+  "shareChatKeyBody": "If you confirm, the resolver of this dispute will be able to read the whole chat between you and your counterparty in this order, and only that chat: not the chats of your earlier or later trades. This cannot be undone. Sharing is optional, but it helps the resolver settle the dispute faster.",
+  "@shareChatKeyBody": {"description": "Body of the dialog confirming that the peer chat key goes to the dispute solver: what the solver can read, and only that"},
+  "shareChatKeyConfirm": "Share",
+  "@shareChatKeyConfirm": {"description": "Confirm button of the dialog that shares the peer chat key with the solver"},
+  "chatKeySharedIndicator": "Chat key shared with the resolver",
+  "@chatKeySharedIndicator": {"description": "Dispute chat app bar: tooltip and label of the indicator shown once the chat key went to the current solver"},
+  "shareChatKeyUnavailable": "The chat key of this trade is not available on this device.",
+  "@shareChatKeyUnavailable": {"description": "Error in the share-chat-key dialog: the counterparty or trade key of this order is not known on this device"}
 }

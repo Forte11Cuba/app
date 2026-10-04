@@ -1971,6 +1971,7 @@ void main() {
             initiatedByMe: false,
             openedAt: intToPlatformInt64(1000),
             isRead: false,
+            chatKeyShared: false,
           );
         },
       );
