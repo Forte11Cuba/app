@@ -163,7 +163,11 @@ dropped. One whose target has not arrived is held in memory — one per
 party and target, at most 256 per trade — until it does. The peer cursor stays
 where it was when the earliest held reaction arrived, whatever arrives after
 it, and catches up once that reaction is stored with its target: the target
-is older than the reaction, so a restart must fetch both again. Otherwise a reaction is passed
+is older than the reaction, so a restart must fetch both again. A reaction
+held for more than 10 minutes stops holding the cursor back (its target was
+refused by the retention quota, or names nothing) but stays held in case the
+target comes. If the target's write fails, its reactions are held again
+until a retry stores it. Otherwise a reaction is passed
 only once durably stored. Every write of a message row (a new message,
 a reaction, `mark_as_read`) happens under the store's write lock, so none
 writes an older copy over another — on web the read flag rewrites whole

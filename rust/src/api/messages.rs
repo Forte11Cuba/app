@@ -66,7 +66,18 @@ struct HeldReaction {
     /// the reaction is stored: its target is older than the reaction and
     /// not here yet, so a restart must fetch both again.
     floor: i64,
+    /// When it was first held, by our clock: past [`HELD_FLOOR_SECS`] it no
+    /// longer holds the cursor back.
+    held_at: i64,
 }
+
+/// How long a held reaction keeps the peer cursor back. A target served in
+/// the same catch-up arrives within seconds; one that has not come by then
+/// (refused by the retention quota, or an id that names nothing) must not
+/// pin the cursor for the life of the trade, refetching every later event on
+/// each start. Past it the reaction stays held, and still lands if its
+/// target comes.
+const HELD_FLOOR_SECS: i64 = 600;
 
 struct MessageStore {
     /// Messages keyed by trade_id. Write-through cache over the `messages`
@@ -160,7 +171,7 @@ impl MessageStore {
         // and no other write of this message reaches the database between.
         let stored = {
             let mut store = self.messages.write().await;
-            self.fold_held_reactions(&mut msg).await;
+            let folded = self.fold_held_reactions(&mut msg).await;
             store
                 .entry(msg.trade_id.clone())
                 .or_default()
@@ -169,7 +180,7 @@ impl MessageStore {
             // live in the `messages` table. Failure is logged, never
             // propagated — a full disk must not take the chat (let alone the
             // trade) down.
-            match crate::db::app_db::db() {
+            let stored = match crate::db::app_db::db() {
                 Some(db) => match db.save_message(&msg).await {
                     Ok(()) => true,
                     Err(e) => {
@@ -178,7 +189,19 @@ impl MessageStore {
                     }
                 },
                 None => true,
+            };
+            // Not durable yet: the folded reactions keep holding the cursor
+            // back, or a later event could carry it past them and their
+            // target. They are folded again on the retry.
+            if !stored && !folded.is_empty() {
+                self.held_reactions
+                    .write()
+                    .await
+                    .entry(msg.trade_id.clone())
+                    .or_default()
+                    .extend(folded);
             }
+            stored
         };
         self.note_durability(&msg.id, stored).await;
         let _ = self.new_message_tx.send(msg.clone());
@@ -283,6 +306,7 @@ impl MessageStore {
             target_id: target_id.to_string(),
             reaction,
             floor,
+            held_at: unix_now(),
         });
     }
 
@@ -290,16 +314,27 @@ impl MessageStore {
     /// peer chat's cursor must not pass it, or a restart before the target
     /// arrives loses the reaction, and the target too, which is older.
     async fn held_floor(&self, trade_id: &str) -> Option<i64> {
-        let held = self.held_reactions.read().await;
-        held.get(trade_id)?.iter().map(|h| h.floor).min()
+        self.held_floor_at(trade_id, unix_now()).await
     }
 
-    /// Fold the reactions held for `msg` into it.
-    async fn fold_held_reactions(&self, msg: &mut ChatMessage) {
+    /// [`Self::held_floor`] as of `now`: reactions held for longer than
+    /// [`HELD_FLOOR_SECS`] no longer count.
+    async fn held_floor_at(&self, trade_id: &str, now: i64) -> Option<i64> {
+        let held = self.held_reactions.read().await;
+        held.get(trade_id)?
+            .iter()
+            .filter(|h| now - h.held_at <= HELD_FLOOR_SECS)
+            .map(|h| h.floor)
+            .min()
+    }
+
+    /// Fold the reactions held for `msg` into it, and return them: they are
+    /// held again if `msg` cannot be stored.
+    async fn fold_held_reactions(&self, msg: &mut ChatMessage) -> Vec<HeldReaction> {
         let mine = {
             let mut held = self.held_reactions.write().await;
             let Some(list) = held.get_mut(&msg.trade_id) else {
-                return;
+                return Vec::new();
             };
             let (mine, rest): (VecDeque<_>, VecDeque<_>) =
                 list.drain(..).partition(|h| h.target_id == msg.id);
@@ -310,11 +345,12 @@ impl MessageStore {
             }
             mine
         };
-        for held in mine {
+        for held in &mine {
             if reaction_allowed(msg, &held.reaction) {
-                merge_reaction(&mut msg.reactions, held.reaction);
+                merge_reaction(&mut msg.reactions, held.reaction.clone());
             }
         }
+        mine.into()
     }
 
     /// `true` if this message id was already accepted, in memory or on disk.
@@ -361,6 +397,11 @@ impl MessageStore {
         match db.save_message(&msg).await {
             Ok(()) => {
                 self.non_durable.write().await.remove(id);
+                // Reactions held again when its first write failed are in
+                // the row now: they stop holding the cursor back.
+                if let Some(list) = self.held_reactions.write().await.get_mut(trade_id) {
+                    list.retain(|h| h.target_id != id);
+                }
                 true
             }
             Err(e) => {
@@ -4424,6 +4465,26 @@ mod tests {
         let held = store.held_reactions.read().await;
         assert_eq!(held["t"].len(), 1);
         assert_eq!(held["t"][0].reaction.emoji, "😂", "the newest is kept");
+    }
+
+    #[tokio::test]
+    async fn a_reaction_held_too_long_stops_holding_the_cursor() {
+        let store = MessageStore::new();
+        store
+            .apply_reaction("t", "never-comes", reaction("bob", "👍", 1, "a"), 42)
+            .await;
+        let now = unix_now();
+
+        assert_eq!(store.held_floor_at("t", now).await, Some(42));
+        assert_eq!(
+            store.held_floor_at("t", now + HELD_FLOOR_SECS + 1).await,
+            None
+        );
+        assert_eq!(
+            store.held_reactions.read().await["t"].len(),
+            1,
+            "still held"
+        );
     }
 
     #[tokio::test]
