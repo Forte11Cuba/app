@@ -101,6 +101,9 @@ normative list):
   - *UI.* `ChatRowState` decides from the persisted row (`TradeRow.rowStatus`
     and `completedAt`), as Rust does: the book's live status may run ahead
     of the row, and the composer must not drop out while it catches up.
+- Catch-up and the token bucket: a relay still serving its stored backlog
+  (no EOSE on its current connection) is not metered, even after another
+  relay's EOSE: rejecting older stored events would lose them for good.
 - Isolation: chat runs on its own task and bounded channels; it can never
   block the order state machine, the daemon transport, or a dispute.
 - Push wake: once a peer message or attachment pointer reached the relays,
@@ -166,9 +169,9 @@ dropped. One whose target has not arrived is held in memory — one per
 party and target, at most 256 per trade — until it does. Stored catch-up is served
 newest first, so no channel's cursor moves until it is over — EOSE from
 every connected relay that held the subscription, a relay that drops the
-connection meanwhile no longer awaited, and one that delivers before its
-EOSE without being awaited (reconnected and given the subscription again)
-awaited from then on: passing
+connection meanwhile no longer awaited, and one that delivers with no EOSE on its
+current connection (joined late, or reconnected and given the subscription
+again) awaited from then on: passing
 a newer event before an older one arrives would lose the older one on a
 restart. After that, the peer cursor still stops at a held reaction's floor
 (where the catch-up started, or the live cursor) until the reaction is

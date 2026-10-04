@@ -2056,10 +2056,15 @@ struct ChatRxState {
     /// The relays whose EOSE is still to come. Empty in tests, which call
     /// [`Self::caught_up`] themselves.
     awaiting_eose: std::collections::HashSet<String>,
-    /// Relays that have sent EOSE. One that delivers before sending it —
-    /// reconnected, and given the subscription again by `live_subs` — is
-    /// replaying stored events newest first: catch-up starts over for it.
-    eose_seen: std::collections::HashSet<String>,
+    /// Relays that have sent EOSE, each with the connection it came on (the
+    /// relay's `connected_at`). An event from a relay with no EOSE on its
+    /// current connection — it joined late, or reconnected and got the
+    /// subscription again from `live_subs` — is a replay of stored events,
+    /// newest first: catch-up starts over for that relay.
+    eose_seen: HashMap<String, u64>,
+    /// The event being handled comes from a relay still in catch-up: like
+    /// any stored backlog, the token bucket lets it through (`budget_ok`).
+    from_catch_up: bool,
     /// The chat claim this state belongs to: cursor writes are gated on it
     /// still owning the chat. `None` only in tests that run no task.
     generation: Option<u64>,
@@ -2079,7 +2084,8 @@ impl ChatRxState {
             flooded: false,
             caught_up: false,
             awaiting_eose: std::collections::HashSet::new(),
-            eose_seen: std::collections::HashSet::new(),
+            eose_seen: HashMap::new(),
+            from_catch_up: false,
             generation,
         }
     }
@@ -2102,7 +2108,9 @@ impl ChatRxState {
 
     /// Live-stream budget check (no-op during stored catch-up).
     fn budget_ok(&mut self, order_id: &str) -> bool {
-        if !self.live {
+        // Stored backlog is bounded by the filter's `limit`; metering it
+        // would reject older events for good, the cursor passing them.
+        if !self.live || self.from_catch_up {
             return true;
         }
         if self.bucket.try_take(crate::rt::time::Instant::now()) {
@@ -2149,22 +2157,27 @@ impl ChatRxState {
     /// One relay's EOSE: from the first the token bucket meters arrivals;
     /// once every relay that held the subscription has sent one, catch-up
     /// is over.
-    async fn eose_from(&mut self, order_id: &str, relay: &str) {
+    async fn eose_from(&mut self, order_id: &str, relay: &str, connection: u64) {
         self.live = true;
-        self.eose_seen.insert(relay.to_string());
+        self.eose_seen.insert(relay.to_string(), connection);
         self.awaiting_eose.remove(relay);
         if self.awaiting_eose.is_empty() {
             self.caught_up(order_id).await;
         }
     }
 
-    /// An event from `relay`. One that has not sent EOSE yet and was not
-    /// awaited joined late: its stored events come newest first, so the
-    /// cursor waits for its EOSE as for the others'.
-    fn event_from(&mut self, relay: &str) {
-        if !self.eose_seen.contains(relay) && self.awaiting_eose.insert(relay.to_string()) {
-            self.caught_up = false;
+    /// An event from `relay`, on its connection `connection`. A relay with
+    /// no EOSE on that connection is replaying stored events newest first —
+    /// it joined late or reconnected — so the cursor waits for its EOSE as
+    /// for the others', and its backlog skips the token bucket.
+    fn event_from(&mut self, relay: &str, connection: u64) {
+        if self.eose_seen.get(relay) != Some(&connection) {
+            self.eose_seen.remove(relay);
+            if self.awaiting_eose.insert(relay.to_string()) {
+                self.caught_up = false;
+            }
         }
+        self.from_catch_up = self.awaiting_eose.contains(relay);
     }
 
     /// Stop waiting for relays that dropped the connection: their catch-up
@@ -2324,7 +2337,8 @@ async fn run_chat_subscription(
                 event,
             }) => {
                 if subscription_id == sub_id {
-                    state.event_from(&relay_url.to_string());
+                    let connection = connection_of(&client, &relay_url).await;
+                    state.event_from(&relay_url.to_string(), connection);
                     handle_chat_event(
                         channel,
                         order_id,
@@ -2348,7 +2362,10 @@ async fn run_chat_subscription(
                 // the token bucket meters everything from here on.
                 if let nostr_sdk::prelude::RelayMessage::EndOfStoredEvents(sid) = *message {
                     if *sid == sub_id {
-                        state.eose_from(order_id, &relay_url.to_string()).await;
+                        let connection = connection_of(&client, &relay_url).await;
+                        state
+                            .eose_from(order_id, &relay_url.to_string(), connection)
+                            .await;
                     }
                 }
             }
@@ -2357,6 +2374,18 @@ async fn run_chat_subscription(
             // surfaces here.
             Some(ClientNotification::Shutdown) | None => break,
         }
+    }
+}
+
+/// Which connection of `relay` this is: when it last connected. A reconnect
+/// changes it, which is how a replayed catch-up is told from live traffic.
+async fn connection_of(
+    client: &nostr_sdk::prelude::Client,
+    relay: &nostr_sdk::prelude::RelayUrl,
+) -> u64 {
+    match client.relay(relay).await {
+        Ok(Some(relay)) => relay.stats().connected_at().as_secs(),
+        _ => 0,
     }
 }
 
@@ -4699,13 +4728,13 @@ mod tests {
         chat.receive(&newest).await;
         let order = chat.order_id.clone();
 
-        chat.state.eose_from(&order, "wss://fast").await;
+        chat.state.eose_from(&order, "wss://fast", 1).await;
         assert!(chat.state.live, "the token bucket meters from the first");
         assert_eq!(
             chat.state.cursor, 0,
             "the slow relay may still serve older ones"
         );
-        chat.state.eose_from(&order, "wss://slow").await;
+        chat.state.eose_from(&order, "wss://slow", 1).await;
 
         assert!(chat.state.cursor >= newest.created_at.as_secs() as i64 - 1);
     }
@@ -4746,14 +4775,44 @@ mod tests {
     fn a_relay_that_joins_late_reopens_catch_up() {
         let mut state = ChatRxState::new(ChatChannel::Peer, 0, None);
         state.caught_up = true;
-        state.eose_seen.insert("wss://early".to_string());
+        state.eose_seen.insert("wss://early".to_string(), 1);
 
-        state.event_from("wss://early");
+        state.event_from("wss://early", 1);
         assert!(state.caught_up, "a relay past its EOSE is live");
-        state.event_from("wss://late");
+        assert!(!state.from_catch_up);
+        state.event_from("wss://late", 1);
 
         assert!(!state.caught_up);
         assert!(state.awaiting_eose.contains("wss://late"));
+        assert!(state.from_catch_up, "its backlog skips the token bucket");
+    }
+
+    #[test]
+    fn a_relay_that_reconnects_reopens_catch_up() {
+        let mut state = ChatRxState::new(ChatChannel::Peer, 0, None);
+        state.caught_up = true;
+        state.eose_seen.insert("wss://relay".to_string(), 1);
+
+        // Same relay, a later connection: the subscription was repaired.
+        state.event_from("wss://relay", 2);
+
+        assert!(!state.caught_up);
+        assert!(state.awaiting_eose.contains("wss://relay"));
+    }
+
+    #[test]
+    fn a_relay_still_in_catch_up_skips_the_token_bucket() {
+        let mut state = ChatRxState::new(ChatChannel::Peer, 0, None);
+        state.live = true; // another relay already sent EOSE
+        state.awaiting_eose.insert("wss://slow".to_string());
+
+        state.event_from("wss://slow", 1);
+        let accepted = (0..RATE_CAPACITY as u32 * 3)
+            .filter(|_| state.budget_ok("order-x"))
+            .count();
+
+        assert_eq!(accepted, RATE_CAPACITY as usize * 3);
+        assert_eq!(state.consecutive_rejected, 0);
     }
 
     #[tokio::test]
