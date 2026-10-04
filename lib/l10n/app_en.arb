@@ -97,24 +97,6 @@
   "@disputeCoopCancelMessage": {
     "description": "Body text in the cooperative-cancel resolved banner"
   },
-  "disputeWithBuyer": "Dispute with Buyer: {handle}",
-  "@disputeWithBuyer": {
-    "description": "Dispute chat screen title when trading as seller (peer is the buyer)",
-    "placeholders": {
-      "handle": {
-        "type": "String"
-      }
-    }
-  },
-  "disputeWithSeller": "Dispute with Seller: {handle}",
-  "@disputeWithSeller": {
-    "description": "Dispute chat screen title when trading as buyer (peer is the seller)",
-    "placeholders": {
-      "handle": {
-        "type": "String"
-      }
-    }
-  },
   "orderLabel": "Order {orderId}",
   "@orderLabel": {
     "description": "Sub-title showing the truncated order/trade ID",
@@ -124,17 +106,79 @@
       }
     }
   },
-  "disputeInitiated": "Initiated",
-  "@disputeInitiated": {
-    "description": "Status chip label for a newly opened dispute"
-  },
-  "disputeInProgress": "In progress",
-  "@disputeInProgress": {
-    "description": "Status chip label for a dispute under admin review"
-  },
   "disputeStatusClosed": "Closed",
   "@disputeStatusClosed": {
-    "description": "Status chip label for a resolved/closed dispute"
+    "description": "Dispute info card chip: the dispute ended without a verdict (e.g. a cooperative cancel)"
+  },
+  "disputeWith": "Dispute with {role}: {counterparty}",
+  "@disputeWith": {
+    "description": "Dispute info card title: the counterparty's role (seller or buyer) and pseudonym",
+    "placeholders": {
+      "role": {
+        "type": "String"
+      },
+      "counterparty": {
+        "type": "String"
+      }
+    }
+  },
+  "seller": "Seller",
+  "@seller": {
+    "description": "Role name for the seller, used inside disputeWith"
+  },
+  "buyer": "Buyer",
+  "@buyer": {
+    "description": "Role name for the buyer, used inside disputeWith"
+  },
+  "disputeStatusInitiated": "Initiated",
+  "@disputeStatusInitiated": {
+    "description": "Dispute info card chip: opened, no solver yet"
+  },
+  "disputeStatusInProgress": "In-progress",
+  "@disputeStatusInProgress": {
+    "description": "Dispute info card chip: a solver has the dispute"
+  },
+  "disputeStatusResolved": "Resolved",
+  "@disputeStatusResolved": {
+    "description": "Dispute info card chip: a solver's verdict ended the dispute"
+  },
+  "disputeInProgress": "This dispute is currently in progress. A solver is reviewing your case.",
+  "@disputeInProgress": {
+    "description": "Dispute info card: status sentence while a solver reviews the dispute (or one has taken it)"
+  },
+  "disputeInstruction1": "Wait for a solver to take your dispute. Once they arrive, share any relevant evidence to help clarify the situation.",
+  "@disputeInstruction1": {
+    "description": "Dispute info card: first instruction bullet"
+  },
+  "disputeInstruction2": "The final decision will be made based on the evidence presented.",
+  "@disputeInstruction2": {
+    "description": "Dispute info card: second instruction bullet"
+  },
+  "disputeInstruction3": "If you don't respond, the system will assume you don't want to cooperate and you might lose the dispute.",
+  "@disputeInstruction3": {
+    "description": "Dispute info card: third instruction bullet"
+  },
+  "disputeOpenedByYouAgainstSeller": "You opened this dispute against the seller {counterparty}, please read carefully below:",
+  "@disputeOpenedByYouAgainstSeller": {
+    "description": "Dispute info card: status sentence when the user (buyer) opened the dispute and no solver took it yet",
+    "placeholders": {
+      "counterparty": {
+        "type": "String"
+      }
+    }
+  },
+  "disputeOpenedByYouAgainstBuyer": "You opened this dispute against the buyer {counterparty}, please read carefully below:",
+  "@disputeOpenedByYouAgainstBuyer": {
+    "description": "Dispute info card: status sentence when the user (seller) opened the dispute and no solver took it yet",
+    "placeholders": {
+      "counterparty": {
+        "type": "String"
+      }
+    }
+  },
+  "disputeWaitingForAdmin": "Waiting for admin assignment",
+  "@disputeWaitingForAdmin": {
+    "description": "Dispute info card: status sentence when the peer opened the dispute and no solver took it yet"
   },
   "disputeLostFundsToBuyer": "The dispute resolver settled the dispute in the buyer's favour. The sats were released to the buyer.",
   "@disputeLostFundsToBuyer": {
@@ -1867,7 +1911,7 @@
   },
   "orderIdLabel": "Order ID",
   "@orderIdLabel": {
-    "description": "Label for the order ID field"
+    "description": "Dispute info card: label over the order ID"
   },
   "fiatAmountLabel": "Fiat Amount",
   "@fiatAmountLabel": {
@@ -2348,11 +2392,11 @@
   },
   "disputeDetailsTitle": "Dispute Details",
   "@disputeDetailsTitle": {
-    "description": "Title of the dispute info card"
+    "description": "App bar title of the dispute chat screen once the dispute is found (v1's title)"
   },
   "disputeIdLabel": "Dispute ID",
   "@disputeIdLabel": {
-    "description": "Label for the dispute ID field"
+    "description": "Dispute info card: label over the dispute ID"
   },
   "disputeReasonLabel": "Reason: {reason}",
   "@disputeReasonLabel": {

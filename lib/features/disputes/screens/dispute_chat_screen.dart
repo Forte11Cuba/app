@@ -15,13 +15,16 @@ import 'package:mostro/features/disputes/widgets/dispute_message_input.dart';
 import 'package:mostro/features/disputes/widgets/dispute_messages_list.dart';
 import 'package:mostro/features/notifications/models/notification_model.dart';
 import 'package:mostro/features/notifications/providers/notifications_provider.dart';
+import 'package:mostro/shared/widgets/redesign_app_bar.dart';
 import 'package:mostro/src/rust/api/types.dart' as rust_types;
 
 /// Dispute chat screen — Route `/dispute_details/:disputeId`.
 ///
 /// Layout:
-///   - Custom header: "Dispute with Buyer/Seller: [handle]" + status badge
-///   - Scrollable [DisputeMessagesList] (info card + bubbles + banners)
+///   - App bar: "Dispute Details", as in v1
+///   - Scrollable [DisputeMessagesList]: the info card ("Dispute with
+///     [role]: [handle]", status chip, order and dispute ids, instructions
+///     — #680), the resolved outcome, bubbles and banners
 ///   - [DisputeMessageInput] — only once a solver took the dispute
 ///
 /// The conversation is with the solver (#143): history and live messages
@@ -210,22 +213,25 @@ class _DisputeChatScreenState extends ConsumerState<DisputeChatScreen> {
         dispute.status == DisputeStatus.inReview && dispute.adminPubkey != null;
 
     return Scaffold(
-      appBar: AppBar(
-        title: _HeaderTitle(dispute: dispute, colors: colors),
-        titleSpacing: 0,
-        // The dispute screen is pushed over the trade detail; automation
-        // leaves it the way it leaves every other screen (`appbar.back`).
-        leading: const BackButton().withAutomationId(AutomationIds.appBarBack),
+      backgroundColor: OrderBookPalette.of(context).bg,
+      // Who the dispute is with and its status open the conversation, in
+      // the info card (#680); the bar names the screen, as v1's does. Its
+      // back arrow carries `appbar.back`, like every other screen's.
+      appBar: redesignAppBar(
+        context,
+        title: AppLocalizations.of(context).disputeDetailsTitle,
+        onBack: () => Navigator.of(context).maybePop(),
       ),
       body: Column(
         children: [
-          // ── Terminal state: resolved ──────────────────────────────────
-          if (isResolved) _ResolvedBanner(dispute: dispute, colors: colors),
-
           // ── Chat area ─────────────────────────────────────────────────
           Expanded(
             child: DisputeMessagesList(
               dispute: dispute,
+              // Terminal state: the outcome scrolls under the info card.
+              outcome: isResolved
+                  ? _ResolvedBanner(dispute: dispute, colors: colors)
+                  : null,
               messages: messages,
               uploads: uploads,
               roleOf: (pubkey) =>
@@ -269,98 +275,6 @@ String disputeSendErrorMessage(AppLocalizations l10n, Object error) {
   if (raw.contains('AdminNotAssigned')) return l10n.disputeSolverNotAssigned;
   if (raw.contains('NoOpenDispute')) return l10n.disputeChatClosed;
   return l10n.messageSendFailed;
-}
-
-// ── Header title ──────────────────────────────────────────────────────────────
-
-class _HeaderTitle extends StatelessWidget {
-  const _HeaderTitle({required this.dispute, required this.colors});
-
-  final DisputeItem dispute;
-  final AppColors colors;
-
-  @override
-  Widget build(BuildContext context) {
-    final l10n = AppLocalizations.of(context);
-    final textTheme = Theme.of(context).textTheme;
-    final handle = dispute.peerHandle ?? l10n.unknownPeerHandle;
-
-    final title = dispute.isSelling
-        ? l10n.disputeWithBuyer(handle)
-        : l10n.disputeWithSeller(handle);
-
-    final truncatedId = dispute.tradeId.length > 12
-        ? '${dispute.tradeId.substring(0, 12)}\u2026'
-        : dispute.tradeId;
-
-    final (statusBg, statusFg, statusLabel) = _statusChip(dispute.status, l10n);
-
-    return Row(
-      children: [
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                title,
-                style: textTheme.titleMedium?.copyWith(
-                  color: colors.textPrimary,
-                  fontWeight: FontWeight.bold,
-                ),
-                overflow: TextOverflow.ellipsis,
-              ),
-              const SizedBox(height: 2),
-              Text(
-                l10n.orderLabel(truncatedId),
-                style: textTheme.bodySmall?.copyWith(color: colors.textSubtle),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(width: AppSpacing.sm),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm, vertical: 3),
-          decoration: BoxDecoration(
-            color: statusBg,
-            borderRadius: BorderRadius.circular(AppRadius.chip),
-          ),
-          child: Text(
-            statusLabel,
-            style: textTheme.bodySmall?.copyWith(
-              color: statusFg,
-              fontWeight: FontWeight.w500,
-              fontSize: 11,
-            ),
-          ),
-        ),
-        const SizedBox(width: AppSpacing.sm),
-      ],
-    );
-  }
-
-  static (Color, Color, String) _statusChip(
-    DisputeStatus status,
-    AppLocalizations l10n,
-  ) {
-    return switch (status) {
-      DisputeStatus.open => (
-        AppColors.statusPending.$1,
-        AppColors.statusPending.$2,
-        l10n.disputeInitiated,
-      ),
-      DisputeStatus.inReview => (
-        AppColors.statusActive.$1,
-        AppColors.statusActive.$2,
-        l10n.disputeInProgress,
-      ),
-      DisputeStatus.resolved => (
-        AppColors.statusInactive.$1,
-        AppColors.statusInactive.$2,
-        l10n.disputeStatusClosed,
-      ),
-    };
-  }
 }
 
 // ── Terminal state banners ─────────────────────────────────────────────────────

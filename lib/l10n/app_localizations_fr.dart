@@ -86,28 +86,62 @@ class AppLocalizationsFr extends AppLocalizations {
       'La commande a été annulée coopérativement. Aucun fonds n\'a été transféré.';
 
   @override
-  String disputeWithBuyer(String handle) {
-    return 'Litige avec l\'Acheteur : $handle';
-  }
-
-  @override
-  String disputeWithSeller(String handle) {
-    return 'Litige avec le Vendeur : $handle';
-  }
-
-  @override
   String orderLabel(String orderId) {
     return 'Commande $orderId';
   }
 
   @override
-  String get disputeInitiated => 'Initié';
-
-  @override
-  String get disputeInProgress => 'En cours';
-
-  @override
   String get disputeStatusClosed => 'Fermé';
+
+  @override
+  String disputeWith(String role, String counterparty) {
+    return 'Différend avec $role : $counterparty';
+  }
+
+  @override
+  String get seller => 'Vendeur';
+
+  @override
+  String get buyer => 'Acheteur';
+
+  @override
+  String get disputeStatusInitiated => 'Initié';
+
+  @override
+  String get disputeStatusInProgress => 'En cours';
+
+  @override
+  String get disputeStatusResolved => 'Résolu';
+
+  @override
+  String get disputeInProgress =>
+      'Ce différend est actuellement en cours. Un résolveur examine votre cas.';
+
+  @override
+  String get disputeInstruction1 =>
+      'Attendez qu\'un résolveur prenne votre différend. Une fois qu\'il arrive, partagez toute preuve pertinente pour aider à clarifier la situation.';
+
+  @override
+  String get disputeInstruction2 =>
+      'La décision finale sera prise basée sur les preuves présentées.';
+
+  @override
+  String get disputeInstruction3 =>
+      'Si vous ne répondez pas, le système supposera que vous ne voulez pas coopérer et vous pourriez perdre le différend.';
+
+  @override
+  String disputeOpenedByYouAgainstSeller(String counterparty) {
+    return 'Vous avez ouvert ce différend contre le vendeur $counterparty, veuillez lire attentivement ci-dessous :';
+  }
+
+  @override
+  String disputeOpenedByYouAgainstBuyer(String counterparty) {
+    return 'Vous avez ouvert ce différend contre l\'acheteur $counterparty, veuillez lire attentivement ci-dessous :';
+  }
+
+  @override
+  String get disputeWaitingForAdmin =>
+      'En attente d\'assignation d\'administrateur';
 
   @override
   String get disputeLostFundsToBuyer =>
@@ -1474,7 +1508,7 @@ class AppLocalizationsFr extends AppLocalizations {
   String get tradeInformationTitle => 'Informations sur la transaction';
 
   @override
-  String get orderIdLabel => 'ID de l\'ordre';
+  String get orderIdLabel => 'ID de commande';
 
   @override
   String get fiatAmountLabel => 'Montant fiat';
@@ -1783,7 +1817,7 @@ class AppLocalizationsFr extends AppLocalizations {
   String get disputeDetailsTitle => 'Détails du litige';
 
   @override
-  String get disputeIdLabel => 'ID du litige';
+  String get disputeIdLabel => 'ID du différend';
 
   @override
   String disputeReasonLabel(String reason) {

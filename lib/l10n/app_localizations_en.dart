@@ -85,28 +85,61 @@ class AppLocalizationsEn extends AppLocalizations {
       'The order was cooperatively cancelled. No funds were transferred.';
 
   @override
-  String disputeWithBuyer(String handle) {
-    return 'Dispute with Buyer: $handle';
-  }
-
-  @override
-  String disputeWithSeller(String handle) {
-    return 'Dispute with Seller: $handle';
-  }
-
-  @override
   String orderLabel(String orderId) {
     return 'Order $orderId';
   }
 
   @override
-  String get disputeInitiated => 'Initiated';
-
-  @override
-  String get disputeInProgress => 'In progress';
-
-  @override
   String get disputeStatusClosed => 'Closed';
+
+  @override
+  String disputeWith(String role, String counterparty) {
+    return 'Dispute with $role: $counterparty';
+  }
+
+  @override
+  String get seller => 'Seller';
+
+  @override
+  String get buyer => 'Buyer';
+
+  @override
+  String get disputeStatusInitiated => 'Initiated';
+
+  @override
+  String get disputeStatusInProgress => 'In-progress';
+
+  @override
+  String get disputeStatusResolved => 'Resolved';
+
+  @override
+  String get disputeInProgress =>
+      'This dispute is currently in progress. A solver is reviewing your case.';
+
+  @override
+  String get disputeInstruction1 =>
+      'Wait for a solver to take your dispute. Once they arrive, share any relevant evidence to help clarify the situation.';
+
+  @override
+  String get disputeInstruction2 =>
+      'The final decision will be made based on the evidence presented.';
+
+  @override
+  String get disputeInstruction3 =>
+      'If you don\'t respond, the system will assume you don\'t want to cooperate and you might lose the dispute.';
+
+  @override
+  String disputeOpenedByYouAgainstSeller(String counterparty) {
+    return 'You opened this dispute against the seller $counterparty, please read carefully below:';
+  }
+
+  @override
+  String disputeOpenedByYouAgainstBuyer(String counterparty) {
+    return 'You opened this dispute against the buyer $counterparty, please read carefully below:';
+  }
+
+  @override
+  String get disputeWaitingForAdmin => 'Waiting for admin assignment';
 
   @override
   String get disputeLostFundsToBuyer =>
