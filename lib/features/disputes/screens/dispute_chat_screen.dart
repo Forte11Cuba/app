@@ -230,7 +230,14 @@ class _DisputeChatScreenState extends ConsumerState<DisputeChatScreen> {
               dispute: dispute,
               // Terminal state: the outcome scrolls under the info card.
               outcome: isResolved
-                  ? _ResolvedBanner(dispute: dispute, colors: colors)
+                  ? _ResolvedBanner(
+                      dispute: dispute,
+                      colors: colors,
+                      // The side the info card names, from the trade row.
+                      isSelling: ref
+                          .watch(disputeCounterpartProvider(tradeId))
+                          .isSelling,
+                    )
                   : null,
               messages: messages,
               uploads: uploads,
@@ -287,11 +294,20 @@ String disputeSendErrorMessage(AppLocalizations l10n, Object error) {
 /// - [DisputeResolution.cooperativeCancel] → blue "Resolved" badge + cooperative cancel text
 /// - [DisputeResolution.fundsToBuyer] or [DisputeResolution.fundsToSeller] where the
 ///   viewing party lost → blue "Resolved" badge + role-aware outcome text
+/// - the viewing party's side unknown → the same badge + a neutral outcome
 class _ResolvedBanner extends StatelessWidget {
-  const _ResolvedBanner({required this.dispute, required this.colors});
+  const _ResolvedBanner({
+    required this.dispute,
+    required this.colors,
+    required this.isSelling,
+  });
 
   final DisputeItem dispute;
   final AppColors colors;
+
+  /// The user's side of the trade, null while unknown: then nobody is told
+  /// they won or lost.
+  final bool? isSelling;
 
   @override
   Widget build(BuildContext context) {
@@ -358,9 +374,12 @@ class _ResolvedBanner extends StatelessWidget {
     }
 
     // Determine if the viewing party "won" the dispute.
-    final userWon =
-        (dispute.resolution == DisputeResolution.fundsToBuyer && !dispute.isSelling) ||
-        (dispute.resolution == DisputeResolution.fundsToSeller && dispute.isSelling);
+    final isSelling = this.isSelling;
+    final userWon = switch ((dispute.resolution, isSelling)) {
+      (DisputeResolution.fundsToBuyer, false) => true,
+      (DisputeResolution.fundsToSeller, true) => true,
+      _ => false,
+    };
 
     if (userWon) {
       // ── Viewing party won: green success state ────────────────────────
@@ -447,7 +466,7 @@ class _ResolvedBanner extends StatelessWidget {
               borderRadius: BorderRadius.circular(AppRadius.card),
             ),
             child: Text(
-              _lostResolutionText(dispute, l10n),
+              _outcomeText(dispute.resolution, isSelling, l10n),
               style: textTheme.bodySmall?.copyWith(
                 color: AppColors.statusSuccess.$2,
               ),
@@ -474,18 +493,26 @@ class _ResolvedBanner extends StatelessWidget {
     );
   }
 
-  /// Returns the outcome description for the party who did not win.
+  /// The outcome when the viewing party did not win, or when their side is
+  /// unknown ([isSelling] null) and the outcome is told without a side.
   ///
   /// Only called when [userWon] is false and resolution is not
-  /// [DisputeResolution.cooperativeCancel], so the two reachable cases are:
+  /// [DisputeResolution.cooperativeCancel], so the reachable cases are:
   /// - [DisputeResolution.fundsToBuyer] with isSelling=true (seller lost)
   /// - [DisputeResolution.fundsToSeller] with isSelling=false (buyer lost)
-  static String _lostResolutionText(DisputeItem dispute, AppLocalizations l10n) {
-    if (dispute.isSelling) {
-      // Seller lost: admin released funds to the buyer.
-      return l10n.disputeLostFundsToBuyer;
-    }
+  /// - either verdict, or none, with the side unknown
+  static String _outcomeText(
+    DisputeResolution? resolution,
+    bool? isSelling,
+    AppLocalizations l10n,
+  ) => switch ((resolution, isSelling)) {
+    // Seller lost: admin released funds to the buyer.
+    (DisputeResolution.fundsToBuyer, true) => l10n.disputeLostFundsToBuyer,
     // Buyer lost: admin returned funds to the seller.
-    return l10n.disputeLostFundsToSeller;
-  }
+    (DisputeResolution.fundsToSeller, false) => l10n.disputeLostFundsToSeller,
+    (DisputeResolution.fundsToBuyer, _) => l10n.disputeDescResolvedBuyerFavour,
+    (DisputeResolution.fundsToSeller, _) =>
+      l10n.disputeDescResolvedSellerFavour,
+    _ => l10n.disputeDescResolved,
+  };
 }
