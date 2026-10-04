@@ -87,28 +87,61 @@ class AppLocalizationsNl extends AppLocalizations {
       'De order is in overleg geannuleerd. Er is geen geld overgemaakt.';
 
   @override
-  String disputeWithBuyer(String handle) {
-    return 'Dispuut met koper: $handle';
-  }
-
-  @override
-  String disputeWithSeller(String handle) {
-    return 'Dispuut met verkoper: $handle';
-  }
-
-  @override
   String orderLabel(String orderId) {
     return 'Order $orderId';
   }
 
   @override
-  String get disputeInitiated => 'Geopend';
-
-  @override
-  String get disputeInProgress => 'In behandeling';
-
-  @override
   String get disputeStatusClosed => 'Gesloten';
+
+  @override
+  String disputeWith(String role, String counterparty) {
+    return 'Dispuut met $role: $counterparty';
+  }
+
+  @override
+  String get seller => 'Verkoper';
+
+  @override
+  String get buyer => 'Koper';
+
+  @override
+  String get disputeStatusInitiated => 'Geopend';
+
+  @override
+  String get disputeStatusInProgress => 'In behandeling';
+
+  @override
+  String get disputeStatusResolved => 'Opgelost';
+
+  @override
+  String get disputeInProgress =>
+      'Dit dispuut is in behandeling. Een solver bekijkt je zaak.';
+
+  @override
+  String get disputeInstruction1 =>
+      'Wacht tot een solver je dispuut oppakt. Deel daarna al het bewijs dat helpt om de situatie duidelijk te maken.';
+
+  @override
+  String get disputeInstruction2 =>
+      'De uiteindelijke beslissing wordt genomen op grond van het aangedragen bewijs.';
+
+  @override
+  String get disputeInstruction3 =>
+      'Reageer je niet, dan gaat het systeem ervan uit dat je niet wilt meewerken en kun je het dispuut verliezen.';
+
+  @override
+  String disputeOpenedByYouAgainstSeller(String counterparty) {
+    return 'Jij hebt dit dispuut geopend tegen verkoper $counterparty; lees hieronder aandachtig verder:';
+  }
+
+  @override
+  String disputeOpenedByYouAgainstBuyer(String counterparty) {
+    return 'Jij hebt dit dispuut geopend tegen koper $counterparty; lees hieronder aandachtig verder:';
+  }
+
+  @override
+  String get disputeWaitingForAdmin => 'Wacht op toewijzing van een beheerder';
 
   @override
   String get disputeLostFundsToBuyer =>

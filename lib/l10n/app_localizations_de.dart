@@ -87,28 +87,62 @@ class AppLocalizationsDe extends AppLocalizations {
       'Die Bestellung wurde kooperativ storniert. Es wurden keine Mittel übertragen.';
 
   @override
-  String disputeWithBuyer(String handle) {
-    return 'Streit mit Käufer: $handle';
-  }
-
-  @override
-  String disputeWithSeller(String handle) {
-    return 'Streit mit Verkäufer: $handle';
-  }
-
-  @override
   String orderLabel(String orderId) {
     return 'Bestellung $orderId';
   }
 
   @override
-  String get disputeInitiated => 'Eingeleitet';
-
-  @override
-  String get disputeInProgress => 'In Bearbeitung';
-
-  @override
   String get disputeStatusClosed => 'Geschlossen';
+
+  @override
+  String disputeWith(String role, String counterparty) {
+    return 'Streitfall mit $role: $counterparty';
+  }
+
+  @override
+  String get seller => 'Verkäufer';
+
+  @override
+  String get buyer => 'Käufer';
+
+  @override
+  String get disputeStatusInitiated => 'Eingeleitet';
+
+  @override
+  String get disputeStatusInProgress => 'In Bearbeitung';
+
+  @override
+  String get disputeStatusResolved => 'Gelöst';
+
+  @override
+  String get disputeInProgress =>
+      'Dieser Streitfall wird derzeit bearbeitet. Ein Schlichter prüft deinen Fall.';
+
+  @override
+  String get disputeInstruction1 =>
+      'Warte darauf, dass ein Schlichter deinen Streitfall übernimmt. Sobald er da ist, teile alle relevanten Beweise mit, um die Situation zu klären.';
+
+  @override
+  String get disputeInstruction2 =>
+      'Die endgültige Entscheidung wird auf Basis der vorgelegten Beweise getroffen.';
+
+  @override
+  String get disputeInstruction3 =>
+      'Wenn du nicht antwortest, geht das System davon aus, dass du nicht kooperieren möchtest, und du könntest den Streitfall verlieren.';
+
+  @override
+  String disputeOpenedByYouAgainstSeller(String counterparty) {
+    return 'Du hast diesen Streitfall gegen den Verkäufer $counterparty eröffnet, bitte lies das Folgende sorgfältig durch:';
+  }
+
+  @override
+  String disputeOpenedByYouAgainstBuyer(String counterparty) {
+    return 'Du hast diesen Streitfall gegen den Käufer $counterparty eröffnet, bitte lies das Folgende sorgfältig durch:';
+  }
+
+  @override
+  String get disputeWaitingForAdmin =>
+      'Wartet auf Zuweisung eines Administrators';
 
   @override
   String get disputeLostFundsToBuyer =>
@@ -1478,7 +1512,7 @@ class AppLocalizationsDe extends AppLocalizations {
   String get tradeInformationTitle => 'Trade-Informationen';
 
   @override
-  String get orderIdLabel => 'Bestell-ID';
+  String get orderIdLabel => 'Order-ID';
 
   @override
   String get fiatAmountLabel => 'Fiat-Betrag';
