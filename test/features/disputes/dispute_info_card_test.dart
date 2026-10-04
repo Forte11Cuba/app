@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -11,6 +12,7 @@ import 'package:mostro/features/disputes/screens/dispute_chat_screen.dart';
 import 'package:mostro/features/disputes/widgets/dispute_info_card.dart';
 import 'package:mostro/features/disputes/widgets/dispute_message_input.dart';
 import 'package:mostro/features/disputes/widgets/dispute_messages_list.dart';
+import 'package:mostro/features/disputes/widgets/dispute_title_row.dart';
 import 'package:mostro/features/notifications/providers/notifications_provider.dart';
 import 'package:mostro/features/trades/providers/trades_providers.dart';
 import 'package:mostro/features/trades/widgets/trade_list_chip.dart';
@@ -22,6 +24,7 @@ import 'package:mostro/shared/utils/platform_int64.dart';
 import 'package:mostro/src/rust/api/types.dart' as rust_types;
 
 import '../../support/fake_trades.dart';
+import '../../support/load_app_fonts.dart';
 import '../../support/provider_harness.dart';
 
 // Full-length ids: the card must show them whole, never shortened.
@@ -191,7 +194,7 @@ void main() {
       await _pump(tester, dispute: _dispute());
 
       final title = _inCard(find.text(_en.disputeWith(_en.seller, _peer)));
-      final row = find.ancestor(of: title, matching: find.byType(Row)).first;
+      final row = _inCard(find.byType(DisputeTitleRow));
       expect(
         tester.getSize(title).width,
         greaterThan(tester.getSize(row).width / 2),
@@ -559,5 +562,83 @@ void main() {
         expect(find.text(_en.disputeLostFundsToSeller), findsNothing);
       });
     }
+  });
+
+  // Measured with the app's fonts: the test engine's em squares would put
+  // every break somewhere else.
+  group('title wraps between words', () {
+    setUpAll(loadAppFonts);
+
+    /// Where the title's lines start, by the caret moving down a line.
+    List<int> lineStarts(RenderParagraph paragraph, String text) {
+      final starts = <int>[];
+      var lastY =
+          paragraph
+              .getOffsetForCaret(const TextPosition(offset: 0), Rect.zero)
+              .dy;
+      for (var i = 1; i < text.length; i++) {
+        final y =
+            paragraph.getOffsetForCaret(TextPosition(offset: i), Rect.zero).dy;
+        if (y > lastY) starts.add(i);
+        lastY = y;
+      }
+      return starts;
+    }
+
+    bool breaksBetweenWords(String text, int at) {
+      final before = text[at - 1];
+      return before == ' ' || before == '-' || text[at] == ' ';
+    }
+
+    for (final locale in AppLocalizations.supportedLocales) {
+      for (final role in [
+        rust_types.TradeRole.buyer,
+        rust_types.TradeRole.seller,
+      ]) {
+        testWidgets('320 dp, 2x, ${locale.languageCode}, ${role.name}', (
+          tester,
+        ) async {
+          await _pump(
+            tester,
+            dispute: _dispute(),
+            role: role,
+            locale: locale,
+            size: const Size(320, 640),
+            textScale: 2,
+          );
+          final l10n = lookupAppLocalizations(locale);
+          final title = l10n.disputeWith(
+            role == rust_types.TradeRole.buyer ? l10n.seller : l10n.buyer,
+            _peer,
+          );
+
+          expect(tester.takeException(), isNull);
+          final paragraph = tester.renderObject<RenderParagraph>(
+            _inCard(find.text(title)),
+          );
+          for (final at in lineStarts(paragraph, title)) {
+            expect(
+              breaksBetweenWords(title, at),
+              isTrue,
+              reason:
+                  '"${title.substring(0, at)}|${title.substring(at)}" '
+                  'breaks a word',
+            );
+          }
+        });
+      }
+    }
+
+    testWidgets('393 dp, 1x: title and chip side by side', (tester) async {
+      await _pump(tester, dispute: _dispute(), size: const Size(393, 800));
+
+      final title = _inCard(find.text(_en.disputeWith(_en.seller, _peer)));
+      final chip = _inCard(find.byType(TradeListChip));
+      expect(tester.getTopLeft(chip).dy, tester.getTopLeft(title).dy);
+      expect(
+        tester.getTopLeft(chip).dx,
+        greaterThanOrEqualTo(tester.getTopRight(title).dx),
+      );
+    });
   });
 }

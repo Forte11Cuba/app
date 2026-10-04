@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mostro/core/order_book_palette.dart';
 import 'package:mostro/features/disputes/models/dispute_info_rules.dart';
 import 'package:mostro/features/disputes/providers/disputes_providers.dart';
+import 'package:mostro/features/disputes/widgets/dispute_title_row.dart';
 import 'package:mostro/features/order/widgets/order_detail_cards.dart';
 import 'package:mostro/features/trades/widgets/trade_list_chip.dart';
 import 'package:mostro/l10n/app_localizations.dart';
@@ -12,9 +13,6 @@ import 'package:mostro/shared/widgets/redesign_app_bar.dart';
 
 /// Gap between the card's sections.
 const double _sectionGap = 14;
-
-/// The most of the title row the status chip may take.
-const double _chipMaxShare = 0.45;
 
 /// The card that opens the dispute chat (MostroP2P/app#680), as v1's
 /// `DisputeInfoCard` and in v1's words: who the dispute is with and its
@@ -55,46 +53,28 @@ class DisputeInfoCard extends ConsumerWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // The chip keeps its natural width, up to a share of the row;
-            // the title takes the rest and wraps only when it must.
-            LayoutBuilder(
-              builder:
-                  (context, constraints) => Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(
-                        child: Text(
-                          l10n.disputeWith(
-                            isSelling ? l10n.buyer : l10n.seller,
-                            handle,
-                          ),
-                          style: TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w600,
-                            height: 1.4,
-                            color: book.textPrimary,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      // One line like every chip; a long translation at
-                      // large text on a narrow phone shrinks instead of
-                      // overflowing.
-                      ConstrainedBox(
-                        constraints: BoxConstraints(
-                          maxWidth: constraints.maxWidth * _chipMaxShare,
-                        ),
-                        child: FittedBox(
-                          fit: BoxFit.scaleDown,
-                          alignment: AlignmentDirectional.topEnd,
-                          child: TradeListChip.status(
-                            kind: disputeChipKind(chip),
-                            caption: chip.localized(l10n),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
+            // Side by side when the title's words fit beside the chip;
+            // otherwise the chip goes under the title (no word is broken).
+            DisputeTitleRow(
+              title: Text(
+                l10n.disputeWith(isSelling ? l10n.buyer : l10n.seller, handle),
+                style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                  height: 1.4,
+                  color: book.textPrimary,
+                ),
+              ),
+              // One line like every chip; one wider than the card at large
+              // text shrinks instead of overflowing.
+              chip: FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: AlignmentDirectional.topStart,
+                child: TradeListChip.status(
+                  kind: disputeChipKind(chip),
+                  caption: chip.localized(l10n),
+                ),
+              ),
             ),
             const SizedBox(height: _sectionGap),
             _IdRow(
