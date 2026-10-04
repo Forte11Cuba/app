@@ -8,6 +8,7 @@ import 'package:mostro/core/app_theme.dart';
 import 'package:mostro/features/chat/attachments/attachment_flow.dart';
 import 'package:mostro/features/chat/attachments/upload_controller.dart';
 import 'package:mostro/features/chat/models/chat_list_rules.dart';
+import 'package:mostro/features/chat/models/reaction_rules.dart';
 import 'package:mostro/features/chat/providers/chat_list_provider.dart';
 import 'package:mostro/features/chat/providers/chat_providers.dart';
 import 'package:mostro/features/chat/widgets/info_panels.dart';
@@ -17,6 +18,7 @@ import 'package:mostro/features/chat/widgets/trade_state_header.dart';
 import 'package:mostro/features/chat/widgets/upload_bubble.dart';
 import 'package:mostro/features/notifications/models/notification_model.dart';
 import 'package:mostro/features/notifications/providers/notifications_provider.dart';
+import 'package:mostro/features/order/widgets/order_detail_cards.dart';
 import 'package:mostro/features/trades/providers/trades_providers.dart';
 import 'package:mostro/l10n/app_localizations.dart';
 import 'package:mostro/shared/widgets/bottom_nav_bar.dart';
@@ -327,6 +329,35 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
         );
   }
 
+  /// Replaces the copy of a message already in the list, unless it carries
+  /// older reactions than the one shown (a send's reply landing after the
+  /// update of a later send). One not shown yet is left to the history and
+  /// the incoming stream, which own adding.
+  void _onMessageUpdated(rust_types.ChatMessage msg) {
+    final index = _messages.indexWhere((m) => m.id == msg.id);
+    if (index < 0 || !reactionsNotOlder(msg, _messages[index])) return;
+    setState(() => _messages[index] = msg);
+  }
+
+  /// Sends the user's reaction to the counterpart's [msg]; an empty [emoji]
+  /// withdraws it. Never a preview or an unread message.
+  Future<void> _onReact(rust_types.ChatMessage msg, String emoji) async {
+    final l10n = AppLocalizations.of(context);
+    try {
+      final updated = await messages_api.sendReaction(
+        tradeId: widget.orderId,
+        messageId: msg.id,
+        emoji: emoji,
+      );
+      if (!mounted) return;
+      _onMessageUpdated(updated);
+    } catch (e) {
+      debugPrint('[chat] sendReaction failed: $e');
+      if (!mounted) return;
+      showOrderDetailSnackBar(context, l10n.reactionSendFailed);
+    }
+  }
+
   // ── Helpers ───────────────────────────────────────────────────────────────
 
   /// Whether the list is close enough to the end to keep following it.
@@ -451,6 +482,11 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
       incomingMessageProvider(widget.orderId),
       (_, next) => next.whenData(_onIncomingMessage),
     );
+    // A message already shown that changed: a reaction to it.
+    ref.listen<AsyncValue<rust_types.ChatMessage>>(
+      messageUpdatesProvider(widget.orderId),
+      (_, next) => next.whenData(_onMessageUpdated),
+    );
 
     // Resolve the peer identity from the trade row, live. Listening (rather
     // than a one-shot read) keeps the autoDispose provider chain alive, and
@@ -570,8 +606,11 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
                     createdAt: msg.createdAt.toInt(),
                     messageType: _msgTypeStr(msg.messageType),
                     attachment: msg.attachment,
+                    reaction: shownReaction(msg),
                   ),
                   peerColorHue: room.peerColorHue,
+                  onReact:
+                      msg.isMine ? null : (emoji) => _onReact(msg, emoji),
                 );
               },
             );

@@ -4136,5 +4136,17 @@ class AppLocalizationsEn extends AppLocalizations {
       'The chat key of this trade is not available on this device.';
 
   @override
+  String get moreReactions => 'More reactions';
+
+  @override
+  String messageReactionLabel(String emoji) {
+    return 'Reaction: $emoji';
+  }
+
+  @override
+  String get reactionSendFailed =>
+      'Couldn\'t send the reaction. Please try again.';
+
+  @override
   String get messageMenuHint => 'Open the message menu';
 }

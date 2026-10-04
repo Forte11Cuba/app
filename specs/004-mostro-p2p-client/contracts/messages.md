@@ -137,6 +137,40 @@ session.
 
 ---
 
+### send_reaction(trade_id: String, message_id: String, emoji: String) → ChatMessage
+React to the counterparty's message, or withdraw the reaction with an empty
+`emoji` (protocol chat.md, "Reactions"; #690).
+
+**Validation**: `emoji` ≤ 64 bytes. The target is a peer-chat message the
+counterparty wrote, named by its inner event id.
+
+**Side effects**: Wraps an inner **kind 7** event with one `e` tag (the
+target's inner id) in the chat envelope and publishes it. It is dated one
+second after the user's previous reaction to that message when that one is
+not older, so a quick change is never settled by id. Unlike a message, a
+reaction no relay accepted is **not** kept, and it wakes nobody. Once
+published it is folded into the target (`ChatMessage.reactions`), persisted
+with it and emitted on `on_message_updated`.
+
+**Errors**: `ReactionTooLarge`, `MessageNotFound`, `ReactionNotAllowed`,
+`SendFailed`.
+
+**Receiving**: an incoming kind 7 passes the same validation as a message
+(step 11 checks its one `e` tag and its size) and is folded into its target:
+one per party, the newest `created_at` holding, ties to the lowest id. A
+reaction to the reactor's own message, or on the dispute channel, is
+dropped. One whose target has not arrived is held in memory — one per
+party and target, at most 256 per trade — until it does. The cursor passes a
+reaction only once it is durably stored with its target, so a held one is
+fetched again after a restart. The target is saved under the store's write
+lock, so a concurrent `mark_as_read` or reaction never writes an older copy
+over it. A reaction is never a message: no unread count, no
+`on_new_message`, no notification. An inner kind this client does not
+implement (`UnsupportedInnerKind`, a typed error) is dropped and passed
+without counting toward the flood breaker.
+
+---
+
 ### get_messages(trade_id: String) → Vec<ChatMessage>
 Get all messages for a trade, ordered by creation time.
 
@@ -175,6 +209,11 @@ or an open chat. Repeated deliveries must preserve read/delete state. Card write
 reads and deletes commit and publish in invocation order. Mark-read operates on the
 latest persisted record even before UI hydration; a read during event processing
 suppresses that pending event, even if the user has since left the chat.
+
+### on_message_updated(trade_id: String) → Stream<ChatMessage>
+Emits a stored message of the trade again when it changes: a reaction to
+it, received or sent. Never a new message, so nothing that counts unread
+messages or raises notifications listens to it.
 
 ### on_unread_count_changed() → Stream<u32>
 Emits when the global unread message count changes.

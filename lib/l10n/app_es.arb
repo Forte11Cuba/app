@@ -1267,5 +1267,8 @@
   "shareChatKeyConfirm": "Compartir",
   "chatKeySharedIndicator": "Clave del chat compartida con el resolutor",
   "shareChatKeyUnavailable": "La clave del chat de esta operación no está disponible en este dispositivo.",
-  "messageMenuHint": "Abrir el menú del mensaje"
+  "messageMenuHint": "Abrir el menú del mensaje",
+  "moreReactions": "Más reacciones",
+  "messageReactionLabel": "Reacción: {emoji}",
+  "reactionSendFailed": "No se pudo enviar la reacción. Inténtalo de nuevo."
 }

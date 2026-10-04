@@ -4181,5 +4181,16 @@ class AppLocalizationsIt extends AppLocalizations {
       'La chiave della chat di questa operazione non è disponibile su questo dispositivo.';
 
   @override
+  String get moreReactions => 'Altre reazioni';
+
+  @override
+  String messageReactionLabel(String emoji) {
+    return 'Reazione: $emoji';
+  }
+
+  @override
+  String get reactionSendFailed => 'Impossibile inviare la reazione. Riprova.';
+
+  @override
   String get messageMenuHint => 'Apri il menu del messaggio';
 }

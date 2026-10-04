@@ -1267,5 +1267,8 @@
   "shareChatKeyConfirm": "Delen",
   "chatKeySharedIndicator": "Chatsleutel gedeeld met de solver",
   "shareChatKeyUnavailable": "De chatsleutel van deze trade is niet beschikbaar op dit apparaat.",
-  "messageMenuHint": "Berichtmenu openen"
+  "messageMenuHint": "Berichtmenu openen",
+  "moreReactions": "Meer reacties",
+  "messageReactionLabel": "Reactie: {emoji}",
+  "reactionSendFailed": "De reactie kon niet worden verstuurd. Probeer het opnieuw."
 }

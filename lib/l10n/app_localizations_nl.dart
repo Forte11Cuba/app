@@ -4170,5 +4170,17 @@ class AppLocalizationsNl extends AppLocalizations {
       'De chatsleutel van deze trade is niet beschikbaar op dit apparaat.';
 
   @override
+  String get moreReactions => 'Meer reacties';
+
+  @override
+  String messageReactionLabel(String emoji) {
+    return 'Reactie: $emoji';
+  }
+
+  @override
+  String get reactionSendFailed =>
+      'De reactie kon niet worden verstuurd. Probeer het opnieuw.';
+
+  @override
   String get messageMenuHint => 'Berichtmenu openen';
 }
