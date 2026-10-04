@@ -368,6 +368,22 @@ pub(crate) async fn publish_chat_payload_for(
     publish_chat_payload(ctx, payload).await.map(|p| p.inner)
 }
 
+/// [`publish_chat_payload_for`] for a message that only counts once a relay
+/// holds it, such as the chat key sent to a solver (#415): when none takes
+/// it, it fails with `SendFailed` instead of being kept as sent.
+pub(crate) async fn publish_delivered_chat_payload_for(
+    ctx: &ChatContext,
+    payload: &str,
+) -> Result<nostr_sdk::prelude::Event> {
+    let published = publish_chat_payload(ctx, payload)
+        .await
+        .map_err(|e| anyhow!("SendFailed: {e}"))?;
+    if !published.delivered {
+        bail!("SendFailed: no relay accepted the message");
+    }
+    Ok(published.inner)
+}
+
 /// A chat envelope handed to the pool.
 struct PublishedChat {
     /// The signed inner event: the message's durable identity.
@@ -1869,6 +1885,13 @@ async fn handle_chat_event(
     // reconstructs, but never as unread.
     let is_echo = inner.pubkey == *my_trade_pubkey;
     let (content, attachment) = parse_chat_payload(&inner.content);
+    // Another device of ours sent the solver the chat key (#415): this one
+    // must stop offering it too.
+    if channel == ChatChannel::Dispute && is_echo && attachment.is_none() {
+        if let Some(solver) = allowed_signers.iter().find(|k| *k != my_trade_pubkey) {
+            crate::api::disputes::note_chat_key_share_echo(order_id, solver, &content).await;
+        }
+    }
 
     let msg = ChatMessage {
         id: inner_id,
@@ -2031,12 +2054,19 @@ pub(crate) fn chat_still_relevant(trade: &crate::api::types::TradeInfo) -> bool 
     chat_still_relevant_at(trade, unix_now())
 }
 
+/// Whether `peer` can be `trade`'s counterparty: known, and not the Mostro
+/// node a pre-#334 row seeded it with (see [`chat_still_relevant`]). Keys
+/// derived with the node would open no conversation of this trade.
+pub(crate) fn plausible_counterparty(trade: &crate::api::types::TradeInfo, peer: &str) -> bool {
+    !peer.is_empty()
+        && peer != trade.order.creator_pubkey
+        && peer != crate::config::active_mostro_pubkey()
+}
+
 /// [`chat_still_relevant`] at `now` (Unix seconds).
 pub(crate) fn chat_still_relevant_at(trade: &crate::api::types::TradeInfo, now: i64) -> bool {
     use crate::api::types::OrderStatus::*;
-    let peer_known = !trade.counterparty_pubkey.is_empty()
-        && trade.counterparty_pubkey != trade.order.creator_pubkey
-        && trade.counterparty_pubkey != crate::config::active_mostro_pubkey();
+    let peer_known = plausible_counterparty(trade, &trade.counterparty_pubkey);
     let live = trade.outcome.is_none()
         && matches!(
             trade.order.status,

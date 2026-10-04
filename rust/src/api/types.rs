@@ -1165,6 +1165,9 @@ pub struct Dispute {
     pub resolved_at: Option<i64>,
     /// Whether the local user has seen the latest dispute update.
     pub is_read: bool,
+    /// Whether this side already sent the current solver the chat key
+    /// (#415). A takeover clears it: the new solver never got the key.
+    pub chat_key_shared: bool,
 }
 
 /// State of the embedded Cashu wallet — phase C2 of `docs/cashu/README.md`.

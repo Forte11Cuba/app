@@ -783,6 +783,10 @@ class Dispute {
   /// Whether the local user has seen the latest dispute update.
   final bool isRead;
 
+  /// Whether this side already sent the current solver the chat key
+  /// (#415). A takeover clears it: the new solver never got the key.
+  final bool chatKeyShared;
+
   const Dispute({
     required this.id,
     required this.tradeId,
@@ -794,6 +798,7 @@ class Dispute {
     required this.openedAt,
     this.resolvedAt,
     required this.isRead,
+    required this.chatKeyShared,
   });
 
   @override
@@ -807,7 +812,8 @@ class Dispute {
       resolution.hashCode ^
       openedAt.hashCode ^
       resolvedAt.hashCode ^
-      isRead.hashCode;
+      isRead.hashCode ^
+      chatKeyShared.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -823,7 +829,8 @@ class Dispute {
           resolution == other.resolution &&
           openedAt == other.openedAt &&
           resolvedAt == other.resolvedAt &&
-          isRead == other.isRead;
+          isRead == other.isRead &&
+          chatKeyShared == other.chatKeyShared;
 }
 
 enum DisputeResolution {
