@@ -490,12 +490,6 @@ abstract class AppLocalizations {
   /// **'Coming soon'**
   String get comingSoonMessage;
 
-  /// Trade status chip label: active
-  ///
-  /// In en, this message translates to:
-  /// **'Active'**
-  String get tradeStatusActive;
-
   /// Trade status chip label: completed
   ///
   /// In en, this message translates to:
@@ -2698,6 +2692,12 @@ abstract class AppLocalizations {
   /// **'Sats Amount'**
   String get satsAmountLabel;
 
+  /// User information panel: the counterparty shared no reputation for this order (full privacy) or it has not arrived yet
+  ///
+  /// In en, this message translates to:
+  /// **'This user\'s reputation is not available'**
+  String get peerReputationUnavailable;
+
   /// Label for the status field
   ///
   /// In en, this message translates to:
@@ -2716,41 +2716,11 @@ abstract class AppLocalizations {
   /// **'Created'**
   String get createdLabel;
 
-  /// Placeholder note in the trade information panel
-  ///
-  /// In en, this message translates to:
-  /// **'Details wired when trade provider available (Phase 10+)'**
-  String get tradeDetailsPlaceholder;
-
   /// Title of the user information panel
   ///
   /// In en, this message translates to:
   /// **'User Information'**
   String get userInformationTitle;
-
-  /// Label for the peer public key
-  ///
-  /// In en, this message translates to:
-  /// **'Peer\'s Public Key'**
-  String get peerPublicKeyLabel;
-
-  /// Label for the shared key
-  ///
-  /// In en, this message translates to:
-  /// **'Your Shared Key'**
-  String get yourSharedKeyLabel;
-
-  /// Placeholder note for the shared key
-  ///
-  /// In en, this message translates to:
-  /// **'Available after bridge integration (Phase 10+)'**
-  String get sharedKeyPlaceholder;
-
-  /// Safety note about the shared key
-  ///
-  /// In en, this message translates to:
-  /// **'Keep your shared key safe — it is needed for dispute resolution'**
-  String get sharedKeySafetyNote;
 
   /// File type chip: video
   ///
