@@ -568,5 +568,32 @@ void main() {
       // Its content is the file name: there is nothing to copy.
       expect(find.text('Copy'), findsNothing);
     });
+
+    testWidgets('holding a counterpart attachment offers only the reactions', (
+      tester,
+    ) async {
+      final reacted = <String>[];
+      await _pump(
+        tester,
+        MessageBubble(
+          message: bubbleMessage(pdfInfo()),
+          peerColorHue: 200,
+          onReact: (emoji) async => reacted.add(emoji),
+        ),
+        gateway: FakeAttachmentGateway(),
+      );
+
+      final gesture = await tester.startGesture(
+        tester.getCenter(find.byType(EncryptedFileMessage)),
+      );
+      await tester.pump(messageMenuHoldDuration);
+      await gesture.up();
+      await tester.pumpAndSettle();
+      expect(find.text('Copy'), findsNothing);
+      await tester.tap(find.text('👍'));
+      await tester.pumpAndSettle();
+
+      expect(reacted, ['👍']);
+    });
   });
 }

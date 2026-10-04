@@ -166,7 +166,9 @@ dropped. One whose target has not arrived is held in memory — one per
 party and target, at most 256 per trade — until it does. Stored catch-up is served
 newest first, so no channel's cursor moves until it is over — EOSE from
 every connected relay that held the subscription, a relay that drops the
-connection meanwhile no longer awaited: passing
+connection meanwhile no longer awaited, and one that delivers before its
+EOSE without being awaited (reconnected and given the subscription again)
+awaited from then on: passing
 a newer event before an older one arrives would lose the older one on a
 restart. After that, the peer cursor still stops at a held reaction's floor
 (where the catch-up started, or the live cursor) until the reaction is
@@ -177,8 +179,10 @@ held for more than 10 minutes stops holding the cursor back (its target was
 refused by the retention quota, or names nothing) but stays held in case the
 target comes. If the target's write fails, its reactions are held again
 until a retry stores it. Otherwise a reaction is passed
-only once durably stored. Once any write of a session fails, that chat's
-cursor stays put until a restart, which fetches the unsaved event again. Every write of a message row (a new message,
+only once durably stored. While any message of the trade is in memory
+only (its write, or that of a reaction it carries, failed — received or
+sent), the cursor stays put until a retry stores it, or a restart fetches
+it again. Every write of a message row (a new message,
 a reaction, `mark_as_read`, the retry of a failed write) happens under the
 store's write lock, so none
 writes an older copy over another — on web the read flag rewrites whole

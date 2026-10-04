@@ -79,7 +79,7 @@ class ChatMessage {
 /// - System messages → centered italic text, no bubble background.
 /// - Held for a second → the message's menu ([showMessageActionsMenu]):
 ///   Copy for a text message, and the reactions when [onReact] is set; an
-///   attachment opens none.
+///   attachment offers only the reactions, and without [onReact] no menu.
 /// - A reaction shows under the bubble.
 class MessageBubble extends StatelessWidget {
   const MessageBubble({
@@ -185,8 +185,8 @@ class MessageBubble extends StatelessWidget {
               crossAxisAlignment: alignment,
               children: [
                 // An attachment's content is its file name: nothing worth
-                // copying, so it opens no menu.
-                if (attachment != null)
+                // copying. It opens the menu only to react to it.
+                if (attachment != null && onReact == null)
                   bubble
                 else
                   // The recognizer gives screen readers the long press; the
@@ -264,6 +264,7 @@ class MessageBubble extends StatelessWidget {
       bubble: bubble,
       alignEnd: message.isMine,
       canReact: react != null,
+      canCopy: message.attachment == null,
       currentReaction: message.reaction,
     );
     switch (choice) {

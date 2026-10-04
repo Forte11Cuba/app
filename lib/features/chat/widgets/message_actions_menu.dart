@@ -47,7 +47,8 @@ typedef MessageAnchor = MessagePlace? Function();
 ///
 /// The message stays lit above the scrim and the menu opens under it, or
 /// above it when there is no room below. With [canReact] the reactions sit
-/// above the message, [currentReaction] marked as the user's. Everything
+/// above the message, [currentReaction] marked as the user's; without
+/// [canCopy] (an attachment) they are the whole menu. Everything
 /// follows the message when it moves — a new message scrolls the chat, the
 /// keyboard closes, the screen turns — and the menu closes if it
 /// disappears. [alignEnd] lines everything up with the message's side: the
@@ -58,6 +59,7 @@ Future<MessageMenuChoice?> showMessageActionsMenu({
   required Widget bubble,
   required bool alignEnd,
   bool canReact = false,
+  bool canCopy = true,
   String? currentReaction,
 }) async {
   final place = anchor();
@@ -72,6 +74,7 @@ Future<MessageMenuChoice?> showMessageActionsMenu({
       bubble: bubble,
       alignEnd: alignEnd,
       canReact: canReact,
+      canCopy: canCopy,
       currentReaction: currentReaction,
       scrim: book.scrim,
       barrierLabel: MaterialLocalizations.of(context).modalBarrierDismissLabel,
@@ -87,6 +90,7 @@ class _MessageActionsRoute extends PopupRoute<MessageMenuChoice> {
     required this.bubble,
     required this.alignEnd,
     required this.canReact,
+    required this.canCopy,
     required this.currentReaction,
     required this.scrim,
     required this.barrierLabel,
@@ -100,6 +104,7 @@ class _MessageActionsRoute extends PopupRoute<MessageMenuChoice> {
   final Widget bubble;
   final bool alignEnd;
   final bool canReact;
+  final bool canCopy;
   final String? currentReaction;
   final Color scrim;
   final bool animate;
@@ -141,8 +146,15 @@ class _MessageActionsRoute extends PopupRoute<MessageMenuChoice> {
                   // original underneath.
                   Positioned.fromRect(
                     rect: place.rect.shift(-place.visible.topLeft),
+                    // An attachment's bubble holds ink of its own, which
+                    // needs a Material out here in the route as well.
                     child: IgnorePointer(
-                      child: ExcludeSemantics(child: bubble),
+                      child: ExcludeSemantics(
+                        child: Material(
+                          type: MaterialType.transparency,
+                          child: bubble,
+                        ),
+                      ),
                     ),
                   ),
                 ],
@@ -161,7 +173,8 @@ class _MessageActionsRoute extends PopupRoute<MessageMenuChoice> {
                   id: _Slot.reactions,
                   child: _ReactionPill(current: currentReaction),
                 ),
-              LayoutId(id: _Slot.actions, child: const _ActionsCard()),
+              if (canCopy)
+                LayoutId(id: _Slot.actions, child: const _ActionsCard()),
             ],
           ),
         ],
@@ -264,10 +277,14 @@ class _MenuLayout extends MultiChildLayoutDelegate {
   void performLayout(Size size) {
     final height = math.max(0.0, size.height - safeArea.vertical - 2 * _margin);
     final width = size.width - safeArea.horizontal;
-    final actions = layoutChild(
-      _Slot.actions,
-      BoxConstraints.loose(Size(math.max(0.0, width - 2 * _margin), height)),
-    );
+    final actions = hasChild(_Slot.actions)
+        ? layoutChild(
+            _Slot.actions,
+            BoxConstraints.loose(
+              Size(math.max(0.0, width - 2 * _margin), height),
+            ),
+          )
+        : null;
     final reactions = hasChild(_Slot.reactions)
         ? layoutChild(
             _Slot.reactions,
@@ -282,13 +299,22 @@ class _MenuLayout extends MultiChildLayoutDelegate {
     final below = bubbleRect.bottom + _gap;
     final above = bubbleRect.top - _gap;
 
-    double actionsY;
+    double? actionsY;
     double? reactionsY;
-    if (reactions == null) {
-      actionsY = below + actions.height <= bottom
+    if (reactions == null && actions == null) {
+      return;
+    } else if (reactions == null) {
+      actionsY = below + actions!.height <= bottom
           ? below
           : above - actions.height;
       actionsY = _clamp(actionsY, top, bottom - actions.height);
+    } else if (actions == null) {
+      // Reactions alone (an attachment): above the message, or under it.
+      reactionsY = _clamp(
+        above - reactions.height >= top ? above - reactions.height : below,
+        top,
+        bottom - reactions.height,
+      );
     } else if (above - reactions.height >= top &&
         below + actions.height <= bottom) {
       reactionsY = above - reactions.height;
@@ -306,10 +332,12 @@ class _MenuLayout extends MultiChildLayoutDelegate {
       actionsY = stackTop + reactions.height + _gap;
     }
 
-    positionChild(
-      _Slot.actions,
-      Offset(_x(size, actions.width, _margin), actionsY),
-    );
+    if (actions != null && actionsY != null) {
+      positionChild(
+        _Slot.actions,
+        Offset(_x(size, actions.width, _margin), actionsY),
+      );
+    }
     if (reactions != null && reactionsY != null) {
       positionChild(
         _Slot.reactions,

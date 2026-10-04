@@ -224,6 +224,20 @@ impl MessageStore {
         }
     }
 
+    /// Whether a message of `trade_id` is in memory only: its write failed and
+    /// no retry has stored it yet.
+    async fn has_unsaved(&self, trade_id: &str) -> bool {
+        let unsaved = self.non_durable.read().await;
+        if unsaved.is_empty() {
+            return false;
+        }
+        self.messages
+            .read()
+            .await
+            .get(trade_id)
+            .is_some_and(|msgs| msgs.iter().any(|m| unsaved.contains(&m.id)))
+    }
+
     /// Fold a reaction into the message `target_id` of `trade_id`, persist the
     /// message and announce it on `updated_tx`. `floor` is the chat's cursor
     /// when it arrived, kept by [`Self::held_floor`] if the target is not
@@ -2042,10 +2056,10 @@ struct ChatRxState {
     /// The relays whose EOSE is still to come. Empty in tests, which call
     /// [`Self::caught_up`] themselves.
     awaiting_eose: std::collections::HashSet<String>,
-    /// A write of this session failed. The cursor then stays where it is
-    /// until a restart: a later event passing it would leave the unsaved
-    /// message or reaction behind, never fetched again.
-    write_failed: bool,
+    /// Relays that have sent EOSE. One that delivers before sending it —
+    /// reconnected, and given the subscription again by `live_subs` — is
+    /// replaying stored events newest first: catch-up starts over for it.
+    eose_seen: std::collections::HashSet<String>,
     /// The chat claim this state belongs to: cursor writes are gated on it
     /// still owning the chat. `None` only in tests that run no task.
     generation: Option<u64>,
@@ -2065,7 +2079,7 @@ impl ChatRxState {
             flooded: false,
             caught_up: false,
             awaiting_eose: std::collections::HashSet::new(),
-            write_failed: false,
+            eose_seen: std::collections::HashSet::new(),
             generation,
         }
     }
@@ -2137,9 +2151,19 @@ impl ChatRxState {
     /// is over.
     async fn eose_from(&mut self, order_id: &str, relay: &str) {
         self.live = true;
+        self.eose_seen.insert(relay.to_string());
         self.awaiting_eose.remove(relay);
         if self.awaiting_eose.is_empty() {
             self.caught_up(order_id).await;
+        }
+    }
+
+    /// An event from `relay`. One that has not sent EOSE yet and was not
+    /// awaited joined late: its stored events come newest first, so the
+    /// cursor waits for its EOSE as for the others'.
+    fn event_from(&mut self, relay: &str) {
+        if !self.eose_seen.contains(relay) && self.awaiting_eose.insert(relay.to_string()) {
+            self.caught_up = false;
         }
     }
 
@@ -2166,7 +2190,11 @@ impl ChatRxState {
     /// reaction's floor. Also run on a quiet chat, so a floor that expired
     /// with no event after it still lets the cursor go.
     async fn settle_cursor(&mut self, order_id: &str) {
-        if !self.caught_up || self.write_failed {
+        // A message of this trade whose write failed — received, or a
+        // reaction this device sent — keeps the cursor where it is until a
+        // retry stores it: a later event passing it would leave it behind,
+        // never fetched again.
+        if !self.caught_up || message_store().has_unsaved(order_id).await {
             return;
         }
         let floor = match self.channel {
@@ -2291,11 +2319,12 @@ async fn run_chat_subscription(
         };
         match notification {
             Some(ClientNotification::Event {
+                relay_url,
                 subscription_id,
                 event,
-                ..
             }) => {
                 if subscription_id == sub_id {
+                    state.event_from(&relay_url.to_string());
                     handle_chat_event(
                         channel,
                         order_id,
@@ -2437,8 +2466,6 @@ async fn handle_chat_event(
                 state
                     .advance_cursor(order_id, event.created_at.as_secs() as i64)
                     .await;
-            } else {
-                state.write_failed = true;
             }
             return;
         }
@@ -2490,8 +2517,6 @@ async fn handle_chat_event(
         state
             .advance_cursor(order_id, event.created_at.as_secs() as i64)
             .await;
-    } else {
-        state.write_failed = true;
     }
 }
 
@@ -2547,8 +2572,6 @@ async fn handle_reaction(
     };
     if passed {
         state.advance_cursor(order_id, at).await;
-    } else {
-        state.write_failed = true;
     }
 }
 
@@ -4688,18 +4711,49 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_failed_write_keeps_the_cursor_for_the_session() {
+    async fn an_unsaved_message_keeps_the_cursor_until_a_retry_stores_it() {
         let mut chat = AliceChat::new();
         chat.caught_up().await;
-        chat.state.write_failed = true;
+        // A reaction this device sent whose write failed leaves its target
+        // in memory only, as a failed incoming write does.
+        let (outer, inner) = chat.message(&chat.alice.clone(), "target").await;
+        chat.receive(&outer).await;
+        let cursor = chat.state.cursor;
+        message_store()
+            .non_durable
+            .write()
+            .await
+            .insert(inner.id.to_hex());
         let (later, _) = chat.message(&chat.bob.clone(), "after the failure").await;
 
         chat.receive(&later).await;
-
         assert_eq!(
-            chat.state.cursor, 0,
+            chat.state.cursor, cursor,
             "a restart fetches the unsaved one again"
         );
+        message_store()
+            .non_durable
+            .write()
+            .await
+            .remove(&inner.id.to_hex());
+        let order = chat.order_id.clone();
+        chat.state.settle_cursor(&order).await;
+
+        assert!(chat.state.cursor >= later.created_at.as_secs() as i64 - 1);
+    }
+
+    #[test]
+    fn a_relay_that_joins_late_reopens_catch_up() {
+        let mut state = ChatRxState::new(ChatChannel::Peer, 0, None);
+        state.caught_up = true;
+        state.eose_seen.insert("wss://early".to_string());
+
+        state.event_from("wss://early");
+        assert!(state.caught_up, "a relay past its EOSE is live");
+        state.event_from("wss://late");
+
+        assert!(!state.caught_up);
+        assert!(state.awaiting_eose.contains("wss://late"));
     }
 
     #[tokio::test]
