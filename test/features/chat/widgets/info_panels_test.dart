@@ -4,9 +4,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:intl/intl.dart';
 import 'package:mostro/core/app_theme.dart';
+import 'package:mostro/features/chat/models/chat_list_rules.dart';
+import 'package:mostro/features/chat/providers/chat_list_provider.dart';
 import 'package:mostro/features/chat/providers/chat_providers.dart';
 import 'package:mostro/features/chat/screens/chat_room_screen.dart';
 import 'package:mostro/features/chat/widgets/info_panels.dart';
+import 'package:mostro/features/chat/widgets/message_input.dart';
 import 'package:mostro/features/chat/widgets/trade_state_header.dart';
 import 'package:mostro/features/home/providers/home_order_providers.dart';
 import 'package:mostro/features/order/models/order_detail_rules.dart'
@@ -15,6 +18,7 @@ import 'package:mostro/features/order/providers/trade_state_provider.dart';
 import 'package:mostro/features/trades/providers/trades_providers.dart';
 import 'package:mostro/l10n/app_localizations.dart';
 import 'package:mostro/l10n/app_localizations_en.dart';
+import 'package:mostro/shared/widgets/bottom_nav_bar.dart';
 import 'package:mostro/shared/widgets/counterpart_reputation_row.dart';
 import 'package:mostro/shared/widgets/nym_avatar.dart';
 import 'package:mostro/src/rust/api/types.dart' as rust_types;
@@ -89,6 +93,7 @@ Future<void> _pumpChatRoom(
   Locale? locale,
   double textScale = 1,
   Size size = const Size(400, 900),
+  List<Override> overrides = const [],
 }) async {
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1;
@@ -109,6 +114,7 @@ Future<void> _pumpChatRoom(
                 ? const Stream<rust_types.OrderStatus>.empty()
                 : Stream.value(live),
       ),
+      ...overrides,
     ],
   );
   container.read(chatRoomsNotifierProvider.notifier).upsertRoom(_room);
@@ -139,6 +145,50 @@ Future<void> _pumpChatRoom(
   );
   await tester.pump();
   await tester.pump();
+}
+
+/// [ChatRoomScreen] for an open trade on a short phone (320 x 640) in
+/// German at 2x text, with the input bar shown.
+Future<void> _pumpShortGermanChat(WidgetTester tester) => _pumpChatRoom(
+  tester,
+  trades: [_trade(peerRating: 4.4, peerReviews: 4, peerDays: 64)],
+  // The order the issue was reported on.
+  book: fakeOrder(
+    id: _orderId,
+    fiatAmount: 23478,
+    fiatCode: 'ARS',
+    amountSats: BigInt.from(17122),
+    paymentMethod: 'Mercado Pago',
+    rating: 4.8,
+    tradeCount: 12,
+  ),
+  live: rust_types.OrderStatus.fiatSent,
+  locale: const Locale('de'),
+  textScale: 2,
+  size: const Size(320, 640),
+  overrides: [
+    chatRowStateProvider(_orderId).overrideWithValue(
+      const ChatRowState(
+        group: ChatGroup.active,
+        tone: ChatAvatarTone.yourTurn,
+      ),
+    ),
+  ],
+);
+
+/// Runs [body] and returns every Flutter error it reported (an overflow is
+/// one), as text. `FlutterError.onError` is restored before returning, as
+/// the test binding requires.
+Future<List<String>> _collectFlutterErrors(Future<void> Function() body) async {
+  final errors = <String>[];
+  final previous = FlutterError.onError;
+  FlutterError.onError = (details) => errors.add(details.toString());
+  try {
+    await body();
+  } finally {
+    FlutterError.onError = previous;
+  }
+  return errors;
 }
 
 /// Opens a panel the way a user does: through its app-bar icon.
@@ -421,6 +471,73 @@ void main() {
   group('at large text', () {
     // Real glyph widths: the test font draws every glyph a full em wide.
     setUpAll(loadAppFonts);
+
+    // A short phone at 2x text in German, the longest translation. The app
+    // bar's title overflowed next to its two icons (#679).
+    testWidgets('the chat screen fits 320 x 640, de, 2x, panels closed', (
+      tester,
+    ) async {
+      final errors = await _collectFlutterErrors(() async {
+        await _pumpShortGermanChat(tester);
+        final de = lookupAppLocalizations(const Locale('de'));
+
+        expect(find.text(_peerHandle), findsOneWidget);
+        for (final tooltip in [de.exchangeInfoTooltip, de.userInfoTooltip]) {
+          final icon = tester.getRect(find.byTooltip(tooltip));
+          expect(icon.left, greaterThanOrEqualTo(0), reason: tooltip);
+          expect(icon.right, lessThanOrEqualTo(320), reason: tooltip);
+        }
+      });
+
+      expect(errors, isEmpty);
+    });
+
+    // The trade header and the input bar take most of that chat column, so
+    // a panel sized from the screen left the conversation 2 px tall.
+    for (final panel in ['trade', 'user']) {
+      testWidgets('the $panel panel fits the chat column at 320 x 640, de, '
+          '2x', (tester) async {
+        final errors = await _collectFlutterErrors(() async {
+          await _pumpShortGermanChat(tester);
+          final de = lookupAppLocalizations(const Locale('de'));
+
+          await _open(
+            tester,
+            panel == 'trade' ? de.exchangeInfoTooltip : de.userInfoTooltip,
+          );
+
+          expect(
+            find.byType(
+              panel == 'trade' ? TradeInformationTab : UserInformationTab,
+            ),
+            findsOneWidget,
+          );
+          final messages = tester.getRect(
+            find
+                .ancestor(
+                  of: find.text(de.noMessagesYet(_peerHandle)),
+                  matching: find.byType(Expanded),
+                )
+                .first,
+          );
+          expect(
+            messages.height,
+            greaterThanOrEqualTo(kFollowThresholdPixels),
+            reason: 'about one message stays visible under the panel',
+          );
+          final input = tester.getRect(find.byType(MessageInput));
+          final nav = tester.getRect(find.byType(BottomNavBar));
+          expect(input.top, greaterThanOrEqualTo(0));
+          expect(
+            input.bottom,
+            lessThanOrEqualTo(nav.top),
+            reason: 'the input bar stays on screen, above the bottom bar',
+          );
+        });
+
+        expect(errors, isEmpty);
+      });
+    }
 
     testWidgets('both panels open at 2x text in German on a phone', (
       tester,
