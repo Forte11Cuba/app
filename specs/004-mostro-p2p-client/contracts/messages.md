@@ -164,7 +164,9 @@ one per party, the newest `created_at` holding, ties to the lowest id. A
 reaction to the reactor's own message, or on the dispute channel, is
 dropped. One whose target has not arrived is held in memory — one per
 party and target, at most 256 per trade — until it does. Stored catch-up is served
-newest first, so no channel's cursor moves until it is over (EOSE): passing
+newest first, so no channel's cursor moves until it is over — EOSE from
+every connected relay that held the subscription, a relay that drops the
+connection meanwhile no longer awaited: passing
 a newer event before an older one arrives would lose the older one on a
 restart. After that, the peer cursor still stops at a held reaction's floor
 (where the catch-up started, or the live cursor) until the reaction is
@@ -177,7 +179,8 @@ target comes. If the target's write fails, its reactions are held again
 until a retry stores it. Otherwise a reaction is passed
 only once durably stored. Once any write of a session fails, that chat's
 cursor stays put until a restart, which fetches the unsaved event again. Every write of a message row (a new message,
-a reaction, `mark_as_read`) happens under the store's write lock, so none
+a reaction, `mark_as_read`, the retry of a failed write) happens under the
+store's write lock, so none
 writes an older copy over another — on web the read flag rewrites whole
 rows. A reaction is never a message: no unread count, no
 `on_new_message`, no notification. An inner kind this client does not

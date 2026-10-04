@@ -389,16 +389,19 @@ impl MessageStore {
         if !self.non_durable.read().await.contains(id) {
             return true;
         }
-        let copy = {
-            let store = self.messages.read().await;
-            store
-                .get(trade_id)
-                .and_then(|msgs| msgs.iter().find(|m| m.id == id).cloned())
-        };
+        // Under the write lock, like every other write of a message row: a
+        // reaction or a read flag saved meanwhile is never put back by an
+        // older copy, and the row written is the one the cursor relies on.
+        let store = self.messages.write().await;
+        let copy = store
+            .get(trade_id)
+            .and_then(|msgs| msgs.iter().find(|m| m.id == id).cloned());
         let (Some(db), Some(msg)) = (crate::db::app_db::db(), copy) else {
             return false;
         };
-        match db.save_message(&msg).await {
+        let saved = db.save_message(&msg).await;
+        drop(store);
+        match saved {
             Ok(()) => {
                 self.non_durable.write().await.remove(id);
                 // Reactions held again when its first write failed are in
@@ -2031,6 +2034,14 @@ struct ChatRxState {
     /// already be past its older target; this is where both are safe.
     start_cursor: i64,
     flooded: bool,
+    /// Every relay that held the subscription has sent EOSE: stored
+    /// catch-up is over and the cursor may move. `live` turns on at the first
+    /// one, for the token bucket; this waits for the slowest, which may
+    /// still be serving older events newest first.
+    caught_up: bool,
+    /// The relays whose EOSE is still to come. Empty in tests, which call
+    /// [`Self::caught_up`] themselves.
+    awaiting_eose: std::collections::HashSet<String>,
     /// A write of this session failed. The cursor then stays where it is
     /// until a restart: a later event passing it would leave the unsaved
     /// message or reaction behind, never fetched again.
@@ -2052,6 +2063,8 @@ impl ChatRxState {
             wanted: cursor,
             start_cursor: cursor,
             flooded: false,
+            caught_up: false,
+            awaiting_eose: std::collections::HashSet::new(),
             write_failed: false,
             generation,
         }
@@ -2115,14 +2128,45 @@ impl ChatRxState {
     /// Stored catch-up is over: the cursor may now pass what it delivered.
     async fn caught_up(&mut self, order_id: &str) {
         self.live = true;
+        self.caught_up = true;
         self.settle_cursor(order_id).await;
+    }
+
+    /// One relay's EOSE: from the first the token bucket meters arrivals;
+    /// once every relay that held the subscription has sent one, catch-up
+    /// is over.
+    async fn eose_from(&mut self, order_id: &str, relay: &str) {
+        self.live = true;
+        self.awaiting_eose.remove(relay);
+        if self.awaiting_eose.is_empty() {
+            self.caught_up(order_id).await;
+        }
+    }
+
+    /// Stop waiting for relays that dropped the connection: their catch-up
+    /// starts over on a reconnect and cannot hold this one back for good.
+    async fn forget_gone_relays(&mut self, order_id: &str, client: &nostr_sdk::prelude::Client) {
+        if self.caught_up || self.awaiting_eose.is_empty() {
+            return;
+        }
+        let connected: std::collections::HashSet<String> = client
+            .relays()
+            .await
+            .into_iter()
+            .filter(|(_, relay)| relay.status() == nostr_sdk::prelude::RelayStatus::Connected)
+            .map(|(url, _)| url.to_string())
+            .collect();
+        self.awaiting_eose.retain(|url| connected.contains(url));
+        if self.awaiting_eose.is_empty() && self.live {
+            self.caught_up(order_id).await;
+        }
     }
 
     /// Move the cursor as far as [`Self::wanted`], short of a held
     /// reaction's floor. Also run on a quiet chat, so a floor that expired
     /// with no event after it still lets the cursor go.
     async fn settle_cursor(&mut self, order_id: &str) {
-        if !self.live || self.write_failed {
+        if !self.caught_up || self.write_failed {
             return;
         }
         let floor = match self.channel {
@@ -2231,6 +2275,7 @@ async fn run_chat_subscription(
     );
 
     let mut state = ChatRxState::new(channel, cursor, Some(generation));
+    state.awaiting_eose = relays_holding(&client, &sub_id).await;
 
     loop {
         // The trade ended and `stop_chat_subscriptions` took the chat back.
@@ -2240,6 +2285,7 @@ async fn run_chat_subscription(
         // A quiet minute re-checks the cursor: a held reaction's floor can
         // expire with no event after it.
         let Ok(notification) = crate::rt::time::timeout(CURSOR_RECHECK, rx.next()).await else {
+            state.forget_gone_relays(order_id, &client).await;
             state.settle_cursor(order_id).await;
             continue;
         };
@@ -2266,12 +2312,14 @@ async fn run_chat_subscription(
                     return;
                 }
             }
-            Some(ClientNotification::Message { message, .. }) => {
+            Some(ClientNotification::Message {
+                relay_url, message, ..
+            }) => {
                 // EOSE for one of our subscriptions: stored catch-up is over,
                 // the token bucket meters everything from here on.
                 if let nostr_sdk::prelude::RelayMessage::EndOfStoredEvents(sid) = *message {
                     if *sid == sub_id {
-                        state.caught_up(order_id).await;
+                        state.eose_from(order_id, &relay_url.to_string()).await;
                     }
                 }
             }
@@ -2281,6 +2329,23 @@ async fn run_chat_subscription(
             Some(ClientNotification::Shutdown) | None => break,
         }
     }
+}
+
+/// The connected relays that hold subscription `id`: the ones whose stored
+/// catch-up the chat cursor waits for.
+async fn relays_holding(
+    client: &nostr_sdk::prelude::Client,
+    id: &nostr_sdk::prelude::SubscriptionId,
+) -> std::collections::HashSet<String> {
+    let mut holding = std::collections::HashSet::new();
+    for (url, relay) in client.relays().await {
+        if relay.status() == nostr_sdk::prelude::RelayStatus::Connected
+            && relay.subscription(id).await.is_some()
+        {
+            holding.insert(url.to_string());
+        }
+    }
+    holding
 }
 
 /// Validate and store one incoming chat-envelope event (see
@@ -2459,7 +2524,7 @@ async fn handle_reaction(
     };
     // Live events come in order, so a missing target is older than the
     // cursor only in catch-up, where it is still on its way.
-    let floor = if state.live {
+    let floor = if state.caught_up {
         state.cursor
     } else {
         state.start_cursor
@@ -3408,6 +3473,7 @@ mod tests {
         let generation = claim_chat(ChatChannel::Dispute, &order).await.expect("claim");
         let mut state = ChatRxState::new(ChatChannel::Dispute, 0, Some(generation));
         state.live = true;
+        state.caught_up = true;
         state.advance_cursor(&order, now - 20).await;
         assert_eq!(
             db.get_setting(&key).await.unwrap(),
@@ -4600,6 +4666,25 @@ mod tests {
         chat.state.settle_cursor(&order).await;
 
         assert!(chat.state.cursor >= later.created_at.as_secs() as i64 - 1);
+    }
+
+    #[tokio::test]
+    async fn the_cursor_waits_for_every_relays_eose() {
+        let mut chat = AliceChat::new();
+        let (newest, _) = chat.message(&chat.bob.clone(), "newest").await;
+        chat.state.awaiting_eose = ["wss://fast".to_string(), "wss://slow".to_string()].into();
+        chat.receive(&newest).await;
+        let order = chat.order_id.clone();
+
+        chat.state.eose_from(&order, "wss://fast").await;
+        assert!(chat.state.live, "the token bucket meters from the first");
+        assert_eq!(
+            chat.state.cursor, 0,
+            "the slow relay may still serve older ones"
+        );
+        chat.state.eose_from(&order, "wss://slow").await;
+
+        assert!(chat.state.cursor >= newest.created_at.as_secs() as i64 - 1);
     }
 
     #[tokio::test]
