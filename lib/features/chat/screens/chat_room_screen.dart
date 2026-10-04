@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -32,6 +33,16 @@ const double kFollowThresholdPixels = 80;
 /// How long a burst of incoming messages may stay quiet before the room is
 /// marked read once, instead of once per message.
 const Duration kMarkReadDebounce = Duration(milliseconds: 400);
+
+/// How much of the conversation an open info panel always leaves visible
+/// under it: about one message bubble, as [kFollowThresholdPixels].
+const double kMinVisibleMessagesHeight = kFollowThresholdPixels;
+
+/// The tallest an info panel may be when the panel and the messages share
+/// [available] height: whatever keeps [kMinVisibleMessagesHeight] of the
+/// conversation in view. The panel scrolls inside when its content is taller.
+double infoPanelMaxHeight(double available) =>
+    math.max(0, available - kMinVisibleMessagesHeight);
 
 /// Whether an arriving message should scroll the list.
 ///
@@ -496,88 +507,98 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
     }
 
     // Chat column
+    // Info panels (mobile only)
+    final infoPanel = AnimatedSwitcher(
+      duration: const Duration(milliseconds: 250),
+      child:
+          _showTradeInfo
+              ? TradeInformationTab(
+                key: const ValueKey('trade'),
+                orderId: widget.orderId,
+              )
+              : _showUserInfo
+              ? UserInformationTab(key: const ValueKey('user'), room: room)
+              : const SizedBox.shrink(key: ValueKey('none')),
+    );
+
+    final messageList =
+        !_historyLoaded
+            ? const Center(child: CircularProgressIndicator())
+            : _messages.isEmpty && uploads.isEmpty
+            ? Center(
+              child: Padding(
+                padding: const EdgeInsets.all(AppSpacing.lg),
+                child: Text(
+                  l10n.noMessagesYet(displayHandle),
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: colors.textSubtle),
+                ),
+              ),
+            )
+            : ListView.builder(
+              controller: _scrollController,
+              padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
+              itemCount: _messages.length + uploads.length,
+              itemBuilder: (context, index) {
+                // Files still on their way out follow the history.
+                if (index >= _messages.length) {
+                  final upload = uploads[index - _messages.length];
+                  return UploadBubble(
+                    key: ValueKey(upload.id),
+                    upload: upload,
+                    onRetry: () => _retryUpload(upload.id),
+                    onDiscard:
+                        () => ref
+                            .read(chatUploadsProvider(widget.orderId).notifier)
+                            .discard(upload.id),
+                  );
+                }
+                final msg = _messages[index];
+                return MessageBubble(
+                  // Adapt the FRB-generated ChatMessage to the
+                  // Dart-side ChatMessage used by MessageBubble.
+                  message: ChatMessage(
+                    id: msg.id,
+                    tradeId: msg.tradeId,
+                    content: msg.content,
+                    isMine: msg.isMine,
+                    isRead: msg.isRead,
+                    hasAttachment: msg.hasAttachment,
+                    createdAt: msg.createdAt.toInt(),
+                    messageType: _msgTypeStr(msg.messageType),
+                    attachment: msg.attachment,
+                  ),
+                  peerColorHue: room.peerColorHue,
+                );
+              },
+            );
+
     final chatColumn = Column(
       children: [
         // Sticky trade-state header — pinned below the app bar, does not
         // scroll with messages. Hides itself when the order can't be resolved.
         TradeStateHeader(orderId: widget.orderId),
 
-        // Info panels (mobile only)
-        if (!showSidePanel)
-          AnimatedSwitcher(
-            duration: const Duration(milliseconds: 250),
-            child:
-                _showTradeInfo
-                    ? TradeInformationTab(
-                      key: const ValueKey('trade'),
-                      orderId: widget.orderId,
-                    )
-                    : _showUserInfo
-                    ? UserInformationTab(
-                      key: const ValueKey('user'),
-                      room: room,
-                    )
-                    : const SizedBox.shrink(key: ValueKey('none')),
-          ),
-
-        // Message list
+        // The info panel and the messages share what the header and the
+        // composer leave. The panel gives way first (it scrolls inside), so
+        // a short screen at large text still shows the conversation.
         Expanded(
           child:
-              !_historyLoaded
-                  ? const Center(child: CircularProgressIndicator())
-                  : _messages.isEmpty && uploads.isEmpty
-                  ? Center(
-                    child: Padding(
-                      padding: const EdgeInsets.all(AppSpacing.lg),
-                      child: Text(
-                        l10n.noMessagesYet(displayHandle),
-                        textAlign: TextAlign.center,
-                        style: TextStyle(color: colors.textSubtle),
-                      ),
-                    ),
-                  )
-                  : ListView.builder(
-                    controller: _scrollController,
-                    padding: const EdgeInsets.symmetric(
-                      vertical: AppSpacing.sm,
-                    ),
-                    itemCount: _messages.length + uploads.length,
-                    itemBuilder: (context, index) {
-                      // Files still on their way out follow the history.
-                      if (index >= _messages.length) {
-                        final upload = uploads[index - _messages.length];
-                        return UploadBubble(
-                          key: ValueKey(upload.id),
-                          upload: upload,
-                          onRetry: () => _retryUpload(upload.id),
-                          onDiscard:
-                              () => ref
-                                  .read(
-                                    chatUploadsProvider(
-                                      widget.orderId,
-                                    ).notifier,
-                                  )
-                                  .discard(upload.id),
-                        );
-                      }
-                      final msg = _messages[index];
-                      return MessageBubble(
-                        // Adapt the FRB-generated ChatMessage to the
-                        // Dart-side ChatMessage used by MessageBubble.
-                        message: ChatMessage(
-                          id: msg.id,
-                          tradeId: msg.tradeId,
-                          content: msg.content,
-                          isMine: msg.isMine,
-                          isRead: msg.isRead,
-                          hasAttachment: msg.hasAttachment,
-                          createdAt: msg.createdAt.toInt(),
-                          messageType: _msgTypeStr(msg.messageType),
-                          attachment: msg.attachment,
+              showSidePanel
+                  ? messageList
+                  : LayoutBuilder(
+                    builder:
+                        (context, box) => Column(
+                          children: [
+                            ConstrainedBox(
+                              constraints: BoxConstraints(
+                                maxHeight: infoPanelMaxHeight(box.maxHeight),
+                              ),
+                              child: infoPanel,
+                            ),
+                            Expanded(child: messageList),
+                          ],
                         ),
-                        peerColorHue: room.peerColorHue,
-                      );
-                    },
                   ),
         ),
 
