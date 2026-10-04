@@ -250,41 +250,95 @@ abstract class AppLocalizations {
   /// **'The order was cooperatively cancelled. No funds were transferred.'**
   String get disputeCoopCancelMessage;
 
-  /// Dispute chat screen title when trading as seller (peer is the buyer)
-  ///
-  /// In en, this message translates to:
-  /// **'Dispute with Buyer: {handle}'**
-  String disputeWithBuyer(String handle);
-
-  /// Dispute chat screen title when trading as buyer (peer is the seller)
-  ///
-  /// In en, this message translates to:
-  /// **'Dispute with Seller: {handle}'**
-  String disputeWithSeller(String handle);
-
   /// Sub-title showing the truncated order/trade ID
   ///
   /// In en, this message translates to:
   /// **'Order {orderId}'**
   String orderLabel(String orderId);
 
-  /// Status chip label for a newly opened dispute
-  ///
-  /// In en, this message translates to:
-  /// **'Initiated'**
-  String get disputeInitiated;
-
-  /// Status chip label for a dispute under admin review
-  ///
-  /// In en, this message translates to:
-  /// **'In progress'**
-  String get disputeInProgress;
-
-  /// Status chip label for a resolved/closed dispute
+  /// Dispute info card chip: the dispute ended without a verdict (e.g. a cooperative cancel)
   ///
   /// In en, this message translates to:
   /// **'Closed'**
   String get disputeStatusClosed;
+
+  /// Dispute info card title: the counterparty's role (seller or buyer) and pseudonym
+  ///
+  /// In en, this message translates to:
+  /// **'Dispute with {role}: {counterparty}'**
+  String disputeWith(String role, String counterparty);
+
+  /// Role name for the seller, used inside disputeWith
+  ///
+  /// In en, this message translates to:
+  /// **'Seller'**
+  String get seller;
+
+  /// Role name for the buyer, used inside disputeWith
+  ///
+  /// In en, this message translates to:
+  /// **'Buyer'**
+  String get buyer;
+
+  /// Dispute info card chip: opened, no solver yet
+  ///
+  /// In en, this message translates to:
+  /// **'Initiated'**
+  String get disputeStatusInitiated;
+
+  /// Dispute info card chip: a solver has the dispute
+  ///
+  /// In en, this message translates to:
+  /// **'In-progress'**
+  String get disputeStatusInProgress;
+
+  /// Dispute info card chip: a solver's verdict ended the dispute
+  ///
+  /// In en, this message translates to:
+  /// **'Resolved'**
+  String get disputeStatusResolved;
+
+  /// Dispute info card: status sentence while a solver reviews the dispute (or one has taken it)
+  ///
+  /// In en, this message translates to:
+  /// **'This dispute is currently in progress. A solver is reviewing your case.'**
+  String get disputeInProgress;
+
+  /// Dispute info card: first instruction bullet
+  ///
+  /// In en, this message translates to:
+  /// **'Wait for a solver to take your dispute. Once they arrive, share any relevant evidence to help clarify the situation.'**
+  String get disputeInstruction1;
+
+  /// Dispute info card: second instruction bullet
+  ///
+  /// In en, this message translates to:
+  /// **'The final decision will be made based on the evidence presented.'**
+  String get disputeInstruction2;
+
+  /// Dispute info card: third instruction bullet
+  ///
+  /// In en, this message translates to:
+  /// **'If you don\'t respond, the system will assume you don\'t want to cooperate and you might lose the dispute.'**
+  String get disputeInstruction3;
+
+  /// Dispute info card: status sentence when the user (buyer) opened the dispute and no solver took it yet
+  ///
+  /// In en, this message translates to:
+  /// **'You opened this dispute against the seller {counterparty}, please read carefully below:'**
+  String disputeOpenedByYouAgainstSeller(String counterparty);
+
+  /// Dispute info card: status sentence when the user (seller) opened the dispute and no solver took it yet
+  ///
+  /// In en, this message translates to:
+  /// **'You opened this dispute against the buyer {counterparty}, please read carefully below:'**
+  String disputeOpenedByYouAgainstBuyer(String counterparty);
+
+  /// Dispute info card: status sentence when the peer opened the dispute and no solver took it yet
+  ///
+  /// In en, this message translates to:
+  /// **'Waiting for admin assignment'**
+  String get disputeWaitingForAdmin;
 
   /// Resolution text shown to the seller when admin released funds to the buyer
   ///
@@ -2674,7 +2728,7 @@ abstract class AppLocalizations {
   /// **'Trade Information'**
   String get tradeInformationTitle;
 
-  /// Label for the order ID field
+  /// Dispute info card: label over the order ID
   ///
   /// In en, this message translates to:
   /// **'Order ID'**
@@ -3142,13 +3196,13 @@ abstract class AppLocalizations {
   /// **'{count, plural, =1{Select 1 star} other{Select {count} stars}}'**
   String selectStarTooltip(int count);
 
-  /// Title of the dispute info card
+  /// App bar title of the dispute chat screen once the dispute is found (v1's title)
   ///
   /// In en, this message translates to:
   /// **'Dispute Details'**
   String get disputeDetailsTitle;
 
-  /// Label for the dispute ID field
+  /// Dispute info card: label over the dispute ID
   ///
   /// In en, this message translates to:
   /// **'Dispute ID'**

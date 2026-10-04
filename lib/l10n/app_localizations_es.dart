@@ -87,28 +87,61 @@ class AppLocalizationsEs extends AppLocalizations {
       'La orden fue cancelada cooperativamente. No se transfirieron fondos.';
 
   @override
-  String disputeWithBuyer(String handle) {
-    return 'Disputa con Comprador: $handle';
-  }
-
-  @override
-  String disputeWithSeller(String handle) {
-    return 'Disputa con Vendedor: $handle';
-  }
-
-  @override
   String orderLabel(String orderId) {
     return 'Orden $orderId';
   }
 
   @override
-  String get disputeInitiated => 'Iniciado';
+  String get disputeStatusClosed => 'Cerrada';
 
   @override
-  String get disputeInProgress => 'En progreso';
+  String disputeWith(String role, String counterparty) {
+    return 'Disputa con $role: $counterparty';
+  }
 
   @override
-  String get disputeStatusClosed => 'Cerrado';
+  String get seller => 'Vendedor';
+
+  @override
+  String get buyer => 'Comprador';
+
+  @override
+  String get disputeStatusInitiated => 'Iniciada';
+
+  @override
+  String get disputeStatusInProgress => 'En progreso';
+
+  @override
+  String get disputeStatusResolved => 'Resuelta';
+
+  @override
+  String get disputeInProgress =>
+      'Esta disputa está actualmente en progreso. Un mediador está revisando tu caso.';
+
+  @override
+  String get disputeInstruction1 =>
+      'Espera a que un mediador tome tu disputa. Una vez que llegue, comparte cualquier evidencia relevante para ayudar a aclarar la situación.';
+
+  @override
+  String get disputeInstruction2 =>
+      'La decisión final se tomará en base a la evidencia presentada.';
+
+  @override
+  String get disputeInstruction3 =>
+      'Si no respondes, el sistema asumirá que no deseas cooperar y podrías perder la disputa.';
+
+  @override
+  String disputeOpenedByYouAgainstSeller(String counterparty) {
+    return 'Abriste esta disputa contra el vendedor $counterparty, lee atentamente a continuación:';
+  }
+
+  @override
+  String disputeOpenedByYouAgainstBuyer(String counterparty) {
+    return 'Abriste esta disputa contra el comprador $counterparty, lee atentamente a continuación:';
+  }
+
+  @override
+  String get disputeWaitingForAdmin => 'Esperando asignación de administrador';
 
   @override
   String get disputeLostFundsToBuyer =>
@@ -1472,7 +1505,7 @@ class AppLocalizationsEs extends AppLocalizations {
   String get tradeInformationTitle => 'Información de la operación';
 
   @override
-  String get orderIdLabel => 'ID de orden';
+  String get orderIdLabel => 'ID de la orden';
 
   @override
   String get fiatAmountLabel => 'Monto fiat';
@@ -1780,7 +1813,7 @@ class AppLocalizationsEs extends AppLocalizations {
   String get disputeDetailsTitle => 'Detalles de la disputa';
 
   @override
-  String get disputeIdLabel => 'ID de disputa';
+  String get disputeIdLabel => 'ID de Disputa';
 
   @override
   String disputeReasonLabel(String reason) {

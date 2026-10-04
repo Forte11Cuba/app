@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:mostro/features/trades/providers/trades_providers.dart';
+import 'package:mostro/shared/providers/peer_nym_provider.dart';
 import 'package:mostro/shared/utils/platform_int64.dart';
 import 'package:mostro/src/rust/api/disputes.dart' as disputes_api;
 import 'package:mostro/src/rust/api/types.dart' as rust_types;
@@ -257,6 +258,25 @@ final disputeByTradeIdProvider = Provider.family<DisputeItem?, String>((
       .where((d) => d.tradeId == tradeId)
       .firstOrNull;
 });
+
+/// Who a dispute is with: the user's side of the trade and the counterpart's
+/// pseudonym, from the trade row (v1 reads the session's peer). Either is
+/// null while the row loads, or when the trade or its peer is unknown.
+typedef DisputeCounterpart = ({bool? isSelling, String? handle});
+
+final disputeCounterpartProvider = Provider.autoDispose
+    .family<DisputeCounterpart, String>((ref, tradeId) {
+      final trade = ref.watch(tradeInfoProvider(tradeId)).valueOrNull;
+      if (trade == null) return (isSelling: null, handle: null);
+      final pubkey = trade.counterpartyPubkey;
+      return (
+        isSelling: trade.role == rust_types.TradeRole.seller,
+        handle:
+            pubkey.isEmpty
+                ? null
+                : ref.watch(peerNymProvider(pubkey)).valueOrNull?.pseudonym,
+      );
+    });
 
 /// The bridge's dispute for a trade, or null. Its own provider so the trade
 /// screen's fallback lookup can be driven in tests without the bridge.

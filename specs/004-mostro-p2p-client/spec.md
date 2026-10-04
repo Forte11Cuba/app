@@ -183,6 +183,7 @@ Either party can open a dispute during an active trade if they cannot resolve a 
 5. **Given** the admin resolves in the buyer's favor, **When** resolution is processed, **Then** the chat becomes read-only with a lock message and the order completes as success.
 6. **Given** the admin resolves in the seller's favor, **When** resolution is processed, **Then** the hold invoice is canceled, and the chat shows "The administrator canceled the order and refunded you."
 7. **Given** the seller taps "Release" during a dispute, **When** confirmed, **Then** the dispute closes and the order transitions to success without admin involvement.
+8. **Given** the user opens the dispute chat, **When** it renders, **Then** it opens with v1's information card, in v1's wording, which scrolls with the messages: "Dispute with [role]: [handle]" with the dispute's status chip, the full order ID and dispute ID on labelled lines in monospace (wrapped, never shortened, tap to copy), and, while the dispute is open, the status sentence for its status and three instructions. Once the dispute is resolved the card shows neither: the resolved outcome follows it. The card never points to the chat's shared key (#415, #680).
 
 ---
 
