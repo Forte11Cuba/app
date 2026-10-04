@@ -1,3 +1,4 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
@@ -5,6 +6,8 @@ import 'package:intl/intl.dart';
 import 'package:mostro/core/app_theme.dart';
 import 'package:mostro/features/chat/widgets/encrypted_file_message.dart';
 import 'package:mostro/features/chat/widgets/encrypted_image_message.dart';
+import 'package:mostro/features/chat/widgets/message_actions_menu.dart';
+import 'package:mostro/features/order/widgets/order_detail_cards.dart';
 import 'package:mostro/l10n/app_localizations.dart';
 import 'package:mostro/src/rust/api/types.dart' as rust_types;
 
@@ -65,7 +68,8 @@ class ChatMessage {
 /// - Own messages → right-aligned, purple background, top-right square corner.
 /// - Peer messages → left-aligned, dark hue background, top-left square corner.
 /// - System messages → centered italic text, no bubble background.
-/// - Long-press → copies content to clipboard and shows a SnackBar.
+/// - Held for a second → the message's menu ([showMessageActionsMenu]):
+///   Copy for a text message; an attachment opens none.
 class MessageBubble extends StatelessWidget {
   const MessageBubble({
     super.key,
@@ -118,82 +122,115 @@ class MessageBubble extends StatelessWidget {
     // An image fills its bubble; a thin frame keeps the bubble's colour.
     final isImage = attachment?.fileType == rust_types.FileType.image;
 
-    return GestureDetector(
-      // An attachment's content is its file name: nothing worth copying.
-      onLongPress: attachment != null
-          ? null
-          : () => _copyToClipboard(context, message.content),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(
-          horizontal: AppSpacing.lg,
-          vertical: AppSpacing.xs,
-        ),
-        child: Row(
-          mainAxisAlignment: mainAxisAlignment,
-          crossAxisAlignment: CrossAxisAlignment.end,
-          children: [
-            Flexible(
-              child: Column(
-                crossAxisAlignment: alignment,
-                children: [
-                  // Bubble
-                  Container(
-                    constraints: BoxConstraints(
-                      maxWidth: MediaQuery.of(context).size.width * 0.72,
-                    ),
-                    padding: isImage
-                        ? const EdgeInsets.all(4)
-                        : const EdgeInsets.symmetric(
-                            horizontal: AppSpacing.md,
-                            vertical: AppSpacing.sm,
-                          ),
-                    decoration: BoxDecoration(
-                      color: bubbleColor,
-                      borderRadius: borderRadius,
-                    ),
-                    child: switch (attachment) {
-                      null => Text(
-                          message.content,
-                          style: textTheme.bodyMedium?.copyWith(
-                            color: Colors.white,
-                          ),
-                        ),
-                      _ when isImage => EncryptedImageMessage(
-                          messageId: message.id,
-                          attachment: attachment,
-                        ),
-                      _ => EncryptedFileMessage(
-                          messageId: message.id,
-                          attachment: attachment,
-                        ),
-                    },
-                  ),
-                  const SizedBox(height: 2),
-                  // Timestamp
-                  Text(
-                    timestamp,
-                    style: textTheme.bodySmall?.copyWith(
-                      color: colors.textSubtle,
-                      fontSize: 10,
-                    ),
-                  ),
-                ],
-              ),
+    final bubble = Container(
+      constraints: BoxConstraints(
+        maxWidth: MediaQuery.of(context).size.width * 0.72,
+      ),
+      padding: isImage
+          ? const EdgeInsets.all(4)
+          : const EdgeInsets.symmetric(
+              horizontal: AppSpacing.md,
+              vertical: AppSpacing.sm,
             ),
-          ],
-        ),
+      decoration: BoxDecoration(
+        color: bubbleColor,
+        borderRadius: borderRadius,
+      ),
+      child: switch (attachment) {
+        null => Text(
+            message.content,
+            style: textTheme.bodyMedium?.copyWith(
+              // design-check: ignore DS-COL-1 — unchanged ink of the v1 bubbles (§14), moved here; the chat has no palette yet
+              color: Colors.white,
+            ),
+          ),
+        _ when isImage => EncryptedImageMessage(
+            messageId: message.id,
+            attachment: attachment,
+          ),
+        _ => EncryptedFileMessage(
+            messageId: message.id,
+            attachment: attachment,
+          ),
+      },
+    );
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.lg,
+        vertical: AppSpacing.xs,
+      ),
+      child: Row(
+        mainAxisAlignment: mainAxisAlignment,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          Flexible(
+            child: Column(
+              crossAxisAlignment: alignment,
+              children: [
+                // An attachment's content is its file name: nothing worth
+                // copying, so it opens no menu.
+                if (attachment != null)
+                  bubble
+                else
+                  Builder(
+                    builder: (bubbleContext) => RawGestureDetector(
+                      gestures: {
+                        LongPressGestureRecognizer:
+                            GestureRecognizerFactoryWithHandlers<
+                                LongPressGestureRecognizer>(
+                          () => LongPressGestureRecognizer(
+                            duration: messageMenuHoldDuration,
+                          ),
+                          (recognizer) => recognizer.onLongPress =
+                              () => _openMenu(bubbleContext, bubble),
+                        ),
+                      },
+                      child: bubble,
+                    ),
+                  ),
+                const SizedBox(height: 2),
+                // Timestamp
+                Text(
+                  timestamp,
+                  style: textTheme.bodySmall?.copyWith(
+                    color: colors.textSubtle,
+                    fontSize: 10,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
 
-  void _copyToClipboard(BuildContext context, String text) {
-    Clipboard.setData(ClipboardData(text: text));
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(AppLocalizations.of(context).messageCopied),
-        duration: const Duration(seconds: 2),
-      ),
+  /// Held for [messageMenuHoldDuration]: the message's menu, drawn over the
+  /// bubble that [bubbleContext] lays out.
+  Future<void> _openMenu(BuildContext bubbleContext, Widget bubble) async {
+    final box = bubbleContext.findRenderObject() as RenderBox?;
+    if (box == null || !box.hasSize) return;
+    Feedback.forLongPress(bubbleContext);
+
+    final action = await showMessageActionsMenu(
+      context: bubbleContext,
+      bubbleRect: box.localToGlobal(Offset.zero) & box.size,
+      bubble: bubble,
+      alignEnd: message.isMine,
     );
+    if (action == null) return;
+    switch (action) {
+      case MessageAction.copy:
+        // Copied even if the chat closed meanwhile; only the confirmation
+        // needs the screen.
+        await Clipboard.setData(ClipboardData(text: message.content));
+        if (!bubbleContext.mounted) return;
+        showOrderDetailSnackBar(
+          bubbleContext,
+          AppLocalizations.of(bubbleContext).messageCopied,
+        );
+    }
   }
 
   String _formatTime(int unixSeconds) {

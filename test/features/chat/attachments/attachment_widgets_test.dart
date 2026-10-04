@@ -13,6 +13,7 @@ import 'package:mostro/features/chat/attachments/upload_controller.dart';
 import 'package:mostro/features/chat/screens/attachment_viewer_screen.dart';
 import 'package:mostro/features/chat/widgets/encrypted_file_message.dart';
 import 'package:mostro/features/chat/widgets/encrypted_image_message.dart';
+import 'package:mostro/features/chat/widgets/message_actions_menu.dart';
 import 'package:mostro/features/chat/widgets/message_bubble.dart';
 import 'package:mostro/features/chat/widgets/upload_bubble.dart';
 import 'package:mostro/l10n/app_localizations.dart';
@@ -548,6 +549,24 @@ void main() {
       expect(find.byType(EncryptedFileMessage), findsOneWidget);
       // The name appears once, in the card — not also as message text.
       expect(find.text('transfer.pdf'), findsOneWidget);
+    });
+
+    testWidgets('holding an attachment opens no message menu', (tester) async {
+      await _pump(
+        tester,
+        MessageBubble(message: bubbleMessage(pdfInfo()), peerColorHue: 200),
+        gateway: FakeAttachmentGateway(),
+      );
+
+      final gesture = await tester.startGesture(
+        tester.getCenter(find.byType(EncryptedFileMessage)),
+      );
+      await tester.pump(messageMenuHoldDuration);
+      await gesture.up();
+      await tester.pumpAndSettle();
+
+      // Its content is the file name: there is nothing to copy.
+      expect(find.text('Copy'), findsNothing);
     });
   });
 }
