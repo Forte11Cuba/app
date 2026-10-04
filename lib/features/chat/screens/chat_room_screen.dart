@@ -479,13 +479,7 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
                     orderId: widget.orderId,
                   )
                   : _showUserInfo
-                  ? UserInformationTab(
-                    key: const ValueKey('user'),
-                    peerHandle: displayHandle,
-                    peerPubkey: room.peerPubkey,
-                    peerIconIndex: room.peerIconIndex,
-                    peerColorHue: room.peerColorHue,
-                  )
+                  ? UserInformationTab(key: const ValueKey('user'), room: room)
                   : Container(
                     key: const ValueKey('none'),
                     color: colors.backgroundCard,
@@ -521,10 +515,7 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
                     : _showUserInfo
                     ? UserInformationTab(
                       key: const ValueKey('user'),
-                      peerHandle: displayHandle,
-                      peerPubkey: room.peerPubkey,
-                      peerIconIndex: room.peerIconIndex,
-                      peerColorHue: room.peerColorHue,
+                      room: room,
                     )
                     : const SizedBox.shrink(key: ValueKey('none')),
           ),

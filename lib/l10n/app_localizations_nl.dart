@@ -241,9 +241,6 @@ class AppLocalizationsNl extends AppLocalizations {
   String get comingSoonMessage => 'Komt binnenkort';
 
   @override
-  String get tradeStatusActive => 'Actief';
-
-  @override
   String get tradeStatusCompleted => 'Afgerond';
 
   @override
@@ -1480,6 +1477,10 @@ class AppLocalizationsNl extends AppLocalizations {
   String get satsAmountLabel => 'Aantal sats';
 
   @override
+  String get peerReputationUnavailable =>
+      'De reputatie van deze gebruiker is niet beschikbaar';
+
+  @override
   String get statusLabel => 'Status';
 
   @override
@@ -1489,25 +1490,7 @@ class AppLocalizationsNl extends AppLocalizations {
   String get createdLabel => 'Aangemaakt';
 
   @override
-  String get tradeDetailsPlaceholder =>
-      'Details worden aangesloten zodra de trade-provider er is (fase 10+)';
-
-  @override
   String get userInformationTitle => 'Gebruikersgegevens';
-
-  @override
-  String get peerPublicKeyLabel => 'Publieke sleutel van de ander';
-
-  @override
-  String get yourSharedKeyLabel => 'Je gedeelde sleutel';
-
-  @override
-  String get sharedKeyPlaceholder =>
-      'Beschikbaar na de bridge-integratie (fase 10+)';
-
-  @override
-  String get sharedKeySafetyNote =>
-      'Bewaar je gedeelde sleutel goed: die is nodig om een dispuut op te lossen';
 
   @override
   String get fileTypeVideo => 'Video';

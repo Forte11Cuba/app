@@ -23,15 +23,13 @@
 
 Most of what follows (T001–T145) is `[x]` — the phases read as a
 completed build log, not a live backlog. What's actually still open lives
-in three clusters of `[~]` partial tasks (code exists, but the backend or
+in two clusters of `[~]` partial tasks (code exists, but the backend or
 the UI wiring doesn't):
 
 - **IndexedDB / web storage** (Phase 1 — Setup): T010 — only messages,
   settings and the active Mostro pubkey are implemented; orders, trades,
   relays, identity, queued messages and trade keys return "IndexedDB not
   yet implemented", so the web target cannot persist a trade (#233).
-- **P2P chat** (Phase 10): T079 — the trade info panel still shows
-  placeholder fields.
 - **Dispute admin chat** (Phase 12 — Dispute System): T088 — the list is
   fed on resume only (#397). T090–T093 are done (#143, #589 phase 3).
 
@@ -282,7 +280,7 @@ configuration.
 - [x] T076 Implement chat room screen in `lib/features/chat/screens/chat_room_screen.dart`: AppBar (← + `NymAvatar` + peer handle + subtitle). Two info toggle buttons. Message list with optimistic send. `MessageInput` at bottom. Error scaffold for invalid orderId. Route: `/chat_room/:orderId`. Wired in app_routes.dart.
 - [x] T077 [P] Implement message bubble widget in `lib/features/chat/widgets/message_bubble.dart`: own messages (right-aligned, purple `#7856AF`), peer messages (left-aligned, dark shade of `colorHue`), system messages (centered italic). Timestamp below bubble. Long-press → copy to clipboard.
 - [x] T078 [P] Implement message input widget in `lib/features/chat/widgets/message_input.dart`: paperclip attach icon (spinner when attaching), text input "Write a message..." pill, green send button. Clears field after send.
-- [~] T079 [P] Implement trade info panel in `lib/features/chat/widgets/info_panels.dart`: `TradeInformationTab` (order ID copyable, placeholder fields). `UserInformationTab` (peer avatar + handle + copyable peer pubkey). **Partial**: still placeholder dashes — the trade-detail fields are not yet wired to the bridge. The ECDH shared-key display is dropped from scope: the key is never exposed to Dart/UI; Rust sends it to the solver over the dispute chat behind an explicit confirmation (one-tap delivery and the `contracts/disputes.md` update are deferred to #415).
+- [x] T079 [P] Implement the info panels in `lib/features/chat/widgets/info_panels.dart` (#139): `TradeInformationTab` (order ID copyable, fiat and sats amounts, the trade header's status, payment method, creation date; from the trade row, then the order the header resolves; a missing figure leaves its row out). `UserInformationTab` (the peer's alias and avatar as the chat header shows them, and their public reputation; no peer pubkey). The ECDH shared-key display is dropped from scope: the key is never exposed to Dart/UI; Rust sends it to the solver over the dispute chat behind an explicit confirmation (one-tap delivery and the `contracts/disputes.md` update are deferred to #415).
 - [x] T080 Implement encrypted image message widget in `lib/features/chat/widgets/encrypted_image_message.dart`: downloaded and decrypted on arrival through `download_attachment()` (plaintext in memory only, `attachment_providers.dart`), drawn at the sender's `width`/`height`, loading and error states with retry; tap opens `AttachmentViewerScreen` (pinch-zoom, Save). #589 phase 2a.
 - [x] T081 [P] Implement encrypted file message widget in `lib/features/chat/widgets/encrypted_file_message.dart`: file card with type icon, name, size (PDF, and DOC/DOCX/video from v1); tap opens it in another app, the menu adds Share and Save (`attachment_launcher.dart`: allow-listed types only, temporary copies swept on resume, start-up and identity change). #589 phases 2a–2b.
 

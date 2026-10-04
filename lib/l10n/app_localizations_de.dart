@@ -241,9 +241,6 @@ class AppLocalizationsDe extends AppLocalizations {
   String get comingSoonMessage => 'Demnächst verfügbar';
 
   @override
-  String get tradeStatusActive => 'Aktiv';
-
-  @override
   String get tradeStatusCompleted => 'Abgeschlossen';
 
   @override
@@ -1490,6 +1487,10 @@ class AppLocalizationsDe extends AppLocalizations {
   String get satsAmountLabel => 'Sats-Betrag';
 
   @override
+  String get peerReputationUnavailable =>
+      'Die Reputation dieses Nutzers ist nicht verfügbar';
+
+  @override
   String get statusLabel => 'Status';
 
   @override
@@ -1499,25 +1500,7 @@ class AppLocalizationsDe extends AppLocalizations {
   String get createdLabel => 'Erstellt';
 
   @override
-  String get tradeDetailsPlaceholder =>
-      'Details verfügbar, sobald der Trade-Provider bereit ist (Phase 10+)';
-
-  @override
   String get userInformationTitle => 'Benutzerinformationen';
-
-  @override
-  String get peerPublicKeyLabel => 'Öffentlicher Schlüssel des Partners';
-
-  @override
-  String get yourSharedKeyLabel => 'Dein gemeinsamer Schlüssel';
-
-  @override
-  String get sharedKeyPlaceholder =>
-      'Verfügbar nach der Bridge-Integration (Phase 10+)';
-
-  @override
-  String get sharedKeySafetyNote =>
-      'Bewahre deinen gemeinsamen Schlüssel sicher auf — er wird für die Streitbeilegung benötigt';
 
   @override
   String get fileTypeVideo => 'Video';

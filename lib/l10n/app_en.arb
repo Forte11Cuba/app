@@ -290,10 +290,6 @@
   "@comingSoonMessage": {
     "description": "Generic coming-soon placeholder message"
   },
-  "tradeStatusActive": "Active",
-  "@tradeStatusActive": {
-    "description": "Trade status chip label: active"
-  },
   "tradeStatusCompleted": "Completed",
   "@tradeStatusCompleted": {
     "description": "Trade status chip label: completed"
@@ -1881,6 +1877,10 @@
   "@satsAmountLabel": {
     "description": "Label for the sats amount field"
   },
+  "peerReputationUnavailable": "This user's reputation is not available",
+  "@peerReputationUnavailable": {
+    "description": "User information panel: the counterparty shared no reputation for this order (full privacy) or it has not arrived yet"
+  },
   "statusLabel": "Status",
   "@statusLabel": {
     "description": "Label for the status field"
@@ -1893,29 +1893,9 @@
   "@createdLabel": {
     "description": "Label for the created date field"
   },
-  "tradeDetailsPlaceholder": "Details wired when trade provider available (Phase 10+)",
-  "@tradeDetailsPlaceholder": {
-    "description": "Placeholder note in the trade information panel"
-  },
   "userInformationTitle": "User Information",
   "@userInformationTitle": {
     "description": "Title of the user information panel"
-  },
-  "peerPublicKeyLabel": "Peer's Public Key",
-  "@peerPublicKeyLabel": {
-    "description": "Label for the peer public key"
-  },
-  "yourSharedKeyLabel": "Your Shared Key",
-  "@yourSharedKeyLabel": {
-    "description": "Label for the shared key"
-  },
-  "sharedKeyPlaceholder": "Available after bridge integration (Phase 10+)",
-  "@sharedKeyPlaceholder": {
-    "description": "Placeholder note for the shared key"
-  },
-  "sharedKeySafetyNote": "Keep your shared key safe — it is needed for dispute resolution",
-  "@sharedKeySafetyNote": {
-    "description": "Safety note about the shared key"
   },
   "fileTypeVideo": "Video",
   "@fileTypeVideo": {
