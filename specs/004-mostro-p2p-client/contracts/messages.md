@@ -160,9 +160,11 @@ with it and emitted on `on_message_updated`.
 one per party, the newest `created_at` holding, ties to the lowest id. A
 reaction to the reactor's own message, or on the dispute channel, is
 dropped. One whose target has not arrived is held in memory — one per
-party and target, at most 256 per trade — until it does. The cursor passes a
-reaction only once it is durably stored with its target, so a held one is
-fetched again after a restart. The target is saved under the store's write
+party and target, at most 256 per trade — until it does. The peer cursor stops
+at the earliest held reaction's outer event, whatever arrives after it, and
+catches up once that reaction is stored with its target: a restart fetches a
+held reaction again (`since` is inclusive). Otherwise a reaction is passed
+only once durably stored. The target is saved under the store's write
 lock, so a concurrent `mark_as_read` or reaction never writes an older copy
 over it. A reaction is never a message: no unread count, no
 `on_new_message`, no notification. An inner kind this client does not
