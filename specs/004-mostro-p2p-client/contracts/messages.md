@@ -175,7 +175,8 @@ held for more than 10 minutes stops holding the cursor back (its target was
 refused by the retention quota, or names nothing) but stays held in case the
 target comes. If the target's write fails, its reactions are held again
 until a retry stores it. Otherwise a reaction is passed
-only once durably stored. Every write of a message row (a new message,
+only once durably stored. Once any write of a session fails, that chat's
+cursor stays put until a restart, which fetches the unsaved event again. Every write of a message row (a new message,
 a reaction, `mark_as_read`) happens under the store's write lock, so none
 writes an older copy over another — on web the read flag rewrites whole
 rows. A reaction is never a message: no unread count, no
@@ -224,10 +225,15 @@ reads and deletes commit and publish in invocation order. Mark-read operates on 
 latest persisted record even before UI hydration; a read during event processing
 suppresses that pending event, even if the user has since left the chat.
 
-### on_message_updated(trade_id: String) → Stream<ChatMessage>
+### on_message_updated(trade_id: String) → MessageUpdateStream
 Emits a stored message of the trade again when it changes: a reaction to
 it, received or sent. Never a new message, so nothing that counts unread
-messages or raises notifications listens to it.
+messages or raises notifications listens to it. It opens with the trade's
+messages that carry reactions, read once subscribed, so a reaction applied
+between the caller's history read and the subscription still arrives; a
+receiver that lags gets that snapshot again instead of a gap. The screen
+keeps an update for a message it does not show yet and applies it when the
+message is added.
 
 ### on_unread_count_changed() → Stream<u32>
 Emits when the global unread message count changes.

@@ -1335,9 +1335,29 @@ pub async fn on_unread_count_changed() -> Result<UnreadCountStream> {
 
 /// Stream that emits a trade's messages again when they change after being
 /// stored: a reaction to one of them, received or sent. Never a new message.
-pub async fn on_message_updated(trade_id: String) -> Result<MessageStream> {
+///
+/// It opens with the trade's messages that carry reactions, read once it is
+/// subscribed: a reaction applied between the caller's history read and the
+/// subscription still arrives. A receiver that lags behind gets the same
+/// snapshot again instead of a gap.
+pub async fn on_message_updated(trade_id: String) -> Result<MessageUpdateStream> {
     let rx = message_store().updated_tx.subscribe();
-    Ok(MessageStream { rx, trade_id })
+    let pending = reacted_messages(&trade_id).await;
+    Ok(MessageUpdateStream {
+        rx,
+        trade_id,
+        pending,
+    })
+}
+
+/// The trade's messages carrying a reaction, withdrawn ones included.
+async fn reacted_messages(trade_id: &str) -> VecDeque<ChatMessage> {
+    message_store()
+        .get_messages(trade_id)
+        .await
+        .into_iter()
+        .filter(|m| !m.reactions.is_empty())
+        .collect()
 }
 
 /// Stream that emits attachment upload/download progress (0.0–1.0).
@@ -1360,6 +1380,33 @@ impl MessageStream {
                 Ok(msg) if msg.trade_id == self.trade_id => return Some(msg),
                 Ok(_) => continue, // different trade
                 Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(broadcast::error::RecvError::Closed) => return None,
+            }
+        }
+    }
+}
+
+/// See [`on_message_updated`].
+pub struct MessageUpdateStream {
+    rx: broadcast::Receiver<ChatMessage>,
+    trade_id: String,
+    /// A snapshot still to hand out: at the start, and after a lag.
+    pending: VecDeque<ChatMessage>,
+}
+
+impl MessageUpdateStream {
+    pub async fn next(&mut self) -> Option<ChatMessage> {
+        loop {
+            if let Some(msg) = self.pending.pop_front() {
+                return Some(msg);
+            }
+            match self.rx.recv().await {
+                Ok(msg) if msg.trade_id == self.trade_id => return Some(msg),
+                Ok(_) => continue, // different trade
+                // Updates were dropped: hand out the current state instead.
+                Err(broadcast::error::RecvError::Lagged(_)) => {
+                    self.pending = reacted_messages(&self.trade_id).await;
+                }
                 Err(broadcast::error::RecvError::Closed) => return None,
             }
         }
@@ -1984,6 +2031,10 @@ struct ChatRxState {
     /// already be past its older target; this is where both are safe.
     start_cursor: i64,
     flooded: bool,
+    /// A write of this session failed. The cursor then stays where it is
+    /// until a restart: a later event passing it would leave the unsaved
+    /// message or reaction behind, never fetched again.
+    write_failed: bool,
     /// The chat claim this state belongs to: cursor writes are gated on it
     /// still owning the chat. `None` only in tests that run no task.
     generation: Option<u64>,
@@ -2001,6 +2052,7 @@ impl ChatRxState {
             wanted: cursor,
             start_cursor: cursor,
             flooded: false,
+            write_failed: false,
             generation,
         }
     }
@@ -2070,7 +2122,7 @@ impl ChatRxState {
     /// reaction's floor. Also run on a quiet chat, so a floor that expired
     /// with no event after it still lets the cursor go.
     async fn settle_cursor(&mut self, order_id: &str) {
-        if !self.live {
+        if !self.live || self.write_failed {
             return;
         }
         let floor = match self.channel {
@@ -2320,6 +2372,8 @@ async fn handle_chat_event(
                 state
                     .advance_cursor(order_id, event.created_at.as_secs() as i64)
                     .await;
+            } else {
+                state.write_failed = true;
             }
             return;
         }
@@ -2371,6 +2425,8 @@ async fn handle_chat_event(
         state
             .advance_cursor(order_id, event.created_at.as_secs() as i64)
             .await;
+    } else {
+        state.write_failed = true;
     }
 }
 
@@ -2426,6 +2482,8 @@ async fn handle_reaction(
     };
     if passed {
         state.advance_cursor(order_id, at).await;
+    } else {
+        state.write_failed = true;
     }
 }
 
@@ -4542,6 +4600,59 @@ mod tests {
         chat.state.settle_cursor(&order).await;
 
         assert!(chat.state.cursor >= later.created_at.as_secs() as i64 - 1);
+    }
+
+    #[tokio::test]
+    async fn a_failed_write_keeps_the_cursor_for_the_session() {
+        let mut chat = AliceChat::new();
+        chat.caught_up().await;
+        chat.state.write_failed = true;
+        let (later, _) = chat.message(&chat.bob.clone(), "after the failure").await;
+
+        chat.receive(&later).await;
+
+        assert_eq!(
+            chat.state.cursor, 0,
+            "a restart fetches the unsaved one again"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_update_stream_opens_with_the_reacted_messages() {
+        let mut chat = AliceChat::new();
+        let (outer, inner) = chat.message(&chat.alice.clone(), "reacted").await;
+        let (plain, _) = chat.message(&chat.alice.clone(), "plain").await;
+        chat.receive(&outer).await;
+        chat.receive(&plain).await;
+        chat.receive(&chat.bob_reacts(&inner.id, "👍").await).await;
+
+        let mut updates = on_message_updated(chat.order_id.clone()).await.unwrap();
+        let first = updates.next().await.unwrap();
+
+        assert_eq!(first.content, "reacted");
+        assert!(updates.pending.is_empty(), "the plain one is not resent");
+    }
+
+    #[tokio::test]
+    async fn a_lagging_update_stream_gets_the_snapshot_again() {
+        let mut chat = AliceChat::new();
+        let (outer, inner) = chat.message(&chat.alice.clone(), "reacted").await;
+        chat.receive(&outer).await;
+        chat.receive(&chat.bob_reacts(&inner.id, "👍").await).await;
+        let mut updates = on_message_updated(chat.order_id.clone()).await.unwrap();
+        updates.next().await.unwrap();
+
+        // More updates than the channel holds, none read.
+        let other = notification_test_message("another-trade", 1);
+        for _ in 0..100 {
+            let _ = message_store().updated_tx.send(other.clone());
+        }
+        let next = tokio::time::timeout(std::time::Duration::from_secs(1), updates.next())
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(next.content, "reacted");
     }
 
     #[tokio::test]

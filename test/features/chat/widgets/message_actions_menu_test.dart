@@ -319,6 +319,19 @@ void main() {
       semantics.dispose();
     });
 
+    testWidgets('❤ from the full list marks the quick ❤️', (tester) async {
+      final semantics = tester.ensureSemantics();
+      await pump(tester, textMessage(reaction: '❤'));
+
+      await press(tester, const Duration(seconds: 1));
+
+      expect(
+        tester.getSemantics(find.text('❤️')),
+        isSemantics(isButton: true, isSelected: true),
+      );
+      semantics.dispose();
+    });
+
     testWidgets('they sit above the message and the actions under it', (
       tester,
     ) async {

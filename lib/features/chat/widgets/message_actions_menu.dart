@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import 'package:mostro/core/order_book_palette.dart';
+import 'package:mostro/features/chat/models/reaction_rules.dart';
 import 'package:mostro/l10n/app_localizations.dart';
 
 /// How long a chat message is held before its menu opens.
@@ -374,7 +375,8 @@ class _ReactionPill extends StatelessWidget {
               children: [
                 for (final emoji in shown)
                   _PillButton(
-                    selected: emoji == current,
+                    // ❤ picked from the full list is the quick ❤️.
+                    selected: sameReaction(emoji, current),
                     onTap: () => Navigator.of(context).pop(ReactWith(emoji)),
                     child: Text(emoji, style: const TextStyle(fontSize: 22)),
                   ),

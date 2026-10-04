@@ -96,7 +96,7 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
   /// message's arrival on the other stream, or the history load. Applied
   /// as the message is added; bounded, oldest dropped first.
   final Map<String, rust_types.ChatMessage> _earlyUpdates = {};
-  static const _maxEarlyUpdates = 64;
+  static const _maxEarlyUpdates = 256;
 
   /// Coalesces mark-read across a burst. A history replay would otherwise
   /// fire one bridge call per message.
