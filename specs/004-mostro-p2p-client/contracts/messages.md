@@ -33,7 +33,7 @@ Each channel keeps its **own** durable `since` cursor
 dispute) and its own subscription ids, so the two independent streams can
 never suppress or tear down each other. Messages persist locally after
 validation; the `since` cursor advances only past durably persisted
-messages. Supports encrypted file attachments via Blossom servers.
+messages, and only once the stored catch-up is over (EOSE). Supports encrypted file attachments via Blossom servers.
 
 **Security requirements implemented** (see the protocol spec for the
 normative list):
@@ -163,11 +163,14 @@ were made.
 one per party, the newest `created_at` holding, ties to the lowest id. A
 reaction to the reactor's own message, or on the dispute channel, is
 dropped. One whose target has not arrived is held in memory — one per
-party and target, at most 256 per trade — until it does. During catch-up, which
-serves the newest events first, the peer cursor goes back to where that
-catch-up started when a reaction is held, and stays there whatever arrives
-after it; it catches up once the reaction is stored with its target. The
-target is older than the reaction, so a restart must fetch both again. A reaction
+party and target, at most 256 per trade — until it does. Stored catch-up is served
+newest first, so no channel's cursor moves until it is over (EOSE): passing
+a newer event before an older one arrives would lose the older one on a
+restart. After that, the peer cursor still stops at a held reaction's floor
+(where the catch-up started, or the live cursor) until the reaction is
+stored with its target, which is older, so a restart fetches both again. A
+quiet chat re-checks its cursor every minute, so an expired floor (below)
+lets it go without another event. A reaction
 held for more than 10 minutes stops holding the cursor back (its target was
 refused by the retention quota, or names nothing) but stays held in case the
 target comes. If the target's write fails, its reactions are held again
