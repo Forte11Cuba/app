@@ -154,6 +154,28 @@ void main() {
       await _leaveRoom(tester);
     });
 
+    testWidgets('does not scroll under an open message menu', (tester) async {
+      await _pumpChatRoom(tester, incoming);
+      await _receive(tester, incoming, [
+        for (var n = 1; n <= 6; n++) _peerMessage(n),
+      ]);
+      await tester.pumpAndSettle();
+      final gesture = await tester.startGesture(
+        tester.getCenter(find.textContaining('#6')),
+      );
+      await tester.pump(const Duration(seconds: 1));
+      await gesture.up();
+      await tester.pumpAndSettle();
+      final offset = _listController(tester).offset;
+
+      await _receive(tester, incoming, [_peerMessage(7)]);
+      await tester.pumpAndSettle();
+
+      expect(find.text('Copy'), findsOneWidget);
+      expect(_listController(tester).offset, offset);
+      await _leaveRoom(tester);
+    });
+
     testWidgets('leaves a reader who scrolled up where they were',
         (tester) async {
       await _pumpChatRoom(tester, incoming);

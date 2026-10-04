@@ -311,8 +311,11 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
     setState(() => _messages.add(msg));
     // Only follow the conversation if the user was already at the bottom;
     // otherwise an arriving message yanks them away from what they were
-    // reading, and a burst starts one animation per message.
-    if (wasAtBottom) _scrollToBottom();
+    // reading, and a burst starts one animation per message. Nor while a
+    // message's menu is open over the room: it follows its message a frame
+    // late, so a scroll animation would leave it trailing.
+    final menuOpen = !(ModalRoute.of(context)?.isCurrent ?? true);
+    if (wasAtBottom && !menuOpen) _scrollToBottom();
     _scheduleMarkRead();
     ref
         .read(chatRoomsNotifierProvider.notifier)

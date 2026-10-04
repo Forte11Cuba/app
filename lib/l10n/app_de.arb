@@ -1266,5 +1266,6 @@
   "shareChatKeyBody": "Wenn du bestätigst, kann der Schlichter dieses Streitfalls den gesamten Chat zwischen dir und deinem Gegenüber in dieser Order lesen, und nur diesen Chat: nicht die Chats deiner früheren oder späteren Trades. Das kann nicht rückgängig gemacht werden. Das Teilen ist freiwillig, hilft dem Schlichter aber, den Streitfall schneller zu lösen.",
   "shareChatKeyConfirm": "Teilen",
   "chatKeySharedIndicator": "Chat-Schlüssel mit dem Schlichter geteilt",
-  "shareChatKeyUnavailable": "Der Chat-Schlüssel dieses Trades ist auf diesem Gerät nicht verfügbar."
+  "shareChatKeyUnavailable": "Der Chat-Schlüssel dieses Trades ist auf diesem Gerät nicht verfügbar.",
+  "messageMenuHint": "Nachrichtenmenü öffnen"
 }

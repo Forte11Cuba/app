@@ -6915,6 +6915,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'The chat key of this trade is not available on this device.'**
   String get shareChatKeyUnavailable;
+
+  /// Screen-reader hint of a chat message: what holding it opens
+  ///
+  /// In en, this message translates to:
+  /// **'Open the message menu'**
+  String get messageMenuHint;
 }
 
 class _AppLocalizationsDelegate

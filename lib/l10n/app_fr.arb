@@ -1266,5 +1266,6 @@
   "shareChatKeyBody": "Si vous confirmez, le médiateur de ce litige pourra lire l'intégralité du chat entre vous et votre contrepartie pour cet ordre, et uniquement ce chat : pas ceux de vos transactions passées ou futures. Cette action est irréversible. Le partage est facultatif, mais il aide le médiateur à résoudre le litige plus vite.",
   "shareChatKeyConfirm": "Partager",
   "chatKeySharedIndicator": "Clé du chat partagée avec le médiateur",
-  "shareChatKeyUnavailable": "La clé du chat de cette transaction n'est pas disponible sur cet appareil."
+  "shareChatKeyUnavailable": "La clé du chat de cette transaction n'est pas disponible sur cet appareil.",
+  "messageMenuHint": "Ouvrir le menu du message"
 }
