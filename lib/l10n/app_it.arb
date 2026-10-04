@@ -1251,5 +1251,11 @@
   "lockEscrowOrderMovedOn": "Il nodo dice che questo ordine non attende più l'escrow. Il tuo escrow resta salvato su questo dispositivo; lo stato del trade si aggiornerà quando il nodo lo comunicherà.",
   "tradeHeadlineWaitingPaymentSellerCashu": "Blocca l'escrow per avviare il trade",
   "tradeWaitingPaymentSellerInstructionCashu": "Blocca il tuo ecash nell'escrow presso il mint del nodo. Questo avvia il trade, e torna a te se il nodo scompare.",
-  "tradeBodyWaitingPaymentBuyerCashu": "Stanno bloccando i sats nell'escrow. Una volta bloccato, tocca a te pagare il fiat."
+  "tradeBodyWaitingPaymentBuyerCashu": "Stanno bloccando i sats nell'escrow. Una volta bloccato, tocca a te pagare il fiat.",
+  "shareChatKeyAction": "Condividi la chiave della chat con il mediatore",
+  "shareChatKeyTitle": "Condividere la chiave della chat con il mediatore?",
+  "shareChatKeyBody": "Se confermi, il mediatore di questa controversia potrà leggere l'intera chat tra te e la tua controparte in questo ordine, e solo quella chat: non le chat delle tue operazioni precedenti o successive. L'operazione non può essere annullata. La condivisione è facoltativa, ma aiuta il mediatore a risolvere la controversia più rapidamente.",
+  "shareChatKeyConfirm": "Condividi",
+  "chatKeySharedIndicator": "Chiave della chat condivisa con il mediatore",
+  "shareChatKeyUnavailable": "La chiave della chat di questa operazione non è disponibile su questo dispositivo."
 }

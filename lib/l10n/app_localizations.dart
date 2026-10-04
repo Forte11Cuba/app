@@ -6825,6 +6825,42 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'They\'re locking the sats in escrow. Once it\'s locked, it\'s your turn to pay the fiat.'**
   String get tradeBodyWaitingPaymentBuyerCashu;
+
+  /// Dispute chat app bar: tooltip of the action that sends the solver the peer chat key (#415)
+  ///
+  /// In en, this message translates to:
+  /// **'Share the chat key with the resolver'**
+  String get shareChatKeyAction;
+
+  /// Title of the dialog confirming that the peer chat key goes to the dispute solver
+  ///
+  /// In en, this message translates to:
+  /// **'Share the chat key with the resolver?'**
+  String get shareChatKeyTitle;
+
+  /// Body of the dialog confirming that the peer chat key goes to the dispute solver: what the solver can read, and only that
+  ///
+  /// In en, this message translates to:
+  /// **'If you confirm, the resolver of this dispute will be able to read the whole chat between you and your counterparty in this order, and only that chat: not the chats of your earlier or later trades. This cannot be undone. Sharing is optional, but it helps the resolver settle the dispute faster.'**
+  String get shareChatKeyBody;
+
+  /// Confirm button of the dialog that shares the peer chat key with the solver
+  ///
+  /// In en, this message translates to:
+  /// **'Share'**
+  String get shareChatKeyConfirm;
+
+  /// Dispute chat app bar: tooltip and label of the indicator shown once the chat key went to the current solver
+  ///
+  /// In en, this message translates to:
+  /// **'Chat key shared with the resolver'**
+  String get chatKeySharedIndicator;
+
+  /// Error in the share-chat-key dialog: the counterparty or trade key of this order is not known on this device
+  ///
+  /// In en, this message translates to:
+  /// **'The chat key of this trade is not available on this device.'**
+  String get shareChatKeyUnavailable;
 }
 
 class _AppLocalizationsDelegate

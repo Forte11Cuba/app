@@ -4081,4 +4081,24 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get tradeBodyWaitingPaymentBuyerCashu =>
       'They\'re locking the sats in escrow. Once it\'s locked, it\'s your turn to pay the fiat.';
+
+  @override
+  String get shareChatKeyAction => 'Share the chat key with the resolver';
+
+  @override
+  String get shareChatKeyTitle => 'Share the chat key with the resolver?';
+
+  @override
+  String get shareChatKeyBody =>
+      'If you confirm, the resolver of this dispute will be able to read the whole chat between you and your counterparty in this order, and only that chat: not the chats of your earlier or later trades. This cannot be undone. Sharing is optional, but it helps the resolver settle the dispute faster.';
+
+  @override
+  String get shareChatKeyConfirm => 'Share';
+
+  @override
+  String get chatKeySharedIndicator => 'Chat key shared with the resolver';
+
+  @override
+  String get shareChatKeyUnavailable =>
+      'The chat key of this trade is not available on this device.';
 }

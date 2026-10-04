@@ -13,6 +13,7 @@ import 'package:mostro/features/disputes/providers/dispute_chat_provider.dart';
 import 'package:mostro/features/disputes/providers/disputes_providers.dart';
 import 'package:mostro/features/disputes/widgets/dispute_message_input.dart';
 import 'package:mostro/features/disputes/widgets/dispute_messages_list.dart';
+import 'package:mostro/features/disputes/widgets/share_chat_key_action.dart';
 import 'package:mostro/features/notifications/models/notification_model.dart';
 import 'package:mostro/features/notifications/providers/notifications_provider.dart';
 import 'package:mostro/src/rust/api/types.dart' as rust_types;
@@ -20,7 +21,8 @@ import 'package:mostro/src/rust/api/types.dart' as rust_types;
 /// Dispute chat screen — Route `/dispute_details/:disputeId`.
 ///
 /// Layout:
-///   - Custom header: "Dispute with Buyer/Seller: [handle]" + status badge
+///   - Custom header: "Dispute with Buyer/Seller: [handle]" + status badge,
+///     and the [ShareChatKeyAction] once a solver took the dispute (#415)
 ///   - Scrollable [DisputeMessagesList] (info card + bubbles + banners)
 ///   - [DisputeMessageInput] — only once a solver took the dispute
 ///
@@ -143,6 +145,22 @@ class _DisputeChatScreenState extends ConsumerState<DisputeChatScreen> {
     }
   }
 
+  /// Key button: confirm, then send the solver the peer chat key (#415). The
+  /// dialog sends it and reports a failure itself.
+  Future<void> _onShareChatKey(String tradeId) async {
+    final gateway = ref.read(disputeChatGatewayProvider);
+    final sent = await showShareChatKeyDialog(
+      context: context,
+      share: () => gateway.shareChatKey(tradeId),
+    );
+    if (!mounted) return;
+    if (sent != null) {
+      ref.read(disputeChatProvider(tradeId).notifier).add(sent);
+    }
+    // Shared now, or already: the record says which the button shows.
+    unawaited(_refreshDispute(tradeId));
+  }
+
   Future<void> _retryUpload(String tradeId, String uploadId) async {
     final sent = await ref
         .read(disputeUploadsProvider(tradeId).notifier)
@@ -216,6 +234,13 @@ class _DisputeChatScreenState extends ConsumerState<DisputeChatScreen> {
         // The dispute screen is pushed over the trade detail; automation
         // leaves it the way it leaves every other screen (`appbar.back`).
         leading: const BackButton().withAutomationId(AutomationIds.appBarBack),
+        actions: [
+          if (canWrite)
+            ShareChatKeyAction(
+              shared: dispute.chatKeyShared,
+              onPressed: () => _onShareChatKey(tradeId),
+            ),
+        ],
       ),
       body: Column(
         children: [
@@ -295,47 +320,57 @@ class _HeaderTitle extends StatelessWidget {
 
     final (statusBg, statusFg, statusLabel) = _statusChip(dispute.status, l10n);
 
-    return Row(
-      children: [
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                title,
-                style: textTheme.titleMedium?.copyWith(
-                  color: colors.textPrimary,
-                  fontWeight: FontWeight.bold,
+    return LayoutBuilder(
+      builder: (context, constraints) => Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  title,
+                  style: textTheme.titleMedium?.copyWith(
+                    color: colors.textPrimary,
+                    fontWeight: FontWeight.bold,
+                  ),
+                  overflow: TextOverflow.ellipsis,
                 ),
-                overflow: TextOverflow.ellipsis,
-              ),
-              const SizedBox(height: 2),
-              Text(
-                l10n.orderLabel(truncatedId),
-                style: textTheme.bodySmall?.copyWith(color: colors.textSubtle),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(width: AppSpacing.sm),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm, vertical: 3),
-          decoration: BoxDecoration(
-            color: statusBg,
-            borderRadius: BorderRadius.circular(AppRadius.chip),
-          ),
-          child: Text(
-            statusLabel,
-            style: textTheme.bodySmall?.copyWith(
-              color: statusFg,
-              fontWeight: FontWeight.w500,
-              fontSize: 11,
+                const SizedBox(height: 2),
+                Text(
+                  l10n.orderLabel(truncatedId),
+                  style: textTheme.bodySmall?.copyWith(color: colors.textSubtle),
+                ),
+              ],
             ),
           ),
-        ),
-        const SizedBox(width: AppSpacing.sm),
-      ],
+          const SizedBox(width: AppSpacing.sm),
+          // Scaled down rather than cut when a large text size and the app
+          // bar's actions leave it no room (DS-L10N-2).
+          ConstrainedBox(
+            constraints: BoxConstraints(maxWidth: constraints.maxWidth * 0.4),
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm, vertical: 4),
+                decoration: BoxDecoration(
+                  color: statusBg,
+                  borderRadius: BorderRadius.circular(AppRadius.chip),
+                ),
+                child: Text(
+                  statusLabel,
+                  style: textTheme.bodySmall?.copyWith(
+                    color: statusFg,
+                    fontWeight: FontWeight.w500,
+                    fontSize: 11,
+                  ),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: AppSpacing.sm),
+        ],
+      ),
     );
   }
 

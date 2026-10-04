@@ -4134,4 +4134,25 @@ class AppLocalizationsDe extends AppLocalizations {
   @override
   String get tradeBodyWaitingPaymentBuyerCashu =>
       'Die Gegenseite sperrt die Sats im Escrow. Sobald er gesperrt ist, bist du dran, den Fiat-Betrag zu zahlen.';
+
+  @override
+  String get shareChatKeyAction => 'Chat-Schlüssel mit dem Schlichter teilen';
+
+  @override
+  String get shareChatKeyTitle => 'Chat-Schlüssel mit dem Schlichter teilen?';
+
+  @override
+  String get shareChatKeyBody =>
+      'Wenn du bestätigst, kann der Schlichter dieses Streitfalls den gesamten Chat zwischen dir und deinem Gegenüber in dieser Order lesen, und nur diesen Chat: nicht die Chats deiner früheren oder späteren Trades. Das kann nicht rückgängig gemacht werden. Das Teilen ist freiwillig, hilft dem Schlichter aber, den Streitfall schneller zu lösen.';
+
+  @override
+  String get shareChatKeyConfirm => 'Teilen';
+
+  @override
+  String get chatKeySharedIndicator =>
+      'Chat-Schlüssel mit dem Schlichter geteilt';
+
+  @override
+  String get shareChatKeyUnavailable =>
+      'Der Chat-Schlüssel dieses Trades ist auf diesem Gerät nicht verfügbar.';
 }

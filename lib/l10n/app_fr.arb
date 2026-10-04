@@ -1251,5 +1251,11 @@
   "lockEscrowOrderMovedOn": "Le nœud indique que cet ordre n'attend plus l'escrow. Votre escrow reste enregistré sur cet appareil ; le statut du trade se mettra à jour quand le nœud le signalera.",
   "tradeHeadlineWaitingPaymentSellerCashu": "Verrouillez l'escrow pour démarrer le trade",
   "tradeWaitingPaymentSellerInstructionCashu": "Verrouillez votre ecash dans l'escrow au mint du nœud. Cela démarre le trade, et il vous revient si le nœud disparaît.",
-  "tradeBodyWaitingPaymentBuyerCashu": "Ils verrouillent les sats dans l'escrow. Une fois verrouillé, c'est à vous de payer le fiat."
+  "tradeBodyWaitingPaymentBuyerCashu": "Ils verrouillent les sats dans l'escrow. Une fois verrouillé, c'est à vous de payer le fiat.",
+  "shareChatKeyAction": "Partager la clé du chat avec le médiateur",
+  "shareChatKeyTitle": "Partager la clé du chat avec le médiateur ?",
+  "shareChatKeyBody": "Si vous confirmez, le médiateur de ce litige pourra lire l'intégralité du chat entre vous et votre contrepartie pour cet ordre, et uniquement ce chat : pas ceux de vos transactions passées ou futures. Cette action est irréversible. Le partage est facultatif, mais il aide le médiateur à résoudre le litige plus vite.",
+  "shareChatKeyConfirm": "Partager",
+  "chatKeySharedIndicator": "Clé du chat partagée avec le médiateur",
+  "shareChatKeyUnavailable": "La clé du chat de cette transaction n'est pas disponible sur cet appareil."
 }

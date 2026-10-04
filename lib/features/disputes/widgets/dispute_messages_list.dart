@@ -284,9 +284,12 @@ class _IdRow extends StatelessWidget {
         padding: const EdgeInsets.symmetric(vertical: 2),
         child: Row(
           children: [
-            Text(
-              '$label: ',
-              style: textTheme.bodySmall?.copyWith(color: colors.textSubtle),
+            Flexible(
+              child: Text(
+                '$label: ',
+                style: textTheme.bodySmall?.copyWith(color: colors.textSubtle),
+                overflow: TextOverflow.ellipsis,
+              ),
             ),
             Expanded(
               child: Text(
