@@ -479,10 +479,7 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
                     orderId: widget.orderId,
                   )
                   : _showUserInfo
-                  ? UserInformationTab(
-                    key: const ValueKey('user'),
-                    room: room,
-                  )
+                  ? UserInformationTab(key: const ValueKey('user'), room: room)
                   : Container(
                     key: const ValueKey('none'),
                     color: colors.backgroundCard,
