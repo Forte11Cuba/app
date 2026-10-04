@@ -163,6 +163,40 @@ void main() {
     expect(find.text('Copy'), findsNothing);
   });
 
+  testWidgets('a message partly scrolled away stays cut at the list', (
+    tester,
+  ) async {
+    await pump(tester, textMessage(), inLongList: true);
+    await press(tester, const Duration(seconds: 1));
+    final bubble = tester.getRect(find.text(_text).first);
+
+    // Half of it above the list's top edge.
+    listPosition(tester).jumpTo(bubble.top + bubble.height / 2);
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.text('Copy'), findsOneWidget);
+    final lit = find.text(_text).last;
+    expect(tester.getRect(lit).top, lessThan(0));
+    final cut = find.ancestor(of: lit, matching: find.byType(ClipRect)).first;
+    expect(tester.getRect(cut).top, 0);
+  });
+
+  testWidgets('the menu stays clear of an open keyboard', (tester) async {
+    addTearDown(tester.view.reset);
+    tester.view.physicalSize = const Size(400, 800);
+    tester.view.devicePixelRatio = 1;
+    tester.view.viewInsets = const FakeViewPadding(bottom: 300);
+    await pump(tester, textMessage(), atBottom: true);
+
+    await press(tester, const Duration(seconds: 1));
+
+    expect(
+      tester.getRect(find.text('Copy')).bottom,
+      lessThanOrEqualTo(800 - 300),
+    );
+  });
+
   testWidgets('a change of screen size keeps the menu on its message', (
     tester,
   ) async {

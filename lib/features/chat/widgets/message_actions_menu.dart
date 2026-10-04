@@ -11,9 +11,12 @@ const messageMenuHoldDuration = Duration(seconds: 1);
 /// What the user picked in a message's menu.
 enum MessageAction { copy }
 
-/// Where a message is on screen, in global coordinates, or null once it is
-/// gone (scrolled out of a list and disposed).
-typedef MessageAnchor = Rect? Function();
+/// Where a message is on screen, in global coordinates: [rect] the whole
+/// message, [visible] the part its list shows.
+typedef MessagePlace = ({Rect rect, Rect visible});
+
+/// The message's [MessagePlace], or null once nobody can see it.
+typedef MessageAnchor = MessagePlace? Function();
 
 /// Opens the menu of the chat message drawn by [bubble], which [anchor]
 /// locates, and resolves to the action picked, or null when the user
@@ -31,15 +34,15 @@ Future<MessageAction?> showMessageActionsMenu({
   required Widget bubble,
   required bool alignEnd,
 }) async {
-  final bubbleRect = anchor();
-  if (bubbleRect == null) return null;
+  final place = anchor();
+  if (place == null) return null;
   final book = OrderBookPalette.of(context);
   // Root navigator: the route places the message by global coordinates, so
   // its overlay must cover the whole screen.
   return Navigator.of(context, rootNavigator: true).push(
     _MessageActionsRoute(
       anchor: anchor,
-      bubbleRect: bubbleRect,
+      place: place,
       bubble: bubble,
       alignEnd: alignEnd,
       scrim: book.scrim,
@@ -52,7 +55,7 @@ Future<MessageAction?> showMessageActionsMenu({
 class _MessageActionsRoute extends PopupRoute<MessageAction> {
   _MessageActionsRoute({
     required this.anchor,
-    required this.bubbleRect,
+    required this.place,
     required this.bubble,
     required this.alignEnd,
     required this.scrim,
@@ -63,7 +66,7 @@ class _MessageActionsRoute extends PopupRoute<MessageAction> {
   final MessageAnchor anchor;
 
   /// Where the message was when the menu opened.
-  final Rect bubbleRect;
+  final MessagePlace place;
   final Widget bubble;
   final bool alignEnd;
   final Color scrim;
@@ -90,26 +93,49 @@ class _MessageActionsRoute extends PopupRoute<MessageAction> {
   ) {
     return _FollowAnchor(
       anchor: anchor,
-      initial: bubbleRect,
-      builder: (context, rect) => Stack(
+      initial: place,
+      builder: (context, place) => Stack(
         children: [
-          // Taps on the message fall through to the barrier and close the
-          // menu; a screen reader already reads the original underneath.
+          // Cut to what the list shows, as the original is: a message partly
+          // scrolled under the header or the composer stays under them.
           Positioned.fromRect(
-            rect: rect,
-            child: IgnorePointer(child: ExcludeSemantics(child: bubble)),
+            rect: place.visible,
+            child: ClipRect(
+              child: Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  // Taps on the message fall through to the barrier and
+                  // close the menu; a screen reader already reads the
+                  // original underneath.
+                  Positioned.fromRect(
+                    rect: place.rect.shift(-place.visible.topLeft),
+                    child: IgnorePointer(
+                      child: ExcludeSemantics(child: bubble),
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ),
           CustomSingleChildLayout(
             delegate: _MenuPosition(
-              bubbleRect: rect,
+              bubbleRect: place.visible,
               alignEnd: alignEnd,
-              safeArea: MediaQuery.paddingOf(context),
+              safeArea: _usableInsets(context),
             ),
             child: const _ActionsCard(),
           ),
         ],
       ),
     );
+  }
+
+  /// The safe area, the keyboard counting as the bottom edge while it is up:
+  /// the composer may keep it open while a message is held.
+  static EdgeInsets _usableInsets(BuildContext context) {
+    final padding = MediaQuery.paddingOf(context);
+    final keyboard = MediaQuery.viewInsetsOf(context).bottom;
+    return padding.copyWith(bottom: math.max(padding.bottom, keyboard));
   }
 
   @override
@@ -139,15 +165,15 @@ class _FollowAnchor extends StatefulWidget {
   });
 
   final MessageAnchor anchor;
-  final Rect initial;
-  final Widget Function(BuildContext context, Rect rect) builder;
+  final MessagePlace initial;
+  final Widget Function(BuildContext context, MessagePlace place) builder;
 
   @override
   State<_FollowAnchor> createState() => _FollowAnchorState();
 }
 
 class _FollowAnchorState extends State<_FollowAnchor> {
-  late Rect _rect = widget.initial;
+  late MessagePlace _place = widget.initial;
 
   @override
   void initState() {
@@ -158,18 +184,18 @@ class _FollowAnchorState extends State<_FollowAnchor> {
   void _checkAfterFrame() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      final rect = widget.anchor();
-      if (rect == null) {
+      final place = widget.anchor();
+      if (place == null) {
         Navigator.of(context).maybePop();
         return;
       }
-      if (rect != _rect) setState(() => _rect = rect);
+      if (place != _place) setState(() => _place = place);
       _checkAfterFrame();
     });
   }
 
   @override
-  Widget build(BuildContext context) => widget.builder(context, _rect);
+  Widget build(BuildContext context) => widget.builder(context, _place);
 }
 
 /// Places the menu under the message, or above it when it does not fit,

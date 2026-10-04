@@ -217,9 +217,10 @@ class MessageBubble extends StatelessWidget {
   /// Held for [messageMenuHoldDuration]: the message's menu, drawn over the
   /// bubble that [bubbleContext] lays out.
   Future<void> _openMenu(BuildContext bubbleContext, Widget bubble) async {
-    // Where the message is, or null once nobody can see it: disposed, or
-    // scrolled out of its list while the list keeps it built in its cache.
-    Rect? anchor() {
+    // Where the message is and what of it its list shows, or null once
+    // nobody can see it: disposed, or scrolled out of its list while the
+    // list keeps it built in its cache.
+    MessagePlace? anchor() {
       if (!bubbleContext.mounted) return null;
       final box = bubbleContext.findRenderObject() as RenderBox?;
       if (box == null || !box.attached || !box.hasSize) return null;
@@ -227,11 +228,12 @@ class MessageBubble extends StatelessWidget {
       final viewport =
           Scrollable.maybeOf(bubbleContext)?.context.findRenderObject()
               as RenderBox?;
-      if (viewport != null && viewport.attached && viewport.hasSize) {
-        final visible = viewport.localToGlobal(Offset.zero) & viewport.size;
-        if (!rect.overlaps(visible)) return null;
+      if (viewport == null || !viewport.attached || !viewport.hasSize) {
+        return (rect: rect, visible: rect);
       }
-      return rect;
+      final list = viewport.localToGlobal(Offset.zero) & viewport.size;
+      if (!rect.overlaps(list)) return null;
+      return (rect: rect, visible: rect.intersect(list));
     }
 
     if (anchor() == null) return;
