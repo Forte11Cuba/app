@@ -171,7 +171,9 @@ newest first, so no channel's cursor moves until it is over — EOSE from
 every connected relay that held the subscription, a relay that drops the
 connection meanwhile no longer awaited, and one that delivers with no EOSE on its
 current connection (joined late, or reconnected and given the subscription
-again) awaited from then on: passing
+again; connections are told apart by the relay's count of them) awaited
+from then on, the persisted cursor going back to the subscription's start,
+which its replay begins from: passing
 a newer event before an older one arrives would lose the older one on a
 restart. After that, the peer cursor still stops at a held reaction's floor
 (where the catch-up started, or the live cursor) until the reaction is
@@ -187,7 +189,7 @@ only (its write, or that of a reaction it carries, failed — received or
 sent), the cursor stays put until a retry stores it, or a restart fetches
 it again. Every write of a message row (a new message,
 a reaction, `mark_as_read`, the retry of a failed write) happens under the
-store's write lock, so none
+store's write lock, and so does recording whether it was stored, so none
 writes an older copy over another — on web the read flag rewrites whole
 rows. A reaction is never a message: no unread count, no
 `on_new_message`, no notification. An inner kind this client does not

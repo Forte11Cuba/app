@@ -205,9 +205,12 @@ impl MessageStore {
                     .or_default()
                     .extend(folded);
             }
+            // Recorded before the lock goes, with the write it describes:
+            // another write of this row can't slip in between and be
+            // undone by this one's outcome.
+            self.note_durability(&msg.id, stored).await;
             stored
         };
-        self.note_durability(&msg.id, stored).await;
         let _ = self.new_message_tx.send(msg.clone());
         let unread = self.unread_count_inner().await;
         let _ = self.unread_tx.send(unread);
@@ -227,7 +230,9 @@ impl MessageStore {
     /// Whether a message of `trade_id` is in memory only: its write failed and
     /// no retry has stored it yet.
     async fn has_unsaved(&self, trade_id: &str) -> bool {
-        let unsaved = self.non_durable.read().await;
+        // Copied out, so `non_durable` is never held while waiting for
+        // `messages`: writers take them the other way round.
+        let unsaved = self.non_durable.read().await.clone();
         if unsaved.is_empty() {
             return false;
         }
@@ -282,11 +287,12 @@ impl MessageStore {
                 },
                 None => true,
             };
+            // A failed write marks the message memory-only, so
+            // `ensure_durable` retries it, reaction included, and the cursor
+            // stays put meanwhile. Recorded under the lock, with the write.
+            self.note_durability(&updated.id, durable).await;
             (updated, durable)
         };
-        // A failed write marks the message memory-only, so `ensure_durable`
-        // retries it, reaction included, and the cursor stays put meanwhile.
-        self.note_durability(&updated.id, durable).await;
         let _ = self.updated_tx.send(updated.clone());
         ReactionOutcome::Applied {
             message: Box::new(updated),
@@ -413,9 +419,9 @@ impl MessageStore {
         let (Some(db), Some(msg)) = (crate::db::app_db::db(), copy) else {
             return false;
         };
-        let saved = db.save_message(&msg).await;
-        drop(store);
-        match saved {
+        // The outcome is recorded before the lock goes: a later write of
+        // this row that fails cannot have its marker cleared by this success.
+        let durable = match db.save_message(&msg).await {
             Ok(()) => {
                 self.non_durable.write().await.remove(id);
                 // Reactions held again when its first write failed are in
@@ -429,7 +435,9 @@ impl MessageStore {
                 log::warn!("[messages] persist retry failed id={id}: {e}");
                 false
             }
-        }
+        };
+        drop(store);
+        durable
     }
 
     /// `true` when storing one more incoming message of `incoming_bytes`
@@ -2057,7 +2065,7 @@ struct ChatRxState {
     /// [`Self::caught_up`] themselves.
     awaiting_eose: std::collections::HashSet<String>,
     /// Relays that have sent EOSE, each with the connection it came on (the
-    /// relay's `connected_at`). An event from a relay with no EOSE on its
+    /// relay's count of connections, see `connection_of`). An event from a relay with no EOSE on its
     /// current connection — it joined late, or reconnected and got the
     /// subscription again from `live_subs` — is a replay of stored events,
     /// newest first: catch-up starts over for that relay.
@@ -2170,11 +2178,20 @@ impl ChatRxState {
     /// no EOSE on that connection is replaying stored events newest first —
     /// it joined late or reconnected — so the cursor waits for its EOSE as
     /// for the others', and its backlog skips the token bucket.
-    fn event_from(&mut self, relay: &str, connection: u64) {
+    ///
+    /// Its REQ is the recorded one, `since` the subscription's start, so it
+    /// may replay events older than a cursor already persisted: the cursor
+    /// goes back to that start, or a restart halfway through would skip
+    /// them.
+    async fn event_from(&mut self, order_id: &str, relay: &str, connection: u64) {
         if self.eose_seen.get(relay) != Some(&connection) {
             self.eose_seen.remove(relay);
             if self.awaiting_eose.insert(relay.to_string()) {
                 self.caught_up = false;
+                if self.cursor > self.start_cursor {
+                    self.cursor = self.start_cursor;
+                    self.persist_cursor(order_id).await;
+                }
             }
         }
         self.from_catch_up = self.awaiting_eose.contains(relay);
@@ -2338,7 +2355,9 @@ async fn run_chat_subscription(
             }) => {
                 if subscription_id == sub_id {
                     let connection = connection_of(&client, &relay_url).await;
-                    state.event_from(&relay_url.to_string(), connection);
+                    state
+                        .event_from(order_id, &relay_url.to_string(), connection)
+                        .await;
                     handle_chat_event(
                         channel,
                         order_id,
@@ -2377,14 +2396,16 @@ async fn run_chat_subscription(
     }
 }
 
-/// Which connection of `relay` this is: when it last connected. A reconnect
-/// changes it, which is how a replayed catch-up is told from live traffic.
+/// Which connection of `relay` this is: how many times it has connected. A
+/// reconnect counts one more, which is how a replayed catch-up is told from
+/// live traffic — even two connections within the same second, which the
+/// relay's `connected_at` (whole seconds) would not tell apart.
 async fn connection_of(
     client: &nostr_sdk::prelude::Client,
     relay: &nostr_sdk::prelude::RelayUrl,
 ) -> u64 {
     match client.relay(relay).await {
-        Ok(Some(relay)) => relay.stats().connected_at().as_secs(),
+        Ok(Some(relay)) => relay.stats().success() as u64,
         _ => 0,
     }
 }
@@ -4771,42 +4792,45 @@ mod tests {
         assert!(chat.state.cursor >= later.created_at.as_secs() as i64 - 1);
     }
 
-    #[test]
-    fn a_relay_that_joins_late_reopens_catch_up() {
+    #[tokio::test]
+    async fn a_relay_that_joins_late_reopens_catch_up() {
         let mut state = ChatRxState::new(ChatChannel::Peer, 0, None);
         state.caught_up = true;
         state.eose_seen.insert("wss://early".to_string(), 1);
 
-        state.event_from("wss://early", 1);
+        state.event_from("o", "wss://early", 1).await;
         assert!(state.caught_up, "a relay past its EOSE is live");
         assert!(!state.from_catch_up);
-        state.event_from("wss://late", 1);
+        state.event_from("o", "wss://late", 1).await;
 
         assert!(!state.caught_up);
         assert!(state.awaiting_eose.contains("wss://late"));
         assert!(state.from_catch_up, "its backlog skips the token bucket");
     }
 
-    #[test]
-    fn a_relay_that_reconnects_reopens_catch_up() {
-        let mut state = ChatRxState::new(ChatChannel::Peer, 0, None);
+    #[tokio::test]
+    async fn a_relay_that_reconnects_reopens_catch_up_from_the_start() {
+        let mut state = ChatRxState::new(ChatChannel::Peer, 100, None);
         state.caught_up = true;
+        state.cursor = 150; // persisted after the first catch-up
         state.eose_seen.insert("wss://relay".to_string(), 1);
 
-        // Same relay, a later connection: the subscription was repaired.
-        state.event_from("wss://relay", 2);
+        // Same relay, a later connection: the subscription was repaired,
+        // with the recorded since = 100.
+        state.event_from("o", "wss://relay", 2).await;
 
         assert!(!state.caught_up);
         assert!(state.awaiting_eose.contains("wss://relay"));
+        assert_eq!(state.cursor, 100, "back to what the replay starts from");
     }
 
-    #[test]
-    fn a_relay_still_in_catch_up_skips_the_token_bucket() {
+    #[tokio::test]
+    async fn a_relay_still_in_catch_up_skips_the_token_bucket() {
         let mut state = ChatRxState::new(ChatChannel::Peer, 0, None);
         state.live = true; // another relay already sent EOSE
         state.awaiting_eose.insert("wss://slow".to_string());
 
-        state.event_from("wss://slow", 1);
+        state.event_from("o", "wss://slow", 1).await;
         let accepted = (0..RATE_CAPACITY as u32 * 3)
             .filter(|_| state.budget_ok("order-x"))
             .count();
