@@ -485,4 +485,79 @@ void main() {
       });
     });
   });
+
+  // The outcome is told from the user's side of the trade, the side the
+  // card names; DisputeItem.isSelling is never set (#680 review).
+  group('resolved banner', () {
+    for (final (role, resolution, won, lostText) in [
+      (rust_types.TradeRole.buyer, DisputeResolution.fundsToBuyer, true, null),
+      (
+        rust_types.TradeRole.seller,
+        DisputeResolution.fundsToBuyer,
+        false,
+        _en.disputeLostFundsToBuyer,
+      ),
+      (
+        rust_types.TradeRole.seller,
+        DisputeResolution.fundsToSeller,
+        true,
+        null,
+      ),
+      (
+        rust_types.TradeRole.buyer,
+        DisputeResolution.fundsToSeller,
+        false,
+        _en.disputeLostFundsToSeller,
+      ),
+    ]) {
+      testWidgets('${role.name}, ${resolution.name}: '
+          '${won ? 'won' : 'lost'}', (tester) async {
+        await _pump(
+          tester,
+          dispute: _dispute(
+            status: DisputeStatus.resolved,
+            resolution: resolution,
+          ),
+          role: role,
+        );
+
+        expect(
+          find.text(_en.disputeSuccessfullyCompleted),
+          won ? findsOneWidget : findsNothing,
+        );
+        for (final text in [
+          _en.disputeLostFundsToBuyer,
+          _en.disputeLostFundsToSeller,
+        ]) {
+          expect(
+            find.text(text),
+            text == lostText ? findsOneWidget : findsNothing,
+          );
+        }
+      });
+    }
+
+    for (final (resolution, neutral) in [
+      (DisputeResolution.fundsToBuyer, _en.disputeDescResolvedBuyerFavour),
+      (DisputeResolution.fundsToSeller, _en.disputeDescResolvedSellerFavour),
+    ]) {
+      testWidgets('unknown role, ${resolution.name}: a neutral outcome', (
+        tester,
+      ) async {
+        await _pump(
+          tester,
+          dispute: _dispute(
+            status: DisputeStatus.resolved,
+            resolution: resolution,
+          ),
+          role: null,
+        );
+
+        expect(find.text(neutral), findsOneWidget);
+        expect(find.text(_en.disputeSuccessfullyCompleted), findsNothing);
+        expect(find.text(_en.disputeLostFundsToBuyer), findsNothing);
+        expect(find.text(_en.disputeLostFundsToSeller), findsNothing);
+      });
+    }
+  });
 }
