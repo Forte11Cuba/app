@@ -47,6 +47,8 @@ class InputSourceAction extends StatelessWidget {
           onTap: onTap,
           borderRadius: const BorderRadius.all(Radius.circular(14)),
           child: Container(
+            // DS-CMP-6: the padding and a 13 sp label alone come to 46 dp.
+            constraints: const BoxConstraints(minHeight: 48),
             decoration: BoxDecoration(
               borderRadius: const BorderRadius.all(Radius.circular(14)),
               border: Border.all(
@@ -59,13 +61,13 @@ class InputSourceAction extends StatelessWidget {
               children: [
                 Icon(icon, size: 14, color: ink),
                 const SizedBox(width: 6),
-                // Half a 360 px screen is tight for `Escanear QR` and tighter
-                // for the longer translations: ellipsize rather than overflow.
+                // Half a 320 dp screen is tight for `Escanear QR`, and German
+                // at a large text size does not fit on one line: wrap rather
+                // than cut the verb (DS-L10N-2).
                 Flexible(
                   child: Text(
                     label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.center,
                     style: TextStyle(
                       fontSize: 13,
                       fontWeight: lime ? FontWeight.w600 : FontWeight.w500,
