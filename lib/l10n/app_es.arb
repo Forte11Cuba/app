@@ -1266,5 +1266,6 @@
   "shareChatKeyBody": "Si confirmas, el resolutor de esta disputa podrá leer el chat completo entre tú y tu contraparte en esta orden, y solo ese chat: no los chats de tus operaciones anteriores ni futuras. Esto no se puede deshacer. Compartirla es opcional, pero ayuda al resolutor a resolver la disputa más rápido.",
   "shareChatKeyConfirm": "Compartir",
   "chatKeySharedIndicator": "Clave del chat compartida con el resolutor",
-  "shareChatKeyUnavailable": "La clave del chat de esta operación no está disponible en este dispositivo."
+  "shareChatKeyUnavailable": "La clave del chat de esta operación no está disponible en este dispositivo.",
+  "messageMenuHint": "Abrir el menú del mensaje"
 }

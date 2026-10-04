@@ -4330,5 +4330,9 @@
   "chatKeySharedIndicator": "Chat key shared with the resolver",
   "@chatKeySharedIndicator": {"description": "Dispute chat app bar: tooltip and label of the indicator shown once the chat key went to the current solver"},
   "shareChatKeyUnavailable": "The chat key of this trade is not available on this device.",
-  "@shareChatKeyUnavailable": {"description": "Error in the share-chat-key dialog: the counterparty or trade key of this order is not known on this device"}
+  "@shareChatKeyUnavailable": {"description": "Error in the share-chat-key dialog: the counterparty or trade key of this order is not known on this device"},
+  "messageMenuHint": "Open the message menu",
+  "@messageMenuHint": {
+    "description": "Screen-reader hint of a chat message: what holding it opens"
+  }
 }

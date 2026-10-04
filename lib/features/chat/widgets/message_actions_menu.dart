@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import 'package:mostro/core/order_book_palette.dart';
@@ -9,25 +11,34 @@ const messageMenuHoldDuration = Duration(seconds: 1);
 /// What the user picked in a message's menu.
 enum MessageAction { copy }
 
-/// Opens the menu of the chat message drawn by [bubble] at [bubbleRect]
-/// (global coordinates), and resolves to the action picked, or null when the
-/// user dismissed it.
+/// Where a message is on screen, in global coordinates, or null once it is
+/// gone (scrolled out of a list and disposed).
+typedef MessageAnchor = Rect? Function();
+
+/// Opens the menu of the chat message drawn by [bubble], which [anchor]
+/// locates, and resolves to the action picked, or null when the user
+/// dismissed it.
 ///
 /// The message stays lit above the scrim and the menu opens under it, or
-/// above it when there is no room below. [alignEnd] lines the menu up with
-/// the message's side: the right for one's own, the left for the
+/// above it when there is no room below. Both follow the message when it
+/// moves — a new message scrolls the chat, the keyboard closes, the screen
+/// turns — and the menu closes if it disappears. [alignEnd] lines the menu
+/// up with the message's side: the right for one's own, the left for the
 /// counterpart's.
 Future<MessageAction?> showMessageActionsMenu({
   required BuildContext context,
-  required Rect bubbleRect,
+  required MessageAnchor anchor,
   required Widget bubble,
   required bool alignEnd,
-}) {
+}) async {
+  final bubbleRect = anchor();
+  if (bubbleRect == null) return null;
   final book = OrderBookPalette.of(context);
   // Root navigator: the route places the message by global coordinates, so
   // its overlay must cover the whole screen.
   return Navigator.of(context, rootNavigator: true).push(
     _MessageActionsRoute(
+      anchor: anchor,
       bubbleRect: bubbleRect,
       bubble: bubble,
       alignEnd: alignEnd,
@@ -40,6 +51,7 @@ Future<MessageAction?> showMessageActionsMenu({
 
 class _MessageActionsRoute extends PopupRoute<MessageAction> {
   _MessageActionsRoute({
+    required this.anchor,
     required this.bubbleRect,
     required this.bubble,
     required this.alignEnd,
@@ -48,6 +60,9 @@ class _MessageActionsRoute extends PopupRoute<MessageAction> {
     required this.animate,
   });
 
+  final MessageAnchor anchor;
+
+  /// Where the message was when the menu opened.
   final Rect bubbleRect;
   final Widget bubble;
   final bool alignEnd;
@@ -73,18 +88,20 @@ class _MessageActionsRoute extends PopupRoute<MessageAction> {
     Animation<double> animation,
     Animation<double> secondaryAnimation,
   ) {
-    return _CloseOnResize(
-      child: Stack(
+    return _FollowAnchor(
+      anchor: anchor,
+      initial: bubbleRect,
+      builder: (context, rect) => Stack(
         children: [
           // Taps on the message fall through to the barrier and close the
           // menu; a screen reader already reads the original underneath.
           Positioned.fromRect(
-            rect: bubbleRect,
+            rect: rect,
             child: IgnorePointer(child: ExcludeSemantics(child: bubble)),
           ),
           CustomSingleChildLayout(
             delegate: _MenuPosition(
-              bubbleRect: bubbleRect,
+              bubbleRect: rect,
               alignEnd: alignEnd,
               safeArea: MediaQuery.paddingOf(context),
             ),
@@ -109,38 +126,55 @@ class _MessageActionsRoute extends PopupRoute<MessageAction> {
   }
 }
 
-/// Closes the menu when the screen changes size (a rotation, a resized
-/// window): the message was placed where it stood when the menu opened.
-class _CloseOnResize extends StatefulWidget {
-  const _CloseOnResize({required this.child});
+/// Rebuilds the menu where the message is after every frame that moved it,
+/// and closes the menu once the message is gone.
+///
+/// Checking after each frame costs one rectangle comparison and schedules
+/// nothing: a still screen draws no frame, so the check waits with it.
+class _FollowAnchor extends StatefulWidget {
+  const _FollowAnchor({
+    required this.anchor,
+    required this.initial,
+    required this.builder,
+  });
 
-  final Widget child;
+  final MessageAnchor anchor;
+  final Rect initial;
+  final Widget Function(BuildContext context, Rect rect) builder;
 
   @override
-  State<_CloseOnResize> createState() => _CloseOnResizeState();
+  State<_FollowAnchor> createState() => _FollowAnchorState();
 }
 
-class _CloseOnResizeState extends State<_CloseOnResize> {
-  Size? _openedAt;
+class _FollowAnchorState extends State<_FollowAnchor> {
+  late Rect _rect = widget.initial;
 
   @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    final size = MediaQuery.sizeOf(context);
-    final openedAt = _openedAt ??= size;
-    if (size != openedAt) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) Navigator.of(context).maybePop();
-      });
-    }
+  void initState() {
+    super.initState();
+    _checkAfterFrame();
+  }
+
+  void _checkAfterFrame() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final rect = widget.anchor();
+      if (rect == null) {
+        Navigator.of(context).maybePop();
+        return;
+      }
+      if (rect != _rect) setState(() => _rect = rect);
+      _checkAfterFrame();
+    });
   }
 
   @override
-  Widget build(BuildContext context) => widget.child;
+  Widget build(BuildContext context) => widget.builder(context, _rect);
 }
 
 /// Places the menu under the message, or above it when it does not fit,
-/// kept inside the safe area with [_margin] to spare.
+/// kept inside the safe area, cutouts on the sides included, with [_margin]
+/// to spare.
 class _MenuPosition extends SingleChildLayoutDelegate {
   const _MenuPosition({
     required this.bubbleRect,
@@ -159,8 +193,8 @@ class _MenuPosition extends SingleChildLayoutDelegate {
   BoxConstraints getConstraintsForChild(BoxConstraints constraints) {
     return BoxConstraints.loose(
       Size(
-        constraints.maxWidth - 2 * _margin,
-        constraints.maxHeight - safeArea.vertical - 2 * _margin,
+        math.max(0, constraints.maxWidth - safeArea.horizontal - 2 * _margin),
+        math.max(0, constraints.maxHeight - safeArea.vertical - 2 * _margin),
       ),
     );
   }
@@ -174,12 +208,18 @@ class _MenuPosition extends SingleChildLayoutDelegate {
     final above = bubbleRect.top - _gap - childSize.height;
     final y = below + childSize.height <= bottom ? below : above;
 
+    final left = safeArea.left + _margin;
+    final right = size.width - safeArea.right - _margin;
     final x = alignEnd ? bubbleRect.right - childSize.width : bubbleRect.left;
     return Offset(
-      x.clamp(_margin, size.width - _margin - childSize.width),
-      y.clamp(top, bottom - childSize.height),
+      _clamp(x, left, right - childSize.width),
+      _clamp(y, top, bottom - childSize.height),
     );
   }
+
+  /// [value] within [min]..[max], [min] winning when they cross.
+  static double _clamp(double value, double min, double max) =>
+      math.max(min, math.min(value, max));
 
   @override
   bool shouldRelayout(_MenuPosition oldDelegate) =>

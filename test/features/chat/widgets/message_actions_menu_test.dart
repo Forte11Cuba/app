@@ -26,6 +26,7 @@ void main() {
     ChatMessage message, {
     Locale locale = const Locale('en'),
     bool atBottom = false,
+    bool inLongList = false,
   }) async {
     await tester.pumpWidget(
       MaterialApp(
@@ -35,16 +36,24 @@ void main() {
         supportedLocales: AppLocalizations.supportedLocales,
         home: Scaffold(
           // A chat lists its newest message at the bottom.
-          body: atBottom
-              ? ListView(
-                  reverse: true,
-                  children: [
-                    MessageBubble(message: message, peerColorHue: 200),
-                  ],
-                )
-              : Center(
-                  child: MessageBubble(message: message, peerColorHue: 200),
-                ),
+          body: switch ((atBottom, inLongList)) {
+            (true, _) => ListView(
+                reverse: true,
+                children: [
+                  MessageBubble(message: message, peerColorHue: 200),
+                ],
+              ),
+            // 300 dp down a list that scrolls far past it.
+            (_, true) => ListView.builder(
+                itemCount: 40,
+                itemBuilder: (_, i) => i == 1
+                    ? MessageBubble(message: message, peerColorHue: 200)
+                    : const SizedBox(height: 300),
+              ),
+            _ => Center(
+                child: MessageBubble(message: message, peerColorHue: 200),
+              ),
+          },
         ),
       ),
     );
@@ -105,16 +114,85 @@ void main() {
     expect(menu.left, greaterThanOrEqualTo(0));
   });
 
-  testWidgets('a change of screen size closes the menu', (tester) async {
+  ScrollPosition listPosition(WidgetTester tester) =>
+      tester.state<ScrollableState>(find.byType(Scrollable)).position;
+
+  testWidgets('the menu follows its message when the chat scrolls', (
+    tester,
+  ) async {
+    await pump(tester, textMessage(), inLongList: true);
+    await press(tester, const Duration(seconds: 1));
+    final before = tester.getRect(find.text('Copy'));
+
+    // As a new message arriving at the bottom would.
+    listPosition(tester).jumpTo(100);
+    await tester.pump();
+    await tester.pump();
+
+    expect(tester.getRect(find.text('Copy')).top, before.top - 100);
+    // The lit copy of the message stays on the message.
+    expect(
+      tester.getRect(find.text(_text).last),
+      tester.getRect(find.text(_text).first),
+    );
+  });
+
+  testWidgets('the menu closes once its message is gone', (tester) async {
+    await pump(tester, textMessage(), inLongList: true);
+    await press(tester, const Duration(seconds: 1));
+
+    listPosition(tester).jumpTo(5000);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Copy'), findsNothing);
+  });
+
+  testWidgets('a change of screen size keeps the menu on its message', (
+    tester,
+  ) async {
     addTearDown(tester.view.reset);
     await pump(tester, textMessage());
 
     await press(tester, const Duration(seconds: 1));
-    expect(find.text('Copy'), findsOneWidget);
     tester.view.physicalSize = tester.view.physicalSize.flipped;
     await tester.pumpAndSettle();
 
-    expect(find.text('Copy'), findsNothing);
+    expect(find.text('Copy'), findsOneWidget);
+    expect(
+      tester.getRect(find.text(_text).last),
+      tester.getRect(find.text(_text).first),
+    );
+  });
+
+  testWidgets('the menu keeps clear of a cutout on the side', (tester) async {
+    addTearDown(tester.view.reset);
+    tester.view.padding = const FakeViewPadding(left: 120);
+    await pump(tester, textMessage());
+
+    await press(tester, const Duration(seconds: 1));
+
+    final cutout = 120 / tester.view.devicePixelRatio;
+    expect(
+      tester.getRect(find.text('Copy')).left,
+      greaterThanOrEqualTo(cutout + 16),
+    );
+  });
+
+  testWidgets('a screen reader learns what holding a message opens', (
+    tester,
+  ) async {
+    final semantics = tester.ensureSemantics();
+    await pump(tester, textMessage());
+
+    expect(
+      tester.getSemantics(find.text(_text)),
+      isSemantics(
+        isButton: true,
+        hasLongPressAction: true,
+        onLongPressHint: 'Open the message menu',
+      ),
+    );
+    semantics.dispose();
   });
 
   testWidgets('own messages open the same menu', (tester) async {

@@ -1266,5 +1266,6 @@
   "shareChatKeyBody": "Als je bevestigt, kan de solver van dit dispuut de hele chat tussen jou en je tegenpartij in deze order lezen, en alleen die chat: niet de chats van je eerdere of latere trades. Dit kan niet ongedaan worden gemaakt. Delen is optioneel, maar het helpt de solver het dispuut sneller op te lossen.",
   "shareChatKeyConfirm": "Delen",
   "chatKeySharedIndicator": "Chatsleutel gedeeld met de solver",
-  "shareChatKeyUnavailable": "De chatsleutel van deze trade is niet beschikbaar op dit apparaat."
+  "shareChatKeyUnavailable": "De chatsleutel van deze trade is niet beschikbaar op dit apparaat.",
+  "messageMenuHint": "Berichtmenu openen"
 }

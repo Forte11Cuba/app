@@ -4179,4 +4179,7 @@ class AppLocalizationsIt extends AppLocalizations {
   @override
   String get shareChatKeyUnavailable =>
       'La chiave della chat di questa operazione non è disponibile su questo dispositivo.';
+
+  @override
+  String get messageMenuHint => 'Apri il menu del messaggio';
 }

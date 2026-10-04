@@ -4189,4 +4189,7 @@ class AppLocalizationsDe extends AppLocalizations {
   @override
   String get shareChatKeyUnavailable =>
       'Der Chat-Schlüssel dieses Trades ist auf diesem Gerät nicht verfügbar.';
+
+  @override
+  String get messageMenuHint => 'Nachrichtenmenü öffnen';
 }

@@ -173,20 +173,28 @@ class MessageBubble extends StatelessWidget {
                 if (attachment != null)
                   bubble
                 else
-                  Builder(
-                    builder: (bubbleContext) => RawGestureDetector(
-                      gestures: {
-                        LongPressGestureRecognizer:
-                            GestureRecognizerFactoryWithHandlers<
-                                LongPressGestureRecognizer>(
-                          () => LongPressGestureRecognizer(
-                            duration: messageMenuHoldDuration,
+                  // The recognizer gives screen readers the long press; the
+                  // hint says what it opens (DS-A11Y-1).
+                  Semantics(
+                    button: true,
+                    enabled: true,
+                    onLongPressHint:
+                        AppLocalizations.of(context).messageMenuHint,
+                    child: Builder(
+                      builder: (bubbleContext) => RawGestureDetector(
+                        gestures: {
+                          LongPressGestureRecognizer:
+                              GestureRecognizerFactoryWithHandlers<
+                                  LongPressGestureRecognizer>(
+                            () => LongPressGestureRecognizer(
+                              duration: messageMenuHoldDuration,
+                            ),
+                            (recognizer) => recognizer.onLongPress =
+                                () => _openMenu(bubbleContext, bubble),
                           ),
-                          (recognizer) => recognizer.onLongPress =
-                              () => _openMenu(bubbleContext, bubble),
-                        ),
-                      },
-                      child: bubble,
+                        },
+                        child: bubble,
+                      ),
                     ),
                   ),
                 const SizedBox(height: 2),
@@ -209,13 +217,19 @@ class MessageBubble extends StatelessWidget {
   /// Held for [messageMenuHoldDuration]: the message's menu, drawn over the
   /// bubble that [bubbleContext] lays out.
   Future<void> _openMenu(BuildContext bubbleContext, Widget bubble) async {
-    final box = bubbleContext.findRenderObject() as RenderBox?;
-    if (box == null || !box.hasSize) return;
+    Rect? anchor() {
+      if (!bubbleContext.mounted) return null;
+      final box = bubbleContext.findRenderObject() as RenderBox?;
+      if (box == null || !box.attached || !box.hasSize) return null;
+      return box.localToGlobal(Offset.zero) & box.size;
+    }
+
+    if (anchor() == null) return;
     Feedback.forLongPress(bubbleContext);
 
     final action = await showMessageActionsMenu(
       context: bubbleContext,
-      bubbleRect: box.localToGlobal(Offset.zero) & box.size,
+      anchor: anchor,
       bubble: bubble,
       alignEnd: message.isMine,
     );
