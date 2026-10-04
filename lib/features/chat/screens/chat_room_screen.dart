@@ -721,16 +721,23 @@ class _AppBarTitle extends StatelessWidget {
               size: 28,
             ),
             const SizedBox(width: AppSpacing.sm),
-            Text(
-              handle,
-              style: textTheme.headlineSmall,
-              overflow: TextOverflow.ellipsis,
+            // The alias gives way to the app bar's icons rather than
+            // pushing past them: a long one at large text ellipsizes (#679).
+            Flexible(
+              child: Text(
+                handle,
+                style: textTheme.headlineSmall,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
             ),
           ],
         ),
         Text(
           l10n.chattingWith(handle),
           style: textTheme.bodySmall?.copyWith(color: colors.textSubtle),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
         ),
       ],
     );
