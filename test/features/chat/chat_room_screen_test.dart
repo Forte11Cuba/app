@@ -443,6 +443,20 @@ void main() {
       await _leaveRoom(tester);
     });
 
+    testWidgets('an update that overtakes its message is applied on arrival', (
+      tester,
+    ) async {
+      await pumpRoom(tester);
+
+      updates.add(shortPeerMessage(reactions: [_reaction('👍')]));
+      await tester.pump();
+      await _receive(tester, incoming, [shortPeerMessage()]);
+
+      expect(find.byType(MessageBubble), findsOneWidget);
+      expect(find.text('👍'), findsOneWidget);
+      await _leaveRoom(tester);
+    });
+
     testWidgets('a reaction that cannot be sent says so', (tester) async {
       await pumpRoom(tester);
       await _receive(tester, incoming, [shortPeerMessage()]);

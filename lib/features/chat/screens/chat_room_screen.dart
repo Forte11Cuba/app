@@ -92,6 +92,12 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
   /// the list for every incoming message made dedup O(history) per message.
   final Set<String> _seenIds = {};
 
+  /// Updates of messages not in the list yet: one can overtake its
+  /// message's arrival on the other stream, or the history load. Applied
+  /// as the message is added; bounded, oldest dropped first.
+  final Map<String, rust_types.ChatMessage> _earlyUpdates = {};
+  static const _maxEarlyUpdates = 64;
+
   /// Coalesces mark-read across a burst. A history replay would otherwise
   /// fire one bridge call per message.
   Timer? _markReadDebounce;
@@ -150,7 +156,7 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
           // not the solver (PR #254 review).
           if (msg.messageType != rust_types.MessageType.peer) continue;
           if (_seenIds.add(msg.id)) {
-            _messages.add(msg);
+            _messages.add(_withEarlyUpdate(msg));
           }
         }
         _messages.sort((a, b) => a.createdAt.compareTo(b.createdAt));
@@ -262,7 +268,7 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
     // Every path that appends to [_messages] must go through [_seenIds], or
     // an echo of this send arriving on the stream would render it twice.
     if (_seenIds.add(sent.id)) {
-      setState(() => _messages.add(sent));
+      setState(() => _messages.add(_withEarlyUpdate(sent)));
     }
     _scrollToBottom();
     ref
@@ -310,7 +316,7 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
     // extent only grows at the next layout, so reading here keeps the
     // decision about the list they were looking at, whenever that lands.
     final wasAtBottom = _isPinnedToBottom();
-    setState(() => _messages.add(msg));
+    setState(() => _messages.add(_withEarlyUpdate(msg)));
     // Only follow the conversation if the user was already at the bottom;
     // otherwise an arriving message yanks them away from what they were
     // reading, and a burst starts one animation per message. Nor while a
@@ -331,12 +337,30 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
 
   /// Replaces the copy of a message already in the list, unless it carries
   /// older reactions than the one shown (a send's reply landing after the
-  /// update of a later send). One not shown yet is left to the history and
-  /// the incoming stream, which own adding.
+  /// update of a later send). One not shown yet waits in [_earlyUpdates]:
+  /// adding stays with the history and the incoming stream.
   void _onMessageUpdated(rust_types.ChatMessage msg) {
+    if (msg.messageType != rust_types.MessageType.peer) return;
     final index = _messages.indexWhere((m) => m.id == msg.id);
-    if (index < 0 || !reactionsNotOlder(msg, _messages[index])) return;
+    if (index < 0) {
+      final waiting = _earlyUpdates[msg.id];
+      if (waiting != null && !reactionsNotOlder(msg, waiting)) return;
+      _earlyUpdates.remove(msg.id);
+      if (_earlyUpdates.length >= _maxEarlyUpdates) {
+        _earlyUpdates.remove(_earlyUpdates.keys.first);
+      }
+      _earlyUpdates[msg.id] = msg;
+      return;
+    }
+    if (!reactionsNotOlder(msg, _messages[index])) return;
     setState(() => _messages[index] = msg);
+  }
+
+  /// [msg], or the update of it that arrived first when that one is not
+  /// older.
+  rust_types.ChatMessage _withEarlyUpdate(rust_types.ChatMessage msg) {
+    final update = _earlyUpdates.remove(msg.id);
+    return update != null && reactionsNotOlder(update, msg) ? update : msg;
   }
 
   /// Sends the user's reaction to the counterpart's [msg]; an empty [emoji]
