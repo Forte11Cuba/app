@@ -199,32 +199,27 @@ class _NwcWalletScreenState extends ConsumerState<NwcWalletScreen> {
               onChanged: (_) => setState(() {}),
             ).withAutomationId(AutomationIds.walletNwcUri),
             const SizedBox(height: 12),
-            // Stretched to the taller of the two: a label that wraps at a
-            // large text size would otherwise leave the pair uneven.
-            IntrinsicHeight(
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  // Scanning is the real path; pasting is the exception, so it
-                  // stays neutral and scanning carries the lime tint.
-                  Expanded(
-                    child: InputSourceAction(
-                      icon: Icons.content_paste_outlined,
-                      label: l10n.pasteButtonLabel,
-                      onTap: _pasteUri,
-                    ).withAutomationId(AutomationIds.walletNwcPaste),
+            Row(
+              children: [
+                // Scanning is the real path; pasting is the exception, so it
+                // stays neutral and scanning carries the lime tint.
+                Expanded(
+                  child: InputSourceAction(
+                    icon: Icons.content_paste_outlined,
+                    label: l10n.pasteButtonLabel,
+                    onTap: _pasteUri,
+                  ).withAutomationId(AutomationIds.walletNwcPaste),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: InputSourceAction(
+                    icon: Icons.qr_code_scanner,
+                    label: l10n.scanQrButtonLabel,
+                    onTap: () => setState(() => _showScanner = true),
+                    accent: true,
                   ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: InputSourceAction(
-                      icon: Icons.qr_code_scanner,
-                      label: l10n.scanQrButtonLabel,
-                      onTap: () => setState(() => _showScanner = true),
-                      accent: true,
-                    ),
-                  ),
-                ],
-              ),
+                ),
+              ],
             ),
           ],
         ),

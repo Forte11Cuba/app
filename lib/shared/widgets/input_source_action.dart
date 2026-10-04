@@ -15,6 +15,7 @@ class InputSourceAction extends StatelessWidget {
     required this.label,
     required this.onTap,
     this.accent = false,
+    this.tooltip,
   });
 
   final IconData icon;
@@ -24,6 +25,10 @@ class InputSourceAction extends StatelessWidget {
   /// says — a lime tint on something that cannot be pressed reads as a go.
   final VoidCallback? onTap;
   final bool accent;
+
+  /// Shown on hover or long press, and read by screen readers: why a
+  /// disabled action cannot be used.
+  final String? tooltip;
 
   @override
   Widget build(BuildContext context) {
@@ -37,7 +42,7 @@ class InputSourceAction extends StatelessWidget {
             : lime
             ? book.limeInk
             : book.textBody;
-    return Semantics(
+    final action = Semantics(
       button: true,
       enabled: enabled,
       child: Material(
@@ -55,31 +60,36 @@ class InputSourceAction extends StatelessWidget {
                 color: lime ? pal.scanBorder : pal.buttonBorder,
               ),
             ),
-            padding: const EdgeInsets.symmetric(vertical: 12),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(icon, size: 14, color: ink),
-                const SizedBox(width: 6),
-                // Half a 320 dp screen is tight for `Escanear QR`, and German
-                // at a large text size does not fit on one line: wrap rather
-                // than cut the verb (DS-L10N-2).
-                Flexible(
-                  child: Text(
-                    label,
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: lime ? FontWeight.w600 : FontWeight.w500,
-                      color: ink,
+            padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+            // Half a 320 dp screen is tight for `Escanear QR`, and German at
+            // a large text size does not fit at all: one line, shrunk to fit,
+            // rather than cutting or wrapping the label (DS-TYP-7, DS-L10N-2).
+            child: Center(
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(icon, size: 14, color: ink),
+                    const SizedBox(width: 6),
+                    Text(
+                      label,
+                      maxLines: 1,
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: lime ? FontWeight.w600 : FontWeight.w500,
+                        color: ink,
+                      ),
                     ),
-                  ),
+                  ],
                 ),
-              ],
+              ),
             ),
           ),
         ),
       ),
     );
+    if (tooltip == null) return action;
+    return Tooltip(message: tooltip, child: action);
   }
 }
