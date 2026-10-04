@@ -147,6 +147,22 @@ void main() {
     expect(find.text('Copy'), findsNothing);
   });
 
+  testWidgets('the menu closes once its message scrolls out of sight', (
+    tester,
+  ) async {
+    await pump(tester, textMessage(), inLongList: true);
+    await press(tester, const Duration(seconds: 1));
+    final bubble = tester.getRect(find.text(_text).first);
+
+    // Just above the top: out of sight, still built in the list's cache.
+    listPosition(tester).jumpTo(bubble.bottom + 50);
+    await tester.pump();
+    expect(find.text(_text, skipOffstage: false), findsWidgets);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Copy'), findsNothing);
+  });
+
   testWidgets('a change of screen size keeps the menu on its message', (
     tester,
   ) async {
