@@ -166,13 +166,13 @@ pub async fn create_identity() -> Result<IdentityCreationResult> {
         bail!("AlreadyExists");
     }
 
-    // The one point where retrying a pending data wipe is safe: the slot is
-    // empty (checked above, under the write lock), so the tables hold
-    // nothing of a live identity (issue #555). This also covers the app
-    // dying between a deletion and its replacement — the next launch lands
-    // here through the first-run auto-create.
+    // A point where retrying a pending data wipe is safe: the slot is empty
+    // (checked above, under the write lock), so the tables hold nothing of a
+    // live identity (issue #555). A retry that fails again refuses the new
+    // identity: once one is installed, the launch reload never retries, and
+    // the previous user's rows would stay for the life of the install.
     if let Some(db) = crate::db::app_db::db() {
-        retry_pending_wipe(db).await;
+        retry_pending_wipe(db).await?;
     }
 
     let mnemonic_words = key_ops::generate_mnemonic()?;
@@ -292,6 +292,10 @@ pub async fn import_from_mnemonic(words: Vec<String>, recover: bool) -> Result<I
     if recover && privacy_mode {
         bail!("PrivacyModeRecoveryUnavailable");
     }
+    // An import replaces the deleted identity just as a creation does, so it
+    // settles a pending wipe first — and refuses, like a creation, when it
+    // cannot (issue #555).
+    retry_pending_wipe_if_vacant().await?;
     let info = load_identity_from_mnemonic(words, 0, privacy_mode, None).await?;
     if recover {
         // NOTE: recovery is best-effort relative to the import, but this `?`
@@ -501,19 +505,23 @@ fn clear_logs_and_report(failures: &[String]) {
 /// Retry the data wipe a previous deletion left pending, if any (issue #555).
 ///
 /// Only sound while no identity holds the session — `create_identity` calls
-/// it under the write lock, after refusing to replace a loaded identity:
+/// it under the write lock, after refusing to replace a loaded identity, and
+/// `import_from_mnemonic` through [`retry_pending_wipe_if_vacant`]:
 /// `clear_identity_data` empties whole tables, so a retry with a live
 /// identity would take its trades — and its payout claims, which no restore
 /// brings back — along with the leftovers. That is why the launch reload
 /// (`load_identity_from_mnemonic`) never calls this.
 ///
-/// A marker that cannot be read is not a wipe order: the data stays put.
-async fn retry_pending_wipe<S: Storage>(db: &S) {
+/// Fails with the `PendingWipeFailed` marker when the wipe fails again, and
+/// the caller must not install an identity then: the marker stays, and the
+/// next creation or import retries. A marker that cannot be read is not a
+/// wipe order: the data stays put.
+async fn retry_pending_wipe<S: Storage>(db: &S) -> Result<()> {
     use crate::db::settings_keys::IDENTITY_WIPE_PENDING;
 
     match db.get_setting(IDENTITY_WIPE_PENDING).await {
         Ok(Some(_)) => {}
-        Ok(None) | Err(_) => return,
+        Ok(None) | Err(_) => return Ok(()),
     }
     match db.clear_identity_data().await {
         Ok(()) => {
@@ -530,8 +538,26 @@ async fn retry_pending_wipe<S: Storage>(db: &S) {
                 "identity",
                 format!("retry of the pending identity wipe failed — the previous identity's data is still on disk: {e}"),
             );
+            bail!("PendingWipeFailed");
         }
     }
+    Ok(())
+}
+
+/// [`retry_pending_wipe`] for the import, which does not hold the identity
+/// lock up to the install: retries only while the slot is empty, checked
+/// under the write lock. Dart deletes the current identity before importing,
+/// so that is every import it makes; a slot already taken is the launch
+/// reload's case, where a retry would take the live identity's data.
+async fn retry_pending_wipe_if_vacant() -> Result<()> {
+    let guard = identity_lock().write().await;
+    if guard.is_some() {
+        return Ok(());
+    }
+    if let Some(db) = crate::db::app_db::db() {
+        retry_pending_wipe(db).await?;
+    }
+    Ok(())
 }
 
 /// Whether a previous identity deletion left its data wipe pending: the
@@ -1685,7 +1711,7 @@ mod tests {
         let probe = settings_keys::status_cursor("wipe-retry-probe");
         db.set_setting(&probe, "1").await.unwrap();
 
-        retry_pending_wipe(&db).await;
+        retry_pending_wipe(&db).await.unwrap();
         assert_eq!(
             db.get_setting(&probe).await.unwrap().as_deref(),
             Some("1"),
@@ -1695,7 +1721,7 @@ mod tests {
         db.set_setting(settings_keys::IDENTITY_WIPE_PENDING, "1")
             .await
             .unwrap();
-        retry_pending_wipe(&db).await;
+        retry_pending_wipe(&db).await.unwrap();
         assert_eq!(
             db.get_setting(&probe).await.unwrap(),
             None,
@@ -1710,13 +1736,17 @@ mod tests {
         );
     }
 
-    /// A retry that fails keeps the marker, so the next creation tries again.
+    /// A retry that fails is an error the caller must stop on, and keeps the
+    /// marker, so the next creation or import tries again.
     #[tokio::test]
-    async fn a_failed_retry_keeps_the_marker() {
+    async fn a_failed_retry_fails_and_keeps_the_marker() {
         let store = WipeFailingStore::new();
         store.put_setting(crate::db::settings_keys::IDENTITY_WIPE_PENDING, "1");
 
-        retry_pending_wipe(&store).await;
+        let err = retry_pending_wipe(&store)
+            .await
+            .expect_err("a failed retry must not let a new identity in");
+        assert_eq!(err.to_string(), "PendingWipeFailed");
 
         assert_eq!(
             store
@@ -1727,33 +1757,51 @@ mod tests {
     }
 
     /// The retry may only run while the identity slot is empty — the whole
-    /// trade-off of issue #555 (`retry_pending_wipe` explains why): so it
-    /// must sit in `create_identity` between the AlreadyExists guard and the
-    /// install of the new identity, and the launch reload must not call it.
+    /// trade-off of issue #555 (`retry_pending_wipe` explains why) — and a
+    /// failed one must stop the new identity: so `create_identity` runs it
+    /// between the AlreadyExists guard and the install, propagating its
+    /// error; the import runs it, through the empty-slot check, before
+    /// loading the phrase; and the launch reload never calls it.
     #[test]
-    fn the_wipe_retry_runs_before_the_new_identity_and_never_on_reload() {
+    fn the_wipe_retry_gates_every_new_identity_and_never_runs_on_reload() {
         let source = include_str!("identity.rs");
+        let body_of = |signature: &str| {
+            let start = source.find(signature).expect(signature);
+            &source[start..start + source[start..].find("\n}\n").expect("it ends")]
+        };
 
-        let start = source
-            .find("pub async fn create_identity(")
-            .expect("create_identity exists");
-        let body = &source[start..start + source[start..].find("\n}\n").expect("it ends")];
+        let body = body_of("pub async fn create_identity(");
         let guard = body
             .find("bail!(\"AlreadyExists\")")
             .expect("the replace guard exists");
         let retry = body
-            .find("retry_pending_wipe")
-            .expect("create_identity retries the pending wipe");
+            .find("retry_pending_wipe(db).await?")
+            .expect("create_identity retries the pending wipe and stops on failure");
         let install = body.find("*guard = Some").expect("the install exists");
         assert!(
             guard < retry && retry < install,
             "the retry must run after the guard and before the install"
         );
 
-        let start = source
-            .find("pub async fn load_identity_from_mnemonic(")
-            .expect("the launch reload exists");
-        let body = &source[start..start + source[start..].find("\n}\n").expect("it ends")];
+        let body = body_of("pub async fn import_from_mnemonic(");
+        let retry = body
+            .find("retry_pending_wipe_if_vacant().await?")
+            .expect("the import retries the pending wipe and stops on failure");
+        let load = body
+            .find("load_identity_from_mnemonic(")
+            .expect("the import loads the phrase");
+        assert!(retry < load, "the retry must run before the import installs");
+
+        let body = body_of("async fn retry_pending_wipe_if_vacant(");
+        let vacant = body
+            .find("if guard.is_some()")
+            .expect("the import's retry checks the slot");
+        let retry = body
+            .find("retry_pending_wipe(db).await?")
+            .expect("and then retries");
+        assert!(vacant < retry, "the slot is checked before the wipe");
+
+        let body = body_of("pub async fn load_identity_from_mnemonic(");
         assert!(
             !body.contains("retry_pending_wipe"),
             "the launch reload runs with a live identity — a wipe there takes its data"

@@ -103,6 +103,13 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
     unawaited(_loadPendingWipe());
   }
 
+  /// Whether the core refused the new identity because the previous one's
+  /// data wipe failed again (`PendingWipeFailed`, issue #555). That is neither
+  /// a bad phrase nor a generation error, so it gets its own message, and the
+  /// deletion just before it may have set the marker the banner reads.
+  static bool _isPendingWipeFailure(Object e) =>
+      e.toString().contains('PendingWipeFailed');
+
   /// A failed read hides the banner rather than breaking the screen: the
   /// marker is diagnostic, and the retry itself does not depend on it being
   /// shown.
@@ -423,12 +430,15 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
                     swap.messenger.showSnackBar(
                       SnackBar(
                         content: Text(
-                          kDebugMode
+                          _isPendingWipeFailure(e)
+                              ? swap.l10n.pendingWipeBlockedMessage
+                              : kDebugMode
                               ? 'Failed to generate identity: $e'
                               : swap.l10n.failedToGenerateIdentityMessage,
                         ),
                       ),
                     );
+                    if (_isPendingWipeFailure(e)) unawaited(_loadPendingWipe());
                     return;
                   }
                   // Only reset and navigate once the new identity exists.
@@ -461,10 +471,15 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
       swap.messenger.showSnackBar(
         SnackBar(
           content: Text(
-            kDebugMode ? 'Import failed: $e' : l10n.invalidMnemonicMessage,
+            _isPendingWipeFailure(e)
+                ? l10n.pendingWipeBlockedMessage
+                : kDebugMode
+                ? 'Import failed: $e'
+                : l10n.invalidMnemonicMessage,
           ),
         ),
       );
+      if (_isPendingWipeFailure(e)) unawaited(_loadPendingWipe());
       return;
     }
     // Before the recovery below, not after: what it brings back belongs to
@@ -692,8 +707,8 @@ class _BackupBanner extends StatelessWidget {
 /// Shown while a failed identity wipe is pending retry: the previous
 /// identity's rows are still on this device, the deletion itself reported
 /// success, and this banner is the one trace the user gets. Informational
-/// only — the retry belongs to the next identity creation, the point where
-/// the tables hold nothing a live identity would lose (issue #555).
+/// only — the retry belongs to the next identity creation or import, the
+/// point where the tables hold nothing a live identity would lose (#555).
 class _PendingWipeBanner extends StatelessWidget {
   const _PendingWipeBanner();
 

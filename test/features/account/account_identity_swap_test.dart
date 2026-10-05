@@ -643,6 +643,45 @@ void main() {
     });
   });
 
+  // Issue #555: the core refuses a new identity while the previous one's data
+  // wipe keeps failing, and the user must be told that is why.
+  group('a pending wipe that fails again', () {
+    testWidgets('refuses the generation, saying why, and keeps the old state', (
+      tester,
+    ) async {
+      final container = await _pumpAccount(
+        tester,
+        reminderArmed: false,
+        backedUp: true,
+        onRegenerate:
+            () async => throw StateError('AnyhowException(PendingWipeFailed)'),
+      );
+      await _seedPreviousUser(container);
+
+      await _generate(tester);
+
+      expect(find.text(l10n.pendingWipeBlockedMessage), findsOneWidget);
+      expect(find.text('home'), findsNothing);
+      expect(container.read(tradeRoleProvider), {'old': true});
+    });
+
+    testWidgets('refuses the import, not as a bad phrase', (tester) async {
+      await _pumpAccount(
+        tester,
+        reminderArmed: true,
+        backedUp: false,
+        onImport:
+            (_) async => throw StateError('AnyhowException(PendingWipeFailed)'),
+      );
+
+      await _submitImport(tester, l10n);
+
+      expect(find.text(l10n.pendingWipeBlockedMessage), findsOneWidget);
+      expect(find.text(l10n.invalidMnemonicMessage), findsNothing);
+      expect(find.text('home'), findsNothing);
+    });
+  });
+
   group('generating a new identity', () {
     testWidgets('still arms the reminder and clears the backed-up flag', (
       tester,

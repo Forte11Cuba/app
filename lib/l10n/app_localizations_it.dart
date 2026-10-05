@@ -1180,7 +1180,11 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get pendingWipeBannerBody =>
-      'L\'eliminazione dell\'identità precedente non ha potuto rimuovere i suoi scambi e le sue chat da questo dispositivo. L\'app riproverà alla prossima creazione di un nuovo utente.';
+      'L\'eliminazione dell\'identità precedente non ha potuto rimuovere i suoi scambi e le sue chat da questo dispositivo. L\'app riproverà alla prossima creazione o importazione di un nuovo utente.';
+
+  @override
+  String get pendingWipeBlockedMessage =>
+      'Non è stato possibile rimuovere da questo dispositivo i dati dell\'utente precedente, quindi il nuovo utente non è stato configurato. Riprova.';
 
   @override
   String get failedToSaveBackupStatusMessage =>

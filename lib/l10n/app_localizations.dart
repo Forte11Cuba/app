@@ -2155,8 +2155,14 @@ abstract class AppLocalizations {
   /// Body of the pending-wipe warning on the Account screen
   ///
   /// In en, this message translates to:
-  /// **'Deleting the previous identity could not remove its trades and chats from this device. The app will retry the next time a new user is generated.'**
+  /// **'Deleting the previous identity could not remove its trades and chats from this device. The app will retry the next time a new user is generated or imported.'**
   String get pendingWipeBannerBody;
+
+  /// Snackbar shown when generating or importing a user is refused because the previous identity's pending data wipe failed again (issue #555)
+  ///
+  /// In en, this message translates to:
+  /// **'The previous user\'s data could not be removed from this device, so the new user was not set up. Please try again.'**
+  String get pendingWipeBlockedMessage;
 
   /// Snackbar shown when persisting the backup-complete status fails in the backup ritual
   ///

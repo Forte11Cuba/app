@@ -1181,7 +1181,11 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get pendingWipeBannerBody =>
-      'La suppression de l\'identité précédente n\'a pas pu effacer ses échanges et ses discussions de cet appareil. L\'application réessaiera à la prochaine création d\'un nouvel utilisateur.';
+      'La suppression de l\'identité précédente n\'a pas pu effacer ses échanges et ses discussions de cet appareil. L\'application réessaiera à la prochaine création ou importation d\'un nouvel utilisateur.';
+
+  @override
+  String get pendingWipeBlockedMessage =>
+      'Les données de l\'utilisateur précédent n\'ont pas pu être effacées de cet appareil : le nouvel utilisateur n\'a donc pas été configuré. Veuillez réessayer.';
 
   @override
   String get failedToSaveBackupStatusMessage =>

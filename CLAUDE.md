@@ -266,8 +266,10 @@ bridged by flutter_rust_bridge.
   user's session. The stores are process-wide and tests run in parallel, which is why the
   identity lifecycle test calls `delete_identity_inner(false)`. A failed `clear_identity_data`
   is reported *after* the log clear, persists the device-scoped `identity_wipe_pending` key,
-  and `create_identity` retries the wipe off it — only there: with a live identity a retry
-  would take its payout claims, which no restore brings back (issue #555).
+  and `create_identity` / `import_from_mnemonic` retry the wipe off it while the slot is empty,
+  refusing the new identity (`PendingWipeFailed`) if it fails again — never the launch reload:
+  with a live identity a retry would take its payout claims, which no restore brings back
+  (issue #555).
 - **`OrderInfo::created_at` is when the order was created, not the event's time.** It comes from
   the NIP-69 `published_at` tag (mostro#1000), then the legacy `created_at` tag (daemon builds
   between mostro#971 and #1000), then the event's time on older nodes; a tag value is capped at

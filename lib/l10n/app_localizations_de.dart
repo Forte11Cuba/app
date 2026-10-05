@@ -1185,7 +1185,11 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get pendingWipeBannerBody =>
-      'Beim Löschen der vorherigen Identität konnten deren Trades und Chats nicht von diesem Gerät entfernt werden. Die App versucht es erneut, sobald ein neuer Nutzer erstellt wird.';
+      'Beim Löschen der vorherigen Identität konnten deren Trades und Chats nicht von diesem Gerät entfernt werden. Die App versucht es erneut, sobald ein neuer Nutzer erstellt oder importiert wird.';
+
+  @override
+  String get pendingWipeBlockedMessage =>
+      'Die Daten des vorherigen Nutzers konnten nicht von diesem Gerät entfernt werden, daher wurde der neue Nutzer nicht eingerichtet. Bitte versuche es erneut.';
 
   @override
   String get failedToSaveBackupStatusMessage =>

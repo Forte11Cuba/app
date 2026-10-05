@@ -7,7 +7,7 @@ import '../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'types.dart';
 
-// These functions are ignored because they are not marked as `pub`: `clear_logs_and_report`, `current_bip39_seed`, `delete_identity_inner`, `derive_trade_key_with`, `ensure_trade_key_index_at_least_with`, `ensure_trade_key_index_at_least`, `forget_identity_state`, `get_active_keys`, `get_active_trade_keys_up_to`, `get_active_trade_keys`, `get_transport_identity_keys`, `identity_generation`, `identity_lock`, `publish_index`, `reconcile_and_publish_to`, `reconcile_trade_key_index`, `require_durable_storage`, `retry_pending_wipe`, `trade_key_index_tx`, `while_identity_current`, `wipe_identity_rows`
+// These functions are ignored because they are not marked as `pub`: `clear_logs_and_report`, `current_bip39_seed`, `delete_identity_inner`, `derive_trade_key_with`, `ensure_trade_key_index_at_least_with`, `ensure_trade_key_index_at_least`, `forget_identity_state`, `get_active_keys`, `get_active_trade_keys_up_to`, `get_active_trade_keys`, `get_transport_identity_keys`, `identity_generation`, `identity_lock`, `publish_index`, `reconcile_and_publish_to`, `reconcile_trade_key_index`, `require_durable_storage`, `retry_pending_wipe_if_vacant`, `retry_pending_wipe`, `trade_key_index_tx`, `while_identity_current`, `wipe_identity_rows`
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `IdentityState`, `RecoveryProgress`
 
 /// Subscribe to consumed trade-key indices. Flutter calls this once at startup

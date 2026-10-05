@@ -22,11 +22,14 @@ IdentityCreationResult {
 
 **Side effects**: Stores encrypted private key in platform secure storage.
 Retries a data wipe a previous deletion left pending (`identity_wipe_pending`,
-issue #555) before installing the new identity — the one point where that is
-safe, since the empty slot guarantees the tables hold nothing of a live
-identity. The launch reload (`load_identity_from_mnemonic`) never retries.
+issue #555) before installing the new identity — safe there, since the empty
+slot guarantees the tables hold nothing of a live identity. A retry that fails
+again refuses the new identity: once one is installed nothing retries (the
+launch reload, `load_identity_from_mnemonic`, never does), so the previous
+user's rows would stay for the life of the install.
 
-**Errors**: `StorageError` if secure storage unavailable.
+**Errors**: `StorageError` if secure storage unavailable; `PendingWipeFailed`
+when the pending wipe failed again (nothing installed, the marker stays).
 
 ---
 
@@ -36,6 +39,12 @@ sends `Action.restore` to Mostro daemon to recover active trades and
 disputes.
 
 **Validation**: Words MUST be valid BIP-39 English wordlist, 12 or 24 words.
+
+**Pending wipe**: like `create_identity`, retries a pending data wipe before
+installing, and refuses with `PendingWipeFailed` when it fails again — but
+only while no identity is loaded (checked under the identity lock). The
+Account screen deletes the current identity first, so that is every import
+it makes (issue #555).
 
 **Recovery flow** (when `recover = true`):
 1. Derive master key from mnemonic (BIP-32 path N=0).
@@ -55,7 +64,7 @@ disputes.
 **Note**: Recovery only works if identity is NOT in privacy mode.
 
 **Errors**: `InvalidMnemonic`, `StorageError`, `RecoveryFailed`,
-`PrivacyModeRecoveryUnavailable`.
+`PrivacyModeRecoveryUnavailable`, `PendingWipeFailed`.
 
 ---
 
@@ -144,8 +153,9 @@ is already gone. It is reported **after** the log clear (so the failure is
 the first line of the fresh history, worded without orders or
 counterparties), and it persists the `identity_wipe_pending` settings key —
 device-scoped on purpose, since the wipe that would drop it is the wipe that
-failed. `create_identity` retries the wipe off that marker while the slot is
-empty and clears it on success; `has_pending_identity_wipe` exposes it, and
+failed. `create_identity` and `import_from_mnemonic` retry the wipe off that
+marker while the slot is empty, clear it on success and refuse the new
+identity on failure; `has_pending_identity_wipe` exposes it, and
 the Account screen shows a warning while it holds (issue #555). The Dart
 half — cached providers and the notifications store — is
 `resetIdentityScopedState`, run by the Account screen after a generate and,
