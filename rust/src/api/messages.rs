@@ -208,7 +208,7 @@ impl MessageStore {
             // Recorded before the lock goes, with the write it describes:
             // another write of this row can't slip in between and be
             // undone by this one's outcome.
-            self.note_durability(&msg.id, stored).await;
+            self.note_durability(&msg.trade_id, &msg.id, stored).await;
             stored
         };
         let _ = self.new_message_tx.send(msg.clone());
@@ -219,9 +219,16 @@ impl MessageStore {
 
     /// Keep memory-only ids distinct from durably committed ones — the
     /// receive path consults this before advancing the cursor.
-    async fn note_durability(&self, id: &str, durable: bool) {
+    ///
+    /// A stored row also carries every reaction held again when an earlier
+    /// write of it failed (they were folded into it in memory): those stop
+    /// holding the cursor back, whichever write stored it.
+    async fn note_durability(&self, trade_id: &str, id: &str, durable: bool) {
         if durable {
             self.non_durable.write().await.remove(id);
+            if let Some(list) = self.held_reactions.write().await.get_mut(trade_id) {
+                list.retain(|h| h.target_id != id);
+            }
         } else {
             self.non_durable.write().await.insert(id.to_string());
         }
@@ -290,7 +297,7 @@ impl MessageStore {
             // A failed write marks the message memory-only, so
             // `ensure_durable` retries it, reaction included, and the cursor
             // stays put meanwhile. Recorded under the lock, with the write.
-            self.note_durability(&updated.id, durable).await;
+            self.note_durability(trade_id, &updated.id, durable).await;
             (updated, durable)
         };
         let _ = self.updated_tx.send(updated.clone());
@@ -423,12 +430,7 @@ impl MessageStore {
         // this row that fails cannot have its marker cleared by this success.
         let durable = match db.save_message(&msg).await {
             Ok(()) => {
-                self.non_durable.write().await.remove(id);
-                // Reactions held again when its first write failed are in
-                // the row now: they stop holding the cursor back.
-                if let Some(list) = self.held_reactions.write().await.get_mut(trade_id) {
-                    list.retain(|h| h.target_id != id);
-                }
+                self.note_durability(trade_id, id, true).await;
                 true
             }
             Err(e) => {
@@ -4988,6 +4990,28 @@ mod tests {
             1,
             "still held"
         );
+    }
+
+    #[tokio::test]
+    async fn a_stored_row_releases_the_reactions_held_again_for_it() {
+        let store = MessageStore::new();
+        let msg = ChatMessage {
+            sender_pubkey: "alice".to_string(),
+            ..notification_test_message("re-held", 1)
+        };
+        store.add_message(msg.clone()).await;
+        // As after a failed write of the target: its reaction held again.
+        store
+            .hold_reaction("re-held", &msg.id, reaction("bob", "👍", 1, "a"), 0)
+            .await;
+        assert!(store.held_floor("re-held").await.is_some());
+
+        // Another reaction stores the row.
+        store
+            .apply_reaction("re-held", &msg.id, reaction("bob", "😂", 2, "b"), 0)
+            .await;
+
+        assert_eq!(store.held_floor("re-held").await, None);
     }
 
     #[tokio::test]
