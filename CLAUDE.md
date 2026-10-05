@@ -179,7 +179,8 @@ bridged by flutter_rust_bridge.
 - **UI changes are judged against `.specify/DESIGN_SYSTEM.md`**, whose rules have IDs (`DS-COL-1`…).
   New UI code keeps every MUST; its §14 lists the older code that does not, as debt, never as
   a precedent to copy. A change that needs a different value changes the guide first.
-  The **Design guide** CI job runs its *auto* rules on the changed lines of `lib/`
+  The **Design guide** CI job runs its *auto* rules on every class (or top-level function)
+  a change touches under `lib/`, read whole — one changed line in a legacy screen's class means migrating that class
   (`dart tool/design_check.dart` locally; `--all` lists the whole debt).
 - Update this `CLAUDE.md` when guidelines, tooling, or core tech change.
 
