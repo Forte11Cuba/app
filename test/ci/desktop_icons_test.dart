@@ -94,6 +94,31 @@ void main() {
       ));
     });
 
+    test('the menu describes the app in every locale the app speaks', () {
+      // Arrange
+      final entry = File(
+        'linux/packaging/${applicationId()}.desktop',
+      ).readAsLinesSync();
+      final locales = Directory('lib/l10n')
+          .listSync()
+          .map((f) => RegExp(r'app_(\w+)\.arb$').firstMatch(f.path)?.group(1))
+          .whereType<String>()
+          .where((l) => l != 'en');
+
+      // Act / Assert — the English values are the unqualified keys.
+      expect(locales, isNotEmpty);
+      for (final key in ['GenericName', 'Comment']) {
+        expect(entry.where((l) => l.startsWith('$key=')), hasLength(1));
+        for (final locale in locales) {
+          expect(
+            entry.where((l) => l.startsWith('$key[$locale]=')),
+            hasLength(1),
+            reason: '$key[$locale]',
+          );
+        }
+      }
+    });
+
     test('the bundle ships the icon, the entry and install.sh', () {
       // Arrange
       final cmake = File('linux/CMakeLists.txt').readAsStringSync();
