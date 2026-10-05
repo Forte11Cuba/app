@@ -156,7 +156,9 @@ published it is folded into the target (`ChatMessage.reactions`), persisted
 with it and emitted on `on_message_updated`.
 
 Sends run one at a time, so two quick taps are dated in the order they
-were made.
+were made. A reaction that would have to be dated past the receivers' clock
+tolerance (60 s ahead: the previous one came from a device whose clock runs
+ahead) fails with `SendFailed` instead of being published and dropped.
 
 **Errors**: `ReactionTooLarge`, `MessageNotFound`, `ReactionNotAllowed`,
 `SendFailed`.

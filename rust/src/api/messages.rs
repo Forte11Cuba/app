@@ -882,7 +882,8 @@ pub async fn send_reaction(
         .iter()
         .find(|r| r.sender_pubkey == me)
         .map(|r| r.created_at);
-    let created_at = reaction_time(unix_now(), previous);
+    let created_at = reaction_time(unix_now(), previous)
+        .ok_or_else(|| anyhow!("SendFailed: the previous reaction is dated too far ahead"))?;
 
     let (outer, inner) = crate::nostr::transport::mostro_wrap_reaction(
         &ctx.trade_keys,
@@ -930,12 +931,18 @@ pub async fn send_reaction(
 }
 
 /// When a new reaction is dated: now, or one second after the sender's
-/// previous reaction to that message when that is later.
-fn reaction_time(now: i64, previous: Option<i64>) -> i64 {
-    match previous {
+/// previous reaction to that message when that is later. `None` when that
+/// would be further ahead of our clock than receivers accept
+/// (`MAX_CLOCK_SKEW_SECS`): the previous one came from a device whose clock
+/// runs ahead, or quick changes piled up. Publishing it anyway would show
+/// here and be dropped by the counterparty.
+fn reaction_time(now: i64, previous: Option<i64>) -> Option<i64> {
+    let at = match previous {
         Some(previous) if previous >= now => previous + 1,
         _ => now,
-    }
+    };
+    let limit = now.saturating_add(crate::nostr::transport::MAX_CLOCK_SKEW_SECS as i64);
+    (at <= limit).then_some(at)
 }
 
 /// Get all messages for a trade, ordered by creation time (oldest first).
@@ -4456,10 +4463,18 @@ mod tests {
 
     #[test]
     fn a_change_within_a_second_is_dated_after_the_one_it_replaces() {
-        assert_eq!(reaction_time(100, None), 100);
-        assert_eq!(reaction_time(100, Some(99)), 100);
-        assert_eq!(reaction_time(100, Some(100)), 101);
-        assert_eq!(reaction_time(100, Some(101)), 102);
+        assert_eq!(reaction_time(100, None), Some(100));
+        assert_eq!(reaction_time(100, Some(99)), Some(100));
+        assert_eq!(reaction_time(100, Some(100)), Some(101));
+        assert_eq!(reaction_time(100, Some(101)), Some(102));
+    }
+
+    #[test]
+    fn a_change_is_never_dated_past_what_receivers_accept() {
+        let skew = crate::nostr::transport::MAX_CLOCK_SKEW_SECS as i64;
+
+        assert_eq!(reaction_time(100, Some(100 + skew - 1)), Some(100 + skew));
+        assert_eq!(reaction_time(100, Some(100 + skew)), None);
     }
 
     #[test]
