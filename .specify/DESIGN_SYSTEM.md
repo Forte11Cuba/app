@@ -166,7 +166,7 @@ and the only ones allowed:
 
 | ID | Rule | Check |
 |---|---|---|
-| DS-TYP-4 | **MUST.** A literal `fontSize` is one of the sizes above. No half points and nothing under 10. | auto |
+| DS-TYP-4 | **MUST.** A literal `fontSize` is one of the sizes above. No half points and nothing under 10. A `textTheme` role counts as its size: only the roles the theme sets on the scale (`bodyMedium` 14, `bodySmall` 12, `labelLarge` 14, `labelSmall` 11) are allowed. | auto |
 | DS-TYP-5 | **SHOULD.** Weights: 400 for running text, 500 for labels and secondary buttons, 600 for titles, primary buttons and emphasis (the default for emphasis), 700 for hero figures. Write `FontWeight.wNNN`. | review |
 | DS-TYP-6 | **SHOULD.** Multi-line body text uses a line height of 1.4–1.5. Letter spacing is reserved for caps labels (0.3–0.6) and large figures (negative). | review |
 | DS-TYP-7 | **MUST.** Text scaling is never disabled or clamped: no `TextScaler.noScaling`, and no `MediaQuery` override of `textScaler`. A button label stays on one line and may shrink to fit (`FittedBox(fit: BoxFit.scaleDown)`, as `OrderPrimaryButton` does). Body text wraps. | auto, review |
@@ -194,6 +194,7 @@ falls back to Material defaults and is not allowed in new code.
 | DS-SHP-1 | **MUST.** A radius is one of the values above. | auto |
 | DS-SHP-2 | **SHOULD.** Through a named constant, an `AppRadius` token or a file-level `const`, rather than a bare number in a `BorderRadius`. | review |
 | DS-SHP-3 | **MUST.** Surfaces are flat: no `elevation` above 0 and no shadow, except the primary call to action's `ctaShadow` and the dialog's own shadow. Depth comes from the surface color, `inset` and the 1-px `border` tokens. | review |
+| DS-SHP-4 | **MUST.** New code does not read the radius tokens that keep v1's roles: `AppRadius.card` (12; a card is 18), `AppRadius.button` and `AppRadius.input` (8; a call to action is 16, a boxed input 14) and `AppRadius.chip` (6; a chip is a pill). `AppRadius.modal`, `AppRadius.cta` and `AppRadius.bubble` are the redesign's. | auto |
 
 ---
 
@@ -357,7 +358,8 @@ around a rule the change could keep.
 Each gap below is debt. A change in the same code SHOULD close it, and MUST NOT copy it. The
 CI check reports a gap once a pull request touches its class (or, outside a class, the widget
 call it sits in), and a change in that class MUST close every *auto* gap in it (§0). `dart tool/design_check.dart --all`
-lists every one the check can see (595 when the theme-default rules were added).
+lists every one the check can see (595 when the theme-default rules were added, 640 once
+DS-SHP-4 and the `textTheme` roles of DS-TYP-4 joined them).
 
 | Gap | Where | Rule |
 |---|---|---|
@@ -365,7 +367,7 @@ lists every one the check can see (595 when the theme-default rules were added).
 | `ThemeData` defines no button, chip, snackbar or switch theme; every button styles itself. | §6.2 | DS-CMP-3 |
 | `textTheme` (32/24/20/18/16/14/12) does not match the redesign scale. 13 half-point sizes and three 9-sp labels exist. | §3.2 | DS-TYP-4 |
 | `'Manrope'` is written as a literal in `tab_app_bar.dart`. | §3.1 | DS-TYP-1 |
-| `AppRadius.card` is 12, while redesigned cards use 18. `AppRadius.button` (8) is unused by the redesign, which uses 16. About 180 literal radii, including 4, 11, 13, 20, 26 and 28. | §4 | DS-SHP-1, DS-SHP-2 |
+| `AppRadius.card` is 12, while redesigned cards use 18. `AppRadius.button` (8) is unused by the redesign, which uses 16. About 180 literal radii, including 4, 11, 13, 20, 26 and 28. | §4 | DS-SHP-1, DS-SHP-2, DS-SHP-4 |
 | No spacing grid in practice: about 70% of padding literals are on the 2-pt scale, and odd values (11, 13, 9, 15…) are common. `AppSpacing.xxl` is unused. | §5 | DS-SPC-2 |
 | Odd icon sizes (13, 15, 17, 19) are common. | §6.6 | DS-ICO-3 |
 | Chips are padded 9 × 3 or 8 × 3 with a 5 gap, and in-page calls to action use vertical padding 15 in places (`_TakeButton`, `TradeActionBar`), all off the spacing scale. The drawer insets its content 22. | §5, §6 | DS-SPC-1, DS-SPC-2, DS-CMP-3, DS-CMP-9 |
@@ -387,7 +389,8 @@ lists every one the check can see (595 when the theme-default rules were added).
 For the reviewer of a UI change. Each line is a MUST unless marked.
 
 - [ ] No color, font family, font size, radius, spacing or icon-size literal outside the
-      allowed values (DS-COL-1, DS-TYP-1, DS-TYP-4, DS-SHP-1, DS-SPC-2, DS-ICO-3).
+      allowed values, no v1 radius token and no off-scale `textTheme` role (DS-COL-1,
+      DS-TYP-1, DS-TYP-4, DS-SHP-1, DS-SHP-4, DS-SPC-2, DS-ICO-3).
 - [ ] Colors come from the area's palette; new tokens use canonical values and have a 4.5:1
       test in both themes (DS-COL-2, DS-COL-6, DS-COL-8).
 - [ ] Lime is the only green; filled lime and sell carry their dark inks (DS-COL-3, DS-COL-4,

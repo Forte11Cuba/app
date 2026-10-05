@@ -204,6 +204,19 @@ List<Violation> scan(String path, String source, {Set<int>? lines}) {
     );
   }
 
+  // A theme role is a font size with no literal in sight: the theme's are
+  // v1's scale, and one it leaves out falls back to Material's.
+  for (final m in RegExp(r'\btextTheme\s*\.\s*(\w+)').allMatches(code)) {
+    if (textThemeRoles.contains(m[1])) continue;
+    report(
+      m.start,
+      'DS-TYP-4',
+      '`textTheme.${m[1]}` is off the type scale (the theme gives it a v1 '
+          'size, 32/24/20/18/16, or Material\'s default): set a size from '
+          '§3.2 and a palette color',
+    );
+  }
+
   // DS-TYP-7: text scaling is never turned off or clamped.
   for (final m in RegExp(
     r'\bTextScaler\.noScaling\b|\bMediaQuery\.with(?:No|Clamped)TextScaling\b'
@@ -240,6 +253,23 @@ List<Violation> scan(String path, String source, {Set<int>? lines}) {
     r'\b(?:BorderRadius|Radius)\.circular\s*\(',
   ).allMatches(code)) {
     checkLiterals(m.end, _close(code, m.end - 1), radii, 'DS-SHP-1', 'radius');
+  }
+
+  // DS-SHP-4: the theme's radius tokens that still carry v1's roles.
+  const v1Radii = {
+    'card': '12, and a card is 18 (DS-CMP-8)',
+    'button': '8, and an in-page call to action is 16 (DS-CMP-3)',
+    'input': '8, and a boxed input is 14 (DS-CMP-11)',
+    'chip': '6, off the scale, and a chip is a pill, 999 (DS-CMP-9)',
+  };
+  for (final m in RegExp(
+    r'\bAppRadius\.(card|button|input|chip)\b',
+  ).allMatches(code)) {
+    report(
+      m.start,
+      'DS-SHP-4',
+      '`AppRadius.${m[1]}` is a v1 radius: it is ${v1Radii[m[1]]}',
+    );
   }
 
   // DS-SPC-2: paddings, gaps and spacing on the 2-pt scale.
