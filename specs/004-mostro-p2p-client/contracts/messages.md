@@ -177,9 +177,11 @@ which its replay begins from: passing
 a newer event before an older one arrives would lose the older one on a
 restart. After that, the peer cursor still stops at a held reaction's floor
 (where the catch-up started, or the live cursor) until the reaction is
-stored with its target, which is older, so a restart fetches both again. A
-quiet chat re-checks its cursor every minute, so an expired floor (below)
-lets it go without another event. A reaction
+stored with its target, which is older, so a restart fetches both again. Every
+minute, whatever else the client receives, the chat re-checks its cursor,
+so an expired floor (below) or a relay gone while awaited lets it go without
+another event. A relay's CLOSED for the subscription counts as its EOSE: a
+refused REQ never sends one. A reaction
 held for more than 10 minutes stops holding the cursor back (its target was
 refused by the retention quota, or names nothing) but stays held in case the
 target comes. If the target's write fails, its reactions are held again

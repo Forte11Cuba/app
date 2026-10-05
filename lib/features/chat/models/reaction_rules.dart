@@ -14,18 +14,34 @@ String? shownReaction(rust_types.ChatMessage msg) {
 /// Whether [next] may replace [current], two copies of one message: not
 /// when its reactions are older. A reply to an earlier send can land after
 /// the update of a later one, and must not bring the earlier reaction back.
+///
+/// Ordered as the core settles reactions: the newest `createdAt` wins, and
+/// within one second the lowest event id.
 bool reactionsNotOlder(
   rust_types.ChatMessage next,
   rust_types.ChatMessage current,
-) => _newest(next) >= _newest(current);
+) {
+  final a = _newest(next);
+  final b = _newest(current);
+  if (a.at != b.at) return a.at > b.at;
+  if (a.id == null || b.id == null) return true;
+  return a.id!.compareTo(b.id!) <= 0;
+}
 
-int _newest(rust_types.ChatMessage msg) {
-  var newest = 0;
+/// The reaction that settles [msg]'s state: the newest, and of those the
+/// one with the lowest id. Null id when it has none.
+({int at, String? id}) _newest(rust_types.ChatMessage msg) {
+  var at = 0;
+  String? id;
   for (final reaction in msg.reactions) {
-    final at = reaction.createdAt.toInt();
-    if (at > newest) newest = at;
+    final when = reaction.createdAt.toInt();
+    final lower = id == null || reaction.eventId.compareTo(id) < 0;
+    if (when > at || (when == at && lower)) {
+      at = when;
+      id = reaction.eventId;
+    }
   }
-  return newest;
+  return (at: at, id: id);
 }
 
 /// Whether two emojis are the same reaction. A picker may hand over ❤ where

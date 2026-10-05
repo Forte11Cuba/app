@@ -4,12 +4,12 @@ import 'package:mostro/features/chat/models/reaction_rules.dart';
 import 'package:mostro/shared/utils/platform_int64.dart';
 import 'package:mostro/src/rust/api/types.dart' as rust_types;
 
-rust_types.ChatReaction _reaction(String emoji, int at) =>
+rust_types.ChatReaction _reaction(String emoji, int at, {String? id}) =>
     rust_types.ChatReaction(
       senderPubkey: 'peer',
       emoji: emoji,
       createdAt: intToPlatformInt64(at),
-      eventId: 'e$at',
+      eventId: id ?? 'e$at',
     );
 
 rust_types.ChatMessage _message(List<rust_types.ChatReaction> reactions) =>
@@ -51,6 +51,15 @@ void main() {
 
       expect(reactionsNotOlder(_message([_reaction('👍', 5)]), shown), isFalse);
       expect(reactionsNotOlder(_message([]), shown), isFalse);
+    });
+
+    test('settles a tie within a second by the lowest id, as the core', () {
+      final winner = _message([_reaction('👍', 5, id: 'aa')]);
+      final loser = _message([_reaction('😂', 5, id: 'bb')]);
+
+      expect(reactionsNotOlder(loser, winner), isFalse);
+      expect(reactionsNotOlder(winner, loser), isTrue);
+      expect(reactionsNotOlder(winner, winner), isTrue);
     });
 
     test('counts a withdrawal as the newest state', () {

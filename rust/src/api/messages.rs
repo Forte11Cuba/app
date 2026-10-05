@@ -2334,17 +2334,26 @@ async fn run_chat_subscription(
 
     let mut state = ChatRxState::new(channel, cursor, Some(generation));
     state.awaiting_eose = relays_holding(&client, &sub_id).await;
+    // On its own clock: the notification stream is the whole client's, so
+    // waiting for a quiet stream would hardly ever reach the re-check.
+    let mut last_recheck = crate::rt::time::Instant::now();
 
     loop {
         // The trade ended and `stop_chat_subscriptions` took the chat back.
         if !chat_is_current(channel, order_id, generation).await {
             return;
         }
-        // A quiet minute re-checks the cursor: a held reaction's floor can
-        // expire with no event after it.
-        let Ok(notification) = crate::rt::time::timeout(CURSOR_RECHECK, rx.next()).await else {
+        // Every minute, whatever else arrives, the cursor is re-checked: a
+        // held reaction's floor can expire with no event after it, and a
+        // relay awaited for its EOSE can have gone.
+        let wait = CURSOR_RECHECK.saturating_sub(last_recheck.elapsed());
+        let next = crate::rt::time::timeout(wait, rx.next()).await;
+        if last_recheck.elapsed() >= CURSOR_RECHECK {
+            last_recheck = crate::rt::time::Instant::now();
             state.forget_gone_relays(order_id, &client).await;
             state.settle_cursor(order_id).await;
+        }
+        let Ok(notification) = next else {
             continue;
         };
         match notification {
@@ -2377,15 +2386,28 @@ async fn run_chat_subscription(
             Some(ClientNotification::Message {
                 relay_url, message, ..
             }) => {
-                // EOSE for one of our subscriptions: stored catch-up is over,
-                // the token bucket meters everything from here on.
-                if let nostr_sdk::prelude::RelayMessage::EndOfStoredEvents(sid) = *message {
-                    if *sid == sub_id {
-                        let connection = connection_of(&client, &relay_url).await;
-                        state
-                            .eose_from(order_id, &relay_url.to_string(), connection)
-                            .await;
-                    }
+                // EOSE for one of our subscriptions: that relay's stored
+                // catch-up is over. A CLOSED ends it too: a relay that
+                // refuses the REQ (auth-required, a rate limit) never sends
+                // EOSE, and must not hold the cursor for good.
+                //
+                // The connection is read now, not when the relay sent it: an
+                // EOSE still queued while the relay reconnects is taken for
+                // the new connection's. The SDK says neither which
+                // connection a message came on nor when a relay reconnects,
+                // and the window is the queue's latency.
+                let done = match &*message {
+                    nostr_sdk::prelude::RelayMessage::EndOfStoredEvents(sid) => **sid == sub_id,
+                    nostr_sdk::prelude::RelayMessage::Closed {
+                        subscription_id, ..
+                    } => **subscription_id == sub_id,
+                    _ => false,
+                };
+                if done {
+                    let connection = connection_of(&client, &relay_url).await;
+                    state
+                        .eose_from(order_id, &relay_url.to_string(), connection)
+                        .await;
                 }
             }
             // The SDK's notification stream ends on shutdown; lag under
