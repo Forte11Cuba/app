@@ -216,6 +216,10 @@ bridged by flutter_rust_bridge.
   `tool/release/downloads.dart`. None of these builds is vendor-signed or notarized.
 - **The macOS app is sandboxed**: without `com.apple.security.network.client` in
   `macos/Runner/*.entitlements` it builds, launches and reaches no relay.
+- **Desktop icons come from `tool/launcher_icon/build_sources.py`**, not `flutter_launcher_icons`
+  (no Linux target, single-size `.ico`). On Wayland, Linux shows the icon of the desktop entry
+  `install.sh` adds, found by the app ID — `linux/packaging/` files are named after
+  `APPLICATION_ID` and must stay so (`test/ci/desktop_icons_test.dart`).
 - **Release notes and `CHANGELOG.md` are generated** by `tool/release_notes.dart`, one entry
   per merged PR grouped by the conventional-commit type of its **title**. Don't hand-edit
   `CHANGELOG.md`; fix the PR title.
