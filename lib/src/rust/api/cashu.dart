@@ -76,7 +76,7 @@ Future<void> cashuDisconnect() =>
 /// through the developer override — and the locktime falls back to the
 /// protocol default, never to a guess.
 ///
-/// **Errors**: `CashuNotEnabled`, `CashuOrderAmountUnknown`, `CashuMintUnknown`,
+/// **Errors**: `CashuNotEnabled`, `CashuOrderAmountUnknown`, `CashuMintNotSupported`,
 /// `CashuNotConnected`, `CashuBalanceUnknown`.
 Future<CashuEscrowQuote> cashuEscrowQuote({required String orderId}) =>
     RustLib.instance.api.crateApiCashuCashuEscrowQuote(orderId: orderId);
@@ -99,7 +99,7 @@ Future<CashuEscrowQuote> cashuEscrowQuote({required String orderId}) =>
 ///    [`settle_escrow_rejection`] turns into the next step.
 ///
 /// **Errors** (stable markers): `CashuNotEnabled`, `CashuNotConnected`,
-/// `CashuMintUnknown`, `CashuInsufficientFunds`, `NotTheSeller`,
+/// `CashuMintNotSupported`, `CashuInsufficientFunds`, `NotTheSeller`,
 /// `CashuEscrowOrderMovedOn`,
 /// `CashuEscrowRequestMissing`, `CashuWrongTradeKey`, `DeviceClockInvalid`,
 /// `CashuEscrowNotPersisted`, `CashuEscrowRejected: <reason>`,

@@ -113,11 +113,11 @@ async fn active_wallet() -> Result<Arc<CashuWallet>> {
         .ok_or_else(|| anyhow::anyhow!("CashuNotConnected"))?;
 
     let resolved = escrow_mode::get_resolved();
-    if !same_mint(wallet.mint_url(), resolved.config.mint_url.as_deref()) {
+    if !same_mint(wallet.mint_url(), resolved.config.single_mint()) {
         log::warn!(
             "[cashu] wallet is bound to {}, the active node resolves to {:?}",
             wallet.mint_url(),
-            resolved.config.mint_url
+            resolved.config.single_mint()
         );
         bail!("CashuMintChanged");
     }
@@ -130,11 +130,12 @@ fn ensure_enabled() -> Result<()> {
     if escrow_mode::is_cashu_mode() {
         return Ok(());
     }
-    // A Cashu node with no mint to reach: the seller is routed to the escrow
-    // screen on the mode alone (there is no hold invoice on such a node), so
-    // it must say what is missing rather than "not Cashu".
+    // A Cashu node that pins no single mint (it accepts several, or any):
+    // the seller is routed to the escrow screen on the mode alone (there is no
+    // hold invoice on such a node), so it must say why it cannot lock rather
+    // than "not Cashu".
     if escrow_mode::get_resolved().mode.is_cashu() {
-        bail!("CashuMintUnknown");
+        bail!("CashuMintNotSupported");
     }
     bail!("CashuNotEnabled")
 }
@@ -206,13 +207,13 @@ pub async fn cashu_connect() -> Result<CashuWalletStatus> {
         let live = wallet_lock().read().await.clone();
         if let Some(wallet) = live {
             let resolved = escrow_mode::get_resolved();
-            if same_mint(wallet.mint_url(), resolved.config.mint_url.as_deref()) {
+            if same_mint(wallet.mint_url(), resolved.config.single_mint()) {
                 return Ok(snapshot().await);
             }
             log::info!(
                 "[cashu] dropping the wallet bound to {}: the active node now resolves to {:?}",
                 wallet.mint_url(),
-                resolved.config.mint_url
+                resolved.config.single_mint()
             );
             *wallet_lock().write().await = None;
         }
@@ -222,7 +223,8 @@ pub async fn cashu_connect() -> Result<CashuWalletStatus> {
     // have cleared it — handled rather than unwrapped.
     let mint_url = escrow_mode::get_resolved()
         .config
-        .mint_url
+        .single_mint()
+        .map(str::to_string)
         .ok_or_else(|| anyhow::anyhow!("CashuNotEnabled"))?;
 
     let seed = crate::api::identity::current_bip39_seed().await?;
@@ -236,10 +238,10 @@ pub async fn cashu_connect() -> Result<CashuWalletStatus> {
     // should be bound to, and installing anyway would leave the wallet pointing
     // at the previous node's mint.
     let resolved_now = escrow_mode::get_resolved();
-    if !same_mint(&mint_url, resolved_now.config.mint_url.as_deref()) {
+    if !same_mint(&mint_url, resolved_now.config.single_mint()) {
         log::warn!(
             "[cashu] discarding a wallet for {mint_url}: the active node now resolves to {:?}",
-            resolved_now.config.mint_url
+            resolved_now.config.single_mint()
         );
         bail!("CashuNotEnabled");
     }
@@ -331,7 +333,7 @@ pub async fn cashu_disconnect() -> Result<()> {
 /// through the developer override — and the locktime falls back to the
 /// protocol default, never to a guess.
 ///
-/// **Errors**: `CashuNotEnabled`, `CashuOrderAmountUnknown`, `CashuMintUnknown`,
+/// **Errors**: `CashuNotEnabled`, `CashuOrderAmountUnknown`, `CashuMintNotSupported`,
 /// `CashuNotConnected`, `CashuBalanceUnknown`.
 pub async fn cashu_escrow_quote(order_id: String) -> Result<crate::api::types::CashuEscrowQuote> {
     ensure_enabled()?;
@@ -349,13 +351,13 @@ pub async fn cashu_escrow_quote(order_id: String) -> Result<crate::api::types::C
     let fee_sats = 0;
 
     let resolved = escrow_mode::get_resolved();
-    // An escrow locked at the wrong mint is rejected only after the swap, so an
-    // unknown mint fails here instead of defaulting to an empty URL.
+    // An escrow locked at the wrong mint is rejected only after the swap, so a
+    // node that pins no single mint fails here instead of guessing one.
     let mint_url = resolved
         .config
-        .mint_url
-        .filter(|url| !url.trim().is_empty())
-        .ok_or_else(|| anyhow::anyhow!("CashuMintUnknown"))?;
+        .single_mint()
+        .map(str::to_string)
+        .ok_or_else(|| anyhow::anyhow!("CashuMintNotSupported"))?;
 
     // Connect before reading the balance. An unconnected wallet reports zero,
     // and a quote that reports zero turns into "insufficient funds" on a wallet
@@ -482,7 +484,7 @@ const RECORD_ATTEMPTS: usize = 3;
 ///    [`settle_escrow_rejection`] turns into the next step.
 ///
 /// **Errors** (stable markers): `CashuNotEnabled`, `CashuNotConnected`,
-/// `CashuMintUnknown`, `CashuInsufficientFunds`, `NotTheSeller`,
+/// `CashuMintNotSupported`, `CashuInsufficientFunds`, `NotTheSeller`,
 /// `CashuEscrowOrderMovedOn`,
 /// `CashuEscrowRequestMissing`, `CashuWrongTradeKey`, `DeviceClockInvalid`,
 /// `CashuEscrowNotPersisted`, `CashuEscrowRejected: <reason>`,
@@ -540,8 +542,9 @@ pub async fn lock_escrow(order_id: String) -> Result<()> {
     // mismatch comes back as `invalid_mint_url`, which retires it.
     let fallback_mint = escrow_mode::get_resolved()
         .config
-        .mint_url
-        .unwrap_or_default();
+        .single_mint()
+        .unwrap_or_default()
+        .to_string();
     let recorded = trade.cashu_escrow_token.as_deref().map(|token| {
         (
             trade
@@ -1094,10 +1097,11 @@ mod tests {
     // The globals lock must span the call it guards; nothing else in this
     // test awaits on it.
     #[allow(clippy::await_holding_lock)]
-    async fn a_cashu_node_without_a_mint_says_so_rather_than_not_cashu() {
-        // Arrange — the node runs Cashu (override) but names no mint: routing
-        // sends the seller to the escrow screen, which must explain why it
-        // cannot lock, not claim the node is not Cashu.
+    async fn a_cashu_node_without_a_single_mint_says_so_rather_than_not_cashu() {
+        // Arrange — the node runs Cashu (override) and pins no mint, as an
+        // open node or one that accepts several: routing sends the seller to
+        // the escrow screen, which must explain why it cannot lock, not claim
+        // the node is not Cashu.
         let _g = escrow_lock();
         escrow_mode::set_overrides(escrow_mode::EscrowOverrides {
             mode: escrow_mode::EscrowModeOverride::ForceCashu,
@@ -1108,7 +1112,7 @@ mod tests {
         let err = lock_escrow("any-order".to_string()).await.unwrap_err();
 
         // Assert
-        assert_eq!(err.to_string(), "CashuMintUnknown");
+        assert_eq!(err.to_string(), "CashuMintNotSupported");
     }
 
     #[tokio::test]

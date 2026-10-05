@@ -1254,9 +1254,15 @@ pub struct EscrowModeInfo {
     /// Stable marker — `"unknown"`, `"lightning"` or `"cashu"`. Rust does not
     /// translate; Dart maps this to a localized string.
     pub mode: String,
-    /// Mint the node pins for every escrow, override applied. `None` on a
-    /// Lightning node, or on a Cashu node that published none.
+    /// The one mint every escrow on the node is locked at, override applied:
+    /// set only when the node accepts exactly one (the wallet binds to it).
+    /// `None` on a Lightning node, and on a Cashu node that accepts several
+    /// mints or any.
     pub mint_url: Option<String>,
+    /// Every mint the node accepts (MostroP2P/mostro#1047), override applied.
+    /// Meaningful only when [`Self::mode`] is `"cashu"`, where empty means the
+    /// node accepts any mint.
+    pub mint_urls: Vec<String>,
     /// NUT-11 locktime the seller must set, in days.
     pub escrow_locktime_days: Option<u32>,
     /// How close to expiry the daemon stops accepting `fiat-sent`, in days.
@@ -1264,9 +1270,9 @@ pub struct EscrowModeInfo {
     /// True when [`Self::mode`] came from the developer override rather than
     /// the node's own tags.
     pub is_overridden: bool,
-    /// **The gate.** True only when the mode is Cashu *and* there is a usable
-    /// mint to connect to. `mode == "cashu"` alone is not enough — a node can
-    /// advertise Cashu and publish no mint.
+    /// **The gate.** True only when the mode is Cashu *and* the node pins one
+    /// mint for the wallet to bind to. `mode == "cashu"` alone is not enough —
+    /// a node can accept several mints, or any.
     pub is_cashu_available: bool,
     /// Developer override state, mirrored so the dev-only settings surface can
     /// render its own controls without a second call.

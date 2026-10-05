@@ -7939,17 +7939,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   EscrowModeInfo dco_decode_escrow_mode_info(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 8)
-      throw Exception('unexpected arr length: expect 8 but see ${arr.length}');
+    if (arr.length != 9)
+      throw Exception('unexpected arr length: expect 9 but see ${arr.length}');
     return EscrowModeInfo(
       mode: dco_decode_String(arr[0]),
       mintUrl: dco_decode_opt_String(arr[1]),
-      escrowLocktimeDays: dco_decode_opt_box_autoadd_u_32(arr[2]),
-      settlementMarginDays: dco_decode_opt_box_autoadd_u_32(arr[3]),
-      isOverridden: dco_decode_bool(arr[4]),
-      isCashuAvailable: dco_decode_bool(arr[5]),
-      forceCashuOverride: dco_decode_bool(arr[6]),
-      mintUrlOverride: dco_decode_opt_String(arr[7]),
+      mintUrls: dco_decode_list_String(arr[2]),
+      escrowLocktimeDays: dco_decode_opt_box_autoadd_u_32(arr[3]),
+      settlementMarginDays: dco_decode_opt_box_autoadd_u_32(arr[4]),
+      isOverridden: dco_decode_bool(arr[5]),
+      isCashuAvailable: dco_decode_bool(arr[6]),
+      forceCashuOverride: dco_decode_bool(arr[7]),
+      mintUrlOverride: dco_decode_opt_String(arr[8]),
     );
   }
 
@@ -8220,7 +8221,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       maxOrderAmount: dco_decode_opt_box_autoadd_u_64(arr[5]),
       acceptedCurrencies: dco_decode_list_String(arr[6]),
       escrowMode: dco_decode_String(arr[7]),
-      cashuMintUrl: dco_decode_opt_String(arr[8]),
+      cashuMintUrls: dco_decode_list_String(arr[8]),
       bond: dco_decode_bond_policy_info(arr[9]),
       bondRequired: dco_decode_opt_box_autoadd_bool(arr[10]),
       bondPct: dco_decode_opt_box_autoadd_f_64(arr[11]),
@@ -10475,6 +10476,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var var_mode = sse_decode_String(deserializer);
     var var_mintUrl = sse_decode_opt_String(deserializer);
+    var var_mintUrls = sse_decode_list_String(deserializer);
     var var_escrowLocktimeDays = sse_decode_opt_box_autoadd_u_32(deserializer);
     var var_settlementMarginDays = sse_decode_opt_box_autoadd_u_32(
       deserializer,
@@ -10486,6 +10488,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     return EscrowModeInfo(
       mode: var_mode,
       mintUrl: var_mintUrl,
+      mintUrls: var_mintUrls,
       escrowLocktimeDays: var_escrowLocktimeDays,
       settlementMarginDays: var_settlementMarginDays,
       isOverridden: var_isOverridden,
@@ -10870,7 +10873,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_maxOrderAmount = sse_decode_opt_box_autoadd_u_64(deserializer);
     var var_acceptedCurrencies = sse_decode_list_String(deserializer);
     var var_escrowMode = sse_decode_String(deserializer);
-    var var_cashuMintUrl = sse_decode_opt_String(deserializer);
+    var var_cashuMintUrls = sse_decode_list_String(deserializer);
     var var_bond = sse_decode_bond_policy_info(deserializer);
     var var_bondRequired = sse_decode_opt_box_autoadd_bool(deserializer);
     var var_bondPct = sse_decode_opt_box_autoadd_f_64(deserializer);
@@ -10885,7 +10888,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       maxOrderAmount: var_maxOrderAmount,
       acceptedCurrencies: var_acceptedCurrencies,
       escrowMode: var_escrowMode,
-      cashuMintUrl: var_cashuMintUrl,
+      cashuMintUrls: var_cashuMintUrls,
       bond: var_bond,
       bondRequired: var_bondRequired,
       bondPct: var_bondPct,
@@ -13469,6 +13472,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_String(self.mode, serializer);
     sse_encode_opt_String(self.mintUrl, serializer);
+    sse_encode_list_String(self.mintUrls, serializer);
     sse_encode_opt_box_autoadd_u_32(self.escrowLocktimeDays, serializer);
     sse_encode_opt_box_autoadd_u_32(self.settlementMarginDays, serializer);
     sse_encode_bool(self.isOverridden, serializer);
@@ -13819,7 +13823,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_opt_box_autoadd_u_64(self.maxOrderAmount, serializer);
     sse_encode_list_String(self.acceptedCurrencies, serializer);
     sse_encode_String(self.escrowMode, serializer);
-    sse_encode_opt_String(self.cashuMintUrl, serializer);
+    sse_encode_list_String(self.cashuMintUrls, serializer);
     sse_encode_bond_policy_info(self.bond, serializer);
     sse_encode_opt_box_autoadd_bool(self.bondRequired, serializer);
     sse_encode_opt_box_autoadd_f_64(self.bondPct, serializer);

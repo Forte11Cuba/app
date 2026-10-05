@@ -14,6 +14,7 @@ import '../../../support/provider_harness.dart';
 EscrowModeInfo _escrow({required bool cashuAvailable}) => EscrowModeInfo(
       mode: cashuAvailable ? 'cashu' : 'lightning',
       mintUrl: cashuAvailable ? 'https://mint.example.com' : null,
+      mintUrls: cashuAvailable ? const ['https://mint.example.com'] : const [],
       escrowLocktimeDays: null,
       settlementMarginDays: null,
       isOverridden: false,

@@ -2145,9 +2145,6 @@ class AppLocalizationsFr extends AppLocalizations {
   String get aboutCashuMintUrlLabel => 'Mint';
 
   @override
-  String get aboutCashuMintNotAdvertised => 'Non annoncé';
-
-  @override
   String get aboutCashuLocktimeLabel => 'Verrouillage du séquestre';
 
   @override
@@ -4136,8 +4133,8 @@ class AppLocalizationsFr extends AppLocalizations {
       'Votre séquestre est verrouillé mais le nœud ne l\'a pas confirmé. Réessayer est sans risque : il ne sera pas verrouillé une seconde fois.';
 
   @override
-  String get lockEscrowMintUnknown =>
-      'Ce nœud n\'a pas publié son mint : il n\'y a nulle part où verrouiller l\'escrow.';
+  String get lockEscrowMintNotSupported =>
+      'Ce nœud laisse chaque ordre choisir son mint, et cette version de l\'app ne peut verrouiller l\'escrow que sur un nœud à mint unique.';
 
   @override
   String get lockEscrowNotRecorded =>
@@ -4213,4 +4210,13 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get messageMenuHint => 'Ouvrir le menu du message';
+
+  @override
+  String get cashuAnyMint => 'N\'importe quel mint';
+
+  @override
+  String get settingsMintLabel => 'Mint';
+
+  @override
+  String get settingsMintCopied => 'URL du mint copiée';
 }

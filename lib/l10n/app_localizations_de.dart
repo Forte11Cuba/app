@@ -2151,9 +2151,6 @@ class AppLocalizationsDe extends AppLocalizations {
   String get aboutCashuMintUrlLabel => 'Mint';
 
   @override
-  String get aboutCashuMintNotAdvertised => 'Nicht angegeben';
-
-  @override
   String get aboutCashuLocktimeLabel => 'Treuhand-Sperrfrist';
 
   @override
@@ -4126,8 +4123,8 @@ class AppLocalizationsDe extends AppLocalizations {
       'Deine Treuhand ist gesperrt, aber der Node hat sie nicht bestätigt. Ein erneuter Versuch ist sicher — es wird kein zweites Mal gesperrt.';
 
   @override
-  String get lockEscrowMintUnknown =>
-      'Dieser Node hat seine Mint nicht veröffentlicht, daher gibt es keinen Ort, um den Escrow zu sperren.';
+  String get lockEscrowMintNotSupported =>
+      'Dieser Node lässt jede Order ihre Mint wählen, und diese App-Version kann den Escrow nur auf einem Node mit einer einzigen Mint sperren.';
 
   @override
   String get lockEscrowNotRecorded =>
@@ -4204,4 +4201,13 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get messageMenuHint => 'Nachrichtenmenü öffnen';
+
+  @override
+  String get cashuAnyMint => 'Beliebige Mint';
+
+  @override
+  String get settingsMintLabel => 'Mint';
+
+  @override
+  String get settingsMintCopied => 'Mint-URL kopiert';
 }

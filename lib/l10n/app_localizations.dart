@@ -3682,12 +3682,6 @@ abstract class AppLocalizations {
   /// **'Mint'**
   String get aboutCashuMintUrlLabel;
 
-  /// About screen — shown when a node says it runs Cashu but publishes no mint, which means trades cannot run
-  ///
-  /// In en, this message translates to:
-  /// **'Not advertised'**
-  String get aboutCashuMintNotAdvertised;
-
   /// About screen — Cashu escrow locktime row label
   ///
   /// In en, this message translates to:
@@ -6814,11 +6808,11 @@ abstract class AppLocalizations {
   /// **'Your escrow is locked but the node has not confirmed it. Retrying is safe — it will not lock a second time.'**
   String get lockEscrowPendingSubmission;
 
-  /// Escrow error — the node published no mint (CashuMintUnknown)
+  /// Escrow error — the node accepts several mints, or any, so each order names its own, and this build can only lock on a node with a single mint (CashuMintNotSupported, MostroP2P/mostro#1047)
   ///
   /// In en, this message translates to:
-  /// **'This node has not published its mint, so there is nowhere to lock the escrow.'**
-  String get lockEscrowMintUnknown;
+  /// **'This node lets each order choose its mint, and this version of the app can only lock an escrow on a node with a single mint.'**
+  String get lockEscrowMintNotSupported;
 
   /// Escrow error — submitted, but the device could not save the token (CashuEscrowNotPersisted)
   ///
@@ -6939,6 +6933,24 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Open the message menu'**
   String get messageMenuHint;
+
+  /// Mint of a Cashu node that lists no mint and so accepts any the order's maker picks (MostroP2P/mostro#1047): value in Settings, About and the node selector
+  ///
+  /// In en, this message translates to:
+  /// **'Any mint'**
+  String get cashuAnyMint;
+
+  /// Settings, Payments group — label of a row naming a Cashu mint the active node accepts (one row per mint); shown only when the node runs Cashu
+  ///
+  /// In en, this message translates to:
+  /// **'Mint'**
+  String get settingsMintLabel;
+
+  /// Snackbar after tapping a mint row in Settings, which copies the mint's full URL
+  ///
+  /// In en, this message translates to:
+  /// **'Mint URL copied'**
+  String get settingsMintCopied;
 }
 
 class _AppLocalizationsDelegate
