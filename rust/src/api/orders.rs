@@ -1195,6 +1195,7 @@ async fn create_order_once(params: NewOrderParams) -> Result<OrderInfo> {
         total_reviews: 0,
         days_active: 0,
         maker_since: None,
+        cashu_mint_url: None,
     };
 
     // Compatibility preflight (PR #252 review): refuse an unsupported node
@@ -2108,6 +2109,8 @@ fn trade_row_from_small_order(
         total_reviews: 0,
         days_active: 0,
         maker_since: None,
+        // A Cashu escrow request names the order's mint (mostro#1047).
+        cashu_mint_url: order.cashu_mint_url.clone(),
     };
     let step = match role {
         TradeRole::Seller => {
@@ -4846,6 +4849,7 @@ fn restored_bond_row(
         total_reviews: 0,
         days_active: 0,
         maker_since: None,
+        cashu_mint_url: None,
     });
     order.status = status;
     order.is_mine = maker;
@@ -17061,6 +17065,7 @@ mod tests {
             total_reviews: 0,
             days_active: 0,
             maker_since: None,
+            cashu_mint_url: None,
         }
     }
 
@@ -22480,6 +22485,7 @@ mod bond_window_tests {
             total_reviews: 0,
             days_active: 0,
             maker_since: None,
+            cashu_mint_url: None,
         }
     }
 

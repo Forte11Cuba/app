@@ -8574,8 +8574,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   OrderInfo dco_decode_order_info(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 18)
-      throw Exception('unexpected arr length: expect 18 but see ${arr.length}');
+    if (arr.length != 19)
+      throw Exception('unexpected arr length: expect 19 but see ${arr.length}');
     return OrderInfo(
       id: dco_decode_String(arr[0]),
       kind: dco_decode_order_kind(arr[1]),
@@ -8595,6 +8595,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       totalReviews: dco_decode_u_32(arr[15]),
       daysActive: dco_decode_u_32(arr[16]),
       makerSince: dco_decode_opt_box_autoadd_i_64(arr[17]),
+      cashuMintUrl: dco_decode_opt_String(arr[18]),
     );
   }
 
@@ -11500,6 +11501,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_totalReviews = sse_decode_u_32(deserializer);
     var var_daysActive = sse_decode_u_32(deserializer);
     var var_makerSince = sse_decode_opt_box_autoadd_i_64(deserializer);
+    var var_cashuMintUrl = sse_decode_opt_String(deserializer);
     return OrderInfo(
       id: var_id,
       kind: var_kind,
@@ -11519,6 +11521,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       totalReviews: var_totalReviews,
       daysActive: var_daysActive,
       makerSince: var_makerSince,
+      cashuMintUrl: var_cashuMintUrl,
     );
   }
 
@@ -14403,6 +14406,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_u_32(self.totalReviews, serializer);
     sse_encode_u_32(self.daysActive, serializer);
     sse_encode_opt_box_autoadd_i_64(self.makerSince, serializer);
+    sse_encode_opt_String(self.cashuMintUrl, serializer);
   }
 
   @protected

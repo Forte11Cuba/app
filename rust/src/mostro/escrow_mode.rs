@@ -542,7 +542,10 @@ mod tests {
         // Assert — every mint, in the node's order; no single mint to bind the
         // wallet to, so the gate stays shut.
         assert_eq!(mode, EscrowMode::Cashu);
-        assert_eq!(config.mint_urls, ["https://mint.a.com", "https://mint.b.com"]);
+        assert_eq!(
+            config.mint_urls,
+            ["https://mint.a.com", "https://mint.b.com"]
+        );
         assert_eq!(config.single_mint(), None);
         assert!(!config.accepts_any_mint());
         assert!(!config.is_usable());
@@ -668,10 +671,7 @@ mod tests {
         // Assert
         assert_eq!(resolved.mode, EscrowMode::Cashu);
         assert!(resolved.is_overridden);
-        assert_eq!(
-            resolved.config.single_mint(),
-            Some("http://localhost:3338")
-        );
+        assert_eq!(resolved.config.single_mint(), Some("http://localhost:3338"));
     }
 
     #[test]
@@ -716,10 +716,7 @@ mod tests {
         let resolved = resolve(&inputs);
 
         // Assert
-        assert_eq!(
-            resolved.config.single_mint(),
-            Some("http://localhost:3338")
-        );
+        assert_eq!(resolved.config.single_mint(), Some("http://localhost:3338"));
     }
 
     #[test]

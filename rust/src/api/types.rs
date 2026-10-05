@@ -319,6 +319,12 @@ pub struct OrderInfo {
     /// display time (now − since) and falls back to [`Self::days_active`].
     #[serde(default)]
     pub maker_since: Option<i64>,
+    /// Mint the order's escrow is locked at, from the Kind 38383
+    /// `cashu_mint_url` tag (MostroP2P/mostro#1047): the maker picks it among
+    /// the node's mints. `None` on a Lightning order, on a Cashu order from an
+    /// older daemon, and on our own new order until its book event says.
+    #[serde(default)]
+    pub cashu_mint_url: Option<String>,
 }
 
 /// Parameters for creating a new order via the Mostro protocol.

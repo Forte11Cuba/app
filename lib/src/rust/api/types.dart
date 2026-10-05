@@ -1509,6 +1509,12 @@ class OrderInfo {
   /// display time (now − since) and falls back to [`Self::days_active`].
   final PlatformInt64? makerSince;
 
+  /// Mint the order's escrow is locked at, from the Kind 38383
+  /// `cashu_mint_url` tag (MostroP2P/mostro#1047): the maker picks it among
+  /// the node's mints. `None` on a Lightning order, on a Cashu order from an
+  /// older daemon, and on our own new order until its book event says.
+  final String? cashuMintUrl;
+
   const OrderInfo({
     required this.id,
     required this.kind,
@@ -1528,6 +1534,7 @@ class OrderInfo {
     required this.totalReviews,
     required this.daysActive,
     this.makerSince,
+    this.cashuMintUrl,
   });
 
   @override
@@ -1549,7 +1556,8 @@ class OrderInfo {
       rating.hashCode ^
       totalReviews.hashCode ^
       daysActive.hashCode ^
-      makerSince.hashCode;
+      makerSince.hashCode ^
+      cashuMintUrl.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -1573,7 +1581,8 @@ class OrderInfo {
           rating == other.rating &&
           totalReviews == other.totalReviews &&
           daysActive == other.daysActive &&
-          makerSince == other.makerSince;
+          makerSince == other.makerSince &&
+          cashuMintUrl == other.cashuMintUrl;
 }
 
 /// Shared types exposed to Flutter via flutter_rust_bridge.

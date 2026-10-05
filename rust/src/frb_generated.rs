@@ -9424,6 +9424,7 @@ impl SseDecode for crate::api::types::OrderInfo {
         let mut var_totalReviews = <u32>::sse_decode(deserializer);
         let mut var_daysActive = <u32>::sse_decode(deserializer);
         let mut var_makerSince = <Option<i64>>::sse_decode(deserializer);
+        let mut var_cashuMintUrl = <Option<String>>::sse_decode(deserializer);
         return crate::api::types::OrderInfo {
             id: var_id,
             kind: var_kind,
@@ -9443,6 +9444,7 @@ impl SseDecode for crate::api::types::OrderInfo {
             total_reviews: var_totalReviews,
             days_active: var_daysActive,
             maker_since: var_makerSince,
+            cashu_mint_url: var_cashuMintUrl,
         };
     }
 }
@@ -12031,6 +12033,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::types::OrderInfo {
             self.total_reviews.into_into_dart().into_dart(),
             self.days_active.into_into_dart().into_dart(),
             self.maker_since.into_into_dart().into_dart(),
+            self.cashu_mint_url.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -14391,6 +14394,7 @@ impl SseEncode for crate::api::types::OrderInfo {
         <u32>::sse_encode(self.total_reviews, serializer);
         <u32>::sse_encode(self.days_active, serializer);
         <Option<i64>>::sse_encode(self.maker_since, serializer);
+        <Option<String>>::sse_encode(self.cashu_mint_url, serializer);
     }
 }
 

@@ -358,6 +358,17 @@ pub async fn cashu_escrow_quote(order_id: String) -> Result<crate::api::types::C
         .single_mint()
         .map(str::to_string)
         .ok_or_else(|| anyhow::anyhow!("CashuMintNotSupported"))?;
+    // The order names its own mint (mostro#1047), and the node refuses a
+    // token locked anywhere else only after the swap: an order on a mint the
+    // wallet is not bound to stops here.
+    if let Some(order_mint) = trade.order.cashu_mint_url.as_deref() {
+        if !same_mint(&mint_url, Some(order_mint)) {
+            log::warn!(
+                "[cashu] order {order_id} escrows at {order_mint}, the wallet's mint is {mint_url}"
+            );
+            bail!("CashuMintNotSupported");
+        }
+    }
 
     // Connect before reading the balance. An unconnected wallet reports zero,
     // and a quote that reports zero turns into "insufficient funds" on a wallet
@@ -1005,6 +1016,7 @@ mod tests {
                 total_reviews: 0,
                 days_active: 0,
                 maker_since: None,
+                cashu_mint_url: None,
             },
             role: TradeRole::Seller,
             counterparty_pubkey: counterparty_pubkey.to_string(),
@@ -1110,6 +1122,34 @@ mod tests {
 
         // Act
         let err = lock_escrow("any-order".to_string()).await.unwrap_err();
+
+        // Assert
+        assert_eq!(err.to_string(), "CashuMintNotSupported");
+    }
+
+    #[tokio::test]
+    // The globals lock must span the calls it guards.
+    #[allow(clippy::await_holding_lock)]
+    async fn an_order_on_another_mint_is_refused_before_any_swap() {
+        // Arrange — a single-mint node, and an order that names another mint
+        // (mostro#1047): a token locked at the wallet's mint would be refused
+        // only after the swap.
+        let _g = escrow_lock();
+        escrow_mode::set_from_tags(
+            escrow_mode::EscrowMode::Cashu,
+            escrow_mode::CashuNodeConfig {
+                mint_urls: vec!["https://mint.a.com".to_string()],
+                ..Default::default()
+            },
+        );
+        let order_id = uuid::Uuid::new_v4().to_string();
+        let db = store().await;
+        let mut trade = seller_trade(&order_id, Some("02"), "");
+        trade.order.cashu_mint_url = Some("https://mint.b.com".to_string());
+        db.save_trade(&trade).await.unwrap();
+
+        // Act
+        let err = cashu_escrow_quote(order_id).await.unwrap_err();
 
         // Assert
         assert_eq!(err.to_string(), "CashuMintNotSupported");
