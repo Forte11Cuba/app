@@ -18,9 +18,9 @@ information architecture. It does not keep v1's look.
 - **Check** says who catches a break:
   - *auto*: the **Design guide** CI job (`tool/design_check.dart`) fails the pull request and
     marks the line. It reads the code the pull request touches under `lib/` (outside
-    `lib/core/`, where tokens are defined): every class, mixin, enum or extension with an added
-    or changed line, **read whole**, and elsewhere the widget call a changed line falls inside
-    (a button whose `icon:` changed is checked for its `style:`). It judges literal values and
+    `lib/core/`, where tokens are defined): every top-level declaration (a class, mixin, enum,
+    extension, function or variable) with an added or changed line, **read whole**, so a
+    button whose `icon:` changed is checked for its `style:`. It judges literal values and
     named v1 tokens only: a value derived from a token is left to review. Run it locally with
     `dart tool/design_check.dart`.
   - *test*: an existing test fails.
@@ -356,8 +356,9 @@ around a rule the change could keep.
 ## 14. Known gaps (code that predates this guide)
 
 Each gap below is debt. A change in the same code SHOULD close it, and MUST NOT copy it. The
-CI check reports a gap once a pull request touches its class (or, outside a class, the widget
-call it sits in), and a change in that class MUST close every *auto* gap in it (§0). `dart tool/design_check.dart --all`
+CI check reports a gap once a pull request touches its class (or, outside a class, the
+top-level function or variable it sits in), and a change in that class MUST close every *auto*
+gap in it (§0). `dart tool/design_check.dart --all`
 lists every one the check can see (595 when the theme-default rules were added, 640 once
 DS-SHP-4 and the `textTheme` roles of DS-TYP-4 joined them).
 

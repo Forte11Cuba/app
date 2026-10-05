@@ -601,6 +601,9 @@ final a = Theme.of(context).textTheme.bodyMedium;
 final b = theme.textTheme.bodySmall;
 final c = theme.textTheme.labelLarge;
 final d = theme.textTheme.labelSmall;
+final e = theme.textTheme.apply(bodyColor: pal.textBody);
+final f = theme.textTheme.copyWith(bodySmall: s);
+final g = Theme.of(context).textTheme.merge(other);
 '''),
         isEmpty,
       );
@@ -609,7 +612,8 @@ final d = theme.textTheme.labelSmall;
 
   /// A break is reported on the line of the widget call. A pull request that
   /// edits an argument of a theme-default button leaves that line untouched,
-  /// and the first version of the check let it through (#657).
+  /// and the first version of the check let it through (#657). Outside a
+  /// class, the top-level function or variable is read whole, like a class.
   group('a call a changed line falls inside', () {
     const source = '''
 final a = FilledButton.icon(
@@ -626,6 +630,19 @@ final b = Text(t);
 
     test('is not reported for a change outside it', () {
       expect(breaks(source, lines: {6}), isEmpty);
+    });
+
+    test('is read for every rule, not only a missing style', () {
+      const helper = '''
+Widget framed(Widget child) {
+  return Padding(
+    padding: const EdgeInsets.all(13),
+    child: child,
+  );
+}
+final pad = EdgeInsets.all(11);
+''';
+      expect(breaks(helper, lines: {4}), ['DS-SPC-2@3']);
     });
   });
 
@@ -680,7 +697,7 @@ extension _Pad on Widget {
 enum _Kind { a, b }
 ''';
       expect(breaks(tricky, lines: {1}), isEmpty);
-      expect(breaks(tricky, lines: {3}), isEmpty);
+      expect(breaks(tricky, lines: {3}), ['DS-CMP-18@4']);
       expect(breaks(tricky, lines: {8}), ['DS-CMP-18@7']);
       expect(breaks(tricky, lines: {12}), ['DS-SPC-2@11']);
     });

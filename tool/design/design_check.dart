@@ -1,8 +1,8 @@
 /// The rules of `.specify/DESIGN_SYSTEM.md` a machine can check, run on the
 /// code a pull request touches under `lib/` (the "Design guide" CI job):
-/// each class with a changed line, read whole, and the widget call a changed
-/// line falls inside. Older code that breaks them is the guide's §14 debt: it
-/// is reported once a pull request touches its class.
+/// each top-level declaration with a changed line, read whole. Older code
+/// that breaks them is the guide's §14 debt: it is reported once a pull
+/// request touches its class.
 ///
 /// Pure: `tool/design_check.dart` collects the diff and the files.
 ///
@@ -89,8 +89,8 @@ Map<String, Set<int>> addedLines(String diff) {
 
 /// The breaks in [source], the content of [path]. With [lines], the
 /// (1-based) lines a pull request changed, only the code they touch is
-/// reported: every class, mixin, enum or extension one falls inside, read
-/// whole, and elsewhere the widget call one falls inside (guide §0).
+/// reported: every top-level declaration one falls inside (a class, mixin,
+/// enum, extension, function or variable), read whole (guide §0).
 List<Violation> scan(String path, String source, {Set<int>? lines}) {
   final views = _mask(source);
   final code = views.code;
@@ -112,8 +112,8 @@ List<Violation> scan(String path, String source, {Set<int>? lines}) {
     return lo + 1;
   }
 
-  // A class with one changed line is read whole: touching a legacy screen
-  // leaves the class it touched free of breaks (#657).
+  // A declaration with one changed line is read whole: touching a legacy
+  // screen leaves the class or function it touched free of breaks (#657).
   final touched =
       lines == null
           ? null
@@ -127,15 +127,9 @@ List<Violation> scan(String path, String source, {Set<int>? lines}) {
   final ignored = _ignores(source, code, lineStarts);
   final found = <Violation>[];
 
-  /// Reports at [offset] when a changed line falls between it and [end],
-  /// the end of the widget call it names: the break is the call's, wherever
-  /// in its arguments the change is.
-  void report(int offset, String rule, String message, {int? end}) {
+  void report(int offset, String rule, String message) {
     final line = lineOf(offset);
-    if (touched != null) {
-      final last = end == null ? line : lineOf(end);
-      if (!touched.any((l) => l >= line && l <= last)) return;
-    }
+    if (touched != null && !touched.contains(line)) return;
     if (ignored[line]?.contains(rule) ?? false) return;
     found.add(Violation(path: path, line: line, rule: rule, message: message));
   }
@@ -206,7 +200,12 @@ List<Violation> scan(String path, String source, {Set<int>? lines}) {
 
   // A theme role is a font size with no literal in sight: the theme's are
   // v1's scale, and one it leaves out falls back to Material's.
-  for (final m in RegExp(r'\btextTheme\s*\.\s*(\w+)').allMatches(code)) {
+  // Only the role getters: `copyWith`, `apply` and `merge` are TextTheme's
+  // own API, not a size.
+  for (final m in RegExp(
+    r'\btextTheme\s*\??\.\s*((?:display|headline|title|body|label)'
+    r'(?:Large|Medium|Small))\b',
+  ).allMatches(code)) {
     if (textThemeRoles.contains(m[1])) continue;
     report(
       m.start,
@@ -357,7 +356,7 @@ List<Violation> scan(String path, String source, {Set<int>? lines}) {
     for (final m in constructor.allMatches(code)) {
       final args = _args(code, m.end - 1);
       if (!args.any((a) => argument.hasMatch(code.substring(a.$1, a.$2)))) {
-        report(m.start, rule, message, end: _close(code, m.end - 1));
+        report(m.start, rule, message);
       }
     }
   }
@@ -390,7 +389,6 @@ List<Violation> scan(String path, String source, {Set<int>? lines}) {
     if (!styled && !colored) {
       report(
         m.start,
-        end: _close(code, m.end - 1),
         'DS-CMP-17',
         'a `TextButton` with neither `style:` nor a palette color on its label '
             'shows the theme\'s lime: use a `ModalLink`, or color the label '
@@ -443,7 +441,6 @@ List<Violation> scan(String path, String source, {Set<int>? lines}) {
     if (missing.isEmpty) continue;
     report(
       m.start,
-      end: _close(code, m.end - 1),
       'DS-CMP-19',
       'a text field that leaves ${missing.map((p) => '`$p`').join(', ')} to '
           'the theme paints v1\'s filled underline, even with '
@@ -458,32 +455,47 @@ List<Violation> scan(String path, String source, {Set<int>? lines}) {
   return found;
 }
 
-/// The `(start, end)` offsets of every top-level class, mixin, enum and
-/// extension in [code], from its keyword to the brace that closes its body.
-/// A mixin application (`class A = B with C;`) has no body and no range.
+/// The `(start, end)` offsets of every top-level declaration in [code] (a
+/// class, mixin, enum, extension, function or variable, with the annotations
+/// above it), from its first character to the `;` or `}` that ends it.
 List<(int, int)> _declarations(String code) {
-  final keyword = RegExp(r'(?:class|mixin|enum|extension)\s[^;{}]*\{');
-  final identifier = RegExp(r'[\w$.]');
   final found = <(int, int)>[];
+  int? start;
   var depth = 0;
   for (var i = 0; i < code.length; i++) {
     final c = code[i];
-    if (depth == 0 && (i == 0 || !identifier.hasMatch(code[i - 1]))) {
-      final m = keyword.matchAsPrefix(code, i);
-      if (m != null) {
-        final close = _close(code, m.end - 1);
-        found.add((i, close));
-        i = close;
-        continue;
-      }
+    if (start == null) {
+      if (c.trim().isEmpty) continue;
+      start = i;
     }
     if (c == '(' || c == '[' || c == '{') {
       depth++;
     } else if (c == ')' || c == ']' || c == '}') {
       depth--;
+      // A body ends the declaration; a literal (`final m = {...};`) or a
+      // closure (`final f = () {...}.call();`) goes on to its `;`.
+      if (depth == 0 && c == '}' && !_continues(code, i + 1)) {
+        found.add((start, i));
+        start = null;
+      }
+    } else if (c == ';' && depth == 0) {
+      found.add((start, i));
+      start = null;
     }
   }
+  if (start != null) found.add((start, code.length - 1));
   return found;
+}
+
+/// Whether the expression before [from] goes on: the next non-blank
+/// character continues it rather than starting a declaration.
+bool _continues(String code, int from) {
+  for (var i = from; i < code.length; i++) {
+    final c = code[i];
+    if (c.trim().isEmpty) continue;
+    return ';,.)]?:'.contains(c);
+  }
+  return false;
 }
 
 /// The rules silenced per line by `// design-check: ignore DS-XXX-N — reason`.
