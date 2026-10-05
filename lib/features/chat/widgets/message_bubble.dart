@@ -105,6 +105,7 @@ class MessageBubble extends StatelessWidget {
       return _SystemMessage(message: message);
     }
 
+    // design-check: ignore DS-COL-11 — the v1 bubble colours (§14), unchanged; the chat has no palette yet
     final colors = Theme.of(context).extension<AppColors>();
     if (colors == null) throw StateError('AppColors theme extension must be registered');
     final textTheme = Theme.of(context).textTheme;
@@ -171,6 +172,42 @@ class MessageBubble extends StatelessWidget {
       },
     );
 
+    // An attachment's content is its file name: nothing worth copying. It
+    // opens the menu only to react to it.
+    final opensMenu = attachment == null || onReact != null;
+    // The menu draws over the bubble alone, though the whole column takes
+    // the gesture; set while the column builds, read when a gesture lands.
+    BuildContext? bubbleContext;
+    void openMenu({required bool held}) {
+      final anchorContext = bubbleContext;
+      if (anchorContext != null) _openMenu(anchorContext, bubble, held: held);
+    }
+
+    final column = Column(
+      crossAxisAlignment: alignment,
+      children: [
+        if (opensMenu)
+          Builder(
+            builder: (context) {
+              bubbleContext = context;
+              return bubble;
+            },
+          )
+        else
+          bubble,
+        if (message.reaction case final emoji?) _ReactionChip(emoji: emoji),
+        const SizedBox(height: 2),
+        // Timestamp
+        Text(
+          timestamp,
+          style: textTheme.bodySmall?.copyWith(
+            color: colors.textSubtle,
+            fontSize: 10,
+          ),
+        ),
+      ],
+    );
+
     return Padding(
       padding: const EdgeInsets.symmetric(
         horizontal: AppSpacing.lg,
@@ -181,17 +218,11 @@ class MessageBubble extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
           Flexible(
-            child: Column(
-              crossAxisAlignment: alignment,
-              children: [
-                // An attachment's content is its file name: nothing worth
-                // copying. It opens the menu only to react to it.
-                if (attachment != null && onReact == null)
-                  bubble
-                else
-                  // The detector gives screen readers the gesture that opens
-                  // the menu; the hint says what it opens (DS-A11Y-1).
-                  Semantics(
+            child: !opensMenu
+                ? column
+                // The detector gives screen readers the gesture that opens
+                // the menu; the hint says what it opens (DS-A11Y-1).
+                : Semantics(
                     button: true,
                     enabled: true,
                     onTapHint: attachment == null
@@ -200,32 +231,26 @@ class MessageBubble extends StatelessWidget {
                     onLongPressHint: attachment == null
                         ? null
                         : AppLocalizations.of(context).messageMenuHint,
-                    child: Builder(
-                      builder: (bubbleContext) => GestureDetector(
-                        // An attachment's own tap opens the file.
-                        onTap: attachment == null
-                            ? () => _openMenu(bubbleContext, bubble,
-                                held: false)
-                            : null,
-                        onLongPress: () => _openMenu(bubbleContext, bubble,
-                            held: true),
-                        child: bubble,
+                    child: GestureDetector(
+                      // The bubble, its reaction and its time take the
+                      // gesture, at least 48 × 48 dp of it however short the
+                      // message (DS-CMP-6); the extra width sits on the
+                      // bubble's open side, so nothing visible moves.
+                      behavior: HitTestBehavior.opaque,
+                      // An attachment's own tap opens the file.
+                      onTap: attachment == null
+                          ? () => openMenu(held: false)
+                          : null,
+                      onLongPress: () => openMenu(held: true),
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(
+                          minWidth: _minTarget,
+                          minHeight: _minTarget,
+                        ),
+                        child: column,
                       ),
                     ),
                   ),
-                if (message.reaction case final emoji?)
-                  _ReactionChip(emoji: emoji),
-                const SizedBox(height: 2),
-                // Timestamp
-                Text(
-                  timestamp,
-                  style: textTheme.bodySmall?.copyWith(
-                    color: colors.textSubtle,
-                    fontSize: 10,
-                  ),
-                ),
-              ],
-            ),
           ),
         ],
       ),
@@ -310,6 +335,9 @@ class MessageBubble extends StatelessWidget {
 // ── Reaction ──────────────────────────────────────────────────────────────────
 
 const _pill = BorderRadius.all(Radius.circular(999));
+
+/// The smallest tap target a message gets, in dp (DS-CMP-6).
+const double _minTarget = 48;
 
 /// The reaction under a bubble, as a small pill.
 class _ReactionChip extends StatelessWidget {

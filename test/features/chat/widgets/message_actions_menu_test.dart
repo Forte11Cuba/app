@@ -310,6 +310,38 @@ void main() {
     semantics.dispose();
   });
 
+  // DS-CMP-6: a one-line bubble is ~36 dp tall, and a one-letter one
+  // narrower than 48 dp; the finger still gets a 48 × 48 target.
+  group('a short message is still a 48 dp target', () {
+    Rect bubbleOf(WidgetTester tester, String text) => tester.getRect(
+          find
+              .ancestor(of: find.text(text), matching: find.byType(Container))
+              .first,
+        );
+
+    testWidgets('a tap just under it opens its menu', (tester) async {
+      await pump(tester, textMessage(content: 'OK'), midScreen: true);
+      final bubble = bubbleOf(tester, 'OK');
+      expect(bubble.height, lessThan(48));
+
+      await tester.tapAt(bubble.bottomLeft + const Offset(8, 4));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Copy'), findsOneWidget);
+    });
+
+    testWidgets('a tap just beside it opens its menu', (tester) async {
+      await pump(tester, textMessage(content: 'k'), midScreen: true);
+      final bubble = bubbleOf(tester, 'k');
+      expect(bubble.width, lessThan(48));
+
+      await tester.tapAt(bubble.centerRight + const Offset(4, 0));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Copy'), findsOneWidget);
+    });
+  });
+
   testWidgets('own messages open the menu without reactions', (
     tester,
   ) async {
