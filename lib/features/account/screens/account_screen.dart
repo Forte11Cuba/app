@@ -228,7 +228,7 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
           fit: StackFit.expand,
           children: [
             BackupFillViewport(
-              gap: 11,
+              gap: 12,
               blocks: [
                 if (_pendingWipe) const _PendingWipeBanner(),
                 if (backedUp)
@@ -645,7 +645,7 @@ class _BackupBanner extends StatelessWidget {
     final pal = BackupPalette.of(context);
     final l10n = AppLocalizations.of(context);
     final shape = RoundedRectangleBorder(
-      borderRadius: BorderRadius.circular(20),
+      borderRadius: BorderRadius.circular(18),
       side: BorderSide(color: pal.amberBorder),
     );
 
@@ -658,7 +658,7 @@ class _BackupBanner extends StatelessWidget {
           onTap: onTap,
           customBorder: shape,
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 15),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
             child: Row(
               children: [
                 Icon(Icons.shield_outlined, size: 20, color: pal.amber),
@@ -721,11 +721,11 @@ class _PendingWipeBanner extends StatelessWidget {
     return Material(
       color: pal.amberFill,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(18),
         side: BorderSide(color: pal.amberBorder),
       ),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 15),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
