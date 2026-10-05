@@ -2174,6 +2174,19 @@ impl ChatRxState {
         }
     }
 
+    /// `relay` closed the subscription (CLOSED). It sends no EOSE, so it is
+    /// no longer awaited; nor is its connection marked done: `live_subs`
+    /// issues the REQ again on that same connection, and the replay that
+    /// follows must reopen catch-up (and take the cursor back) like any
+    /// other.
+    async fn closed_by(&mut self, order_id: &str, relay: &str) {
+        self.eose_seen.remove(relay);
+        self.awaiting_eose.remove(relay);
+        if self.awaiting_eose.is_empty() {
+            self.caught_up(order_id).await;
+        }
+    }
+
     /// An event from `relay`, on its connection `connection`. A relay with
     /// no EOSE on that connection is replaying stored events newest first —
     /// it joined late or reconnected — so the cursor waits for its EOSE as
@@ -2387,27 +2400,29 @@ async fn run_chat_subscription(
                 relay_url, message, ..
             }) => {
                 // EOSE for one of our subscriptions: that relay's stored
-                // catch-up is over. A CLOSED ends it too: a relay that
-                // refuses the REQ (auth-required, a rate limit) never sends
-                // EOSE, and must not hold the cursor for good.
+                // catch-up is over. A CLOSED (auth-required, a rate limit)
+                // never comes with one: that relay is no longer awaited, but
+                // its connection is not marked done either, since `live_subs`
+                // issues the REQ again on it and that replay is a catch-up.
                 //
                 // The connection is read now, not when the relay sent it: an
                 // EOSE still queued while the relay reconnects is taken for
                 // the new connection's. The SDK says neither which
                 // connection a message came on nor when a relay reconnects,
                 // and the window is the queue's latency.
-                let done = match &*message {
-                    nostr_sdk::prelude::RelayMessage::EndOfStoredEvents(sid) => **sid == sub_id,
+                match &*message {
+                    nostr_sdk::prelude::RelayMessage::EndOfStoredEvents(sid) if **sid == sub_id => {
+                        let connection = connection_of(&client, &relay_url).await;
+                        state
+                            .eose_from(order_id, &relay_url.to_string(), connection)
+                            .await;
+                    }
                     nostr_sdk::prelude::RelayMessage::Closed {
                         subscription_id, ..
-                    } => **subscription_id == sub_id,
-                    _ => false,
-                };
-                if done {
-                    let connection = connection_of(&client, &relay_url).await;
-                    state
-                        .eose_from(order_id, &relay_url.to_string(), connection)
-                        .await;
+                    } if **subscription_id == sub_id => {
+                        state.closed_by(order_id, &relay_url.to_string()).await;
+                    }
+                    _ => {}
                 }
             }
             // The SDK's notification stream ends on shutdown; lag under
@@ -4843,6 +4858,22 @@ mod tests {
 
         assert!(!state.caught_up);
         assert!(state.awaiting_eose.contains("wss://relay"));
+        assert_eq!(state.cursor, 100, "back to what the replay starts from");
+    }
+
+    #[tokio::test]
+    async fn a_closed_subscription_replayed_on_the_same_connection_is_a_catch_up() {
+        let mut state = ChatRxState::new(ChatChannel::Peer, 100, None);
+        state.awaiting_eose.insert("wss://relay".to_string());
+
+        state.closed_by("o", "wss://relay").await;
+        assert!(state.caught_up, "a refused REQ holds nothing back");
+        state.cursor = 150;
+        // `live_subs` issues the REQ again on the same connection.
+        state.event_from("o", "wss://relay", 1).await;
+
+        assert!(!state.caught_up);
+        assert!(state.from_catch_up);
         assert_eq!(state.cursor, 100, "back to what the replay starts from");
     }
 

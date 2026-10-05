@@ -180,8 +180,10 @@ restart. After that, the peer cursor still stops at a held reaction's floor
 stored with its target, which is older, so a restart fetches both again. Every
 minute, whatever else the client receives, the chat re-checks its cursor,
 so an expired floor (below) or a relay gone while awaited lets it go without
-another event. A relay's CLOSED for the subscription counts as its EOSE: a
-refused REQ never sends one. A reaction
+another event. A relay's CLOSED for the subscription stops it being awaited
+(a refused REQ never sends EOSE) without marking its connection done:
+`live_subs` issues the REQ again on that connection, and its replay reopens
+catch-up like a reconnect's. A reaction
 held for more than 10 minutes stops holding the cursor back (its target was
 refused by the retention quota, or names nothing) but stays held in case the
 target comes. If the target's write fails, its reactions are held again
