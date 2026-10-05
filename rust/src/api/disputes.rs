@@ -3257,10 +3257,12 @@ mod tests {
         assert!(err.to_string().starts_with("AdminNotAssigned"), "got: {err}");
     }
 
-    /// Once the solver has the key it is never sent again, and a takeover
-    /// offers it to the new solver, who never got it.
+    /// A share is recorded for the solver who got it, yet never refuses
+    /// another: the user may have sent it to the wrong solver (Serbero
+    /// before a human took over) or want it sent again. A takeover clears
+    /// the record, as the new solver never got it.
     #[tokio::test]
-    async fn the_chat_key_is_shared_once_per_solver() {
+    async fn the_chat_key_can_be_sent_again_after_a_share() {
         use nostr_sdk::prelude::Keys;
         let trade_id = format!("t-{}", uuid::Uuid::new_v4());
         seed_dispute(&trade_id, None).await;
@@ -3275,8 +3277,10 @@ mod tests {
 
         let shared = get_dispute(trade_id.clone()).await.unwrap().unwrap();
         assert!(shared.chat_key_shared);
+        // Past any share check: what stops it is the trade key this test
+        // never stored.
         let err = share_chat_key_with_solver(trade_id.clone()).await.unwrap_err();
-        assert!(err.to_string().starts_with("SharedKeyAlreadyShared"), "got: {err}");
+        assert!(err.to_string().starts_with("TradeNotFound"), "got: {err}");
 
         let second = Keys::generate().public_key();
         handle_admin_took_dispute(trade_id.clone(), second.to_hex())
@@ -3286,15 +3290,12 @@ mod tests {
         let taken_over = get_dispute(trade_id.clone()).await.unwrap().unwrap();
         assert_eq!(taken_over.admin_pubkey, Some(second.to_hex()));
         assert!(!taken_over.chat_key_shared);
-        // Past the share check: what stops it now is the trade key this test
-        // never stored.
-        let err = share_chat_key_with_solver(trade_id).await.unwrap_err();
-        assert!(err.to_string().starts_with("TradeNotFound"), "got: {err}");
     }
 
     /// A share another device of this identity sent reaches this one as our
     /// own message: it marks the key as shared, but only for the solver on
-    /// record and only for a message that is the key.
+    /// record and only for a message that is the key. Like a local share, it
+    /// does not stop this device from sending it again.
     #[tokio::test]
     async fn a_chat_key_share_from_another_device_counts_as_shared() {
         use nostr_sdk::prelude::Keys;
@@ -3316,7 +3317,7 @@ mod tests {
         let shared = get_dispute(trade_id.clone()).await.unwrap().unwrap();
         assert!(shared.chat_key_shared);
         let err = share_chat_key_with_solver(trade_id).await.unwrap_err();
-        assert!(err.to_string().starts_with("SharedKeyAlreadyShared"), "got: {err}");
+        assert!(err.to_string().starts_with("TradeNotFound"), "got: {err}");
     }
 
     /// A pre-#334 row names the node that published the order as the
