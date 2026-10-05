@@ -204,9 +204,11 @@ class MessageBubble extends StatelessWidget {
                       builder: (bubbleContext) => GestureDetector(
                         // An attachment's own tap opens the file.
                         onTap: attachment == null
-                            ? () => _openMenu(bubbleContext, bubble)
+                            ? () => _openMenu(bubbleContext, bubble,
+                                held: false)
                             : null,
-                        onLongPress: () => _openMenu(bubbleContext, bubble),
+                        onLongPress: () => _openMenu(bubbleContext, bubble,
+                            held: true),
                         child: bubble,
                       ),
                     ),
@@ -230,9 +232,13 @@ class MessageBubble extends StatelessWidget {
     );
   }
 
-  /// Tapped or held: the message's menu, drawn over the bubble that
-  /// [bubbleContext] lays out.
-  Future<void> _openMenu(BuildContext bubbleContext, Widget bubble) async {
+  /// Tapped or held ([held]): the message's menu, drawn over the bubble
+  /// that [bubbleContext] lays out.
+  Future<void> _openMenu(
+    BuildContext bubbleContext,
+    Widget bubble, {
+    required bool held,
+  }) async {
     // Where the message is and what of it its list shows, or null once
     // nobody can see it: disposed, or scrolled out of its list while the
     // list keeps it built in its cache.
@@ -253,7 +259,11 @@ class MessageBubble extends StatelessWidget {
     }
 
     if (anchor() == null) return;
-    Feedback.forLongPress(bubbleContext);
+    // Each gesture its own feedback: the long-press vibration and the
+    // screen reader's long-press event on a tap would say the wrong thing.
+    held
+        ? Feedback.forLongPress(bubbleContext)
+        : Feedback.forTap(bubbleContext);
 
     final react = onReact;
     final choice = await showMessageActionsMenu(

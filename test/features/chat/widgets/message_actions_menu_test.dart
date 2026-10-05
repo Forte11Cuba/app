@@ -112,6 +112,55 @@ void main() {
     expect(find.text('Copy'), findsNothing);
   });
 
+  group('feedback', () {
+    /// The platform calls the bubble makes, by method name.
+    List<String> spyOnPlatform(WidgetTester tester) {
+      final calls = <String>[];
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        (call) async {
+          calls.add(call.method);
+          return null;
+        },
+      );
+      addTearDown(
+        () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          SystemChannels.platform,
+          null,
+        ),
+      );
+      return calls;
+    }
+
+    testWidgets(
+      'a tap gives the tap feedback, not the long-press vibration',
+      (tester) async {
+        final calls = spyOnPlatform(tester);
+        await pump(tester, textMessage());
+
+        await tester.tap(find.text(_text));
+        await tester.pumpAndSettle();
+
+        expect(calls, contains('SystemSound.play'));
+        expect(calls, isNot(contains('HapticFeedback.vibrate')));
+      },
+      variant: TargetPlatformVariant.only(TargetPlatform.android),
+    );
+
+    testWidgets(
+      'a hold keeps the long-press vibration',
+      (tester) async {
+        final calls = spyOnPlatform(tester);
+        await pump(tester, textMessage());
+
+        await press(tester, const Duration(milliseconds: 500));
+
+        expect(calls, contains('HapticFeedback.vibrate'));
+      },
+      variant: TargetPlatformVariant.only(TargetPlatform.android),
+    );
+  });
+
   testWidgets('a message at the bottom gets the menu above it, on screen', (
     tester,
   ) async {
