@@ -4,6 +4,16 @@ All notable changes to Mostro are documented here, newest first. This file is
 written by the release workflow (docs/RELEASING.md) — do not edit it by hand.
 Versions follow [Semantic Versioning](https://semver.org/).
 
+## [2.0.12] - 2026-10-05
+
+### ✨ Features
+
+- **chat:** tap a message to open its menu, as in Telegram ([#697](https://github.com/MostroP2P/app/pull/697)) by @grunch
+- **icon:** gold-ringed icon on Linux, Windows and macOS ([#696](https://github.com/MostroP2P/app/pull/696)) by @grunch
+- ring the v2 icon in gold and add a dark launch screen ([#694](https://github.com/MostroP2P/app/pull/694)) by @grunch
+- **chat:** react to a counterpart's message ([#692](https://github.com/MostroP2P/app/pull/692)) by @grunch
+- **chat:** hold a message for a second to open its menu ([#691](https://github.com/MostroP2P/app/pull/691)) by @grunch
+
 ## [2.0.11] - 2026-10-04
 
 ### ✨ Features
