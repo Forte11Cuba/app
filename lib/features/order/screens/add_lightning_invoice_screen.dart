@@ -755,6 +755,7 @@ class _AddLightningInvoiceScreenState
               const SizedBox(height: AppSpacing.md),
               TextButton(
                 onPressed: () => setState(() => _manualMode = true),
+                style: TextButton.styleFrom(foregroundColor: book.limeText),
                 child: Text(l10n.enterInvoiceManually),
               ).withAutomationId(AutomationIds.invoiceManual),
             ],
@@ -830,6 +831,7 @@ class _AddLightningInvoiceScreenState
                 const SizedBox(height: AppSpacing.md),
                 TextButton(
                   onPressed: () => setState(() => _manualMode = true),
+                  style: TextButton.styleFrom(foregroundColor: book.limeText),
                   child: Text(l10n.enterInvoiceManually),
                 ).withAutomationId(AutomationIds.invoiceManual),
               ],

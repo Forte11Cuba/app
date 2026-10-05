@@ -352,7 +352,7 @@ class _InvoiceTimeBandState extends State<InvoiceTimeBand>
     final elapsed = widget.remaining == Duration.zero ? widget.elapsed : null;
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 11),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       decoration: BoxDecoration(
         color: urgent ? pal.errorFill : pal.timeFill,
         borderRadius: BorderRadius.circular(16),
@@ -360,8 +360,8 @@ class _InvoiceTimeBandState extends State<InvoiceTimeBand>
       ),
       child: Row(
         children: [
-          Icon(Icons.schedule, size: 15, color: figureColor),
-          const SizedBox(width: 9),
+          Icon(Icons.schedule, size: 16, color: figureColor),
+          const SizedBox(width: 8),
           Expanded(
             child:
                 elapsed != null
