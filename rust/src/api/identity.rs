@@ -1479,6 +1479,9 @@ mod tests {
     struct WipeFailingStore {
         settings: std::sync::Mutex<std::collections::HashMap<String, String>>,
         unreadable: bool,
+        /// Every settings write fails while this holds; clearing it is the
+        /// storage recovering.
+        unwritable: std::sync::atomic::AtomicBool,
         wipes: std::sync::atomic::AtomicUsize,
     }
 
@@ -1487,8 +1490,21 @@ mod tests {
             Self {
                 settings: Default::default(),
                 unreadable: false,
+                unwritable: Default::default(),
                 wipes: Default::default(),
             }
+        }
+        /// Every settings write fails until [`Self::recover`].
+        fn unwritable() -> Self {
+            let store = Self::new();
+            store
+                .unwritable
+                .store(true, std::sync::atomic::Ordering::SeqCst);
+            store
+        }
+        fn recover(&self) {
+            self.unwritable
+                .store(false, std::sync::atomic::Ordering::SeqCst);
         }
         /// Every settings read fails.
         fn unreadable() -> Self {
@@ -1529,6 +1545,9 @@ mod tests {
             Ok(self.setting(key))
         }
         async fn set_setting(&self, key: &str, value: &str) -> Result<()> {
+            if self.unwritable.load(std::sync::atomic::Ordering::SeqCst) {
+                anyhow::bail!("injected settings write failure");
+            }
             self.put_setting(key, value);
             Ok(())
         }
@@ -1862,6 +1881,130 @@ mod tests {
             db.get_setting(&probe).await.unwrap().as_deref(),
             Some("1"),
             "and its rows stay"
+        );
+    }
+
+    /// The gap of review round 3: a marker that could not be written used to
+    /// be a warning only, so the deletion went ahead, the replacement read no
+    /// marker and installed over the previous identity's rows. The intent is
+    /// now recorded first, and a failure there refuses the deletion while
+    /// nothing is lost yet: no wipe ran, so storage recovering leaves the old
+    /// identity whole instead of a new one over its rows.
+    #[tokio::test]
+    async fn an_unwritable_marker_refuses_the_deletion_before_anything_is_lost() {
+        let store = WipeFailingStore::unwritable();
+
+        let err = record_wipe_intent(Some(&store), "owner-pubkey")
+            .await
+            .expect_err("a deletion that cannot leave its marker must not run");
+        assert_eq!(err.to_string(), "WipeNotRecorded");
+        assert_eq!(
+            store.wipes(),
+            0,
+            "nothing is wiped before the marker exists"
+        );
+
+        store.recover();
+        record_wipe_intent(Some(&store), "owner-pubkey")
+            .await
+            .unwrap();
+        assert_eq!(
+            store
+                .setting(crate::db::settings_keys::IDENTITY_WIPE_PENDING)
+                .as_deref(),
+            Some("owner-pubkey"),
+            "once storage recovers the deletion records its intent"
+        );
+    }
+
+    /// The marker is on disk before the wipe runs, so a wipe that then fails
+    /// needs no second write to stop the replacement — the write that could
+    /// fail has already succeeded.
+    #[tokio::test]
+    async fn a_wipe_that_fails_after_the_intent_blocks_the_replacement() {
+        let store = WipeFailingStore::new();
+
+        record_wipe_intent(Some(&store), "owner-pubkey")
+            .await
+            .unwrap();
+        let failures = wipe_identity_rows(&store, true).await;
+        assert!(
+            failures.iter().any(|f| f.contains("injected wipe failure")),
+            "the wipe failure is still reported: {failures:?}"
+        );
+
+        let err = retry_pending_wipe(&store)
+            .await
+            .expect_err("the replacement must not install over the kept rows");
+        assert_eq!(err.to_string(), "PendingWipeFailed");
+        assert_eq!(store.wipes(), 2, "the gate retried the wipe");
+    }
+
+    /// A memory-only session (`init_db` failed) has nowhere to record the
+    /// intent, and the rows earlier sessions persisted are still on disk: the
+    /// deletion is refused as an unwritable marker is.
+    #[tokio::test]
+    async fn without_a_database_the_deletion_is_refused() {
+        let err = record_wipe_intent::<WipeFailingStore>(None, "owner-pubkey")
+            .await
+            .expect_err("no database, no marker, no deletion");
+        assert_eq!(err.to_string(), "WipeNotRecorded");
+    }
+
+    /// A marker that cannot be read may name a wipe still pending: the
+    /// deletion stops instead of overwriting it blind.
+    #[tokio::test]
+    async fn an_unreadable_marker_refuses_the_deletion() {
+        let store = WipeFailingStore::unreadable();
+
+        let err = record_wipe_intent(Some(&store), "owner-pubkey")
+            .await
+            .expect_err("an unreadable marker must not be overwritten");
+        assert_eq!(err.to_string(), "WipeNotRecorded");
+        assert_eq!(store.wipes(), 0);
+    }
+
+    /// A marker an earlier deletion left names whose rows are still on disk;
+    /// the next deletion keeps it rather than claim those rows for its own
+    /// identity, which the launch reload would then release.
+    #[tokio::test]
+    async fn an_earlier_marker_is_kept() {
+        let store = WipeFailingStore::new();
+        store.put_setting(crate::db::settings_keys::IDENTITY_WIPE_PENDING, "pubkey-a");
+
+        record_wipe_intent(Some(&store), "pubkey-b").await.unwrap();
+
+        assert_eq!(
+            store
+                .setting(crate::db::settings_keys::IDENTITY_WIPE_PENDING)
+                .as_deref(),
+            Some("pubkey-a")
+        );
+    }
+
+    /// The intent must be on disk before anything of the identity is given
+    /// up — its subscriptions, its slot — and a failure there must end the
+    /// deletion. Only the real wipe records it: the lifecycle test's
+    /// `wipe_data: false` deletes no rows.
+    #[test]
+    fn the_deletion_records_its_intent_before_giving_anything_up() {
+        let source = include_str!("identity.rs");
+        let start = source
+            .find("async fn delete_identity_inner(")
+            .expect("the deletion exists");
+        let body = &source[start..start + source[start..].find("\n}\n").expect("it ends")];
+        let intent = body
+            .find("record_wipe_intent(crate::db::app_db::db(), &owner).await?")
+            .expect("the deletion records its intent and stops on failure");
+        let release = body
+            .find("release_identity_subscriptions()")
+            .expect("the deletion releases the subscriptions");
+        let take = body
+            .find("guard.take()")
+            .expect("the deletion empties the slot");
+        assert!(
+            intent < release && intent < take,
+            "the intent must be recorded before the identity is given up"
         );
     }
 

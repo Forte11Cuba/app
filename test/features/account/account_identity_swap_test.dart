@@ -682,6 +682,47 @@ void main() {
     });
   });
 
+  // Review round 3 of #555: a deletion that cannot record its pending wipe
+  // is refused before anything is given up. The current user stays, and the
+  // message must say so — not blame the phrase, nor a previous user's data.
+  group('a deletion that cannot record its wipe', () {
+    testWidgets('refuses the generation and keeps the current user', (
+      tester,
+    ) async {
+      final container = await _pumpAccount(
+        tester,
+        reminderArmed: false,
+        backedUp: true,
+        onRegenerate:
+            () async => throw StateError('AnyhowException(WipeNotRecorded)'),
+      );
+      await _seedPreviousUser(container);
+
+      await _generate(tester);
+
+      expect(find.text(l10n.wipeNotRecordedMessage), findsOneWidget);
+      expect(find.text(l10n.pendingWipeBlockedMessage), findsNothing);
+      expect(find.text('home'), findsNothing);
+      expect(container.read(tradeRoleProvider), {'old': true});
+    });
+
+    testWidgets('refuses the import, not as a bad phrase', (tester) async {
+      await _pumpAccount(
+        tester,
+        reminderArmed: true,
+        backedUp: false,
+        onImport:
+            (_) async => throw StateError('AnyhowException(WipeNotRecorded)'),
+      );
+
+      await _submitImport(tester, l10n);
+
+      expect(find.text(l10n.wipeNotRecordedMessage), findsOneWidget);
+      expect(find.text(l10n.invalidMnemonicMessage), findsNothing);
+      expect(find.text('home'), findsNothing);
+    });
+  });
+
   group('generating a new identity', () {
     testWidgets('still arms the reminder and clears the backed-up flag', (
       tester,
