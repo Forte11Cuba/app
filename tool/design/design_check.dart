@@ -22,6 +22,11 @@ const spacing = <num>{0, 1, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 24, 28, 32};
 /// Icon sizes (DS-ICO-3).
 const iconSizes = <num>{12, 14, 16, 18, 20, 22, 24, 32, 44, 48};
 
+/// The `textTheme` roles `lib/core/app_theme.dart` sets on the type scale
+/// (DS-TYP-4). The others are v1's 32/24/20/18/16, or Material's defaults
+/// for a role the theme leaves out.
+const textThemeRoles = {'bodyMedium', 'bodySmall', 'labelLarge', 'labelSmall'};
+
 /// One break of a rule.
 class Violation {
   const Violation({
