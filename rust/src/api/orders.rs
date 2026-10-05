@@ -19791,6 +19791,70 @@ mod tests {
         );
     }
 
+    /// A maker-seller's row starts without the order's mint
+    /// (`create_order_once`); the escrow request names it. If the node's single
+    /// mint changed since, the quote must refuse before any swap, reading the
+    /// mint from storage, so a restart in between changes nothing (#709).
+    #[tokio::test]
+    // The escrow globals lock must span the calls it guards.
+    #[allow(clippy::await_holding_lock)]
+    async fn a_maker_seller_whose_node_changed_mint_is_refused_before_any_swap() {
+        use crate::mostro::escrow_mode::{self, CashuNodeConfig, EscrowMode};
+        // Arrange — the maker's own row, as the create left it.
+        let _escrow = escrow_mode::lock_globals_for_test();
+        let db = bond_test_db().await;
+        let order_uuid = uuid::Uuid::new_v4();
+        let order_id = order_uuid.to_string();
+        let mut row = cashu_seller_row(&order_id, 56);
+        row.cashu_escrow_token = None;
+        row.order.is_mine = true;
+        row.order.amount_sats = Some(10_000);
+        assert_eq!(row.order.cashu_mint_url, None);
+        db.save_trade(&row).await.unwrap();
+
+        // The escrow request: the order escrows at mint A.
+        let mut request = pending_small_order(order_uuid);
+        request.status = Some(mostro_core::order::Status::WaitingPayment);
+        request.amount = 10_000;
+        request.buyer_trade_pubkey =
+            Some("0000000000000000000000000000000000000000000000000000000000000002".to_string());
+        request.cashu_mint_url = Some("https://mint.a.com".to_string());
+        dispatch_mostro_message(
+            daemon_message(
+                order_uuid,
+                Action::WaitingSellerToPay,
+                Some(Payload::Order(request)),
+                2_000,
+            ),
+            "test-maker-escrow-request",
+            "ff00ff95",
+            56,
+        )
+        .await;
+
+        // ...and the node now pins mint B (its config, or a dev override).
+        escrow_mode::set_from_tags(
+            EscrowMode::Cashu,
+            CashuNodeConfig {
+                mint_urls: vec!["https://mint.b.com".to_string()],
+                ..Default::default()
+            },
+        );
+
+        // Act — the quote reads the row back from storage, as after a restart.
+        let stored = db.get_trade_by_order_id(&order_id).await.unwrap().unwrap();
+        let err = crate::api::cashu::cashu_escrow_quote(order_id)
+            .await
+            .unwrap_err();
+
+        // Assert
+        assert_eq!(
+            stored.order.cashu_mint_url.as_deref(),
+            Some("https://mint.a.com")
+        );
+        assert_eq!(err.to_string(), "CashuMintNotSupported");
+    }
+
     /// A `cant-do` on the maker's cancel nonce reaches the cancel, and the
     /// create's record on the same key — still waiting for the `new-order`
     /// of a bond that may lock — is left alone.
