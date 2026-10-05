@@ -13,7 +13,6 @@ import 'package:mostro/features/chat/attachments/upload_controller.dart';
 import 'package:mostro/features/chat/screens/attachment_viewer_screen.dart';
 import 'package:mostro/features/chat/widgets/encrypted_file_message.dart';
 import 'package:mostro/features/chat/widgets/encrypted_image_message.dart';
-import 'package:mostro/features/chat/widgets/message_actions_menu.dart';
 import 'package:mostro/features/chat/widgets/message_bubble.dart';
 import 'package:mostro/features/chat/widgets/upload_bubble.dart';
 import 'package:mostro/l10n/app_localizations.dart';
@@ -558,11 +557,7 @@ void main() {
         gateway: FakeAttachmentGateway(),
       );
 
-      final gesture = await tester.startGesture(
-        tester.getCenter(find.byType(EncryptedFileMessage)),
-      );
-      await tester.pump(messageMenuHoldDuration);
-      await gesture.up();
+      await tester.longPress(find.byType(EncryptedFileMessage));
       await tester.pumpAndSettle();
 
       // Its content is the file name: there is nothing to copy.
@@ -583,17 +578,42 @@ void main() {
         gateway: FakeAttachmentGateway(),
       );
 
-      final gesture = await tester.startGesture(
-        tester.getCenter(find.byType(EncryptedFileMessage)),
-      );
-      await tester.pump(messageMenuHoldDuration);
-      await gesture.up();
+      await tester.longPress(find.byType(EncryptedFileMessage));
       await tester.pumpAndSettle();
       expect(find.text('Copy'), findsNothing);
       await tester.tap(find.text('👍'));
       await tester.pumpAndSettle();
 
       expect(reacted, ['👍']);
+    });
+
+    testWidgets('tapping a counterpart attachment opens it, not the menu', (
+      tester,
+    ) async {
+      final launcher = FakeAttachmentLauncher();
+      await _pump(
+        tester,
+        MessageBubble(
+          message: bubbleMessage(pdfInfo()),
+          peerColorHue: 200,
+          onReact: (_) async {},
+        ),
+        gateway: FakeAttachmentGateway(
+          downloadResult:
+              (_) async => attachmentData(
+                [37, 80, 68, 70],
+                fileName: 'transfer.pdf',
+                mimeType: 'application/pdf',
+              ),
+        ),
+        launcher: launcher,
+      );
+
+      await tester.tap(find.text('transfer.pdf'));
+      await tester.pumpAndSettle();
+
+      expect(launcher.opened, ['transfer.pdf']);
+      expect(find.text('👍'), findsNothing);
     });
   });
 }

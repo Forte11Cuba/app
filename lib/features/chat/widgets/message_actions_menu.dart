@@ -6,9 +6,6 @@ import 'package:mostro/core/order_book_palette.dart';
 import 'package:mostro/features/chat/models/reaction_rules.dart';
 import 'package:mostro/l10n/app_localizations.dart';
 
-/// How long a chat message is held before its menu opens.
-const messageMenuHoldDuration = Duration(seconds: 1);
-
 /// The reactions the menu offers in one tap, in order. «…» opens the rest.
 const quickReactions = ['❤️', '👍', '👎', '😂', '😮', '😢'];
 

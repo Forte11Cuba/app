@@ -1,4 +1,3 @@
-import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
@@ -77,9 +76,10 @@ class ChatMessage {
 /// - Own messages → right-aligned, purple background, top-right square corner.
 /// - Peer messages → left-aligned, dark hue background, top-left square corner.
 /// - System messages → centered italic text, no bubble background.
-/// - Held for a second → the message's menu ([showMessageActionsMenu]):
-///   Copy for a text message, and the reactions when [onReact] is set; an
-///   attachment offers only the reactions, and without [onReact] no menu.
+/// - Tapped or held → the message's menu ([showMessageActionsMenu]): Copy
+///   for a text message, and the reactions when [onReact] is set. A tap on
+///   an attachment opens the file, so only holding it opens the menu, which
+///   offers just the reactions; without [onReact] it has no menu.
 /// - A reaction shows under the bubble.
 class MessageBubble extends StatelessWidget {
   const MessageBubble({
@@ -189,26 +189,26 @@ class MessageBubble extends StatelessWidget {
                 if (attachment != null && onReact == null)
                   bubble
                 else
-                  // The recognizer gives screen readers the long press; the
-                  // hint says what it opens (DS-A11Y-1).
+                  // The detector gives screen readers the gesture that opens
+                  // the menu; the hint says what it opens (DS-A11Y-1).
                   Semantics(
                     button: true,
                     enabled: true,
-                    onLongPressHint:
-                        AppLocalizations.of(context).messageMenuHint,
+                    onTapHint: attachment == null
+                        ? AppLocalizations.of(context).messageMenuHint
+                        : null,
+                    onLongPressHint: attachment == null
+                        ? null
+                        : AppLocalizations.of(context).messageMenuHint,
                     child: Builder(
-                      builder: (bubbleContext) => RawGestureDetector(
-                        gestures: {
-                          LongPressGestureRecognizer:
-                              GestureRecognizerFactoryWithHandlers<
-                                  LongPressGestureRecognizer>(
-                            () => LongPressGestureRecognizer(
-                              duration: messageMenuHoldDuration,
-                            ),
-                            (recognizer) => recognizer.onLongPress =
-                                () => _openMenu(bubbleContext, bubble),
-                          ),
-                        },
+                      builder: (bubbleContext) => GestureDetector(
+                        // An attachment's own tap opens the file.
+                        onTap: attachment == null
+                            ? () => _openMenu(bubbleContext, bubble,
+                                held: false)
+                            : null,
+                        onLongPress: () => _openMenu(bubbleContext, bubble,
+                            held: true),
                         child: bubble,
                       ),
                     ),
@@ -232,9 +232,13 @@ class MessageBubble extends StatelessWidget {
     );
   }
 
-  /// Held for [messageMenuHoldDuration]: the message's menu, drawn over the
-  /// bubble that [bubbleContext] lays out.
-  Future<void> _openMenu(BuildContext bubbleContext, Widget bubble) async {
+  /// Tapped or held ([held]): the message's menu, drawn over the bubble
+  /// that [bubbleContext] lays out.
+  Future<void> _openMenu(
+    BuildContext bubbleContext,
+    Widget bubble, {
+    required bool held,
+  }) async {
     // Where the message is and what of it its list shows, or null once
     // nobody can see it: disposed, or scrolled out of its list while the
     // list keeps it built in its cache.
@@ -255,7 +259,11 @@ class MessageBubble extends StatelessWidget {
     }
 
     if (anchor() == null) return;
-    Feedback.forLongPress(bubbleContext);
+    // Each gesture its own feedback: the long-press vibration and the
+    // screen reader's long-press event on a tap would say the wrong thing.
+    held
+        ? Feedback.forLongPress(bubbleContext)
+        : Feedback.forTap(bubbleContext);
 
     final react = onReact;
     final choice = await showMessageActionsMenu(

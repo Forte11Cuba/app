@@ -6934,7 +6934,7 @@ abstract class AppLocalizations {
   /// **'Couldn\'t send the reaction. Please try again.'**
   String get reactionSendFailed;
 
-  /// Screen-reader hint of a chat message: what holding it opens
+  /// Screen-reader hint of a chat message: what tapping it (or holding an attachment) opens
   ///
   /// In en, this message translates to:
   /// **'Open the message menu'**
