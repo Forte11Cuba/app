@@ -258,9 +258,11 @@ pub mod settings_keys {
 
     /// Set when an identity deletion could not wipe the identity's data
     /// (`clear_identity_data` failed): the previous identity's rows are still
-    /// on disk. The next identity creation retries the wipe and clears this
-    /// (`api::identity::retry_pending_wipe`, issue #555). Presence is the
-    /// value.
+    /// on disk. The next identity creation or import retries the wipe and
+    /// clears this (`api::identity::retry_pending_wipe`, issue #555). The
+    /// value is the deleted identity's public key: reloading that identity
+    /// means the rows are its own, and the marker goes without a wipe
+    /// (`api::identity::release_own_wipe_marker`).
     ///
     /// Deliberately absent from [`IDENTITY_SCOPED_PREFIXES`]: the wipe that
     /// would drop it is the wipe that failed, and the marker must outlive the

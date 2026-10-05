@@ -26,10 +26,12 @@ issue #555) before installing the new identity — safe there, since the empty
 slot guarantees the tables hold nothing of a live identity. A retry that fails
 again refuses the new identity: once one is installed nothing retries (the
 launch reload, `load_identity_from_mnemonic`, never does), so the previous
-user's rows would stay for the life of the install.
+user's rows would stay for the life of the install. A marker that cannot be
+read refuses it the same way, without wiping.
 
 **Errors**: `StorageError` if secure storage unavailable; `PendingWipeFailed`
-when the pending wipe failed again (nothing installed, the marker stays).
+when the pending wipe failed again or its marker cannot be read (nothing
+installed, the marker stays).
 
 ---
 
@@ -153,9 +155,13 @@ is already gone. It is reported **after** the log clear (so the failure is
 the first line of the fresh history, worded without orders or
 counterparties), and it persists the `identity_wipe_pending` settings key —
 device-scoped on purpose, since the wipe that would drop it is the wipe that
-failed. `create_identity` and `import_from_mnemonic` retry the wipe off that
-marker while the slot is empty, clear it on success and refuse the new
-identity on failure; `has_pending_identity_wipe` exposes it, and
+failed — holding the deleted identity's public key. `create_identity` and
+`import_from_mnemonic` retry the wipe off that marker while the slot is
+empty, clear it on success and refuse the new identity on failure. A refused
+replacement leaves the deleted identity's mnemonic in secure storage, so the
+next launch reloads that identity: `load_identity_from_mnemonic` then drops
+a marker naming its own public key, wiping nothing — the rows are its own.
+Otherwise the launch reload never touches the marker; `has_pending_identity_wipe` exposes it, and
 the Account screen shows a warning while it holds (issue #555). The Dart
 half — cached providers and the notifications store — is
 `resetIdentityScopedState`, run by the Account screen after a generate and,
