@@ -283,10 +283,16 @@ class InvoiceTimeBand extends StatefulWidget {
     required this.remaining,
     required this.sentence,
     required this.hours,
+    this.elapsed,
   });
 
   final Duration remaining;
   final String Function(String time) sentence;
+
+  /// Shown instead of [sentence] once [remaining] reaches zero. The local
+  /// clock running out is not the daemon acting: the step stays open until
+  /// its message arrives.
+  final String? elapsed;
 
   /// The localized countdown above an hour (`1 h 05`).
   final String Function(String hours, String minutes) hours;
@@ -343,6 +349,7 @@ class _InvoiceTimeBandState extends State<InvoiceTimeBand>
     final figureColor = urgent ? pal.errorInk : pal.timeFigure;
     final time = formatInvoiceCountdown(widget.remaining, hours: widget.hours);
     final (before, after) = _splitAround(widget.sentence);
+    final elapsed = widget.remaining == Duration.zero ? widget.elapsed : null;
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 11),
@@ -356,33 +363,36 @@ class _InvoiceTimeBandState extends State<InvoiceTimeBand>
           Icon(Icons.schedule, size: 15, color: figureColor),
           const SizedBox(width: 9),
           Expanded(
-            child: Semantics(
-              label: widget.sentence(time),
-              excludeSemantics: true,
-              child: AnimatedBuilder(
-                animation: _pulse,
-                builder:
-                    (context, _) => Text.rich(
-                      TextSpan(
-                        style: TextStyle(fontSize: 12, color: ink),
-                        children: [
-                          TextSpan(text: before),
-                          TextSpan(
-                            text: time,
-                            style: TextStyle(
-                              fontFamily: AppFonts.figures,
-                              fontWeight: FontWeight.w700,
-                              color: figureColor.withValues(
-                                alpha: 1 - 0.65 * _pulse.value,
+            child:
+                elapsed != null
+                    ? Text(elapsed, style: TextStyle(fontSize: 12, color: ink))
+                    : Semantics(
+                      label: widget.sentence(time),
+                      excludeSemantics: true,
+                      child: AnimatedBuilder(
+                        animation: _pulse,
+                        builder:
+                            (context, _) => Text.rich(
+                              TextSpan(
+                                style: TextStyle(fontSize: 12, color: ink),
+                                children: [
+                                  TextSpan(text: before),
+                                  TextSpan(
+                                    text: time,
+                                    style: TextStyle(
+                                      fontFamily: AppFonts.figures,
+                                      fontWeight: FontWeight.w700,
+                                      color: figureColor.withValues(
+                                        alpha: 1 - 0.65 * _pulse.value,
+                                      ),
+                                    ),
+                                  ),
+                                  TextSpan(text: after),
+                                ],
                               ),
                             ),
-                          ),
-                          TextSpan(text: after),
-                        ],
                       ),
                     ),
-              ),
-            ),
           ),
         ],
       ),

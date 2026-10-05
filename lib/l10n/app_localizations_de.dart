@@ -3463,21 +3463,11 @@ class AppLocalizationsDe extends AppLocalizations {
   }
 
   @override
-  String get invoiceExpiredTitle => 'Die Rechnung ist abgelaufen';
-
-  @override
-  String get invoiceExpiredBody =>
-      'Sie wurde nicht rechtzeitig bezahlt: Mostro bricht den Handel ab, und keine Sats haben deine Wallet verlassen.';
-
-  @override
   String get invoiceBackToBook => 'Zurück zum Orderbuch';
 
   @override
-  String get invoiceTimeUpTitle => 'Die Zeit ist abgelaufen';
-
-  @override
-  String get invoiceTimeUpBody =>
-      'Die Rechnung wurde nicht rechtzeitig gesendet: Mostro bricht den Handel ab. Auf deiner Seite wurde nichts gebunden.';
+  String get invoiceStepElapsed =>
+      'Die Zeit ist abgelaufen. Mostro schließt diesen Schritt in Kürze, falls er nicht abgeschlossen wird.';
 
   @override
   String invoiceErrorWrongNetwork(String invoice, String node) {

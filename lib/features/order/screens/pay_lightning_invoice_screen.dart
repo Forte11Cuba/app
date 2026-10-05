@@ -362,19 +362,17 @@ class _PayLightningInvoiceScreenState
         return Scaffold(
           backgroundColor: book.bg,
           appBar: appBar,
+          // The QR stays at 00:00: the step ends when mostrod says so (#569).
           body: ValueListenableBuilder<Duration?>(
             valueListenable: invoiceRemaining,
             builder:
-                (context, remaining, _) =>
-                    remaining == Duration.zero && !_waiting
-                        ? _expired(l10n)
-                        : _payable(
-                          l10n,
-                          invoice: invoice,
-                          amountSats: amountSats,
-                          remaining: remaining,
-                          peer: peerTrade ?? trade,
-                        ),
+                (context, remaining, _) => _payable(
+                  l10n,
+                  invoice: invoice,
+                  amountSats: amountSats,
+                  remaining: remaining,
+                  peer: peerTrade ?? trade,
+                ),
           ),
         );
       },
@@ -439,6 +437,7 @@ class _PayLightningInvoiceScreenState
                         remaining: remaining,
                         sentence: l10n.invoiceExpiresIn,
                         hours: l10n.invoiceCountdownHours,
+                        elapsed: l10n.invoiceStepElapsed,
                       ),
                     ],
                     const SizedBox(height: 11),
@@ -582,17 +581,4 @@ class _PayLightningInvoiceScreenState
       ).withAutomationId(AutomationIds.payCancel),
     ];
   }
-
-  /// Terminal state once the hold invoice ran out: the reason and a way
-  /// back, never a dead QR left on screen.
-  Widget _expired(AppLocalizations l10n) => InvoiceTimeUpView(
-    title: l10n.invoiceExpiredTitle,
-    body: l10n.invoiceExpiredBody,
-    actionLabel: l10n.invoiceBackToBook,
-    onAction: () {
-      _navigated = true;
-      refreshTrades(ref);
-      context.go(AppRoute.home);
-    },
-  );
 }

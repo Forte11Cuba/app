@@ -3457,21 +3457,11 @@ class AppLocalizationsFr extends AppLocalizations {
   }
 
   @override
-  String get invoiceExpiredTitle => 'La facture a expiré';
-
-  @override
-  String get invoiceExpiredBody =>
-      'Elle n\'a pas été payée à temps : Mostro annule l\'opération et aucun sat n\'a quitté ton portefeuille.';
-
-  @override
   String get invoiceBackToBook => 'Retour au carnet d\'ordres';
 
   @override
-  String get invoiceTimeUpTitle => 'Le temps est écoulé';
-
-  @override
-  String get invoiceTimeUpBody =>
-      'La facture n\'a pas été envoyée à temps : Mostro annule l\'opération. Rien n\'a été engagé de ton côté.';
+  String get invoiceStepElapsed =>
+      'Le délai est écoulé. Mostro fermera cette étape sous peu si elle n\'est pas terminée.';
 
   @override
   String invoiceErrorWrongNetwork(String invoice, String node) {

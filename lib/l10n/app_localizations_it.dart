@@ -3450,21 +3450,11 @@ class AppLocalizationsIt extends AppLocalizations {
   }
 
   @override
-  String get invoiceExpiredTitle => 'La fattura è scaduta';
-
-  @override
-  String get invoiceExpiredBody =>
-      'Non è stata pagata in tempo: Mostro annulla l\'operazione e nessun sat ha lasciato il tuo wallet.';
-
-  @override
   String get invoiceBackToBook => 'Torna al registro ordini';
 
   @override
-  String get invoiceTimeUpTitle => 'Il tempo è scaduto';
-
-  @override
-  String get invoiceTimeUpBody =>
-      'La fattura non è stata inviata in tempo: Mostro annulla l\'operazione. Da parte tua non è stato impegnato nulla.';
+  String get invoiceStepElapsed =>
+      'Il tempo è scaduto. Mostro chiuderà a breve questo passaggio se non viene completato.';
 
   @override
   String invoiceErrorWrongNetwork(String invoice, String node) {

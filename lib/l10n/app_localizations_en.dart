@@ -3422,21 +3422,11 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
-  String get invoiceExpiredTitle => 'The invoice expired';
-
-  @override
-  String get invoiceExpiredBody =>
-      'It was not paid in time: Mostro cancels the trade and no sats left your wallet.';
-
-  @override
   String get invoiceBackToBook => 'Back to the order book';
 
   @override
-  String get invoiceTimeUpTitle => 'Time is up';
-
-  @override
-  String get invoiceTimeUpBody =>
-      'The invoice was not sent in time: Mostro cancels the trade. Nothing was committed on your side.';
+  String get invoiceStepElapsed =>
+      'Time is up. Mostro will close this step shortly unless it is completed.';
 
   @override
   String invoiceErrorWrongNetwork(String invoice, String node) {

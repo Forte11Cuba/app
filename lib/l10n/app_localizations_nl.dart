@@ -3447,21 +3447,11 @@ class AppLocalizationsNl extends AppLocalizations {
   }
 
   @override
-  String get invoiceExpiredTitle => 'De invoice is verlopen';
-
-  @override
-  String get invoiceExpiredBody =>
-      'Er is niet op tijd betaald: Mostro annuleert de trade en er zijn geen sats uit je wallet gegaan.';
-
-  @override
   String get invoiceBackToBook => 'Terug naar het orderboek';
 
   @override
-  String get invoiceTimeUpTitle => 'De tijd is om';
-
-  @override
-  String get invoiceTimeUpBody =>
-      'De invoice is niet op tijd verstuurd: Mostro annuleert de trade. Van jouw kant is er niets vastgelegd.';
+  String get invoiceStepElapsed =>
+      'De tijd is om. Mostro sluit deze stap binnenkort af als hij niet wordt voltooid.';
 
   @override
   String invoiceErrorWrongNetwork(String invoice, String node) {

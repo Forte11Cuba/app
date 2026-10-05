@@ -5776,35 +5776,17 @@ abstract class AppLocalizations {
   /// **'Lightning invoice QR code: {invoice}'**
   String invoiceQrSemantics(String invoice);
 
-  /// 13b terminal state when the hold invoice ran out
-  ///
-  /// In en, this message translates to:
-  /// **'The invoice expired'**
-  String get invoiceExpiredTitle;
-
-  /// 13b terminal state explanation
-  ///
-  /// In en, this message translates to:
-  /// **'It was not paid in time: Mostro cancels the trade and no sats left your wallet.'**
-  String get invoiceExpiredBody;
-
-  /// 13b terminal state action
+  /// Terminal state action of the bond invoice screens
   ///
   /// In en, this message translates to:
   /// **'Back to the order book'**
   String get invoiceBackToBook;
 
-  /// 13a terminal state when the buyer's invoice window ran out
+  /// Countdown band at 00:00 on the invoice screens: the local window ended, the daemon has not acted yet.
   ///
   /// In en, this message translates to:
-  /// **'Time is up'**
-  String get invoiceTimeUpTitle;
-
-  /// 13a terminal state explanation
-  ///
-  /// In en, this message translates to:
-  /// **'The invoice was not sent in time: Mostro cancels the trade. Nothing was committed on your side.'**
-  String get invoiceTimeUpBody;
+  /// **'Time is up. Mostro will close this step shortly unless it is completed.'**
+  String get invoiceStepElapsed;
 
   /// 13a validation error: the invoice is for another chain than the node's; both are LND network names like mainnet or testnet
   ///

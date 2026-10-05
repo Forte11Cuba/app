@@ -11,6 +11,7 @@ import 'package:mostro/features/order/widgets/invoice_widgets.dart';
 import 'package:mostro/features/settings/providers/nwc_provider.dart';
 import 'package:mostro/features/trades/providers/trades_providers.dart';
 import 'package:mostro/l10n/app_localizations.dart';
+import 'package:mostro/l10n/app_localizations_en.dart';
 import 'package:mostro/src/rust/api/types.dart';
 import '../../../support/fake_trades.dart';
 
@@ -23,6 +24,7 @@ Finder _semantics(String identifier) => find.byWidgetPredicate(
 /// seconds later. So 00:00 leaves the QR in place, and only the daemon's own
 /// message closes the step (#569).
 void main() {
+  final l10n = AppLocalizationsEn();
   final now = DateTime.utc(2026, 9, 12, 12);
   final nowSeconds = now.millisecondsSinceEpoch ~/ 1000;
 
@@ -69,6 +71,7 @@ void main() {
     });
     expect(_semantics('pay.invoice.text'), findsOneWidget);
     expect(find.byType(InvoiceTimeUpView), findsNothing);
+    expect(find.text(l10n.invoiceStepElapsed), findsNothing);
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
@@ -78,6 +81,7 @@ void main() {
     });
     expect(find.byType(InvoiceTimeUpView), findsNothing);
     expect(_semantics('pay.invoice.text'), findsOneWidget);
+    expect(find.text(l10n.invoiceStepElapsed), findsOneWidget);
     await tester.pumpWidget(const SizedBox.shrink());
   });
 }

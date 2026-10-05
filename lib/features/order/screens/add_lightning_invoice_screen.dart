@@ -845,26 +845,9 @@ class _AddLightningInvoiceScreenState
       // under the field rather than in the footer.
       resizeToAvoidBottomInset: true,
       appBar: appBar,
-      // At 00:00 the form goes: mostrod still accepts a late invoice until
-      // its scheduler cancels, but the screen does not invite one — same
-      // terminal state as 13b. A submission already in flight finishes.
-      body: ValueListenableBuilder<Duration?>(
-        valueListenable: invoiceRemaining,
-        builder:
-            (context, remaining, _) =>
-                remaining == Duration.zero && !_submitting
-                    ? InvoiceTimeUpView(
-                      title: l10n.invoiceTimeUpTitle,
-                      body: l10n.invoiceTimeUpBody,
-                      actionLabel: l10n.invoiceBackToBook,
-                      onAction: () {
-                        _navigated = true;
-                        refreshTrades(ref);
-                        context.go(AppRoute.home);
-                      },
-                    )
-                    : _scrollableForm(l10n, sats, trade),
-      ),
+      // The form stays at 00:00: the step ends when mostrod says so, and
+      // until then it still accepts an invoice (#569).
+      body: _scrollableForm(l10n, sats, trade),
     );
   }
 
@@ -924,6 +907,7 @@ class _AddLightningInvoiceScreenState
                           remaining: remaining,
                           sentence: l10n.invoiceTimeToSend,
                           hours: l10n.invoiceCountdownHours,
+                          elapsed: l10n.invoiceStepElapsed,
                         ),
                       ),
         ),

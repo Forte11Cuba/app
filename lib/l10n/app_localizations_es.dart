@@ -3448,21 +3448,11 @@ class AppLocalizationsEs extends AppLocalizations {
   }
 
   @override
-  String get invoiceExpiredTitle => 'La factura venció';
-
-  @override
-  String get invoiceExpiredBody =>
-      'No se pagó a tiempo: Mostro cancela la operación y ningún sat salió de tu billetera.';
-
-  @override
   String get invoiceBackToBook => 'Volver al libro de órdenes';
 
   @override
-  String get invoiceTimeUpTitle => 'Se acabó el tiempo';
-
-  @override
-  String get invoiceTimeUpBody =>
-      'La factura no se envió a tiempo: Mostro cancela la operación. De tu lado no se comprometió nada.';
+  String get invoiceStepElapsed =>
+      'El plazo terminó. Mostro cerrará este paso en breve si no se completa.';
 
   @override
   String invoiceErrorWrongNetwork(String invoice, String node) {
