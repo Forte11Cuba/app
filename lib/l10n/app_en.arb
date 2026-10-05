@@ -4351,6 +4351,6 @@
   },
   "messageMenuHint": "Open the message menu",
   "@messageMenuHint": {
-    "description": "Screen-reader hint of a chat message: what holding it opens"
+    "description": "Screen-reader hint of a chat message: what tapping it (or holding an attachment) opens"
   }
 }
