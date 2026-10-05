@@ -4200,5 +4200,17 @@ class AppLocalizationsFr extends AppLocalizations {
       'La clé du chat de cette transaction n\'est pas disponible sur cet appareil.';
 
   @override
+  String get moreReactions => 'Plus de réactions';
+
+  @override
+  String messageReactionLabel(String emoji) {
+    return 'Réaction : $emoji';
+  }
+
+  @override
+  String get reactionSendFailed =>
+      'Impossible d\'envoyer la réaction. Veuillez réessayer.';
+
+  @override
   String get messageMenuHint => 'Ouvrir le menu du message';
 }

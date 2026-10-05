@@ -4191,5 +4191,17 @@ class AppLocalizationsDe extends AppLocalizations {
       'Der Chat-Schlüssel dieses Trades ist auf diesem Gerät nicht verfügbar.';
 
   @override
+  String get moreReactions => 'Weitere Reaktionen';
+
+  @override
+  String messageReactionLabel(String emoji) {
+    return 'Reaktion: $emoji';
+  }
+
+  @override
+  String get reactionSendFailed =>
+      'Die Reaktion konnte nicht gesendet werden. Bitte versuche es erneut.';
+
+  @override
   String get messageMenuHint => 'Nachrichtenmenü öffnen';
 }

@@ -78,6 +78,7 @@ rust_types.ChatMessage _solverMessage(String content, {int createdAt = 1000}) =>
       isRead: true,
       hasAttachment: false,
       createdAt: intToPlatformInt64(createdAt),
+      reactions: const [],
     );
 
 /// Pumps the dispute chat with the trade row the card resolves its role and

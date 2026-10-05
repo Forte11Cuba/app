@@ -45,6 +45,7 @@ rust_types.ChatMessage _message({
   hasAttachment: attachment != null,
   attachment: attachment,
   createdAt: intToPlatformInt64(createdAt),
+  reactions: const [],
 );
 
 DisputeItem _dispute({

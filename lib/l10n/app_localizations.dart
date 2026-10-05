@@ -6916,6 +6916,24 @@ abstract class AppLocalizations {
   /// **'The chat key of this trade is not available on this device.'**
   String get shareChatKeyUnavailable;
 
+  /// «…» in a chat message's menu, and the title of the sheet with every emoji
+  ///
+  /// In en, this message translates to:
+  /// **'More reactions'**
+  String get moreReactions;
+
+  /// Screen-reader label of the reaction shown under a chat message
+  ///
+  /// In en, this message translates to:
+  /// **'Reaction: {emoji}'**
+  String messageReactionLabel(String emoji);
+
+  /// Snackbar shown when a reaction to a chat message could not be sent
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn\'t send the reaction. Please try again.'**
+  String get reactionSendFailed;
+
   /// Screen-reader hint of a chat message: what holding it opens
   ///
   /// In en, this message translates to:

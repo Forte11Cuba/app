@@ -707,6 +707,27 @@ pub struct ChatMessage {
     pub has_attachment: bool,
     pub attachment: Option<AttachmentInfo>,
     pub created_at: i64,
+    /// Reactions to this message (protocol chat.md, "Reactions"), at most one
+    /// per party: the newest that party sent. One with an empty `emoji` was
+    /// withdrawn; it is kept so a re-wrapped older reaction changes nothing.
+    /// Older stored messages have none, hence the default.
+    #[serde(default)]
+    pub reactions: Vec<ChatReaction>,
+}
+
+/// A party's reaction to a chat message: an inner kind 7 event naming the
+/// message by its inner id.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ChatReaction {
+    /// Trade pubkey of the party who reacted, from the verified inner event.
+    pub sender_pubkey: String,
+    /// The emoji, or empty when the reaction was withdrawn.
+    pub emoji: String,
+    /// Inner `created_at`: of a party's reactions to one message, the newest
+    /// holds.
+    pub created_at: i64,
+    /// Inner event id: breaks a tie between two reactions of the same second.
+    pub event_id: String,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

@@ -8,6 +8,7 @@ import 'package:mostro/core/app_theme.dart';
 import 'package:mostro/features/chat/attachments/attachment_flow.dart';
 import 'package:mostro/features/chat/attachments/upload_controller.dart';
 import 'package:mostro/features/chat/models/chat_list_rules.dart';
+import 'package:mostro/features/chat/models/reaction_rules.dart';
 import 'package:mostro/features/chat/providers/chat_list_provider.dart';
 import 'package:mostro/features/chat/providers/chat_providers.dart';
 import 'package:mostro/features/chat/widgets/info_panels.dart';
@@ -17,6 +18,7 @@ import 'package:mostro/features/chat/widgets/trade_state_header.dart';
 import 'package:mostro/features/chat/widgets/upload_bubble.dart';
 import 'package:mostro/features/notifications/models/notification_model.dart';
 import 'package:mostro/features/notifications/providers/notifications_provider.dart';
+import 'package:mostro/features/order/widgets/order_detail_cards.dart';
 import 'package:mostro/features/trades/providers/trades_providers.dart';
 import 'package:mostro/l10n/app_localizations.dart';
 import 'package:mostro/shared/widgets/bottom_nav_bar.dart';
@@ -90,6 +92,12 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
   /// the list for every incoming message made dedup O(history) per message.
   final Set<String> _seenIds = {};
 
+  /// Updates of messages not in the list yet: one can overtake its
+  /// message's arrival on the other stream, or the history load. Applied
+  /// as the message is added; bounded, oldest dropped first.
+  final Map<String, rust_types.ChatMessage> _earlyUpdates = {};
+  static const _maxEarlyUpdates = 256;
+
   /// Coalesces mark-read across a burst. A history replay would otherwise
   /// fire one bridge call per message.
   Timer? _markReadDebounce;
@@ -148,7 +156,7 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
           // not the solver (PR #254 review).
           if (msg.messageType != rust_types.MessageType.peer) continue;
           if (_seenIds.add(msg.id)) {
-            _messages.add(msg);
+            _messages.add(_withEarlyUpdate(msg));
           }
         }
         _messages.sort((a, b) => a.createdAt.compareTo(b.createdAt));
@@ -260,7 +268,7 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
     // Every path that appends to [_messages] must go through [_seenIds], or
     // an echo of this send arriving on the stream would render it twice.
     if (_seenIds.add(sent.id)) {
-      setState(() => _messages.add(sent));
+      setState(() => _messages.add(_withEarlyUpdate(sent)));
     }
     _scrollToBottom();
     ref
@@ -308,7 +316,7 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
     // extent only grows at the next layout, so reading here keeps the
     // decision about the list they were looking at, whenever that lands.
     final wasAtBottom = _isPinnedToBottom();
-    setState(() => _messages.add(msg));
+    setState(() => _messages.add(_withEarlyUpdate(msg)));
     // Only follow the conversation if the user was already at the bottom;
     // otherwise an arriving message yanks them away from what they were
     // reading, and a burst starts one animation per message. Nor while a
@@ -325,6 +333,53 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
             rooms: ref.read(chatRoomsNotifierProvider),
           ),
         );
+  }
+
+  /// Replaces the copy of a message already in the list, unless it carries
+  /// older reactions than the one shown (a send's reply landing after the
+  /// update of a later send). One not shown yet waits in [_earlyUpdates]:
+  /// adding stays with the history and the incoming stream.
+  void _onMessageUpdated(rust_types.ChatMessage msg) {
+    if (msg.messageType != rust_types.MessageType.peer) return;
+    final index = _messages.indexWhere((m) => m.id == msg.id);
+    if (index < 0) {
+      final waiting = _earlyUpdates[msg.id];
+      if (waiting != null && !reactionsNotOlder(msg, waiting)) return;
+      _earlyUpdates.remove(msg.id);
+      if (_earlyUpdates.length >= _maxEarlyUpdates) {
+        _earlyUpdates.remove(_earlyUpdates.keys.first);
+      }
+      _earlyUpdates[msg.id] = msg;
+      return;
+    }
+    if (!reactionsNotOlder(msg, _messages[index])) return;
+    setState(() => _messages[index] = msg);
+  }
+
+  /// [msg], or the update of it that arrived first when that one is not
+  /// older.
+  rust_types.ChatMessage _withEarlyUpdate(rust_types.ChatMessage msg) {
+    final update = _earlyUpdates.remove(msg.id);
+    return update != null && reactionsNotOlder(update, msg) ? update : msg;
+  }
+
+  /// Sends the user's reaction to the counterpart's [msg]; an empty [emoji]
+  /// withdraws it. Never a preview or an unread message.
+  Future<void> _onReact(rust_types.ChatMessage msg, String emoji) async {
+    final l10n = AppLocalizations.of(context);
+    try {
+      final updated = await messages_api.sendReaction(
+        tradeId: widget.orderId,
+        messageId: msg.id,
+        emoji: emoji,
+      );
+      if (!mounted) return;
+      _onMessageUpdated(updated);
+    } catch (e) {
+      debugPrint('[chat] sendReaction failed: $e');
+      if (!mounted) return;
+      showOrderDetailSnackBar(context, l10n.reactionSendFailed);
+    }
   }
 
   // ── Helpers ───────────────────────────────────────────────────────────────
@@ -451,6 +506,11 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
       incomingMessageProvider(widget.orderId),
       (_, next) => next.whenData(_onIncomingMessage),
     );
+    // A message already shown that changed: a reaction to it.
+    ref.listen<AsyncValue<rust_types.ChatMessage>>(
+      messageUpdatesProvider(widget.orderId),
+      (_, next) => next.whenData(_onMessageUpdated),
+    );
 
     // Resolve the peer identity from the trade row, live. Listening (rather
     // than a one-shot read) keeps the autoDispose provider chain alive, and
@@ -475,6 +535,13 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
     }
 
     final uploads = ref.watch(chatUploadsProvider(widget.orderId));
+
+    // A closed or still-resolving chat takes no reaction, as it takes no
+
+    // message: offering one would only end in a failure.
+
+    final canReact =
+        ref.watch(chatRowStateProvider(widget.orderId)).canCompose;
 
     final screenWidth = MediaQuery.sizeOf(context).width;
     final showSidePanel = screenWidth >= AppBreakpoints.tablet;
@@ -570,8 +637,13 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
                     createdAt: msg.createdAt.toInt(),
                     messageType: _msgTypeStr(msg.messageType),
                     attachment: msg.attachment,
+                    reaction: shownReaction(msg),
                   ),
                   peerColorHue: room.peerColorHue,
+                  onReact:
+                      msg.isMine || !canReact
+                          ? null
+                          : (emoji) => _onReact(msg, emoji),
                 );
               },
             );

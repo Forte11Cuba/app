@@ -3,31 +3,50 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:mostro/core/app_theme.dart';
+import 'package:mostro/features/chat/widgets/message_actions_menu.dart';
 import 'package:mostro/features/chat/widgets/message_bubble.dart';
 import 'package:mostro/l10n/app_localizations.dart';
 
 const _text = 'CBU 0000003100010000000001';
 
 /// The long-press menu of a P2P chat message: held for a second, a text
-/// message offers Copy.
+/// message offers Copy, and the counterpart's the reactions.
 void main() {
-  ChatMessage textMessage({bool isMine = false}) => ChatMessage(
-    id: 'm1',
-    tradeId: 'order-chat',
-    content: _text,
-    isMine: isMine,
-    isRead: true,
-    hasAttachment: false,
-    createdAt: 1000,
-  );
+  ChatMessage textMessage({
+    bool isMine = false,
+    String? reaction,
+    String content = _text,
+  }) =>
+      ChatMessage(
+        id: 'm1',
+        tradeId: 'order-chat',
+        content: content,
+        isMine: isMine,
+        isRead: true,
+        hasAttachment: false,
+        createdAt: 1000,
+        reaction: reaction,
+      );
+
+  /// What the bubble asked to send, in order.
+  late List<String> reacted;
+
+  setUp(() => reacted = []);
 
   Future<void> pump(
     WidgetTester tester,
     ChatMessage message, {
     Locale locale = const Locale('en'),
     bool atBottom = false,
+    bool midScreen = false,
     bool inLongList = false,
   }) async {
+    // As the chat screen does: only the counterpart's messages take one.
+    final bubble = MessageBubble(
+      message: message,
+      peerColorHue: 200,
+      onReact: message.isMine ? null : (emoji) async => reacted.add(emoji),
+    );
     await tester.pumpWidget(
       MaterialApp(
         theme: buildDarkTheme(),
@@ -36,23 +55,20 @@ void main() {
         supportedLocales: AppLocalizations.supportedLocales,
         home: Scaffold(
           // A chat lists its newest message at the bottom.
-          body: switch ((atBottom, inLongList)) {
-            (true, _) => ListView(
-                reverse: true,
-                children: [
-                  MessageBubble(message: message, peerColorHue: 200),
-                ],
+          body: switch ((atBottom, midScreen, inLongList)) {
+            (true, _, _) => ListView(reverse: true, children: [bubble]),
+            (_, true, _) => ListView(
+                children: [const SizedBox(height: 300), bubble],
               ),
             // 300 dp down a list that scrolls far past it.
-            (_, true) => ListView.builder(
+            (_, _, true) => ListView.builder(
                 itemCount: 40,
-                itemBuilder: (_, i) => i == 1
-                    ? MessageBubble(message: message, peerColorHue: 200)
-                    : const SizedBox(height: 300),
+                itemBuilder: (_, i) =>
+                    i == 1 ? bubble : const SizedBox(height: 300),
               ),
-            _ => Center(
-                child: MessageBubble(message: message, peerColorHue: 200),
-              ),
+            // The bubble's column takes the whole height: the message
+            // sits at the top.
+            _ => Center(child: bubble),
           },
         ),
       ),
@@ -245,12 +261,199 @@ void main() {
     semantics.dispose();
   });
 
-  testWidgets('own messages open the same menu', (tester) async {
+  testWidgets('own messages open the menu without reactions', (
+    tester,
+  ) async {
     await pump(tester, textMessage(isMine: true));
 
     await press(tester, const Duration(seconds: 1));
 
     expect(find.text('Copy'), findsOneWidget);
+    expect(find.text('❤️'), findsNothing);
+  });
+
+  group('reactions', () {
+    testWidgets('the counterpart\'s message offers six and «…»', (
+      tester,
+    ) async {
+      final semantics = tester.ensureSemantics();
+      await pump(tester, textMessage());
+
+      await press(tester, const Duration(seconds: 1));
+
+      for (final emoji in quickReactions) {
+        expect(find.text(emoji), findsOneWidget);
+      }
+      expect(find.bySemanticsLabel('More reactions'), findsOneWidget);
+      semantics.dispose();
+    });
+
+    testWidgets('picking one sends it and closes the menu', (tester) async {
+      await pump(tester, textMessage());
+
+      await press(tester, const Duration(seconds: 1));
+      await tester.tap(find.text('👍'));
+      await tester.pumpAndSettle();
+
+      expect(reacted, ['👍']);
+      expect(find.text('Copy'), findsNothing);
+    });
+
+    testWidgets('the current one is marked, and picking it withdraws it', (
+      tester,
+    ) async {
+      final semantics = tester.ensureSemantics();
+      await pump(tester, textMessage(reaction: '😂'));
+
+      await press(tester, const Duration(seconds: 1));
+      // The last one is the menu's; the first, the chip under the message.
+      final current = find.text('😂').last;
+      expect(
+        tester.getSemantics(current),
+        isSemantics(isButton: true, isSelected: true),
+      );
+      await tester.tap(current);
+      await tester.pumpAndSettle();
+
+      expect(reacted, ['']);
+      semantics.dispose();
+    });
+
+    testWidgets('❤ from the full list marks the quick ❤️', (tester) async {
+      final semantics = tester.ensureSemantics();
+      await pump(tester, textMessage(reaction: '❤'));
+
+      await press(tester, const Duration(seconds: 1));
+
+      expect(
+        tester.getSemantics(find.text('❤️')),
+        isSemantics(isButton: true, isSelected: true),
+      );
+      semantics.dispose();
+    });
+
+    testWidgets('they sit above the message and the actions under it', (
+      tester,
+    ) async {
+      await pump(tester, textMessage(), midScreen: true);
+      final bubble = tester.getRect(find.text(_text).first);
+
+      await press(tester, const Duration(seconds: 1));
+
+      expect(tester.getRect(find.text('❤️')).bottom, lessThan(bubble.top));
+      expect(tester.getRect(find.text('Copy')).top, greaterThan(bubble.bottom));
+    });
+
+    testWidgets('a message at the top gets both under it', (tester) async {
+      await pump(tester, textMessage());
+      final bubble = tester.getRect(find.text(_text).first);
+
+      await press(tester, const Duration(seconds: 1));
+      final reactions = tester.getRect(find.text('❤️'));
+
+      expect(reactions.top, greaterThan(bubble.bottom));
+      expect(tester.getRect(find.text('Copy')).top, greaterThan(reactions.bottom));
+    });
+
+    testWidgets('a message at the bottom gets both above it, on screen', (
+      tester,
+    ) async {
+      await pump(tester, textMessage(), atBottom: true);
+      final bubble = tester.getRect(find.text(_text).first);
+
+      await press(tester, const Duration(seconds: 1));
+      final reactions = tester.getRect(find.text('❤️'));
+      final copy = tester.getRect(find.text('Copy'));
+
+      expect(reactions.bottom, lessThan(copy.top));
+      expect(copy.bottom, lessThan(bubble.top));
+      expect(reactions.top, greaterThanOrEqualTo(0));
+    });
+
+    testWidgets('«…» opens every emoji and sends the one picked', (
+      tester,
+    ) async {
+      await pump(tester, textMessage());
+
+      await press(tester, const Duration(seconds: 1));
+      await tester.tap(find.byIcon(Icons.more_horiz_rounded));
+      await tester.pumpAndSettle();
+      expect(find.text('More reactions'), findsOneWidget);
+      await tester.tap(find.text('😀').first);
+      await tester.pumpAndSettle();
+
+      expect(reacted, ['😀']);
+      expect(find.text('More reactions'), findsNothing);
+    });
+
+    testWidgets('a tall message keeps the reactions clear of the actions', (
+      tester,
+    ) async {
+      // Nearly the whole screen: no room above it or below it.
+      final long = List.filled(26, 'line').join('\n');
+      await pump(tester, textMessage(content: long));
+      final bubble = tester.getRect(find.text(long).first);
+      final gesture = await tester.startGesture(
+        tester.getCenter(find.text(long).first),
+      );
+      await tester.pump(const Duration(seconds: 1));
+      await gesture.up();
+      await tester.pumpAndSettle();
+
+      final reactions = tester.getRect(find.text('❤️'));
+      final copy = tester.getRect(find.text('Copy'));
+      expect(copy.top, lessThan(bubble.bottom), reason: 'over the message');
+      expect(reactions.bottom, lessThan(copy.top));
+      expect(reactions.top, greaterThanOrEqualTo(0));
+      expect(copy.bottom, lessThanOrEqualTo(600));
+      await tester.tap(find.text('❤️'));
+      expect(reacted, ['❤️'], reason: 'the reactions stay tappable');
+    });
+
+    testWidgets('picking the current one from «…» withdraws it too', (
+      tester,
+    ) async {
+      await pump(tester, textMessage(reaction: '😀'));
+
+      await press(tester, const Duration(seconds: 1));
+      await tester.tap(find.byIcon(Icons.more_horiz_rounded));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('😀').last);
+      await tester.pumpAndSettle();
+
+      expect(reacted, ['']);
+    });
+
+    testWidgets('every emoji fits 320 dp at 2x text in German', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(320, 640);
+      tester.view.devicePixelRatio = 1;
+      tester.platformDispatcher.textScaleFactorTestValue = 2;
+      addTearDown(tester.view.reset);
+      addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+      await pump(tester, textMessage(), locale: const Locale('de'));
+
+      await press(tester, const Duration(seconds: 1));
+      await tester.tap(find.byIcon(Icons.more_horiz_rounded));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Weitere Reaktionen'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      final cell = tester.getSize(
+        find.ancestor(of: find.text('😀').last, matching: find.byType(InkWell)).first,
+      );
+      expect(cell.width, greaterThanOrEqualTo(48));
+    });
+
+    testWidgets('a reaction shows under its message', (tester) async {
+      await pump(tester, textMessage(reaction: '👍'));
+
+      expect(
+        tester.getRect(find.text('👍')).top,
+        greaterThan(tester.getRect(find.text(_text)).bottom),
+      );
+    });
   });
 
   group('clipboard', () {
@@ -319,5 +522,15 @@ void main() {
 
     expect(find.text('Kopieren'), findsOneWidget);
     expect(tester.takeException(), isNull);
+    // Too narrow for seven 48-dp targets: the last quick reaction gives way
+    // to «…», which still offers it.
+    expect(find.text('❤️'), findsOneWidget);
+    expect(find.text('😢'), findsNothing);
+    final more = find.ancestor(
+      of: find.byIcon(Icons.more_horiz_rounded),
+      matching: find.byType(InkResponse),
+    );
+    expect(tester.getSize(more.first), const Size(48, 48));
+    expect(tester.getRect(more.first).right, lessThanOrEqualTo(320));
   });
 }

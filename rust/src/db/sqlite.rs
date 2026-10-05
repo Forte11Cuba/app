@@ -1219,6 +1219,7 @@ mod tests {
             has_attachment: false,
             attachment: None,
             created_at: 2,
+            reactions: Vec::new(),
         };
         storage.save_message(&msg).await.unwrap();
 
@@ -1867,6 +1868,7 @@ mod tests {
                     has_attachment: false,
                     attachment: None,
                     created_at,
+                    reactions: Vec::new(),
                 })
                 .await
                 .unwrap();
@@ -1908,6 +1910,7 @@ mod tests {
                 has_attachment: false,
                 attachment: None,
                 created_at: 1,
+                reactions: Vec::new(),
             })
             .await
             .unwrap();
@@ -2042,6 +2045,7 @@ mod tests {
                 has_attachment: false,
                 attachment: None,
                 created_at: 1,
+                reactions: Vec::new(),
             })
             .await
             .unwrap();
@@ -2404,6 +2408,7 @@ mod tests {
                 has_attachment: false,
                 attachment: None,
                 created_at: 2,
+                reactions: Vec::new(),
             })
             .await
             .unwrap();
