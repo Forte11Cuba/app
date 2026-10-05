@@ -709,6 +709,9 @@ class _BackupBanner extends StatelessWidget {
 /// success, and this banner is the one trace the user gets. Informational
 /// only — the retry belongs to the next identity creation or import, the
 /// point where the tables hold nothing a live identity would lose (#555).
+///
+/// A live region (DS-A11Y-2): the marker is read after the screen is up, so
+/// the banner can appear while the user is already on it.
 class _PendingWipeBanner extends StatelessWidget {
   const _PendingWipeBanner();
 
@@ -718,44 +721,48 @@ class _PendingWipeBanner extends StatelessWidget {
     final pal = BackupPalette.of(context);
     final l10n = AppLocalizations.of(context);
 
-    return Material(
-      color: pal.amberFill,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(18),
-        side: BorderSide(color: pal.amberBorder),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Icon(Icons.warning_amber_rounded, size: 20, color: pal.amber),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    l10n.pendingWipeBannerTitle,
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w700,
-                      color: pal.amberTitle,
+    return Semantics(
+      container: true,
+      liveRegion: true,
+      child: Material(
+        color: pal.amberFill,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(18),
+          side: BorderSide(color: pal.amberBorder),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(Icons.warning_amber_rounded, size: 20, color: pal.amber),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      l10n.pendingWipeBannerTitle,
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                        color: pal.amberTitle,
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    l10n.pendingWipeBannerBody,
-                    style: TextStyle(
-                      fontSize: 12,
-                      height: 1.4,
-                      color: book.textMuted,
+                    const SizedBox(height: 2),
+                    Text(
+                      l10n.pendingWipeBannerBody,
+                      style: TextStyle(
+                        fontSize: 12,
+                        height: 1.4,
+                        color: book.textMuted,
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
