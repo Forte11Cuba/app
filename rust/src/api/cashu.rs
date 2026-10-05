@@ -85,10 +85,27 @@ fn lifecycle_lock() -> &'static tokio::sync::Mutex<()> {
 /// wallet stale — the funds it manages belong to the previous node's mint — and
 /// that is true both of a wallet about to be installed and of one already
 /// running, so both paths ask this question.
+///
+/// Also how an order's own mint is matched against the wallet's. Both compare
+/// in the daemon's canonical form ([`canonical_mint`]): the node lists its
+/// mints as configured but publishes an order's mint canonicalised, so the
+/// same mint can arrive spelled two ways.
 fn same_mint(bound_to: &str, resolved_now: Option<&str>) -> bool {
     resolved_now
-        .map(|current| current.trim_end_matches('/') == bound_to.trim_end_matches('/'))
+        .map(|current| canonical_mint(current) == canonical_mint(bound_to))
         .unwrap_or(false)
+}
+
+/// A mint URL as mostrod stores an order's mint (`normalize_mint_url`,
+/// MostroP2P/mostro#1047): parsed, so scheme and host are lower-cased and a
+/// default port dropped, without a trailing slash. A value that does not
+/// parse is compared as written, minus that slash.
+fn canonical_mint(url: &str) -> String {
+    let trimmed = url.trim();
+    match nostr_sdk::prelude::Url::parse(trimmed) {
+        Ok(parsed) => parsed.as_str().trim_end_matches('/').to_string(),
+        Err(_) => trimmed.trim_end_matches('/').to_string(),
+    }
 }
 
 /// A handle to the live wallet, once it is established that it is the wallet
@@ -965,6 +982,15 @@ mod tests {
         // Trailing slashes are a formatting difference, not a different mint.
         assert!(same_mint(mint, Some("https://mint.example.com/")));
         assert!(same_mint("https://mint.example.com/", Some(mint)));
+        // So are host case and a default port: the node lists a mint as
+        // configured, and publishes an order's mint canonicalised.
+        assert!(same_mint(mint, Some("HTTPS://Mint.Example.com:443/")));
+        assert!(same_mint(
+            "http://Mint.example.com:80",
+            Some("http://mint.example.com")
+        ));
+        // A port that is not the default is a different mint.
+        assert!(!same_mint(mint, Some("https://mint.example.com:8443")));
 
         // The node switched to a different Cashu node — drop it.
         assert!(!same_mint(mint, Some("https://other.example.com")));

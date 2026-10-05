@@ -39,13 +39,18 @@ fn trade_key_map() -> &'static std::sync::RwLock<HashMap<String, u32>> {
 }
 
 /// Ids the DB has already been asked about and did not have.
-/// Persist the trade pubkeys the daemon stated against a stored trade, if it
-/// exists. The Cashu escrow is locked to these keys (phase C5).
+/// Persist what an escrow request states against a stored trade, if it
+/// exists: the trade pubkeys the Cashu escrow is locked to (phase C5), and
+/// the order's mint (mostro#1047).
 ///
 /// Read-modify-write rather than a new `Storage` method: this runs once per
 /// order, on a message the daemon sends exactly once.
-async fn store_trade_pubkeys(order_id: &str, pubkeys: &crate::mostro::pending::TradePubkeys) {
-    if pubkeys.is_empty() {
+async fn store_escrow_request_fields(
+    order_id: &str,
+    pubkeys: &crate::mostro::pending::TradePubkeys,
+    mint: Option<&str>,
+) {
+    if pubkeys.is_empty() && mint.is_none() {
         return;
     }
     let Some(db) = crate::db::app_db::db() else {
@@ -62,11 +67,17 @@ async fn store_trade_pubkeys(order_id: &str, pubkeys: &crate::mostro::pending::T
                 trade.seller_trade_pubkey = pubkeys.seller.clone();
                 changed = true;
             }
+            if let Some(mint) = mint {
+                if trade.order.cashu_mint_url.as_deref() != Some(mint) {
+                    trade.order.cashu_mint_url = Some(mint.to_string());
+                    changed = true;
+                }
+            }
             if changed {
                 if let Err(e) = persist_trade_row(db, &trade).await {
                     log::warn!("[orders] failed to persist trade pubkeys for {order_id}: {e}");
                 }
-                // The lock-escrow screen reads these keys off the row.
+                // The lock-escrow screen reads these off the row.
                 crate::api::trade_touch::touch_trade(order_id);
             }
         }
@@ -4154,10 +4165,17 @@ async fn dispatch_mostro_message(
             // The escrow request reaches a *maker* seller here rather than
             // through the take waiter, and it is the only message carrying the
             // counterparty's per-order trade key. Without this the maker path
-            // has no buyer key to lock a Cashu escrow to.
-            store_trade_pubkeys(
+            // has no buyer key to lock a Cashu escrow to. It also names the
+            // order's mint (mostro#1047), which a maker's own row lacks: the
+            // lock checks it before any swap.
+            let escrow_mint = match &kind.payload {
+                Some(mostro_core::message::Payload::Order(so)) => so.cashu_mint_url.as_deref(),
+                _ => None,
+            };
+            store_escrow_request_fields(
                 &order_id,
                 &crate::mostro::pending::trade_pubkeys_from_payload(&kind.payload),
+                escrow_mint,
             )
             .await;
             // Map action → OrderStatus for DB sync (shared with the take
@@ -19732,9 +19750,11 @@ mod tests {
     }
 
     /// The escrow request is the only message naming the buyer's per-order
-    /// trade key; the escrow is locked to it, so it must reach the row.
+    /// trade key; the escrow is locked to it, so it must reach the row. It
+    /// also names the order's mint (mostro#1047), which a maker's own row
+    /// lacks and the lock checks before any swap.
     #[tokio::test]
-    async fn the_escrow_request_stores_both_trade_keys_on_the_row() {
+    async fn the_escrow_request_stores_both_trade_keys_and_the_mint_on_the_row() {
         let db = bond_test_db().await;
         let order_uuid = uuid::Uuid::new_v4();
         let order_id = order_uuid.to_string();
@@ -19747,6 +19767,7 @@ mod tests {
         request.status = Some(mostro_core::order::Status::WaitingPayment);
         request.buyer_trade_pubkey = Some(buyer.to_string());
         request.seller_trade_pubkey = Some(seller.to_string());
+        request.cashu_mint_url = Some("https://mint.a.com".to_string());
 
         dispatch_mostro_message(
             daemon_message(
@@ -19764,6 +19785,10 @@ mod tests {
         let row = db.get_trade_by_order_id(&order_id).await.unwrap().unwrap();
         assert_eq!(row.buyer_trade_pubkey.as_deref(), Some(buyer));
         assert_eq!(row.seller_trade_pubkey.as_deref(), Some(seller));
+        assert_eq!(
+            row.order.cashu_mint_url.as_deref(),
+            Some("https://mint.a.com")
+        );
     }
 
     /// A `cant-do` on the maker's cancel nonce reaches the cancel, and the
