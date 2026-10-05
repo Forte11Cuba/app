@@ -1188,6 +1188,10 @@ class AppLocalizationsFr extends AppLocalizations {
       'Les données de l\'utilisateur précédent n\'ont pas pu être effacées de cet appareil : le nouvel utilisateur n\'a donc pas été configuré. Veuillez réessayer.';
 
   @override
+  String get wipeNotRecordedMessage =>
+      'L\'utilisateur actuel n\'a pas pu être supprimé en toute sécurité : rien n\'a donc été modifié. Veuillez réessayer.';
+
+  @override
   String get failedToSaveBackupStatusMessage =>
       'Échec de l\'enregistrement de l\'état de la sauvegarde. Veuillez réessayer.';
 

@@ -1184,6 +1184,10 @@ class AppLocalizationsNl extends AppLocalizations {
       'De gegevens van de vorige gebruiker konden niet van dit apparaat worden verwijderd, dus de nieuwe gebruiker is niet ingesteld. Probeer het opnieuw.';
 
   @override
+  String get wipeNotRecordedMessage =>
+      'De huidige gebruiker kon niet veilig worden verwijderd, dus er is niets gewijzigd. Probeer het opnieuw.';
+
+  @override
   String get failedToSaveBackupStatusMessage =>
       'De back-upstatus kon niet worden opgeslagen. Probeer het opnieuw.';
 

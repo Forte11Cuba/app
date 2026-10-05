@@ -150,12 +150,21 @@ it (issue #533).
 caches, the push token and toggle, developer overrides. They belong to the
 device, not to the identity.
 
+Before giving anything up, the deletion records the `identity_wipe_pending`
+settings key — device-scoped on purpose, since the wipe that would drop it is
+the wipe that may fail — holding the identity's public key; a successful wipe
+clears it. A marker an earlier deletion left stays as it is. When the marker
+cannot be written or read, or the session has no database, the deletion is
+refused with `WipeNotRecorded` while the identity is still loaded and whole:
+deleting without it would let the replacement install over the rows a failed
+wipe kept, with nothing left to say so. A crash between the marker and the
+wipe leaves the identity's mnemonic in secure storage, so the next launch
+reloads it and drops the marker (below).
+
 A failed wipe is never turned into a failed deletion: by then the identity
 is already gone. It is reported **after** the log clear (so the failure is
 the first line of the fresh history, worded without orders or
-counterparties), and it persists the `identity_wipe_pending` settings key —
-device-scoped on purpose, since the wipe that would drop it is the wipe that
-failed — holding the deleted identity's public key. `create_identity` and
+counterparties), and leaves the marker recorded ahead. `create_identity` and
 `import_from_mnemonic` retry the wipe off that marker while the slot is
 empty, clear it on success and refuse the new identity on failure. A refused
 replacement leaves the deleted identity's mnemonic in secure storage, so the
@@ -167,7 +176,8 @@ half — cached providers and the notifications store — is
 `resetIdentityScopedState`, run by the Account screen after a generate and,
 on import, **before** the recovery.
 
-**Errors**: `NoIdentity`.
+**Errors**: `NoIdentity`; `WipeNotRecorded` when the pending-wipe marker
+cannot be recorded (nothing deleted, the identity stays loaded).
 
 ---
 

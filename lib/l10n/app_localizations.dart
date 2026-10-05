@@ -2164,6 +2164,12 @@ abstract class AppLocalizations {
   /// **'The previous user\'s data could not be removed from this device, so the new user was not set up. Please try again.'**
   String get pendingWipeBlockedMessage;
 
+  /// Snackbar shown when generating or importing a user is refused before the current identity is deleted, because the device could not record that its data wipe is pending (issue #555)
+  ///
+  /// In en, this message translates to:
+  /// **'The current user could not be removed safely, so nothing was changed. Please try again.'**
+  String get wipeNotRecordedMessage;
+
   /// Snackbar shown when persisting the backup-complete status fails in the backup ritual
   ///
   /// In en, this message translates to:

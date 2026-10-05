@@ -1188,6 +1188,10 @@ class AppLocalizationsEs extends AppLocalizations {
       'No se pudieron borrar de este dispositivo los datos del usuario anterior, así que no se configuró el nuevo usuario. Inténtalo de nuevo.';
 
   @override
+  String get wipeNotRecordedMessage =>
+      'No se pudo eliminar el usuario actual de forma segura, así que no se cambió nada. Inténtalo de nuevo.';
+
+  @override
   String get failedToSaveBackupStatusMessage =>
       'No se pudo guardar el estado del respaldo. Inténtalo de nuevo.';
 

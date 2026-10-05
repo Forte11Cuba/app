@@ -392,8 +392,21 @@ pub async fn delete_identity() -> Result<()> {
 /// (`clear_identity_data_wipes_the_identity_and_keeps_the_device`,
 /// `clearing_the_store_leaves_no_chats_and_no_unread_count`).
 async fn delete_identity_inner(wipe_data: bool) -> Result<()> {
-    if identity_lock().read().await.is_none() {
+    let Some(owner) = identity_lock()
+        .read()
+        .await
+        .as_ref()
+        .map(|state| state.identity_info.public_key.clone())
+    else {
         bail!("NoIdentity");
+    };
+    // Before anything of the identity is given up: a wipe that fails later
+    // leaves this marker behind, so no replacement installs over the rows it
+    // kept. A marker that cannot be recorded refuses the deletion here, while
+    // the identity is still whole (issue #555). The lifecycle test's
+    // `wipe_data: false` deletes no rows, so it leaves no intent either.
+    if wipe_data {
+        record_wipe_intent(crate::db::app_db::db(), &owner).await?;
     }
     // While the identity still exists: its relay subscriptions are given
     // back first, so nothing of the old user's keeps arriving afterwards.
@@ -409,23 +422,17 @@ async fn delete_identity_inner(wipe_data: bool) -> Result<()> {
     // between the two.
     IDENTITY_GENERATION.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     drop(guard);
-    let owner = state.identity_info.public_key;
+    drop(state);
 
     // The push server must stop waking this device for keys the user no
     // longer holds; the registrations name pubkeys only, so no key is needed.
     crate::api::push::unregister_all().await;
 
+    // A memory-only session (`init_db` failed) only gets here without a
+    // wipe: `record_wipe_intent` refuses the real deletion when there is no
+    // database to hold the marker.
     let cleanup_failures = match crate::db::app_db::db() {
-        Some(db) => wipe_identity_rows(db, wipe_data, &owner).await,
-        // Memory-only session (`init_db` failed): rows persisted by earlier
-        // sessions are still in the store file, and with no database the
-        // retry marker cannot be persisted either — the report is all there
-        // is (issue #555).
-        None if wipe_data => vec![
-            "no database this session — rows persisted by earlier sessions \
-             stay on disk, and no retry marker could be saved"
-                .to_string(),
-        ],
+        Some(db) => wipe_identity_rows(db, wipe_data).await,
         None => Vec::new(),
     };
     if wipe_data {
@@ -442,20 +449,57 @@ async fn delete_identity_inner(wipe_data: bool) -> Result<()> {
     Ok(())
 }
 
+/// Record that `owner`'s data is about to be wiped, before the deletion
+/// gives anything up (issue #555): [`settings_keys::IDENTITY_WIPE_PENDING`],
+/// holding `owner`'s public key, makes the next identity creation or import
+/// retry a wipe that then fails ([`retry_pending_wipe`]), and tells a reload
+/// of that same identity the rows are its own ([`release_own_wipe_marker`]).
+///
+/// Fails with the `WipeNotRecorded` marker, and the caller must not delete,
+/// when the marker cannot be written — or read, or there is no database to
+/// hold it: a deletion that went ahead without it would let the replacement
+/// install over the previous identity's rows, with nothing left to say so.
+/// Written ahead, a crash between this and the wipe leaves the marker with
+/// the identity still in Flutter's secure storage, which the launch reload
+/// releases. A marker already there names an earlier deletion whose rows are
+/// still on disk, and stays: overwritten, the reload of `owner` would
+/// release it and keep them.
+async fn record_wipe_intent<S: Storage>(db: Option<&S>, owner: &str) -> Result<()> {
+    use crate::db::settings_keys::IDENTITY_WIPE_PENDING;
+
+    let Some(db) = db else {
+        crate::api::logging::blog_warn(
+            "identity",
+            "no database this session — the identity is kept, since rows persisted by \
+             earlier sessions could not be wiped or marked for a retry"
+                .to_string(),
+        );
+        bail!("WipeNotRecorded");
+    };
+    let written = match db.get_setting(IDENTITY_WIPE_PENDING).await {
+        Ok(Some(_)) => return Ok(()),
+        Ok(None) => db.set_setting(IDENTITY_WIPE_PENDING, owner).await,
+        Err(e) => Err(e),
+    };
+    if let Err(e) = written {
+        crate::api::logging::blog_warn(
+            "identity",
+            format!("the wipe-pending marker could not be recorded — the identity is kept: {e}"),
+        );
+        bail!("WipeNotRecorded");
+    }
+    Ok(())
+}
+
 /// Clear what the identity persisted, returning a description per failure
 /// instead of failing: by the time this runs the identity is already gone,
 /// and the contract is that a failed cleanup is reported, never turned into
 /// a failed deletion.
 ///
-/// A failed data wipe additionally persists
-/// [`settings_keys::IDENTITY_WIPE_PENDING`], holding `owner`'s public key,
-/// so the next identity creation or import retries it
-/// ([`retry_pending_wipe`]) — without the marker the previous identity's
-/// trades and chats stay on disk for the life of the install — and a reload
-/// of that same identity knows the rows are its own
-/// ([`release_own_wipe_marker`], issue #555). The returned strings outlive
-/// `clear_logs()`, so they must name no order or counterparty.
-async fn wipe_identity_rows<S: Storage>(db: &S, wipe_data: bool, owner: &str) -> Vec<String> {
+/// A failed data wipe leaves the marker [`record_wipe_intent`] wrote before
+/// the deletion began; a successful one clears it. The returned strings
+/// outlive `clear_logs()`, so they must name no order or counterparty.
+async fn wipe_identity_rows<S: Storage>(db: &S, wipe_data: bool) -> Vec<String> {
     use crate::db::settings_keys::IDENTITY_WIPE_PENDING;
 
     let mut failures = Vec::new();
@@ -482,12 +526,8 @@ async fn wipe_identity_rows<S: Storage>(db: &S, wipe_data: bool, owner: &str) ->
                     failures.push(format!("wipe-pending marker kept: {e}"));
                 }
             }
-            Err(e) => {
-                failures.push(format!("identity data rows kept: {e}"));
-                if let Err(e) = db.set_setting(IDENTITY_WIPE_PENDING, owner).await {
-                    failures.push(format!("wipe-pending marker not persisted: {e}"));
-                }
-            }
+            // The marker recorded before the deletion stays for the retry.
+            Err(e) => failures.push(format!("identity data rows kept: {e}")),
         }
     }
     failures
@@ -1732,13 +1772,17 @@ mod tests {
     }
 
     /// The deletion seam of issue #555: a wipe that fails is reported to the
-    /// caller's failure list AND persists the retry marker — nothing bubbles
-    /// up as an error, per the deletion contract.
+    /// caller's failure list and leaves the marker the deletion recorded
+    /// first — nothing bubbles up as an error, per the deletion contract.
     #[tokio::test]
-    async fn a_failed_wipe_reports_and_persists_the_retry_marker() {
+    async fn a_failed_wipe_reports_and_keeps_the_retry_marker() {
         let store = WipeFailingStore::new();
+        store.put_setting(
+            crate::db::settings_keys::IDENTITY_WIPE_PENDING,
+            "owner-pubkey",
+        );
 
-        let failures = wipe_identity_rows(&store, true, "owner-pubkey").await;
+        let failures = wipe_identity_rows(&store, true).await;
 
         assert!(
             failures.iter().any(|f| f.contains("injected wipe failure")),
@@ -1763,7 +1807,7 @@ mod tests {
             .await
             .unwrap();
 
-        let failures = wipe_identity_rows(&db, true, "owner-pubkey").await;
+        let failures = wipe_identity_rows(&db, true).await;
 
         assert!(failures.is_empty(), "unexpected failures: {failures:?}");
         assert_eq!(
@@ -2008,8 +2052,9 @@ mod tests {
         );
     }
 
-    /// The deletion names the identity whose rows it kept — the public key
-    /// the reload compares against — and must take it before the slot empties.
+    /// The deletion names the identity whose rows it may keep — the public
+    /// key the reload compares against — and must read it while the slot
+    /// still holds it.
     #[test]
     fn the_deletion_marks_the_deleted_identity_as_the_owner() {
         let source = include_str!("identity.rs");
@@ -2017,8 +2062,13 @@ mod tests {
             .find("async fn delete_identity_inner(")
             .expect("the deletion exists");
         let body = &source[start..start + source[start..].find("\n}\n").expect("it ends")];
-        assert!(body.contains("guard.take()"));
-        assert!(body.contains("wipe_identity_rows(db, wipe_data, &owner)"));
+        let owner = body
+            .find("state.identity_info.public_key.clone()")
+            .expect("the deletion reads the identity's public key");
+        let intent = body
+            .find("record_wipe_intent(crate::db::app_db::db(), &owner)")
+            .expect("and records it as the marker's owner");
+        assert!(owner < intent);
     }
 
     /// The retry may only run while the identity slot is empty — the whole

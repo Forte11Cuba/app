@@ -1496,6 +1496,10 @@
   "@pendingWipeBlockedMessage": {
     "description": "Snackbar shown when generating or importing a user is refused because the previous identity's pending data wipe failed again (issue #555)"
   },
+  "wipeNotRecordedMessage": "The current user could not be removed safely, so nothing was changed. Please try again.",
+  "@wipeNotRecordedMessage": {
+    "description": "Snackbar shown when generating or importing a user is refused before the current identity is deleted, because the device could not record that its data wipe is pending (issue #555)"
+  },
   "failedToSaveBackupStatusMessage": "Failed to save backup status. Please try again.",
   "@failedToSaveBackupStatusMessage": {
     "description": "Snackbar shown when persisting the backup-complete status fails in the backup ritual"

@@ -1175,6 +1175,10 @@ class AppLocalizationsEn extends AppLocalizations {
       'The previous user\'s data could not be removed from this device, so the new user was not set up. Please try again.';
 
   @override
+  String get wipeNotRecordedMessage =>
+      'The current user could not be removed safely, so nothing was changed. Please try again.';
+
+  @override
   String get failedToSaveBackupStatusMessage =>
       'Failed to save backup status. Please try again.';
 

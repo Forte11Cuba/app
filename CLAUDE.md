@@ -264,9 +264,11 @@ bridged by flutter_rust_bridge.
   `settings` key family (add its prefix to `IDENTITY_SCOPED_PREFIXES`), a process-wide store,
   a non-`autoDispose` provider — must be added to the matching one, or it leaks into the next
   user's session. The stores are process-wide and tests run in parallel, which is why the
-  identity lifecycle test calls `delete_identity_inner(false)`. A failed `clear_identity_data`
-  is reported *after* the log clear, persists the device-scoped `identity_wipe_pending` key
-  (value: the deleted identity's pubkey), and `create_identity` / `import_from_mnemonic` retry
+  identity lifecycle test calls `delete_identity_inner(false)`. Before giving anything up the
+  deletion records the device-scoped `identity_wipe_pending` key (value: the identity's pubkey;
+  an earlier marker stays) and is refused with `WipeNotRecorded` — identity untouched — when it
+  cannot, or there is no database. A successful wipe clears it; a failed `clear_identity_data`
+  is reported *after* the log clear and leaves it, and `create_identity` / `import_from_mnemonic` retry
   the wipe off it while the slot is empty, refusing the new identity (`PendingWipeFailed`) if it
   fails again or the marker is unreadable. The launch reload never wipes — with a live identity
   that would take its payout claims, which no restore brings back — it only drops a marker that

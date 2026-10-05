@@ -344,6 +344,7 @@
   "pendingWipeBannerTitle": "De gegevens van de vorige gebruiker staan nog op dit apparaat",
   "pendingWipeBannerBody": "Bij het verwijderen van de vorige identiteit konden de trades en chats niet van dit apparaat worden gewist. De app probeert het opnieuw wanneer een nieuwe gebruiker wordt aangemaakt of geïmporteerd.",
   "pendingWipeBlockedMessage": "De gegevens van de vorige gebruiker konden niet van dit apparaat worden verwijderd, dus de nieuwe gebruiker is niet ingesteld. Probeer het opnieuw.",
+  "wipeNotRecordedMessage": "De huidige gebruiker kon niet veilig worden verwijderd, dus er is niets gewijzigd. Probeer het opnieuw.",
   "failedToSaveBackupStatusMessage": "De back-upstatus kon niet worden opgeslagen. Probeer het opnieuw.",
   "backupRitualStep1Title": "Stap 1 van 3 · Schrijf je woorden op",
   "backupRitualStep2Title": "Stap 2 van 3 · Controleren",

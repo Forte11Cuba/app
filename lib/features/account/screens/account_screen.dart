@@ -110,6 +110,12 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
   static bool _isPendingWipeFailure(Object e) =>
       e.toString().contains('PendingWipeFailed');
 
+  /// Whether the core refused to delete the current identity because it could
+  /// not record the wipe as pending (`WipeNotRecorded`, issue #555). Nothing
+  /// was given up: the current user stays, and the message says so.
+  static bool _isWipeNotRecorded(Object e) =>
+      e.toString().contains('WipeNotRecorded');
+
   /// A failed read hides the banner rather than breaking the screen: the
   /// marker is diagnostic, and the retry itself does not depend on it being
   /// shown.
@@ -432,6 +438,8 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
                         content: Text(
                           _isPendingWipeFailure(e)
                               ? swap.l10n.pendingWipeBlockedMessage
+                              : _isWipeNotRecorded(e)
+                              ? swap.l10n.wipeNotRecordedMessage
                               : kDebugMode
                               ? 'Failed to generate identity: $e'
                               : swap.l10n.failedToGenerateIdentityMessage,
@@ -473,6 +481,8 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
           content: Text(
             _isPendingWipeFailure(e)
                 ? l10n.pendingWipeBlockedMessage
+                : _isWipeNotRecorded(e)
+                ? l10n.wipeNotRecordedMessage
                 : kDebugMode
                 ? 'Import failed: $e'
                 : l10n.invalidMnemonicMessage,
