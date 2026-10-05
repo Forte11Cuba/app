@@ -146,7 +146,7 @@ void main() {
     );
 
     test(
-      'adds the entry, pointing at this bundle, and the icon',
+      'adds the entry, pointing at this bundle through a link, and the icon',
       () {
         // Act
         final result = run();
@@ -158,18 +158,66 @@ void main() {
           '${dataHome.path}/icons/hicolor/256x256/apps/$id.png',
         );
         expect(icon.existsSync(), isTrue);
+        final link = Link('${dataHome.path}/$id.bundle');
+        expect(
+          link.resolveSymbolicLinksSync(),
+          bundle.resolveSymbolicLinksSync(),
+        );
         final exec = entry.readAsLinesSync().singleWhere(
           (l) => l.startsWith('Exec='),
         );
-        // Quoted, with `"` and `$` escaped twice (quoting rule, then the
-        // string escape rule) and `%` doubled.
-        expect(
-          exec,
-          'Exec="${temp.path}/My \\\\"apps\\\\" \\\\\$HOME 100%%/mostro"',
-        );
+        // The link keeps the bundle's `"`, `$` and `%` out of the entry.
+        expect(exec, 'Exec="${link.path}/mostro"');
       },
       skip: Platform.isWindows,
     );
+
+    test(
+      'gives an entry that GLib can launch',
+      () {
+        // Arrange
+        File('${bundle.path}/mostro').writeAsStringSync(
+          '#!/bin/sh\ntouch "${temp.path}/launched"\n',
+        );
+        expect(run().exitCode, 0);
+
+        // Act: GLib rejects an entry whose program it cannot find, without
+        // expanding `%%` first, so the escaped bundle path never launched.
+        final result = Process.runSync('gio', [
+          'launch',
+          '${dataHome.path}/applications/$id.desktop',
+        ]);
+
+        // Assert
+        expect(result.exitCode, 0, reason: '${result.stderr}');
+        final launched = File('${temp.path}/launched');
+        for (var i = 0; i < 50 && !launched.existsSync(); i++) {
+          sleep(const Duration(milliseconds: 100));
+        }
+        expect(launched.existsSync(), isTrue);
+      },
+      skip:
+          Platform.isWindows ||
+                  Process.runSync('sh', ['-c', 'command -v gio']).exitCode != 0
+              ? 'needs GLib\'s gio'
+              : false,
+    );
+
+    test('refuses a data directory the entry cannot name', () {
+      // Arrange
+      dataHome = Directory('${temp.path}/share 100%');
+
+      // Act
+      final result = run();
+
+      // Assert
+      expect(result.exitCode, isNot(0));
+      expect(result.stderr, contains('%'));
+      expect(
+        File('${dataHome.path}/applications/$id.desktop').existsSync(),
+        isFalse,
+      );
+    }, skip: Platform.isWindows);
 
     test('--uninstall removes them again', () {
       // Arrange
@@ -190,6 +238,7 @@ void main() {
         ).existsSync(),
         isFalse,
       );
+      expect(Link('${dataHome.path}/$id.bundle').existsSync(), isFalse);
     }, skip: Platform.isWindows);
   });
 }
