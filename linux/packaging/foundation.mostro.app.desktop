@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Mostro
+GenericName=P2P Bitcoin exchange
+Comment=Buy and sell bitcoin peer to peer over Nostr
+Exec=mostro
+Icon=foundation.mostro.app
+Terminal=false
+StartupNotify=true
+StartupWMClass=foundation.mostro.app
+Categories=Office;Finance;Network;
