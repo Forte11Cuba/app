@@ -635,12 +635,32 @@ void main() {
       expect(find.byTooltip(l10n.shareChatKeyAction), findsNothing);
     });
 
-    testWidgets('once the solver has the key, says so and offers nothing', (
+    testWidgets('once the solver has the key, says so and still offers it', (
       tester,
     ) async {
-      await _pumpScreen(tester, dispute: _dispute(chatKeyShared: true));
+      // Arrange: shared already, perhaps with Serbero before a human took
+      // over, or the user just wants to send it again.
+      final gateway = _FakeDisputeGateway(
+        (_) => Completer<Never>().future,
+        onShareKey:
+            () async => _message(id: 'key', isMine: true, content: keyText),
+      );
+      await _pumpScreen(
+        tester,
+        dispute: _dispute(chatKeyShared: true),
+        disputeGateway: gateway,
+      );
       expect(find.byTooltip(l10n.shareChatKeyAction), findsNothing);
-      expect(find.byTooltip(l10n.chatKeySharedIndicator), findsOneWidget);
+
+      // Act
+      await tester.tap(find.byTooltip(l10n.chatKeySharedIndicator));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(l10n.shareChatKeyConfirm));
+      await tester.pumpAndSettle();
+
+      // Assert
+      expect(gateway.keyShares, [_trade]);
+      expect(find.text(keyText), findsOneWidget);
     });
 
     testWidgets('cancelling sends nothing', (tester) async {
@@ -657,7 +677,7 @@ void main() {
       expect(find.text(l10n.shareChatKeyTitle), findsNothing);
     });
 
-    testWidgets('confirming sends it once, shows it and marks it shared', (
+    testWidgets('confirming sends it, marks it shared and can send it again', (
       tester,
     ) async {
       // Arrange: the record reads shared once the key went.
@@ -684,6 +704,13 @@ void main() {
       expect(find.text(keyText), findsOneWidget);
       expect(find.byTooltip(l10n.shareChatKeyAction), findsNothing);
       expect(find.byTooltip(l10n.chatKeySharedIndicator), findsOneWidget);
+
+      await tester.tap(find.byTooltip(l10n.chatKeySharedIndicator));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(l10n.shareChatKeyConfirm));
+      await tester.pumpAndSettle();
+
+      expect(gateway.keyShares, [_trade, _trade]);
     });
 
     testWidgets('a failure stays in the dialog, which can try again', (
@@ -714,26 +741,6 @@ void main() {
       expect(gateway.keyShares, [_trade, _trade]);
       expect(find.text(l10n.shareChatKeyTitle), findsNothing);
       expect(find.text(keyText), findsOneWidget);
-    });
-
-    testWidgets('a solver who already has it just closes the dialog', (
-      tester,
-    ) async {
-      final gateway = _FakeDisputeGateway(
-        (_) => Completer<Never>().future,
-        onShareKey:
-            () async =>
-                throw Exception('SharedKeyAlreadyShared: solver has it'),
-      );
-      await _pumpScreen(tester, dispute: _dispute(), disputeGateway: gateway);
-
-      await tester.tap(find.byTooltip(l10n.shareChatKeyAction));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text(l10n.shareChatKeyConfirm));
-      await tester.pumpAndSettle();
-
-      expect(find.text(l10n.shareChatKeyTitle), findsNothing);
-      expect(find.text(l10n.messageSendFailed), findsNothing);
     });
 
     test('share errors map to their message', () {

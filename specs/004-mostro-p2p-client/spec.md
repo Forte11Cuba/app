@@ -168,7 +168,7 @@ During an active trade, both parties communicate privately via an end-to-end enc
 
 ### User Story 9 — Dispute System with Admin Chat (Priority: P2)
 
-Either party can open a dispute during an active trade if they cannot resolve a disagreement. The platform assigns an admin (dispute resolver) who communicates with the user via a separate encrypted admin chat. Once a solver takes the dispute, the user can optionally send them the P2P chat key from the dispute chat (a key button in its app bar, behind a confirmation, #415), so the solver can read the trade conversation — that one only. The admin can release sats to the buyer or cancel the order and refund the seller. The seller can also voluntarily release at any point during a dispute.
+Either party can open a dispute during an active trade if they cannot resolve a disagreement. The platform assigns an admin (dispute resolver) who communicates with the user via a separate encrypted admin chat. Once a solver takes the dispute, the user can optionally send them the P2P chat key from the dispute chat (a key button in its app bar, behind a confirmation, and again as often as they want, #415), so the solver can read the trade conversation — that one only. The admin can release sats to the buyer or cancel the order and refund the seller. The seller can also voluntarily release at any point during a dispute.
 
 **Why this priority**: Disputes are the safety net that enables users to trust the platform. Without it, fraud cannot be addressed.
 

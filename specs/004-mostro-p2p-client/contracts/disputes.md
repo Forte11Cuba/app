@@ -124,22 +124,23 @@ other. It is derived in Rust from the trade key and the counterparty (the
 session's, else the trade row's) and never crosses the bridge except inside
 the message. A counterparty the trade row says cannot be the peer (a
 pre-#334 row names the Mostro node) is `NoSharedKey`: its key would open no
-conversation, and once sent it would count as shared.
+conversation.
 
 It goes through the same envelope and storage as `submit_evidence`, but it
 counts as sent only once a relay accepted it: otherwise `SendFailed`, nothing
 stored and nothing recorded, so the user can try again. Once sent, the
 dispute's `chat_key_shared` turns true (told through `on_dispute_updated`) and
 the share is persisted as `dispute_key_shared:<order_id>` = the solver's
-pubkey, so a restart never offers it twice. It counts for **that** solver
-only: a takeover clears `chat_key_shared`, because the new solver never got
-the key. The marker is cleared with the other dispute keys and is identity
+pubkey, so a restart still shows it. It counts for **that** solver only: a
+takeover clears `chat_key_shared`, because the new solver never got the key.
+The record only informs: it never refuses another share, since the user may
+have sent the key to a solver who then handed the dispute over (Serbero
+before a human), or want it sent again. The marker is cleared with the other dispute keys and is identity
 scoped. A share sent from another device of the same identity reaches this
 one as our own message in the dispute chat; when it is the key and the
 solver is the one on record, it is recorded the same way.
 
-**Errors**: `NoOpenDispute`, `AdminNotAssigned`, `SharedKeyAlreadyShared`,
-`TradeNotFound`, `NoSharedKey` (the counterparty is not known, or is the
+**Errors**: `NoOpenDispute`, `AdminNotAssigned`, `TradeNotFound`, `NoSharedKey` (the counterparty is not known, or is the
 node), `SendFailed`.
 
 ---
@@ -308,8 +309,8 @@ with `get_dispute` when it opens and follows `on_dispute_updated`, shows the
 `MessageType::Admin` messages, and writes with `submit_evidence` and
 `send_dispute_file`. The disputes list is still fed on resume only (#397).
 A key button in its app bar sends the solver the P2P chat key after an explicit
-confirmation (`share_chat_key_with_solver`, #415) and turns into a check once
-`chat_key_shared` is set.
+confirmation (`share_chat_key_with_solver`, #415). Once `chat_key_shared` is
+set it turns lime and says the key was shared, and still sends it again.
 
 **Platform limitation (web)**: persistence is native-only today. The Flutter
 shell does not call `init_db` on web, and the IndexedDB store's `list_trades`
