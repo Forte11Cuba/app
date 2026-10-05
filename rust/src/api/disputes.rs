@@ -445,10 +445,6 @@ pub async fn submit_evidence(
 /// the parties write.
 const CHAT_KEY_PREFIX: &str = "Shared key: ";
 
-/// Serializes [`share_chat_key_with_solver`]: two taps must not both pass
-/// the "not shared yet" check and send the key twice.
-static CHAT_KEY_SHARE_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
-
 /// Send the dispute's solver the key of this trade's peer chat, so they can
 /// read what buyer and seller wrote to each other (#415). It replaces copying
 /// the key from the peer chat and pasting it here.
@@ -464,17 +460,16 @@ static CHAT_KEY_SHARE_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_n
 /// and is stored as the user's own. It counts as sent only once a relay took
 /// it; then the share is persisted for the current solver.
 ///
+/// A recorded share never refuses another: the user may have sent the key to
+/// a solver who then handed the dispute over (Serbero before a human), or
+/// simply want it sent again. The record only tells the screen.
+///
 /// **Errors**: `NoOpenDispute`, `AdminNotAssigned`, `TradeNotFound`,
-/// `NoSharedKey` (the counterparty is not known), `SharedKeyAlreadyShared`,
-/// `SendFailed`.
+/// `NoSharedKey` (the counterparty is not known), `SendFailed`.
 pub async fn share_chat_key_with_solver(
     trade_id: String,
 ) -> Result<crate::api::types::ChatMessage> {
-    let _sharing = CHAT_KEY_SHARE_LOCK.lock().await;
     let admin_pubkey = current_solver(&trade_id).await?;
-    if chat_key_already_shared(&trade_id, &admin_pubkey).await {
-        bail!("SharedKeyAlreadyShared: the solver of {trade_id} already has the chat key");
-    }
     let trade_index = trade_key_index(&trade_id).await?;
     let peer = counterparty_pubkey(&trade_id)
         .await
@@ -530,7 +525,7 @@ async fn counterparty_pubkey(trade_id: &str) -> Option<nostr_sdk::prelude::Publi
 
 /// Our own message to `solver` in `trade_id`'s dispute chat, arriving from a
 /// relay: when it is the chat key, sent from another device of this
-/// identity, record the share so this one stops offering it (#415). Only
+/// identity, record the share so this one shows it (#415). Only
 /// for the solver on record: a replayed share with a previous one says
 /// nothing about the current solver.
 pub(crate) async fn note_chat_key_share_echo(
@@ -554,23 +549,8 @@ pub(crate) async fn note_chat_key_share_echo(
     record_chat_key_share(trade_id, solver).await;
 }
 
-/// Whether `solver` already has the chat key of `trade_id`: on the record, or
-/// in storage for a record a live event recreated before rehydration.
-async fn chat_key_already_shared(trade_id: &str, solver: &nostr_sdk::prelude::PublicKey) -> bool {
-    let solver = solver.to_hex();
-    if let Some(dispute) = dispute_store().get(trade_id).await {
-        if dispute.chat_key_shared && dispute.admin_pubkey.as_deref() == Some(solver.as_str()) {
-            return true;
-        }
-    }
-    let Some(db) = crate::db::app_db::db() else {
-        return false;
-    };
-    persisted_chat_key_share(db, trade_id).await.as_deref() == Some(solver.as_str())
-}
-
 /// The solver `order_id`'s chat key was sent to, if any. A read error counts
-/// as none: the worst case is offering to send it again.
+/// as none: the worst case is the screen not saying it was sent.
 async fn persisted_chat_key_share(db: &impl Storage, order_id: &str) -> Option<String> {
     match db
         .get_setting(&crate::db::settings_keys::dispute_key_shared(order_id))

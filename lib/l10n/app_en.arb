@@ -4328,7 +4328,7 @@
   "shareChatKeyConfirm": "Share",
   "@shareChatKeyConfirm": {"description": "Confirm button of the dialog that shares the peer chat key with the solver"},
   "chatKeySharedIndicator": "Chat key shared with the resolver",
-  "@chatKeySharedIndicator": {"description": "Dispute chat app bar: tooltip and label of the indicator shown once the chat key went to the current solver"},
+  "@chatKeySharedIndicator": {"description": "Dispute chat app bar: tooltip of the share-chat-key action once the chat key went to the current solver (it can still be sent again)"},
   "shareChatKeyUnavailable": "The chat key of this trade is not available on this device.",
   "@shareChatKeyUnavailable": {"description": "Error in the share-chat-key dialog: the counterparty or trade key of this order is not known on this device"},
   "moreReactions": "More reactions",

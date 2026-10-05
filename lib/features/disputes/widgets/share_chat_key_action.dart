@@ -11,9 +11,10 @@ import 'package:mostro/src/rust/api/types.dart' as rust_types;
 /// The dispute chat's app bar action that sends the solver the peer chat key
 /// (#415), so they can read what buyer and seller wrote to each other.
 ///
-/// Until the current solver has it, a key button that asks first
-/// ([showShareChatKeyDialog]). Once they do, a check that says so and does
-/// nothing: the key goes once per solver.
+/// A key button that asks first ([showShareChatKeyDialog]). Once the current
+/// solver has the key it turns lime and says so, and still sends it again:
+/// the user may have sent it to a solver who handed the dispute over
+/// (Serbero before a human), or just want it sent again.
 class ShareChatKeyAction extends StatelessWidget {
   const ShareChatKeyAction({
     super.key,
@@ -33,28 +34,18 @@ class ShareChatKeyAction extends StatelessWidget {
     final palette = OrderBookPalette.of(context);
     final l10n = AppLocalizations.of(context);
 
-    if (shared) {
-      return Tooltip(
-        message: l10n.chatKeySharedIndicator,
-        child: SizedBox.square(
-          dimension: _target,
-          child: Icon(
-            Icons.task_alt_rounded,
-            size: 22,
-            color: palette.limeIcon,
-            semanticLabel: l10n.chatKeySharedIndicator,
-          ),
-        ),
-      );
-    }
     return IconButton(
       onPressed: onPressed,
-      tooltip: l10n.shareChatKeyAction,
+      tooltip: shared ? l10n.chatKeySharedIndicator : l10n.shareChatKeyAction,
       constraints: const BoxConstraints.tightFor(
         width: _target,
         height: _target,
       ),
-      icon: Icon(Icons.key_rounded, size: 22, color: palette.textPrimary),
+      icon: Icon(
+        Icons.key_rounded,
+        size: 22,
+        color: shared ? palette.limeIcon : palette.textPrimary,
+      ),
     ).withAutomationId(AutomationIds.disputeShareKey);
   }
 }
@@ -103,12 +94,6 @@ class _ShareChatKeyDialogState extends State<ShareChatKeyDialog> {
     } catch (e) {
       debugPrint('[disputes] chat key share failed: $e');
       if (!mounted) return;
-      // The solver has it already (another tap, another device): nothing is
-      // left to do here, and the screen reads the dispute again.
-      if (e.toString().contains('SharedKeyAlreadyShared')) {
-        navigator.pop();
-        return;
-      }
       setState(() {
         _sharing = false;
         _error = shareChatKeyErrorMessage(l10n, e);
