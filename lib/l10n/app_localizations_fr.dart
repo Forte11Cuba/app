@@ -2575,6 +2575,13 @@ class AppLocalizationsFr extends AppLocalizations {
   String get openSystemSettingsAction => 'Ouvrir les réglages';
 
   @override
+  String get notificationsPermissionNotAsked =>
+      'Ce navigateur n\'est pas encore autorisé à afficher des notifications.';
+
+  @override
+  String get allowNotificationsAction => 'Autoriser les notifications';
+
+  @override
   String get notificationsPrivacyFootnote =>
       'Les notifications ne contiennent ni montants ni contreparties. Un push passe par les serveurs de Google ou d’Apple et signale seulement qu’il y a quelque chose à voir.';
 

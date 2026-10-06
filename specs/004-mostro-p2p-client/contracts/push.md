@@ -72,7 +72,10 @@ last_success_at, last_error, node_refused_until }`. `last_error` is a marker:
 `PushServerUnreachable`, `PushRateLimited`, `PushNodeRefused`,
 `PushBadRequest`. Capability (can this platform push) and the OS permission
 are Dart's to know and are read separately (`PushNotificationService.isSupported`,
-`notificationPermissionDeniedProvider`). **Errors**: `StorageUnavailable`.
+`notificationPermissionDeniedProvider`, and on the web
+`notificationPermissionUnaskedProvider`: a permission not asked yet, whose prompt
+the browser shows only from a tap, so startup never asks there and Settings offers
+the tap, `requestPermissionFromGesture()`). **Errors**: `StorageUnavailable`.
 
 ### reconcile_push() → ()
 Explicit trigger. Never fails: every outcome is logged and reflected in the

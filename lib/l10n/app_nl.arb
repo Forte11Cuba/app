@@ -841,6 +841,8 @@
   "nwcBalanceSats": "{sats} sats",
   "notificationsSystemDenied": "Meldingen staan uit in je systeeminstellingen.",
   "openSystemSettingsAction": "Instellingen openen",
+  "notificationsPermissionNotAsked": "Deze browser mag nog geen meldingen tonen.",
+  "allowNotificationsAction": "Meldingen toestaan",
   "notificationsPrivacyFootnote": "Meldingen bevatten geen bedragen en geen tegenpartijen. Een push loopt via de servers van Google of Apple en zegt alleen dát er iets te zien is.",
   "pushMasterToggleTitle": "Pushmeldingen",
   "pushMasterToggleSubtitle": "Wekt de app zodra er een trade-gebeurtenis of chatbericht binnenkomt. De melding zelf bevat niets.",

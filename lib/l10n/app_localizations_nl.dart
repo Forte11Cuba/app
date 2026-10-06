@@ -2567,6 +2567,13 @@ class AppLocalizationsNl extends AppLocalizations {
   String get openSystemSettingsAction => 'Instellingen openen';
 
   @override
+  String get notificationsPermissionNotAsked =>
+      'Deze browser mag nog geen meldingen tonen.';
+
+  @override
+  String get allowNotificationsAction => 'Meldingen toestaan';
+
+  @override
   String get notificationsPrivacyFootnote =>
       'Meldingen bevatten geen bedragen en geen tegenpartijen. Een push loopt via de servers van Google of Apple en zegt alleen dát er iets te zien is.';
 
