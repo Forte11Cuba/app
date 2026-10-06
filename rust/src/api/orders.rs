@@ -15005,6 +15005,95 @@ mod tests {
         );
     }
 
+    /// A request changes no status, so it does not age like one: the
+    /// counterparty can ask to cancel and then open a dispute while this side
+    /// is offline, and a backlog delivered newest-first applies the dispute
+    /// first. The request is still open on the daemon (mostrod never clears
+    /// `cancel_initiator_pubkey`, and cancels from `dispute` as from `active`),
+    /// so the row must still learn it — or the trade screen offers a fresh
+    /// Cancel where the user would be accepting.
+    #[tokio::test]
+    async fn a_cancel_request_older_than_the_dispute_is_still_remembered() {
+        use crate::api::types::{CooperativeCancelState, OrderStatus};
+        use mostro_core::message::Action;
+
+        let path = std::env::temp_dir()
+            .join(format!("mostro_cancel_before_dispute_{}.db", std::process::id()));
+        let _ = crate::db::app_db::init_db(path.to_str().unwrap()).await;
+        let db = crate::db::app_db::db().expect("store initialised");
+
+        let order_uuid = uuid::Uuid::new_v4();
+        let order_id = order_uuid.to_string();
+        let mut order_info = dummy_order_info(&order_id);
+        order_info.status = OrderStatus::Active;
+        db.save_trade(&cancel_test_row(order_info))
+            .await
+            .expect("save the trade row");
+
+        dispatch_daemon_action_at(
+            order_uuid,
+            Action::DisputeInitiatedByPeer,
+            "test-dispute-after-request",
+            2_000,
+        )
+        .await;
+        dispatch_daemon_action_at(
+            order_uuid,
+            Action::CooperativeCancelInitiatedByPeer,
+            "test-request-before-dispute",
+            1_500,
+        )
+        .await;
+
+        let row = db
+            .get_trade_by_order_id(&order_id)
+            .await
+            .expect("trade lookup")
+            .expect("the row must still be there");
+        assert_eq!(row.order.status, OrderStatus::Dispute, "the request moves nothing");
+        assert_eq!(
+            row.cooperative_cancel_state,
+            Some(CooperativeCancelState::RequestedByPeer),
+            "an older request is still open once the dispute is applied"
+        );
+    }
+
+    /// A finished trade has no open request: a replayed one stays out of the
+    /// row, however it is ordered.
+    #[tokio::test]
+    async fn a_replayed_cancel_request_does_not_reach_a_finished_trade() {
+        use crate::api::types::OrderStatus;
+        use mostro_core::message::Action;
+
+        let path = std::env::temp_dir()
+            .join(format!("mostro_cancel_after_end_{}.db", std::process::id()));
+        let _ = crate::db::app_db::init_db(path.to_str().unwrap()).await;
+        let db = crate::db::app_db::db().expect("store initialised");
+
+        let order_uuid = uuid::Uuid::new_v4();
+        let order_id = order_uuid.to_string();
+        let mut order_info = dummy_order_info(&order_id);
+        order_info.status = OrderStatus::CooperativelyCanceled;
+        db.save_trade(&cancel_test_row(order_info))
+            .await
+            .expect("save the trade row");
+
+        dispatch_daemon_action_at(
+            order_uuid,
+            Action::CooperativeCancelInitiatedByPeer,
+            "test-request-after-end",
+            1_500,
+        )
+        .await;
+
+        let row = db
+            .get_trade_by_order_id(&order_id)
+            .await
+            .expect("trade lookup")
+            .expect("the row must still be there");
+        assert_eq!(row.cooperative_cancel_state, None);
+    }
+
     async fn trade_row_gone(order_id: &str) -> bool {
         crate::db::app_db::db()
             .expect("store initialised")
