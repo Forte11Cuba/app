@@ -17,8 +17,11 @@ import 'package:mostro/features/about/providers/mostro_node_provider.dart';
 import 'package:mostro/features/order/models/invoice_rules.dart';
 import 'package:mostro/features/order/providers/invoice_providers.dart';
 import 'package:mostro/features/order/providers/trade_state_provider.dart';
+import 'package:mostro/features/order/widgets/explanatory_note.dart';
 import 'package:mostro/features/order/widgets/invoice_clock.dart';
 import 'package:mostro/features/order/widgets/invoice_widgets.dart';
+import 'package:mostro/features/order/widgets/order_detail_cards.dart'
+    show figureSpans;
 import 'package:mostro/features/settings/providers/nwc_provider.dart';
 import 'package:mostro/features/trades/providers/trades_providers.dart'
     show refreshTrades, tradeInfoProvider;
@@ -445,9 +448,15 @@ class _PayLightningInvoiceScreenState
                       ),
                     ],
                     const SizedBox(height: 12),
-                    InvoiceHoldNote(
-                      sentence: l10n.invoiceHoldNote,
-                      boldWord: 'hold',
+                    ExplanatoryNote.rich(
+                      spans: figureSpans(
+                        l10n.invoiceHoldNote('hold'),
+                        'hold',
+                        TextStyle(
+                          fontWeight: FontWeight.w700,
+                          color: OrderBookPalette.of(context).textStrong,
+                        ),
+                      ),
                     ),
                     const SizedBox(height: 12),
                     InvoiceCounterpartCard(

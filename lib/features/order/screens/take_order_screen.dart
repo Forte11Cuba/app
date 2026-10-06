@@ -22,6 +22,7 @@ import 'package:mostro/features/order/models/order_detail_rules.dart';
 import 'package:mostro/features/order/providers/bond_providers.dart';
 import 'package:mostro/features/order/providers/exchange_rate_provider.dart';
 import 'package:mostro/features/order/providers/trade_state_provider.dart';
+import 'package:mostro/features/order/widgets/explanatory_note.dart';
 import 'package:mostro/features/order/widgets/order_detail_cards.dart';
 import 'package:mostro/features/order/widgets/range_amount_modal.dart';
 import 'package:mostro/features/trades/providers/trades_providers.dart'
@@ -451,45 +452,24 @@ class _TakeOrderScreenState extends ConsumerState<TakeOrderScreen> {
               OrderIdRow(orderId: order.id),
             ],
           ),
+          const SizedBox(height: orderDetailBlockGap),
+          ExplanatoryNote(
+            text: [
+              widget.isBuying
+                  ? l10n.takeOrderNoteBuyer
+                  : l10n.takeOrderNoteSeller,
+              _bondNotice(l10n, order),
+            ].nonNulls.join(' '),
+          ),
         ],
       ),
       bottomNavigationBar: OrderDetailActionBar(
+        // A min-height column, so the dead CTA's centred label does not
+        // stretch the bar over the whole screen.
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.only(top: 1),
-                  child: Icon(
-                    Icons.shield_outlined,
-                    size: 14,
-                    color: book.textTertiary,
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    [
-                      widget.isBuying
-                          ? l10n.takeOrderNoteBuyer
-                          : l10n.takeOrderNoteSeller,
-                      _bondNotice(l10n, order),
-                    ].nonNulls.join(' '),
-                    style: TextStyle(
-                      fontSize: 11,
-                      height: 1.5,
-                      color: book.textSecondary,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            _TakeButton(state: cta, onPressed: _onTakeOrder),
-          ],
+          children: [_TakeButton(state: cta, onPressed: _onTakeOrder)],
         ),
       ),
     );
