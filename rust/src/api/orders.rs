@@ -4274,7 +4274,11 @@ async fn dispatch_mostro_message(
             if status_arm_gate(&row_state, &kind.action, &order_id) {
                 return;
             }
-            if status_write_blocked(&order_id, &kind.action, event_ts).await {
+            // Only a finished trade closes the request; the status cursor does
+            // not. mostrod keeps the initiator until the trade ends, a dispute
+            // included, so a request older than the last status applied (asked,
+            // then disputed while this side was offline) is still open.
+            if status_sync_blocked_by_terminal(&order_id, &kind.action).await {
                 return;
             }
             record_status_event(&order_id, event_ts).await;
