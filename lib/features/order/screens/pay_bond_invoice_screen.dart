@@ -78,8 +78,34 @@ class _PayBondInvoiceScreenState extends ConsumerState<PayBondInvoiceScreen>
     setState(() => _waiting = true);
   }
 
-  /// Walk away: nothing is committed yet, so no confirmation. Both sides
-  /// send the daemon a cancel. A taker's releases the bond and the order
+  /// Leaving cancels something that exists, the take or the unpublished
+  /// order, so it asks first (DS-CMP-20).
+  Future<void> _confirmLeave({required bool maker}) async {
+    if (_canceling) return;
+    final l10n = AppLocalizations.of(context);
+    final confirmed = await showMostroDialog<bool>(
+      context: context,
+      builder:
+          (ctx) => MostroDialog(
+            title: maker ? l10n.bondLeaveMakerTitle : l10n.bondLeaveTakerTitle,
+            body: maker ? l10n.bondLeaveMakerBody : l10n.bondLeaveTakerBody,
+            secondary: ModalAction(
+              label: l10n.noButtonLabel,
+              onPressed: () => Navigator.pop(ctx, false),
+            ),
+            primary: ModalAction(
+              label: l10n.yesCancelButtonLabel,
+              onPressed: () => Navigator.pop(ctx, true),
+              tone: ModalTone.destructive,
+              automationId: AutomationIds.bondCancelConfirm,
+            ),
+          ),
+    );
+    if (!mounted || _navigated || confirmed != true) return;
+    await _cancel(maker: maker);
+  }
+
+  /// Walk away, once confirmed. Both sides send the daemon a cancel. A taker's releases the bond and the order
   /// stays in the book. A maker's waits for the answer (mostro#996): the
   /// daemon closes the unpublished order and cancels the bond invoice, or —
   /// on an older daemon that refuses it — the core drops the row locally. A
@@ -634,9 +660,9 @@ class _PayBondInvoiceScreenState extends ConsumerState<PayBondInvoiceScreen>
   Widget _leaveLink(AppLocalizations l10n, {required bool maker}) =>
       InvoiceCancelLink(
         label: maker ? l10n.bondDontPublish : l10n.bondDontTake,
-        // Nothing is committed yet: not a destructive action.
-        danger: false,
-        onPressed: _canceling ? null : () => _cancel(maker: maker),
+        // It cancels the take or the unpublished order (DS-CMP-20).
+        danger: true,
+        onPressed: _canceling ? null : () => _confirmLeave(maker: maker),
       ).withAutomationId(AutomationIds.bondCancel);
 
   List<Widget> _footer(

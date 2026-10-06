@@ -3092,6 +3092,20 @@ class AppLocalizationsEn extends AppLocalizations {
   String get bondRemoveFromDevice => 'Remove from this device';
 
   @override
+  String get bondLeaveMakerTitle => 'Don\'t publish this order?';
+
+  @override
+  String get bondLeaveMakerBody =>
+      'The order won\'t be published and its deposit invoice is cancelled.';
+
+  @override
+  String get bondLeaveTakerTitle => 'Don\'t take this order?';
+
+  @override
+  String get bondLeaveTakerBody =>
+      'The order stays in the book for others and the deposit invoice is cancelled.';
+
+  @override
   String get bondKeepWaiting => 'Keep waiting';
 
   @override

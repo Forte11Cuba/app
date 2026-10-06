@@ -288,6 +288,9 @@ void main() {
       );
       await tester.ensureVisible(find.text("Don't publish the order"));
       await tester.tap(find.text("Don't publish the order"));
+      // DS-CMP-20: dropping the order asks first.
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Yes, cancel'));
       await tester.pump();
       await tester.pump();
       expect(canceled, ['order-1']);
@@ -311,6 +314,9 @@ void main() {
         );
         await tester.ensureVisible(find.text("Don't publish the order"));
         await tester.tap(find.text("Don't publish the order"));
+        // DS-CMP-20: dropping the order asks first.
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Yes, cancel'));
         await tester.pumpAndSettle();
         expect(find.text("The node didn't cancel the deposit"), findsOneWidget);
         expect(abandoned, isEmpty, reason: 'nothing is dropped on a guess');
@@ -334,6 +340,9 @@ void main() {
       );
       await tester.ensureVisible(find.text("Don't publish the order"));
       await tester.tap(find.text("Don't publish the order"));
+      // DS-CMP-20: dropping the order asks first.
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Yes, cancel'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Keep waiting'));
       await tester.pumpAndSettle();
@@ -351,6 +360,9 @@ void main() {
       );
       await tester.ensureVisible(find.text("Don't publish the order"));
       await tester.tap(find.text("Don't publish the order"));
+      // DS-CMP-20: dropping the order asks first.
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Yes, cancel'));
       await tester.pump();
       await tester.pump();
       expect(

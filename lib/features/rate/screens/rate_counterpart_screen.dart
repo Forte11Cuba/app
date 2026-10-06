@@ -9,6 +9,7 @@ import 'package:mostro/core/daemon_errors.dart';
 import 'package:mostro/features/account/providers/privacy_mode_provider.dart';
 import 'package:mostro/features/rate/providers/rating_providers.dart';
 import 'package:mostro/features/order/providers/trade_state_provider.dart';
+import 'package:mostro/features/order/widgets/invoice_widgets.dart';
 import 'package:mostro/features/trades/screens/trade_detail_screen.dart';
 import 'package:mostro/features/rate/widgets/star_rating.dart';
 import 'package:mostro/l10n/app_localizations.dart';
@@ -28,7 +29,7 @@ import 'package:mostro/src/rust/api/reputation.dart' as reputation_api;
 ///   - [StarRating] widget (5 tappable stars)
 ///   - "X / 5" score display
 ///   - SUBMIT button (the lime call to action, disabled until rating > 0)
-///   - CLOSE button (outlined secondary, skips rating)
+///   - CLOSE link (neutral, skips rating)
 /// Screen content inset from the side edges (DS-SPC-1).
 const double _sideInset = 18;
 
@@ -225,24 +226,13 @@ class _RateCounterpartScreenState extends ConsumerState<RateCounterpartScreen> {
 
               const SizedBox(height: AppSpacing.sm),
 
-              // ── CLOSE button (skip rating) ────────────────────────────
-              OutlinedButton(
+              // ── CLOSE link (skip rating) ────────────────────────────
+              // Skipping the rating undoes nothing: a neutral link
+              // (DS-CMP-20).
+              InvoiceCancelLink(
+                label: l10n.closeRatingButton,
+                danger: false,
                 onPressed: () => context.pop(),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: book.textBody,
-                  side: BorderSide(color: book.border),
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  minimumSize: const Size.fromHeight(48),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(_ctaRadius),
-                  ),
-                  textStyle: const TextStyle(
-                    fontFamily: AppFonts.ui,
-                    fontSize: 15,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-                child: Text(l10n.closeRatingButton),
               ).withAutomationId(AutomationIds.tradeRateClose),
 
               const SizedBox(height: AppSpacing.lg),

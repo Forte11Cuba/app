@@ -135,7 +135,8 @@ My Trades row carries the same verb and files the trade under "your turn".
 `/pay_bond/:orderId`, and no `trade.cancel`: the daemon refuses a cancel in
 this window. On that screen `bond.cancel` reads `Don't publish the order` and
 drops the order locally (nothing was published, nothing charged); a taker's
-reads `Don't take the order` and is a daemon cancel. Once the deposit is
+reads `Don't take the order` and is a daemon cancel. Either opens a
+confirmation first (DS-CMP-20), whose affirmative is `bond.cancel.confirm`. Once the deposit is
 paid the daemon publishes the order and `/my_order` reads `pending`.
 
 **A slashed bond is explained on tap.** Tapping a bond-slashed notification opens a
