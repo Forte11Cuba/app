@@ -51,6 +51,12 @@ List<String> offeredFiatCodes(List<String> catalogue, List<String>? accepted) {
   ];
 }
 
+/// The currency the form keeps once the node's list is known: [current] when
+/// the node accepts it or sets no limit, otherwise the first code the node
+/// lists. The user's default currency in settings is not changed.
+String fiatForNode(String current, List<String>? accepted) =>
+    accepted == null || accepted.contains(current) ? current : accepted.first;
+
 // ── Premium colour rule ───────────────────────────────────────────────────────
 
 /// Whom the premium favours, read from the **maker's** side.

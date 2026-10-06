@@ -22,6 +22,20 @@ void main() {
     });
   });
 
+  group('fiatForNode', () {
+    test('keeps an accepted currency', () {
+      expect(fiatForNode('USD', ['ARS', 'USD']), 'USD');
+    });
+
+    test('falls back to the node\'s first currency', () {
+      expect(fiatForNode('USD', ['ARS', 'EUR']), 'ARS');
+    });
+
+    test('no limit keeps the current currency', () {
+      expect(fiatForNode('USD', null), 'USD');
+    });
+  });
+
   group('offeredFiatCodes', () {
     const catalogue = ['USD', 'EUR', 'ARS'];
 

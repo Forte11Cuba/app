@@ -26,15 +26,21 @@ final selectedFiatCurrencyProvider = Provider<FiatCurrency?>((ref) {
   return null;
 });
 
-/// The currencies the picker offers: the catalogue narrowed to what the
-/// active node accepts ([acceptedFiatCodes]). Until the node's info event
-/// arrives, or when it fails, the whole catalogue is offered: the form never
-/// waits on it, and the node still refuses a currency it does not take.
+/// The fiat codes the active node accepts ([acceptedFiatCodes]), or null
+/// when it sets no limit. Also null until the node's info event arrives, or
+/// when it fails: the form never waits on it, and the node still refuses a
+/// currency it does not take.
+final acceptedFiatCodesProvider = Provider.autoDispose<List<String>?>(
+  (ref) => acceptedFiatCodes(
+    ref.watch(mostroNodeProvider).valueOrNull?.fiatCurrenciesAccepted,
+  ),
+);
+
+/// The currencies the picker offers: the catalogue narrowed to
+/// [acceptedFiatCodesProvider], the whole catalogue when that is null.
 final offeredFiatCurrenciesProvider =
     Provider.autoDispose<AsyncValue<List<FiatCurrency>>>((ref) {
-      final accepted = acceptedFiatCodes(
-        ref.watch(mostroNodeProvider).valueOrNull?.fiatCurrenciesAccepted,
-      );
+      final accepted = ref.watch(acceptedFiatCodesProvider);
       return ref.watch(fiatCurrenciesProvider).whenData((catalogue) {
         final byCode = {for (final c in catalogue) c.code: c};
         return [

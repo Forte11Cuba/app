@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -35,6 +37,7 @@ Future<ProviderContainer> _pump(
   String orderType = 'sell',
   Locale locale = const Locale('en'),
   MostroInstance node = _node,
+  Completer<MostroInstance?>? nodeArrives,
   int? bondEstimate,
 }) async {
   tester.view.physicalSize = const Size(400, 1600);
@@ -42,7 +45,9 @@ Future<ProviderContainer> _pump(
   addTearDown(tester.view.reset);
   final container = createContainer(
     overrides: [
-      mostroNodeProvider.overrideWith((ref) async => node),
+      mostroNodeProvider.overrideWith(
+        (ref) => nodeArrives?.future ?? Future.value(node),
+      ),
       bondEstimateProvider.overrideWith((ref, sats) async => bondEstimate),
       exchangeRateProvider.overrideWith(
         (ref, code) async => switch (code) {
@@ -430,6 +435,50 @@ void main() {
         find.ancestor(of: find.text('CUP'), matching: find.byType(ListTile)),
       );
       expect(cup.subtitle, isNull);
+    });
+  });
+
+  group('selected currency', () {
+    testWidgets("opens on the node's first currency when it lacks USD", (
+      tester,
+    ) async {
+      final container = await _pump(
+        tester,
+        node: const MostroInstance(
+          pubKey: 'npub-test',
+          fiatCurrenciesAccepted: 'ARS,EUR',
+        ),
+      );
+      expect(container.read(selectedFiatCodeProvider), 'ARS');
+    });
+
+    testWidgets('keeps the default when the node accepts it', (tester) async {
+      final container = await _pump(
+        tester,
+        node: const MostroInstance(
+          pubKey: 'npub-test',
+          fiatCurrenciesAccepted: 'ARS,USD',
+        ),
+      );
+      expect(container.read(selectedFiatCodeProvider), 'USD');
+    });
+
+    testWidgets("moves off USD when the node's list arrives late", (
+      tester,
+    ) async {
+      final nodeArrives = Completer<MostroInstance?>();
+      final container = await _pump(tester, nodeArrives: nodeArrives);
+      expect(container.read(selectedFiatCodeProvider), 'USD');
+
+      nodeArrives.complete(
+        const MostroInstance(
+          pubKey: 'npub-test',
+          fiatCurrenciesAccepted: 'ARS',
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(container.read(selectedFiatCodeProvider), 'ARS');
     });
   });
 }

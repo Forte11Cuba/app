@@ -128,6 +128,7 @@ class _AddOrderScreenState extends ConsumerState<AddOrderScreen> {
       final defaultFiat =
           ref.read(settingsProvider).defaultFiatCode ?? 'USD';
       ref.read(selectedFiatCodeProvider.notifier).state = defaultFiat;
+      _keepFiatAccepted(ref.read(acceptedFiatCodesProvider));
       ref.read(isMarketPriceProvider.notifier).state = true;
       ref.read(isRangeOrderProvider.notifier).state = false;
       ref.read(premiumValueProvider.notifier).state = 0.0;
@@ -141,6 +142,13 @@ class _AddOrderScreenState extends ConsumerState<AddOrderScreen> {
     _minController.dispose();
     _maxController.dispose();
     super.dispose();
+  }
+
+  /// Moves the form off a currency the node does not accept ([fiatForNode]).
+  void _keepFiatAccepted(List<String>? accepted) {
+    final selected = ref.read(selectedFiatCodeProvider.notifier);
+    final next = fiatForNode(selected.state, accepted);
+    if (next != selected.state) selected.state = next;
   }
 
   // ── Locale-aware amounts ──────────────────────────────────────────────────
@@ -440,6 +448,13 @@ class _AddOrderScreenState extends ConsumerState<AddOrderScreen> {
     final l10n = AppLocalizations.of(context);
     final locale = _locale(context);
     final symbols = _symbols(context);
+
+    // The node's list can land after the form opened, or change with a node
+    // switch: a currency it does not accept gives way to its first one.
+    ref.listen<List<String>?>(
+      acceptedFiatCodesProvider,
+      (_, accepted) => _keepFiatAccepted(accepted),
+    );
 
     final side = ref.watch(orderSideProvider);
     final methods = ref.watch(allPaymentMethodsProvider);
