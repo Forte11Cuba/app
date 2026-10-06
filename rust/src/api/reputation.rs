@@ -48,6 +48,12 @@ impl RatingStore {
         }
     }
 
+    /// Drop every rating: they all belong to the identity being deleted
+    /// (issue #533). Privacy mode is not a rating and stays.
+    async fn forget(&self) {
+        self.ratings.write().await.clear();
+    }
+
     /// Return the local user's rating for a trade, falling back to the peer's
     /// rating if the local user has not yet submitted one.
     async fn get(&self, trade_id: &str) -> Option<RatingInfo> {
@@ -171,7 +177,7 @@ fn rating_store() -> &'static RatingStore {
 /// Forget the ratings of the identity being deleted (issue #533). Privacy
 /// mode is left alone: the identity swap sets it explicitly.
 pub(crate) async fn forget_identity_ratings() {
-    rating_store().ratings.write().await.clear();
+    rating_store().forget().await;
 }
 
 // ── Helper ────────────────────────────────────────────────────────────────────
@@ -401,6 +407,33 @@ mod tests {
     fn privacy_lock() -> &'static Mutex<()> {
         static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
         LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    /// #533: no rating of the deleted identity survives its deletion. On a
+    /// store of this test's own, so the process-wide one other tests use is
+    /// never emptied under them.
+    #[tokio::test]
+    async fn forgetting_the_identity_drops_every_rating() {
+        let store = RatingStore::new();
+        let rating = |trade_id: &str, is_mine| RatingInfo {
+            trade_id: trade_id.to_string(),
+            score: 5,
+            is_mine,
+            created_at: 1,
+        };
+        store.try_insert_mine(rating("mine", true)).await.unwrap();
+        store.insert_peer(rating("peer", false)).await;
+        store.privacy_mode.store(true, Ordering::SeqCst);
+
+        store.forget().await;
+
+        assert!(store.get("mine").await.is_none());
+        assert!(store.get("peer").await.is_none());
+        assert!(store.ratings.read().await.is_empty());
+        assert!(
+            store.privacy_mode.load(Ordering::SeqCst),
+            "privacy mode is not a rating",
+        );
     }
 
     #[tokio::test]

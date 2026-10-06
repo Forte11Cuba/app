@@ -828,41 +828,128 @@ mod tests {
         assert!(!body.contains("refresh_subscriptions_for_active_node"));
     }
 
+    use crate::source_guard::{expect_body, mutant, production_code};
+
+    /// The public deletion hands `delete_identity_inner` the application's
+    /// store and the real effects, and nothing else (PR #565 review).
+    fn check_deletion_binding(source: &str) -> Result<(), String> {
+        expect_body(
+            &production_code(source),
+            "pub async fn delete_identity() -> Result<()>",
+            "delete_identity_inner(crate::db::app_db::db(), &RealDeleteEffects).await",
+        )
+    }
+
+    /// `forget_identity_state` runs every in-memory reset, and the two #533
+    /// names reach their store's `forget` — which
+    /// `forgetting_the_identity_drops_every_dispute` and
+    /// `forgetting_the_identity_drops_every_rating` hold on a store of their
+    /// own.
+    fn check_identity_resets(identity: &str, disputes: &str, ratings: &str) -> Result<(), String> {
+        expect_body(
+            &production_code(identity),
+            "pub(crate) async fn forget_identity_state()",
+            "crate::api::disputes::forget_identity_disputes().await;
+             crate::api::reputation::forget_identity_ratings().await;
+             crate::mostro::session::session_manager().clear().await;
+             crate::mostro::bond_claims::set_claim_nodes(std::iter::empty());
+             crate::mostro::bond_claims::clear_retained();
+             crate::api::orders::forget_book_ownership().await;",
+        )?;
+        expect_body(
+            &production_code(disputes),
+            "pub(crate) async fn forget_identity_disputes()",
+            "dispute_store().forget().await;
+             if let Ok(mut opens) = pending_opens().lock() {
+                 opens.clear();
+             }
+             solver_assigned_at()
+                 .lock()
+                 .unwrap_or_else(|poisoned| poisoned.into_inner())
+                 .clear();",
+        )?;
+        expect_body(
+            &production_code(ratings),
+            "pub(crate) async fn forget_identity_ratings()",
+            "rating_store().forget().await;",
+        )
+    }
+
     /// #533's second acceptance criterion: `DISPUTE_STORE` and `RATING_STORE`
     /// are empty after a deletion. The lifecycle test proves with a double
     /// that `delete_identity_inner` calls `forget_identity_state` (#553);
-    /// this closes the link below it — the body must actually empty every
-    /// per-identity in-memory store. Source-level because a behavior test
-    /// cannot run here: the stores are process-wide, so clearing them races
-    /// the parallel suite (the same reason the doubles exist).
+    /// this closes the links below it, down to each store's `forget`.
+    /// Source-level because the resets cannot run here: the stores are
+    /// process-wide, so emptying them races the parallel suite (the same
+    /// reason the doubles exist). It holds the resets that exist; a new
+    /// per-identity store still has to be added to them by hand.
     #[test]
-    fn forgetting_the_identity_empties_every_in_memory_store() {
-        let source = include_str!("identity.rs");
-        let start = source
-            .find("async fn forget_identity_state()")
-            .expect("the identity reset exists");
-        let body = &source[start..start + source[start..].find("\n}\n").expect("it ends")];
-
-        assert!(body.contains("forget_identity_disputes()"));
-        assert!(body.contains("forget_identity_ratings()"));
-        assert!(body.contains("session_manager().clear()"));
-        assert!(body.contains("set_claim_nodes(std::iter::empty())"));
-        assert!(body.contains("clear_retained()"));
+    fn forgetting_the_identity_runs_every_reset() {
+        check_identity_resets(
+            include_str!("identity.rs"),
+            include_str!("disputes.rs"),
+            include_str!("reputation.rs"),
+        )
+        .unwrap();
     }
 
     /// PR #565 review: the lifecycle test drives `delete_identity_inner`
-    /// with doubles, so nothing it runs can see what the public entry point
-    /// hands it. Passing no store there would skip every database write of
-    /// the deletion with the suite green; this holds the binding.
+    /// with a throwaway store and doubles, so nothing it runs can see what
+    /// the public entry point hands it. Passing no store there would skip
+    /// every database write of the deletion with the suite green; this holds
+    /// the binding.
     #[test]
     fn deleting_the_identity_binds_the_real_store_and_effects() {
-        let source = include_str!("identity.rs");
-        let start = source
-            .find("pub async fn delete_identity()")
-            .expect("the public deletion exists");
-        let body = &source[start..start + source[start..].find("\n}\n").expect("it ends")];
+        check_deletion_binding(include_str!("identity.rs")).unwrap();
+    }
 
-        assert!(body.contains("delete_identity_inner(crate::db::app_db::db(), &RealDeleteEffects)"));
+    /// The two guards above, against the mutants that used to pass them
+    /// (PR #565 review): each one must be refused.
+    #[test]
+    fn the_deletion_guards_refuse_a_disconnected_cleanup() {
+        let identity = include_str!("identity.rs");
+        let call = "delete_identity_inner(crate::db::app_db::db(), &RealDeleteEffects).await";
+        for broken in [
+            // A new signature: the guard's own text must not answer for it.
+            mutant(
+                identity,
+                "pub async fn delete_identity() -> Result<()>",
+                "pub async fn delete_identity(wipe_data: bool) -> Result<()>",
+            ),
+            // The binding kept in a comment only.
+            mutant(
+                identity,
+                call,
+                &format!(
+                    "// {call}\n    delete_identity_inner(None::<&crate::db::sqlite::SqliteStorage>, &RealDeleteEffects).await"
+                ),
+            ),
+            // The store handed over, but never present.
+            mutant(identity, "app_db::db(),", "app_db::db().filter(|_| false),"),
+        ] {
+            assert!(check_deletion_binding(&broken).is_err());
+        }
+
+        let disputes = include_str!("disputes.rs");
+        let ratings = include_str!("reputation.rs");
+        for reset in [
+            "crate::api::disputes::forget_identity_disputes().await;",
+            "crate::api::reputation::forget_identity_ratings().await;",
+            "crate::mostro::session::session_manager().clear().await;",
+            "crate::mostro::bond_claims::set_claim_nodes(std::iter::empty());",
+            "crate::mostro::bond_claims::clear_retained();",
+            "crate::api::orders::forget_book_ownership().await;",
+        ] {
+            let commented = mutant(identity, reset, &format!("// {reset}"));
+            assert!(
+                check_identity_resets(&commented, disputes, ratings).is_err(),
+                "commenting out {reset} must fail the guard",
+            );
+        }
+        let skipped = mutant(disputes, "dispute_store().forget().await;", "");
+        assert!(check_identity_resets(identity, &skipped, ratings).is_err());
+        let skipped = mutant(ratings, "rating_store().forget().await;", "");
+        assert!(check_identity_resets(identity, disputes, &skipped).is_err());
     }
 
     use super::*;

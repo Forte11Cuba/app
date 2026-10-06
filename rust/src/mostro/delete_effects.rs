@@ -38,20 +38,55 @@ impl DeleteEffects for RealDeleteEffects {
 
 #[cfg(test)]
 mod tests {
+    use crate::source_guard::{expect_body, item_body, mutant, production_code};
+
+    const RELEASE: &str = "crate::api::orders::release_identity_subscriptions().await;";
+    const PUSH: &str = "crate::api::push::unregister_all().await;";
+    const FORGET: &str = "crate::api::identity::forget_identity_state().await;";
+
+    /// Each production effect is exactly its own cleanup: one method per
+    /// call, read per method so two bodies cannot trade places.
+    fn check_real_effects(source: &str) -> Result<(), String> {
+        let code = item_body(
+            &production_code(source),
+            "impl DeleteEffects for RealDeleteEffects",
+        )?;
+        expect_body(
+            &code,
+            "async fn release_identity_subscriptions(&self)",
+            RELEASE,
+        )?;
+        expect_body(&code, "async fn unregister_push(&self)", PUSH)?;
+        expect_body(&code, "async fn forget_identity_state(&self)", FORGET)
+    }
+
     /// The production effects are one-liners the wiring test's doubles
     /// cannot see: emptying one would leave that test green (#553). Same
-    /// source-level guard as `forgetting_the_identity_empties_every_in_memory_store`,
-    /// one level above it.
+    /// source-level guard as `forgetting_the_identity_runs_every_reset`, one
+    /// level above it.
     #[test]
     fn the_real_delete_effects_reach_the_real_cleanups() {
-        let source = include_str!("delete_effects.rs");
-        let start = source
-            .find("impl DeleteEffects for RealDeleteEffects")
-            .expect("the production effects exist");
-        let body = &source[start..start + source[start..].find("\n}\n").expect("it ends")];
+        check_real_effects(include_str!("delete_effects.rs")).unwrap();
+    }
 
-        assert!(body.contains("orders::release_identity_subscriptions().await"));
-        assert!(body.contains("push::unregister_all().await"));
-        assert!(body.contains("identity::forget_identity_state().await"));
+    /// The guard above, against the mutants that used to pass it (PR #565
+    /// review): each one must be refused.
+    #[test]
+    fn the_effects_guard_refuses_a_disconnected_cleanup() {
+        let source = include_str!("delete_effects.rs");
+        // The bodies of the first and last effect traded: in production the
+        // in-memory stores would be emptied while the old keys still listen.
+        let swapped = mutant(source, RELEASE, "SWAP");
+        let swapped = mutant(&swapped, FORGET, RELEASE);
+        let swapped = mutant(&swapped, "SWAP", FORGET);
+        assert!(check_real_effects(&swapped).is_err());
+
+        for call in [RELEASE, PUSH, FORGET] {
+            let commented = mutant(source, call, &format!("// {call}"));
+            assert!(
+                check_real_effects(&commented).is_err(),
+                "commenting out {call} must fail the guard",
+            );
+        }
     }
 }
