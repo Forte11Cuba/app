@@ -1332,6 +1332,7 @@ mod tests {
                 total_reviews: 0,
                 days_active: 0,
                 maker_since: None,
+                cashu_mint_url: None,
             },
             role: TradeRole::Buyer,
             counterparty_pubkey: String::new(),
@@ -1411,6 +1412,7 @@ mod tests {
                 total_reviews: 0,
                 days_active: 0,
                 maker_since: None,
+                cashu_mint_url: None,
             },
             role: TradeRole::Buyer,
             counterparty_pubkey: String::new(),
@@ -1534,6 +1536,7 @@ mod tests {
                 total_reviews: 0,
                 days_active: 0,
                 maker_since: None,
+                cashu_mint_url: None,
             },
             role: TradeRole::Buyer,
             counterparty_pubkey: String::new(),
@@ -1671,6 +1674,7 @@ mod tests {
                 total_reviews: 0,
                 days_active: 0,
                 maker_since: None,
+                cashu_mint_url: None,
             },
             role: TradeRole::Buyer,
             counterparty_pubkey: String::new(),
@@ -1756,6 +1760,7 @@ mod tests {
                 total_reviews: 0,
                 days_active: 0,
                 maker_since: None,
+                cashu_mint_url: None,
             },
             role: TradeRole::Buyer,
             counterparty_pubkey: counterparty.into(),
@@ -2364,6 +2369,7 @@ mod tests {
             total_reviews: 0,
             days_active: 0,
             maker_since: None,
+            cashu_mint_url: None,
         };
         storage.save_order(&order).await.unwrap();
         storage

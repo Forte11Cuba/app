@@ -598,7 +598,6 @@
   "aboutDaysValue": "{count, plural, =1{{count} día} other{{count} días}}",
   "aboutCashuEscrowSection": "Custodia Cashu",
   "aboutCashuMintUrlLabel": "Mint",
-  "aboutCashuMintNotAdvertised": "No anunciado",
   "aboutCashuLocktimeLabel": "Bloqueo de la custodia",
   "aboutCashuSettlementMarginLabel": "Margen de liquidación",
   "escrowModeLightning": "Lightning",
@@ -1250,7 +1249,7 @@
   "lockEscrowClockInvalid": "El reloj de tu dispositivo est\u00e1 mal, as\u00ed que la custodia no se puede fechar bien. Correg\u00ed la fecha e intent\u00e1 de nuevo.",
   "lockEscrowRetry": "Reintentar env\u00edo",
   "lockEscrowPendingSubmission": "Tu custodia est\u00e1 bloqueada pero el nodo no la confirm\u00f3. Reintentar es seguro: no se bloquea una segunda vez.",
-  "lockEscrowMintUnknown": "Este nodo no publicó su mint, así que no hay dónde bloquear el escrow.",
+  "lockEscrowMintNotSupported": "Este nodo deja que cada orden elija su mint, y esta versión de la app solo puede bloquear el escrow en un nodo con un único mint.",
   "lockEscrowNotRecorded": "El escrow llegó al nodo, pero este dispositivo no pudo guardar una copia. El trade puede seguir, pero desde este dispositivo no podrás recuperar el escrow.",
   "lockEscrowRejectedToken": "El nodo no aceptó este escrow. Quedó apartado —vuelve a ti cuando venza su bloqueo— y el próximo intento bloquea uno nuevo.",
   "lockEscrowRejectedMint": "El nodo usa otra mint. Este escrow quedó apartado —vuelve a ti cuando venza su bloqueo—. Revisa la mint del nodo antes de reintentar.",
@@ -1270,5 +1269,8 @@
   "messageMenuHint": "Abrir el menú del mensaje",
   "moreReactions": "Más reacciones",
   "messageReactionLabel": "Reacción: {emoji}",
-  "reactionSendFailed": "No se pudo enviar la reacción. Inténtalo de nuevo."
+  "reactionSendFailed": "No se pudo enviar la reacción. Inténtalo de nuevo.",
+  "cashuAnyMint": "Cualquier mint",
+  "settingsMintLabel": "Mint",
+  "settingsMintCopied": "URL del mint copiada"
 }

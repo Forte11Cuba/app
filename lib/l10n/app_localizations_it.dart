@@ -2145,9 +2145,6 @@ class AppLocalizationsIt extends AppLocalizations {
   String get aboutCashuMintUrlLabel => 'Mint';
 
   @override
-  String get aboutCashuMintNotAdvertised => 'Non dichiarata';
-
-  @override
   String get aboutCashuLocktimeLabel => 'Blocco del deposito';
 
   @override
@@ -4116,8 +4113,8 @@ class AppLocalizationsIt extends AppLocalizations {
       'Il tuo deposito è bloccato ma il nodo non lo ha confermato. Riprovare è sicuro: non verrà bloccato una seconda volta.';
 
   @override
-  String get lockEscrowMintUnknown =>
-      'Questo nodo non ha pubblicato il suo mint, quindi non c\'è dove bloccare l\'escrow.';
+  String get lockEscrowMintNotSupported =>
+      'Questo nodo lascia che ogni ordine scelga il proprio mint, e questa versione dell\'app può bloccare l\'escrow solo su un nodo con un solo mint.';
 
   @override
   String get lockEscrowNotRecorded =>
@@ -4195,4 +4192,13 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get messageMenuHint => 'Apri il menu del messaggio';
+
+  @override
+  String get cashuAnyMint => 'Qualsiasi mint';
+
+  @override
+  String get settingsMintLabel => 'Mint';
+
+  @override
+  String get settingsMintCopied => 'URL del mint copiato';
 }

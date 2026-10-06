@@ -598,7 +598,6 @@
   "aboutDaysValue": "{count, plural, =1{{count} Tag} other{{count} Tage}}",
   "aboutCashuEscrowSection": "Cashu-Treuhand",
   "aboutCashuMintUrlLabel": "Mint",
-  "aboutCashuMintNotAdvertised": "Nicht angegeben",
   "aboutCashuLocktimeLabel": "Treuhand-Sperrfrist",
   "aboutCashuSettlementMarginLabel": "Abwicklungspuffer",
   "escrowModeLightning": "Lightning",
@@ -1250,7 +1249,7 @@
   "lockEscrowClockInvalid": "Die Uhr deines Ger\u00e4ts geht falsch, daher l\u00e4sst sich die Treuhand nicht korrekt datieren. Korrigiere das Datum und versuche es erneut.",
   "lockEscrowRetry": "Senden erneut versuchen",
   "lockEscrowPendingSubmission": "Deine Treuhand ist gesperrt, aber der Node hat sie nicht best\u00e4tigt. Ein erneuter Versuch ist sicher \u2014 es wird kein zweites Mal gesperrt.",
-  "lockEscrowMintUnknown": "Dieser Node hat seine Mint nicht veröffentlicht, daher gibt es keinen Ort, um den Escrow zu sperren.",
+  "lockEscrowMintNotSupported": "Dieser Node lässt jede Order ihre Mint wählen, und diese App-Version kann den Escrow nur auf einem Node mit einer einzigen Mint sperren.",
   "lockEscrowNotRecorded": "Der Escrow hat den Node erreicht, aber dieses Gerät konnte keine Kopie speichern. Der Trade kann weiterlaufen, aber dieses Gerät kann den Escrow nicht zurückfordern.",
   "lockEscrowRejectedToken": "Der Node hat diesen Escrow nicht angenommen. Er wurde beiseitegelegt — er kommt zu dir zurück, wenn seine Sperre abläuft — und der nächste Versuch sperrt einen neuen.",
   "lockEscrowRejectedMint": "Der Node verwendet eine andere Mint. Dieser Escrow wurde beiseitegelegt — er kommt zu dir zurück, wenn seine Sperre abläuft. Prüfe die Mint des Nodes, bevor du es erneut versuchst.",
@@ -1270,5 +1269,8 @@
   "moreReactions": "Weitere Reaktionen",
   "messageReactionLabel": "Reaktion: {emoji}",
   "reactionSendFailed": "Die Reaktion konnte nicht gesendet werden. Bitte versuche es erneut.",
-  "messageMenuHint": "Nachrichtenmenü öffnen"
+  "messageMenuHint": "Nachrichtenmenü öffnen",
+  "cashuAnyMint": "Beliebige Mint",
+  "settingsMintLabel": "Mint",
+  "settingsMintCopied": "Mint-URL kopiert"
 }

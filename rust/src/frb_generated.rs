@@ -8375,6 +8375,7 @@ impl SseDecode for crate::api::types::EscrowModeInfo {
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         let mut var_mode = <String>::sse_decode(deserializer);
         let mut var_mintUrl = <Option<String>>::sse_decode(deserializer);
+        let mut var_mintUrls = <Vec<String>>::sse_decode(deserializer);
         let mut var_escrowLocktimeDays = <Option<u32>>::sse_decode(deserializer);
         let mut var_settlementMarginDays = <Option<u32>>::sse_decode(deserializer);
         let mut var_isOverridden = <bool>::sse_decode(deserializer);
@@ -8384,6 +8385,7 @@ impl SseDecode for crate::api::types::EscrowModeInfo {
         return crate::api::types::EscrowModeInfo {
             mode: var_mode,
             mint_url: var_mintUrl,
+            mint_urls: var_mintUrls,
             escrow_locktime_days: var_escrowLocktimeDays,
             settlement_margin_days: var_settlementMarginDays,
             is_overridden: var_isOverridden,
@@ -8814,7 +8816,7 @@ impl SseDecode for crate::api::node_stats::MostroNodeStats {
         let mut var_maxOrderAmount = <Option<u64>>::sse_decode(deserializer);
         let mut var_acceptedCurrencies = <Vec<String>>::sse_decode(deserializer);
         let mut var_escrowMode = <String>::sse_decode(deserializer);
-        let mut var_cashuMintUrl = <Option<String>>::sse_decode(deserializer);
+        let mut var_cashuMintUrls = <Vec<String>>::sse_decode(deserializer);
         let mut var_bond = <crate::api::types::BondPolicyInfo>::sse_decode(deserializer);
         let mut var_bondRequired = <Option<bool>>::sse_decode(deserializer);
         let mut var_bondPct = <Option<f64>>::sse_decode(deserializer);
@@ -8830,7 +8832,7 @@ impl SseDecode for crate::api::node_stats::MostroNodeStats {
             max_order_amount: var_maxOrderAmount,
             accepted_currencies: var_acceptedCurrencies,
             escrow_mode: var_escrowMode,
-            cashu_mint_url: var_cashuMintUrl,
+            cashu_mint_urls: var_cashuMintUrls,
             bond: var_bond,
             bond_required: var_bondRequired,
             bond_pct: var_bondPct,
@@ -9422,6 +9424,7 @@ impl SseDecode for crate::api::types::OrderInfo {
         let mut var_totalReviews = <u32>::sse_decode(deserializer);
         let mut var_daysActive = <u32>::sse_decode(deserializer);
         let mut var_makerSince = <Option<i64>>::sse_decode(deserializer);
+        let mut var_cashuMintUrl = <Option<String>>::sse_decode(deserializer);
         return crate::api::types::OrderInfo {
             id: var_id,
             kind: var_kind,
@@ -9441,6 +9444,7 @@ impl SseDecode for crate::api::types::OrderInfo {
             total_reviews: var_totalReviews,
             days_active: var_daysActive,
             maker_since: var_makerSince,
+            cashu_mint_url: var_cashuMintUrl,
         };
     }
 }
@@ -11486,6 +11490,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::types::EscrowModeInfo {
         [
             self.mode.into_into_dart().into_dart(),
             self.mint_url.into_into_dart().into_dart(),
+            self.mint_urls.into_into_dart().into_dart(),
             self.escrow_locktime_days.into_into_dart().into_dart(),
             self.settlement_margin_days.into_into_dart().into_dart(),
             self.is_overridden.into_into_dart().into_dart(),
@@ -11812,7 +11817,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::node_stats::MostroNodeStats {
             self.max_order_amount.into_into_dart().into_dart(),
             self.accepted_currencies.into_into_dart().into_dart(),
             self.escrow_mode.into_into_dart().into_dart(),
-            self.cashu_mint_url.into_into_dart().into_dart(),
+            self.cashu_mint_urls.into_into_dart().into_dart(),
             self.bond.into_into_dart().into_dart(),
             self.bond_required.into_into_dart().into_dart(),
             self.bond_pct.into_into_dart().into_dart(),
@@ -12028,6 +12033,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::types::OrderInfo {
             self.total_reviews.into_into_dart().into_dart(),
             self.days_active.into_into_dart().into_dart(),
             self.maker_since.into_into_dart().into_dart(),
+            self.cashu_mint_url.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -13523,6 +13529,7 @@ impl SseEncode for crate::api::types::EscrowModeInfo {
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <String>::sse_encode(self.mode, serializer);
         <Option<String>>::sse_encode(self.mint_url, serializer);
+        <Vec<String>>::sse_encode(self.mint_urls, serializer);
         <Option<u32>>::sse_encode(self.escrow_locktime_days, serializer);
         <Option<u32>>::sse_encode(self.settlement_margin_days, serializer);
         <bool>::sse_encode(self.is_overridden, serializer);
@@ -13897,7 +13904,7 @@ impl SseEncode for crate::api::node_stats::MostroNodeStats {
         <Option<u64>>::sse_encode(self.max_order_amount, serializer);
         <Vec<String>>::sse_encode(self.accepted_currencies, serializer);
         <String>::sse_encode(self.escrow_mode, serializer);
-        <Option<String>>::sse_encode(self.cashu_mint_url, serializer);
+        <Vec<String>>::sse_encode(self.cashu_mint_urls, serializer);
         <crate::api::types::BondPolicyInfo>::sse_encode(self.bond, serializer);
         <Option<bool>>::sse_encode(self.bond_required, serializer);
         <Option<f64>>::sse_encode(self.bond_pct, serializer);
@@ -14387,6 +14394,7 @@ impl SseEncode for crate::api::types::OrderInfo {
         <u32>::sse_encode(self.total_reviews, serializer);
         <u32>::sse_encode(self.days_active, serializer);
         <Option<i64>>::sse_encode(self.maker_since, serializer);
+        <Option<String>>::sse_encode(self.cashu_mint_url, serializer);
     }
 }
 

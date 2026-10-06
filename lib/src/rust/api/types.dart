@@ -905,9 +905,16 @@ class EscrowModeInfo {
   /// translate; Dart maps this to a localized string.
   final String mode;
 
-  /// Mint the node pins for every escrow, override applied. `None` on a
-  /// Lightning node, or on a Cashu node that published none.
+  /// The one mint every escrow on the node is locked at, override applied:
+  /// set only when the node accepts exactly one (the wallet binds to it).
+  /// `None` on a Lightning node, and on a Cashu node that accepts several
+  /// mints or any.
   final String? mintUrl;
+
+  /// Every mint the node accepts (MostroP2P/mostro#1047), override applied.
+  /// Meaningful only when [`Self::mode`] is `"cashu"`, where empty means the
+  /// node accepts any mint.
+  final List<String> mintUrls;
 
   /// NUT-11 locktime the seller must set, in days.
   final int? escrowLocktimeDays;
@@ -919,9 +926,9 @@ class EscrowModeInfo {
   /// the node's own tags.
   final bool isOverridden;
 
-  /// **The gate.** True only when the mode is Cashu *and* there is a usable
-  /// mint to connect to. `mode == "cashu"` alone is not enough — a node can
-  /// advertise Cashu and publish no mint.
+  /// **The gate.** True only when the mode is Cashu *and* the node pins one
+  /// mint for the wallet to bind to. `mode == "cashu"` alone is not enough —
+  /// a node can accept several mints, or any.
   final bool isCashuAvailable;
 
   /// Developer override state, mirrored so the dev-only settings surface can
@@ -934,6 +941,7 @@ class EscrowModeInfo {
   const EscrowModeInfo({
     required this.mode,
     this.mintUrl,
+    required this.mintUrls,
     this.escrowLocktimeDays,
     this.settlementMarginDays,
     required this.isOverridden,
@@ -946,6 +954,7 @@ class EscrowModeInfo {
   int get hashCode =>
       mode.hashCode ^
       mintUrl.hashCode ^
+      mintUrls.hashCode ^
       escrowLocktimeDays.hashCode ^
       settlementMarginDays.hashCode ^
       isOverridden.hashCode ^
@@ -960,6 +969,7 @@ class EscrowModeInfo {
           runtimeType == other.runtimeType &&
           mode == other.mode &&
           mintUrl == other.mintUrl &&
+          mintUrls == other.mintUrls &&
           escrowLocktimeDays == other.escrowLocktimeDays &&
           settlementMarginDays == other.settlementMarginDays &&
           isOverridden == other.isOverridden &&
@@ -1499,6 +1509,12 @@ class OrderInfo {
   /// display time (now − since) and falls back to [`Self::days_active`].
   final PlatformInt64? makerSince;
 
+  /// Mint the order's escrow is locked at, from the Kind 38383
+  /// `cashu_mint_url` tag (MostroP2P/mostro#1047): the maker picks it among
+  /// the node's mints. `None` on a Lightning order, on a Cashu order from an
+  /// older daemon, and on our own new order until its book event says.
+  final String? cashuMintUrl;
+
   const OrderInfo({
     required this.id,
     required this.kind,
@@ -1518,6 +1534,7 @@ class OrderInfo {
     required this.totalReviews,
     required this.daysActive,
     this.makerSince,
+    this.cashuMintUrl,
   });
 
   @override
@@ -1539,7 +1556,8 @@ class OrderInfo {
       rating.hashCode ^
       totalReviews.hashCode ^
       daysActive.hashCode ^
-      makerSince.hashCode;
+      makerSince.hashCode ^
+      cashuMintUrl.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -1563,7 +1581,8 @@ class OrderInfo {
           rating == other.rating &&
           totalReviews == other.totalReviews &&
           daysActive == other.daysActive &&
-          makerSince == other.makerSince;
+          makerSince == other.makerSince &&
+          cashuMintUrl == other.cashuMintUrl;
 }
 
 /// Shared types exposed to Flutter via flutter_rust_bridge.

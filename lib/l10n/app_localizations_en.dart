@@ -2127,9 +2127,6 @@ class AppLocalizationsEn extends AppLocalizations {
   String get aboutCashuMintUrlLabel => 'Mint';
 
   @override
-  String get aboutCashuMintNotAdvertised => 'Not advertised';
-
-  @override
   String get aboutCashuLocktimeLabel => 'Escrow locktime';
 
   @override
@@ -4074,8 +4071,8 @@ class AppLocalizationsEn extends AppLocalizations {
       'Your escrow is locked but the node has not confirmed it. Retrying is safe — it will not lock a second time.';
 
   @override
-  String get lockEscrowMintUnknown =>
-      'This node has not published its mint, so there is nowhere to lock the escrow.';
+  String get lockEscrowMintNotSupported =>
+      'This node lets each order choose its mint, and this version of the app can only lock an escrow on a node with a single mint.';
 
   @override
   String get lockEscrowNotRecorded =>
@@ -4151,4 +4148,13 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get messageMenuHint => 'Open the message menu';
+
+  @override
+  String get cashuAnyMint => 'Any mint';
+
+  @override
+  String get settingsMintLabel => 'Mint';
+
+  @override
+  String get settingsMintCopied => 'Mint URL copied';
 }

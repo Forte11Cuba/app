@@ -598,7 +598,6 @@
   "aboutDaysValue": "{count, plural, =1{{count} jour} other{{count} jours}}",
   "aboutCashuEscrowSection": "Séquestre Cashu",
   "aboutCashuMintUrlLabel": "Mint",
-  "aboutCashuMintNotAdvertised": "Non annoncé",
   "aboutCashuLocktimeLabel": "Verrouillage du séquestre",
   "aboutCashuSettlementMarginLabel": "Marge de règlement",
   "escrowModeLightning": "Lightning",
@@ -1250,7 +1249,7 @@
   "lockEscrowClockInvalid": "L'horloge de votre appareil est incorrecte, le s\u00e9questre ne peut donc pas \u00eatre dat\u00e9 correctement. Corrigez la date et r\u00e9essayez.",
   "lockEscrowRetry": "R\u00e9essayer l'envoi",
   "lockEscrowPendingSubmission": "Votre s\u00e9questre est verrouill\u00e9 mais le n\u0153ud ne l'a pas confirm\u00e9. R\u00e9essayer est sans risque : il ne sera pas verrouill\u00e9 une seconde fois.",
-  "lockEscrowMintUnknown": "Ce nœud n'a pas publié son mint : il n'y a nulle part où verrouiller l'escrow.",
+  "lockEscrowMintNotSupported": "Ce nœud laisse chaque ordre choisir son mint, et cette version de l'app ne peut verrouiller l'escrow que sur un nœud à mint unique.",
   "lockEscrowNotRecorded": "L'escrow est arrivé au nœud, mais cet appareil n'a pas pu en garder une copie. Le trade peut continuer, mais cet appareil ne pourra pas récupérer l'escrow.",
   "lockEscrowRejectedToken": "Le nœud n'a pas accepté cet escrow. Il a été mis de côté — il vous revient à l'expiration de son verrou — et la prochaine tentative en verrouille un nouveau.",
   "lockEscrowRejectedMint": "Le nœud utilise un autre mint. Cet escrow a été mis de côté — il vous revient à l'expiration de son verrou. Vérifiez le mint du nœud avant de réessayer.",
@@ -1270,5 +1269,8 @@
   "moreReactions": "Plus de réactions",
   "messageReactionLabel": "Réaction : {emoji}",
   "reactionSendFailed": "Impossible d'envoyer la réaction. Veuillez réessayer.",
-  "messageMenuHint": "Ouvrir le menu du message"
+  "messageMenuHint": "Ouvrir le menu du message",
+  "cashuAnyMint": "N'importe quel mint",
+  "settingsMintLabel": "Mint",
+  "settingsMintCopied": "URL du mint copiée"
 }

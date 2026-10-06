@@ -598,7 +598,6 @@
   "aboutDaysValue": "{count, plural, =1{{count} giorno} other{{count} giorni}}",
   "aboutCashuEscrowSection": "Deposito Cashu",
   "aboutCashuMintUrlLabel": "Mint",
-  "aboutCashuMintNotAdvertised": "Non dichiarata",
   "aboutCashuLocktimeLabel": "Blocco del deposito",
   "aboutCashuSettlementMarginLabel": "Margine di liquidazione",
   "escrowModeLightning": "Lightning",
@@ -1250,7 +1249,7 @@
   "lockEscrowClockInvalid": "L'orologio del tuo dispositivo \u00e8 errato, quindi il deposito non pu\u00f2 essere datato correttamente. Correggi la data e riprova.",
   "lockEscrowRetry": "Riprova l'invio",
   "lockEscrowPendingSubmission": "Il tuo deposito \u00e8 bloccato ma il nodo non lo ha confermato. Riprovare \u00e8 sicuro: non verr\u00e0 bloccato una seconda volta.",
-  "lockEscrowMintUnknown": "Questo nodo non ha pubblicato il suo mint, quindi non c'è dove bloccare l'escrow.",
+  "lockEscrowMintNotSupported": "Questo nodo lascia che ogni ordine scelga il proprio mint, e questa versione dell'app può bloccare l'escrow solo su un nodo con un solo mint.",
   "lockEscrowNotRecorded": "L'escrow è arrivato al nodo, ma questo dispositivo non ha potuto salvarne una copia. Il trade può continuare, ma da questo dispositivo non potrai recuperare l'escrow.",
   "lockEscrowRejectedToken": "Il nodo non ha accettato questo escrow. È stato messo da parte — torna a te quando scade il suo blocco — e il prossimo tentativo ne blocca uno nuovo.",
   "lockEscrowRejectedMint": "Il nodo usa un altro mint. Questo escrow è stato messo da parte — torna a te quando scade il suo blocco. Controlla il mint del nodo prima di riprovare.",
@@ -1270,5 +1269,8 @@
   "moreReactions": "Altre reazioni",
   "messageReactionLabel": "Reazione: {emoji}",
   "reactionSendFailed": "Impossibile inviare la reazione. Riprova.",
-  "messageMenuHint": "Apri il menu del messaggio"
+  "messageMenuHint": "Apri il menu del messaggio",
+  "cashuAnyMint": "Qualsiasi mint",
+  "settingsMintLabel": "Mint",
+  "settingsMintCopied": "URL del mint copiato"
 }
