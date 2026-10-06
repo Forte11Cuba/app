@@ -708,66 +708,6 @@ class InvoiceOrderIdBody extends StatelessWidget {
   }
 }
 
-/// Lock + the sentence explaining what a hold invoice does, with [boldWord]
-/// set in bold wherever the locale places it in [sentence].
-class InvoiceHoldNote extends StatelessWidget {
-  const InvoiceHoldNote({
-    super.key,
-    required this.sentence,
-    required this.boldWord,
-  });
-
-  final String Function(String hold) sentence;
-  final String boldWord;
-
-  @override
-  Widget build(BuildContext context) {
-    final book = OrderBookPalette.of(context);
-    final pal = InvoicePalette.of(context);
-    final (before, after) = _splitAround(sentence);
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 11),
-      decoration: BoxDecoration(
-        color: pal.subtleFill,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: pal.subtleBorder),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: const EdgeInsets.only(top: 1),
-            child: Icon(Icons.lock_outline, size: 15, color: pal.icon),
-          ),
-          const SizedBox(width: 9),
-          Expanded(
-            child: Text.rich(
-              TextSpan(
-                style: TextStyle(
-                  fontSize: 11,
-                  height: 1.45,
-                  color: book.textSecondary,
-                ),
-                children: [
-                  TextSpan(text: before),
-                  TextSpan(
-                    text: boldWord,
-                    style: TextStyle(
-                      fontWeight: FontWeight.w700,
-                      color: book.textStrong,
-                    ),
-                  ),
-                  TextSpan(text: after),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 /// Terminal state once an invoice step ran out of time: the reason and one
 /// way back, instead of a form or a QR nobody can use any more.
 class InvoiceTimeUpView extends StatelessWidget {
