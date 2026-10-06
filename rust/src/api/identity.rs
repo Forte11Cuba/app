@@ -30,22 +30,47 @@ struct IdentityState {
     identity_info: IdentityInfo,
 }
 
-fn identity_lock() -> &'static RwLock<Option<IdentityState>> {
-    static IDENTITY: OnceLock<RwLock<Option<IdentityState>>> = OnceLock::new();
-    IDENTITY.get_or_init(|| RwLock::new(None))
+/// The loaded identity and the generation that tells it from the next one.
+///
+/// The process has one ([`identity_slot`]); the lifecycle seams (`create_in`,
+/// `load_in`, `delete_in`) take it as a parameter so a test can drive them on
+/// a slot of its own, without racing the tests that share the global one.
+#[flutter_rust_bridge::frb(ignore)]
+struct IdentitySlot {
+    state: RwLock<Option<IdentityState>>,
+    /// Bumped by every identity deletion, under the write lock: it tells work
+    /// that started under one identity apart from the next — even when the
+    /// same mnemonic is imported again, which a pubkey comparison would not.
+    generation: std::sync::atomic::AtomicU64,
 }
 
-/// Bumped by every identity deletion, under the write lock: it tells work
-/// that started under one identity apart from the next — even when the same
-/// mnemonic is imported again, which a pubkey comparison would not.
-static IDENTITY_GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+#[flutter_rust_bridge::frb(ignore)]
+impl IdentitySlot {
+    const fn new() -> Self {
+        Self {
+            state: RwLock::const_new(None),
+            generation: std::sync::atomic::AtomicU64::new(0),
+        }
+    }
+}
+
+fn identity_slot() -> &'static IdentitySlot {
+    static SLOT: IdentitySlot = IdentitySlot::new();
+    &SLOT
+}
+
+fn identity_lock() -> &'static RwLock<Option<IdentityState>> {
+    &identity_slot().state
+}
 
 /// The generation of the active identity, or `None` without one.
 pub(crate) async fn identity_generation() -> Option<u64> {
     let guard = identity_lock().read().await;
-    guard
-        .as_ref()
-        .map(|_| IDENTITY_GENERATION.load(std::sync::atomic::Ordering::SeqCst))
+    guard.as_ref().map(|_| {
+        identity_slot()
+            .generation
+            .load(std::sync::atomic::Ordering::SeqCst)
+    })
 }
 
 /// Run `write` only while the identity of `generation` is still the active
@@ -62,7 +87,10 @@ pub(crate) async fn while_identity_current<T>(
 ) -> Option<T> {
     let guard = identity_lock().read().await;
     let current = guard.is_some()
-        && IDENTITY_GENERATION.load(std::sync::atomic::Ordering::SeqCst) == generation;
+        && identity_slot()
+            .generation
+            .load(std::sync::atomic::Ordering::SeqCst)
+            == generation;
     if !current {
         return None;
     }
@@ -161,7 +189,15 @@ pub struct RecoveryProgress {
 ///
 /// Returns `Err("AlreadyExists")` if an identity is already loaded.
 pub async fn create_identity() -> Result<IdentityCreationResult> {
-    let mut guard = identity_lock().write().await;
+    create_in(identity_slot(), crate::db::app_db::db()).await
+}
+
+/// [`create_identity`] on `slot`, against `db`.
+async fn create_in<S: Storage>(
+    slot: &IdentitySlot,
+    db: Option<&S>,
+) -> Result<IdentityCreationResult> {
+    let mut guard = slot.state.write().await;
     if guard.is_some() {
         bail!("AlreadyExists");
     }
@@ -171,7 +207,7 @@ pub async fn create_identity() -> Result<IdentityCreationResult> {
     // live identity (issue #555). A retry that fails again refuses the new
     // identity: once one is installed, the launch reload never retries, and
     // the previous user's rows would stay for the life of the install.
-    if let Some(db) = crate::db::app_db::db() {
+    if let Some(db) = db {
         retry_pending_wipe(db).await?;
     }
 
@@ -212,6 +248,29 @@ pub async fn load_identity_from_mnemonic(
     privacy_mode: bool,
     created_at: Option<i64>,
 ) -> Result<IdentityInfo> {
+    load_in(
+        identity_slot(),
+        crate::db::app_db::db(),
+        trade_key_index_tx(),
+        words,
+        trade_key_index,
+        privacy_mode,
+        created_at,
+    )
+    .await
+}
+
+/// [`load_identity_from_mnemonic`] on `slot`, against `db`, publishing the
+/// reconciled trade-key counter to `tx`.
+async fn load_in<S: Storage>(
+    slot: &IdentitySlot,
+    db: Option<&S>,
+    tx: &broadcast::Sender<u32>,
+    words: Vec<String>,
+    trade_key_index: u32,
+    privacy_mode: bool,
+    created_at: Option<i64>,
+) -> Result<IdentityInfo> {
     // Deriving is the validation: it parses the phrase and fails on a bad word
     // or checksum with the same `invalid mnemonic` error the explicit check
     // used to produce.
@@ -226,7 +285,7 @@ pub async fn load_identity_from_mnemonic(
     // load: identity loading must survive a corrupt store, and the fallback
     // is safe — any subsequent derivation either persists (repairing the
     // store) or fails before handing out a key.
-    let stored = match crate::db::app_db::db() {
+    let stored = match db {
         Some(db) => match db.get_identity().await {
             Ok(v) => v,
             Err(e) => {
@@ -239,12 +298,8 @@ pub async fn load_identity_from_mnemonic(
         },
         None => None,
     };
-    let trade_key_index = reconcile_and_publish_to(
-        trade_key_index_tx(),
-        trade_key_index,
-        stored.as_ref(),
-        &public_key,
-    );
+    let trade_key_index =
+        reconcile_and_publish_to(tx, trade_key_index, stored.as_ref(), &public_key);
 
     let created_at = match created_at {
         Some(ts) if ts > 0 => ts,
@@ -258,7 +313,7 @@ pub async fn load_identity_from_mnemonic(
         created_at,
     };
 
-    let mut guard = identity_lock().write().await;
+    let mut guard = slot.state.write().await;
     *guard = Some(IdentityState {
         mnemonic_words: words,
         keys,
@@ -268,7 +323,7 @@ pub async fn load_identity_from_mnemonic(
 
     // The rows a failed wipe kept may be this identity's own: then the
     // pending wipe is over, without wiping anything (issue #555).
-    if let Some(db) = crate::db::app_db::db() {
+    if let Some(db) = db {
         release_own_wipe_marker(db, &public_key).await;
     }
 
@@ -317,6 +372,11 @@ pub async fn import_from_mnemonic(words: Vec<String>, recover: bool) -> Result<I
 /// Import identity from an nsec (bech32-encoded Nostr secret key).
 /// Note: nsec import produces a single key with no BIP-39 mnemonic backup.
 pub async fn import_from_nsec(nsec: String) -> Result<IdentityInfo> {
+    import_nsec_in(identity_slot(), nsec).await
+}
+
+/// [`import_from_nsec`] on `slot`.
+async fn import_nsec_in(slot: &IdentitySlot, nsec: String) -> Result<IdentityInfo> {
     let keys =
         Keys::parse(&nsec).map_err(|e| anyhow!("InvalidKey: {e}"))?;
     let public_key = keys.public_key().to_hex();
@@ -330,7 +390,7 @@ pub async fn import_from_nsec(nsec: String) -> Result<IdentityInfo> {
         created_at: now,
     };
 
-    let mut guard = identity_lock().write().await;
+    let mut guard = slot.state.write().await;
     *guard = Some(IdentityState {
         mnemonic_words: vec![], // no mnemonic for nsec imports
         keys,
@@ -392,7 +452,64 @@ pub async fn delete_identity() -> Result<()> {
 /// (`clear_identity_data_wipes_the_identity_and_keeps_the_device`,
 /// `clearing_the_store_leaves_no_chats_and_no_unread_count`).
 async fn delete_identity_inner(wipe_data: bool) -> Result<()> {
-    let Some(owner) = identity_lock()
+    let cleanup_failures = delete_in(
+        identity_slot(),
+        crate::db::app_db::db(),
+        &AppDeletionHooks,
+        wipe_data,
+    )
+    .await?;
+
+    // Last, so the buffered lines above are dropped too: they name orders and
+    // counterparties of the identity being deleted, and the Logs screen can
+    // still share them afterwards. The platform console keeps them. The
+    // cleanup failures are the exception, re-emitted after the clear — see
+    // `clear_logs_and_report`.
+    clear_logs_and_report(&cleanup_failures);
+
+    Ok(())
+}
+
+/// What a deletion does to the rest of the process, outside the slot and the
+/// store: injectable so a test can stand in for the process-wide stores and
+/// pause the deletion at each of these points.
+#[flutter_rust_bridge::frb(ignore)]
+trait DeletionHooks {
+    /// Give back the identity's relay subscriptions.
+    fn release_subscriptions(&self) -> impl std::future::Future<Output = ()>;
+    /// Stop the push server waking this device for the identity's keys.
+    fn unregister_push(&self) -> impl std::future::Future<Output = ()>;
+    /// Empty the in-memory stores of the deleted identity.
+    fn forget_state(&self) -> impl std::future::Future<Output = ()>;
+}
+
+/// The process's own [`DeletionHooks`].
+#[flutter_rust_bridge::frb(ignore)]
+struct AppDeletionHooks;
+
+#[flutter_rust_bridge::frb(ignore)]
+impl DeletionHooks for AppDeletionHooks {
+    async fn release_subscriptions(&self) {
+        crate::api::orders::release_identity_subscriptions().await;
+    }
+    async fn unregister_push(&self) {
+        crate::api::push::unregister_all().await;
+    }
+    async fn forget_state(&self) {
+        forget_identity_state().await;
+    }
+}
+
+/// [`delete_identity_inner`] on `slot`, against `db`, up to the log clear:
+/// returns the cleanup failures to report.
+async fn delete_in<S: Storage>(
+    slot: &IdentitySlot,
+    db: Option<&S>,
+    hooks: &impl DeletionHooks,
+    wipe_data: bool,
+) -> Result<Vec<String>> {
+    let Some(owner) = slot
+        .state
         .read()
         .await
         .as_ref()
@@ -406,47 +523,40 @@ async fn delete_identity_inner(wipe_data: bool) -> Result<()> {
     // the identity is still whole (issue #555). The lifecycle test's
     // `wipe_data: false` deletes no rows, so it leaves no intent either.
     if wipe_data {
-        record_wipe_intent(crate::db::app_db::db(), &owner).await?;
+        record_wipe_intent(db, &owner).await?;
     }
     // While the identity still exists: its relay subscriptions are given
     // back first, so nothing of the old user's keeps arriving afterwards.
     if wipe_data {
-        crate::api::orders::release_identity_subscriptions().await;
+        hooks.release_subscriptions().await;
     }
 
-    let mut guard = identity_lock().write().await;
+    let mut guard = slot.state.write().await;
     let Some(state) = guard.take() else {
         bail!("NoIdentity");
     };
     // Under the same lock, so no `while_identity_current` write can start
     // between the two.
-    IDENTITY_GENERATION.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    slot.generation
+        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     drop(guard);
     drop(state);
 
     // The push server must stop waking this device for keys the user no
     // longer holds; the registrations name pubkeys only, so no key is needed.
-    crate::api::push::unregister_all().await;
+    hooks.unregister_push().await;
 
     // A memory-only session (`init_db` failed) only gets here without a
     // wipe: `record_wipe_intent` refuses the real deletion when there is no
     // database to hold the marker.
-    let cleanup_failures = match crate::db::app_db::db() {
+    let cleanup_failures = match db {
         Some(db) => wipe_identity_rows(db, wipe_data).await,
         None => Vec::new(),
     };
     if wipe_data {
-        forget_identity_state().await;
+        hooks.forget_state().await;
     }
-
-    // Last, so the buffered lines above are dropped too: they name orders and
-    // counterparties of the identity being deleted, and the Logs screen can
-    // still share them afterwards. The platform console keeps them. The
-    // cleanup failures are the exception, re-emitted after the clear — see
-    // `clear_logs_and_report`.
-    clear_logs_and_report(&cleanup_failures);
-
-    Ok(())
+    Ok(cleanup_failures)
 }
 
 /// Record that `owner`'s data is about to be wiped, before the deletion
@@ -607,11 +717,19 @@ async fn retry_pending_wipe<S: Storage>(db: &S) -> Result<()> {
 /// so that is every import it makes; a slot already taken is the launch
 /// reload's case, where a retry would take the live identity's data.
 async fn retry_pending_wipe_if_vacant() -> Result<()> {
-    let guard = identity_lock().write().await;
+    retry_pending_wipe_if_vacant_in(identity_slot(), crate::db::app_db::db()).await
+}
+
+/// [`retry_pending_wipe_if_vacant`] on `slot`, against `db`.
+async fn retry_pending_wipe_if_vacant_in<S: Storage>(
+    slot: &IdentitySlot,
+    db: Option<&S>,
+) -> Result<()> {
+    let guard = slot.state.write().await;
     if guard.is_some() {
         return Ok(());
     }
-    if let Some(db) = crate::db::app_db::db() {
+    if let Some(db) = db {
         retry_pending_wipe(db).await?;
     }
     Ok(())
@@ -2034,14 +2152,14 @@ mod tests {
     fn the_deletion_records_its_intent_before_giving_anything_up() {
         let source = include_str!("identity.rs");
         let start = source
-            .find("async fn delete_identity_inner(")
+            .find("async fn delete_in<")
             .expect("the deletion exists");
         let body = &source[start..start + source[start..].find("\n}\n").expect("it ends")];
         let intent = body
-            .find("record_wipe_intent(crate::db::app_db::db(), &owner).await?")
+            .find("record_wipe_intent(db, &owner).await?")
             .expect("the deletion records its intent and stops on failure");
         let release = body
-            .find("release_identity_subscriptions()")
+            .find("hooks.release_subscriptions()")
             .expect("the deletion releases the subscriptions");
         let take = body
             .find("guard.take()")
@@ -2059,14 +2177,14 @@ mod tests {
     fn the_deletion_marks_the_deleted_identity_as_the_owner() {
         let source = include_str!("identity.rs");
         let start = source
-            .find("async fn delete_identity_inner(")
+            .find("async fn delete_in<")
             .expect("the deletion exists");
         let body = &source[start..start + source[start..].find("\n}\n").expect("it ends")];
         let owner = body
             .find("state.identity_info.public_key.clone()")
             .expect("the deletion reads the identity's public key");
         let intent = body
-            .find("record_wipe_intent(crate::db::app_db::db(), &owner)")
+            .find("record_wipe_intent(db, &owner)")
             .expect("and records it as the marker's owner");
         assert!(owner < intent);
     }
@@ -2085,7 +2203,7 @@ mod tests {
             &source[start..start + source[start..].find("\n}\n").expect("it ends")]
         };
 
-        let body = body_of("pub async fn create_identity(");
+        let body = body_of("async fn create_in<");
         let guard = body
             .find("bail!(\"AlreadyExists\")")
             .expect("the replace guard exists");
@@ -2110,7 +2228,7 @@ mod tests {
             "the retry must run before the import installs"
         );
 
-        let body = body_of("async fn retry_pending_wipe_if_vacant(");
+        let body = body_of("async fn retry_pending_wipe_if_vacant_in<");
         let vacant = body
             .find("if guard.is_some()")
             .expect("the import's retry checks the slot");
@@ -2119,7 +2237,7 @@ mod tests {
             .expect("and then retries");
         assert!(vacant < retry, "the slot is checked before the wipe");
 
-        let body = body_of("pub async fn load_identity_from_mnemonic(");
+        let body = body_of("async fn load_in<");
         assert!(
             !body.contains("retry_pending_wipe"),
             "the launch reload runs with a live identity — a wipe there takes its data"
