@@ -338,6 +338,16 @@ void main() {
           orderId: 'order-8a',
           isBuyer: true,
           status: OrderStatus.waitingPayment,
+          // A buy order: the seller who owes the payment took it, so expiry
+          // puts the order back in the book.
+          trades: [
+            fakeTrade(
+              id: 'order-8a',
+              orderId: 'order-8a',
+              status: OrderStatus.waitingPayment,
+              kind: OrderKind.buy,
+            ),
+          ],
         );
 
         expect(find.text(_en.tradeScreenTitle), findsOneWidget);
@@ -347,10 +357,7 @@ void main() {
         expect(find.byType(TradeChatLockedLine), findsOneWidget);
         expect(find.byType(TradeChatCard), findsNothing);
         expect(find.text(_en.tradeTimerTheyHave), findsOneWidget);
-        expect(
-          find.text(_en.tradeTimerWaitingInvoiceConsequence),
-          findsOneWidget,
-        );
+        expect(find.text(_en.tradeTimerExpiryBackToBook), findsOneWidget);
         expect(_outlinedButtonWithText(_en.cancelTradeButton), findsOneWidget);
         expect(_outlinedButtonWithText(_en.openDisputeButton), findsNothing);
         expect(

@@ -1416,8 +1416,12 @@ class AppLocalizationsNl extends AppLocalizations {
       'Verloopt de tijd, dan gaat de order uit het orderboek. Dat raakt je reputatie niet.';
 
   @override
-  String get tradeTimerWaitingInvoiceConsequence =>
-      'Verloopt de tijd, dan wordt de trade geannuleerd en komt de order terug in het orderboek.';
+  String get tradeTimerExpiryBackToBook =>
+      'Verloopt de tijd, dan komt de order terug in het orderboek.';
+
+  @override
+  String get tradeTimerExpiryCancelled =>
+      'Verloopt de tijd, dan wordt de order geannuleerd.';
 
   @override
   String get tradeStepOrderTaken => 'Order geaccepteerd';
@@ -3452,6 +3456,14 @@ class AppLocalizationsNl extends AppLocalizations {
   @override
   String get invoiceStepElapsed =>
       'De tijd is om. Mostro sluit deze stap binnenkort af als hij niet wordt voltooid.';
+
+  @override
+  String get stepElapsedBackToBook =>
+      'De tijd is om. Wordt de stap niet voltooid, dan zet Mostro de order binnenkort terug in het orderboek.';
+
+  @override
+  String get stepElapsedCancelled =>
+      'De tijd is om. Wordt de stap niet voltooid, dan annuleert Mostro de order binnenkort.';
 
   @override
   String invoiceErrorWrongNetwork(String invoice, String node) {

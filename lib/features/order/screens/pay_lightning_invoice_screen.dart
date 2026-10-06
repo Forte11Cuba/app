@@ -437,7 +437,11 @@ class _PayLightningInvoiceScreenState
                         remaining: remaining,
                         sentence: l10n.invoiceExpiresIn,
                         hours: l10n.invoiceCountdownHours,
-                        elapsed: l10n.invoiceStepElapsed,
+                        elapsed: stepElapsedNotice(
+                          l10n,
+                          buyerStep: false,
+                          kind: peer.order.kind,
+                        ),
                       ),
                     ],
                     const SizedBox(height: 12),

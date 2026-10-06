@@ -10,7 +10,7 @@ import 'package:mostro/core/invoice_palette.dart';
 import 'package:mostro/features/order/models/invoice_rules.dart';
 import 'package:mostro/l10n/app_localizations.dart';
 import 'package:mostro/shared/providers/peer_nym_provider.dart';
-import 'package:mostro/src/rust/api/types.dart' show TradeInfo;
+import 'package:mostro/src/rust/api/types.dart' show OrderKind, TradeInfo;
 
 /// Building blocks shared by the two invoice screens
 /// (`design_handoff_factura_lightning`, 13a and 13b). Both screens import
@@ -272,6 +272,21 @@ class InvoiceHeroCard extends StatelessWidget {
 }
 
 // ── Time band ─────────────────────────────────────────────────────────────────
+
+/// What the countdown says at 00:00 on a waiting step: what mostrod is about
+/// to do with the order ([stepExpiry]), or, while the order's [kind] is not
+/// known yet, only that the step is about to close.
+String stepElapsedNotice(
+  AppLocalizations l10n, {
+  required bool buyerStep,
+  required OrderKind? kind,
+}) => switch (kind == null
+    ? null
+    : stepExpiry(buyerStep: buyerStep, kind: kind)) {
+  StepExpiry.backToBook => l10n.stepElapsedBackToBook,
+  StepExpiry.cancelled => l10n.stepElapsedCancelled,
+  null => l10n.invoiceStepElapsed,
+};
 
 /// Amber band with the time left; red, with a pulsing figure, under a minute.
 ///

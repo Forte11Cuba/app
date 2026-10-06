@@ -90,6 +90,26 @@ Duration invoiceCountdownTick(Duration remaining) {
   return Duration(seconds: remaining.inSeconds % 60 + 1);
 }
 
+// ── Step expiry ───────────────────────────────────────────────────────────────
+
+/// What mostrod does with the order when a waiting step runs out
+/// (`scheduler.rs`): it goes back to the book when the taker owed the step,
+/// and is cancelled when the maker did. Both sides of the trade read the same
+/// outcome.
+enum StepExpiry { backToBook, cancelled }
+
+/// [buyerStep] is the buyer's invoice; otherwise the step is the seller's
+/// hold-invoice payment. The taker owes the buyer's invoice on a sell order
+/// and the seller's payment on a buy order, so [kind] is enough to tell who
+/// owes the step without knowing which side the user took.
+StepExpiry stepExpiry({
+  required bool buyerStep,
+  required rust_types.OrderKind kind,
+}) =>
+    buyerStep == (kind == rust_types.OrderKind.sell)
+        ? StepExpiry.backToBook
+        : StepExpiry.cancelled;
+
 // ── Buyer input ───────────────────────────────────────────────────────────────
 
 const _scheme = 'lightning:';
@@ -258,8 +278,9 @@ bool invoiceCheckAllowsSubmit(InvoiceCheck check) => switch (check) {
 /// Kebab-case like `order.status`, and never the row's sentence, which is
 /// translated.
 String? invoiceCheckWord(InvoiceCheck check) => switch (check) {
-  InvoiceCheckNone() || InvoiceCheckPending() || InvoiceCheckUnverified() =>
-    null,
+  InvoiceCheckNone() ||
+  InvoiceCheckPending() ||
+  InvoiceCheckUnverified() => null,
   InvoiceCheckAddress() => 'address',
   InvoiceCheckValid() => 'valid',
   InvoiceCheckError(:final problem) => switch (problem) {

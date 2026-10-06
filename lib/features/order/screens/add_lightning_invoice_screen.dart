@@ -909,7 +909,11 @@ class _AddLightningInvoiceScreenState
                           remaining: remaining,
                           sentence: l10n.invoiceTimeToSend,
                           hours: l10n.invoiceCountdownHours,
-                          elapsed: l10n.invoiceStepElapsed,
+                          elapsed: stepElapsedNotice(
+                            l10n,
+                            buyerStep: true,
+                            kind: trade?.order.kind,
+                          ),
                         ),
                       ),
         ),

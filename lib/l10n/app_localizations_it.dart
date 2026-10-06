@@ -1419,8 +1419,12 @@ class AppLocalizationsIt extends AppLocalizations {
       'Se scade, l\'ordine viene rimosso dal book. Non influirà sulla tua reputazione.';
 
   @override
-  String get tradeTimerWaitingInvoiceConsequence =>
-      'Se scade, l\'operazione viene annullata e l\'ordine torna nel book.';
+  String get tradeTimerExpiryBackToBook =>
+      'Se scade, l\'ordine torna nel book.';
+
+  @override
+  String get tradeTimerExpiryCancelled =>
+      'Se scade, l\'ordine viene annullato.';
 
   @override
   String get tradeStepOrderTaken => 'Ordine preso';
@@ -3455,6 +3459,14 @@ class AppLocalizationsIt extends AppLocalizations {
   @override
   String get invoiceStepElapsed =>
       'Il tempo è scaduto. Mostro chiuderà a breve questo passaggio se non viene completato.';
+
+  @override
+  String get stepElapsedBackToBook =>
+      'Il tempo è scaduto. Se non viene completato, Mostro riporterà a breve l\'ordine nel book.';
+
+  @override
+  String get stepElapsedCancelled =>
+      'Il tempo è scaduto. Se non viene completato, Mostro annullerà a breve l\'ordine.';
 
   @override
   String invoiceErrorWrongNetwork(String invoice, String node) {

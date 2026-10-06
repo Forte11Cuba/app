@@ -1423,8 +1423,11 @@ class AppLocalizationsFr extends AppLocalizations {
       'S\'il expire, l\'ordre est retiré du carnet. Cela n\'affectera pas votre réputation.';
 
   @override
-  String get tradeTimerWaitingInvoiceConsequence =>
-      'S\'il expire, la transaction est annulée et l\'ordre retourne au carnet.';
+  String get tradeTimerExpiryBackToBook =>
+      'S\'il expire, l\'ordre retourne au carnet.';
+
+  @override
+  String get tradeTimerExpiryCancelled => 'S\'il expire, l\'ordre est annulé.';
 
   @override
   String get tradeStepOrderTaken => 'Ordre pris';
@@ -3462,6 +3465,14 @@ class AppLocalizationsFr extends AppLocalizations {
   @override
   String get invoiceStepElapsed =>
       'Le délai est écoulé. Mostro fermera cette étape sous peu si elle n\'est pas terminée.';
+
+  @override
+  String get stepElapsedBackToBook =>
+      'Le délai est écoulé. Si l\'étape n\'est pas terminée, Mostro remettra l\'ordre dans le carnet sous peu.';
+
+  @override
+  String get stepElapsedCancelled =>
+      'Le délai est écoulé. Si l\'étape n\'est pas terminée, Mostro annulera l\'ordre sous peu.';
 
   @override
   String invoiceErrorWrongNetwork(String invoice, String node) {

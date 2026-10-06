@@ -14,6 +14,30 @@ void main() {
     });
   });
 
+  group('stepExpiry', () {
+    test('the taker owes the step: the order goes back to the book', () {
+      expect(
+        stepExpiry(buyerStep: true, kind: rust_types.OrderKind.sell),
+        StepExpiry.backToBook,
+      );
+      expect(
+        stepExpiry(buyerStep: false, kind: rust_types.OrderKind.buy),
+        StepExpiry.backToBook,
+      );
+    });
+
+    test('the maker owes the step: the order is cancelled', () {
+      expect(
+        stepExpiry(buyerStep: true, kind: rust_types.OrderKind.buy),
+        StepExpiry.cancelled,
+      );
+      expect(
+        stepExpiry(buyerStep: false, kind: rust_types.OrderKind.sell),
+        StepExpiry.cancelled,
+      );
+    });
+  });
+
   group('formatInvoiceSats', () {
     test('has no separator up to five digits', () {
       expect(formatInvoiceSats(250), '250');
