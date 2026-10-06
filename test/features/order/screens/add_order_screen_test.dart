@@ -17,6 +17,7 @@ import 'package:mostro/features/order/widgets/payment_method_section.dart';
 import 'package:mostro/features/order/widgets/price_section.dart';
 import 'package:mostro/l10n/app_localizations.dart';
 import 'package:mostro/shared/utils/fiat_currencies.dart';
+import 'package:mostro/shared/widgets/mostro_modal.dart';
 import '../../../support/provider_harness.dart';
 
 const _node = MostroInstance(
@@ -373,6 +374,62 @@ void main() {
         (tab.decoration! as BoxDecoration).color,
         CreateOrderPalette.dark.sellActiveBg,
       );
+    });
+  });
+
+  group('currency picker', () {
+    /// The codes the open picker lists, in order.
+    List<String> pickerCodes(WidgetTester tester) => tester
+        .widgetList<ListTile>(
+          find.descendant(
+            of: find.byType(MostroDialog),
+            matching: find.byType(ListTile),
+          ),
+        )
+        .map((tile) => (tile.title! as Text).data!)
+        .toList();
+
+    Future<void> openPicker(WidgetTester tester) async {
+      await tester.tap(find.byType(CurrencyInlineSelector));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('offers only the currencies the node accepts', (tester) async {
+      await _pump(
+        tester,
+        node: const MostroInstance(
+          pubKey: 'npub-test',
+          fiatCurrenciesAccepted: 'ars',
+        ),
+      );
+      await openPicker(tester);
+      expect(pickerCodes(tester), ['ARS']);
+    });
+
+    testWidgets('offers the whole catalogue when the node sets no limit', (
+      tester,
+    ) async {
+      await _pump(tester);
+      await openPicker(tester);
+      expect(pickerCodes(tester), ['USD', 'ARS']);
+    });
+
+    testWidgets('lists an accepted code the catalogue does not know', (
+      tester,
+    ) async {
+      await _pump(
+        tester,
+        node: const MostroInstance(
+          pubKey: 'npub-test',
+          fiatCurrenciesAccepted: 'CUP,ARS',
+        ),
+      );
+      await openPicker(tester);
+      expect(pickerCodes(tester), ['ARS', 'CUP']);
+      final cup = tester.widget<ListTile>(
+        find.ancestor(of: find.text('CUP'), matching: find.byType(ListTile)),
+      );
+      expect(cup.subtitle, isNull);
     });
   });
 }

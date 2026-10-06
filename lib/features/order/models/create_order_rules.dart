@@ -20,6 +20,37 @@ bool makerBondApplies({
     policy == BondPolicy.enabled &&
     (applyTo == BondApplyTo.make || applyTo == BondApplyTo.both);
 
+// ── Node's accepted currencies ────────────────────────────────────────────────
+
+/// The fiat codes the node accepts, from the `fiat_currencies_accepted` tag
+/// of its kind 38385 event: split on commas, trimmed, upper-cased and
+/// deduplicated in the node's order, as Rust's `parse_accepted_currencies`.
+///
+/// Null when the node sets no limit: its event has not arrived, or the list
+/// is empty, which mostrod reads as "any currency" (`check_fiat_currency`).
+List<String>? acceptedFiatCodes(String? raw) {
+  final codes = <String>{};
+  for (final part in (raw ?? '').split(',')) {
+    final code = part.trim().toUpperCase();
+    if (code.isNotEmpty) codes.add(code);
+  }
+  return codes.isEmpty ? null : codes.toList();
+}
+
+/// The codes the currency picker offers: the [catalogue]'s, in its order,
+/// narrowed to [accepted]. An accepted code the catalogue does not know goes
+/// at the end, so the node's list is never cut short. A null [accepted]
+/// offers the whole catalogue.
+List<String> offeredFiatCodes(List<String> catalogue, List<String>? accepted) {
+  if (accepted == null) return catalogue;
+  final allowed = accepted.toSet();
+  final known = catalogue.toSet();
+  return [
+    ...catalogue.where(allowed.contains),
+    ...accepted.where((code) => !known.contains(code)),
+  ];
+}
+
 // ── Premium colour rule ───────────────────────────────────────────────────────
 
 /// Whom the premium favours, read from the **maker's** side.

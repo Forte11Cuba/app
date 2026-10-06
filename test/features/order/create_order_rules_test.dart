@@ -5,6 +5,39 @@ import 'package:mostro/features/about/models/mostro_instance.dart'
 import 'package:mostro/features/order/models/create_order_rules.dart';
 
 void main() {
+  group('acceptedFiatCodes', () {
+    test('normalizes the tag as Rust does, in the node order', () {
+      expect(acceptedFiatCodes(' ars, ves ,BRL,ars,, eur'), [
+        'ARS',
+        'VES',
+        'BRL',
+        'EUR',
+      ]);
+    });
+
+    test('no event or an empty list sets no limit', () {
+      expect(acceptedFiatCodes(null), isNull);
+      expect(acceptedFiatCodes(''), isNull);
+      expect(acceptedFiatCodes(' , '), isNull);
+    });
+  });
+
+  group('offeredFiatCodes', () {
+    const catalogue = ['USD', 'EUR', 'ARS'];
+
+    test('narrows the catalogue to the accepted codes, in its order', () {
+      expect(offeredFiatCodes(catalogue, ['ARS', 'USD']), ['USD', 'ARS']);
+    });
+
+    test('keeps an accepted code the catalogue does not know, last', () {
+      expect(offeredFiatCodes(catalogue, ['CUP', 'EUR']), ['EUR', 'CUP']);
+    });
+
+    test('no limit offers the whole catalogue', () {
+      expect(offeredFiatCodes(catalogue, null), catalogue);
+    });
+  });
+
   group('makerBondApplies', () {
     test('applies only to an enabled policy that bonds makers', () {
       expect(

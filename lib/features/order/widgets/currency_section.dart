@@ -5,6 +5,8 @@ import 'package:mostro/core/app_theme.dart';
 import 'package:mostro/core/automation/automation_id.dart';
 import 'package:mostro/core/automation/automation_ids.dart';
 import 'package:mostro/core/create_order_palette.dart';
+import 'package:mostro/features/about/providers/mostro_node_provider.dart';
+import 'package:mostro/features/order/models/create_order_rules.dart';
 import 'package:mostro/l10n/app_localizations.dart';
 import 'package:mostro/shared/utils/fiat_currencies.dart';
 import 'package:mostro/shared/widgets/mostro_modal.dart';
@@ -23,6 +25,24 @@ final selectedFiatCurrencyProvider = Provider<FiatCurrency?>((ref) {
   }
   return null;
 });
+
+/// The currencies the picker offers: the catalogue narrowed to what the
+/// active node accepts ([acceptedFiatCodes]). Until the node's info event
+/// arrives, or when it fails, the whole catalogue is offered: the form never
+/// waits on it, and the node still refuses a currency it does not take.
+final offeredFiatCurrenciesProvider =
+    Provider.autoDispose<AsyncValue<List<FiatCurrency>>>((ref) {
+      final accepted = acceptedFiatCodes(
+        ref.watch(mostroNodeProvider).valueOrNull?.fiatCurrenciesAccepted,
+      );
+      return ref.watch(fiatCurrenciesProvider).whenData((catalogue) {
+        final byCode = {for (final c in catalogue) c.code: c};
+        return [
+          for (final code in offeredFiatCodes(byCode.keys.toList(), accepted))
+            byCode[code] ?? FiatCurrency(code: code, name: '', flag: ''),
+        ];
+      });
+    });
 
 /// Opens the searchable currency picker and writes the choice to
 /// [selectedFiatCodeProvider].
@@ -131,8 +151,9 @@ class CurrencyRowSelector extends ConsumerWidget {
   }
 }
 
-/// Watches the catalogue rather than snapshotting it, so a picker opened
-/// while `assets/data/fiat.json` is still loading fills in once it lands.
+/// Watches the offered list rather than snapshotting it, so a picker opened
+/// while `assets/data/fiat.json` or the node's info event is still loading
+/// fills in once it lands.
 class _CurrencyPickerDialog extends ConsumerStatefulWidget {
   const _CurrencyPickerDialog({
     required this.selected,
@@ -153,7 +174,7 @@ class _CurrencyPickerDialogState extends ConsumerState<_CurrencyPickerDialog> {
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).extension<AppColors>();
-    final currencies = ref.watch(fiatCurrenciesProvider);
+    final currencies = ref.watch(offeredFiatCurrenciesProvider);
     final loaded = currencies.valueOrNull ?? const <FiatCurrency>[];
     final filtered = loaded.where((c) {
       if (_query.isEmpty) return true;
@@ -200,13 +221,18 @@ class _CurrencyPickerDialogState extends ConsumerState<_CurrencyPickerDialog> {
                               style: const TextStyle(fontSize: 20),
                             ),
                             title: Text(c.code),
-                            subtitle: Text(
-                              c.name,
-                              style: TextStyle(
-                                color: colors?.textSubtle,
-                                fontSize: 12,
-                              ),
-                            ),
+                            // A code the node accepts but the catalogue
+                            // does not name has no subtitle.
+                            subtitle:
+                                c.name.isEmpty
+                                    ? null
+                                    : Text(
+                                      c.name,
+                                      style: TextStyle(
+                                        color: colors?.textSubtle,
+                                        fontSize: 12,
+                                      ),
+                                    ),
                             selected: c.code == widget.selected,
                             selectedColor: colors?.mostroGreen,
                             onTap: () => widget.onSelect(c.code),
