@@ -2118,4 +2118,30 @@ void main() {
     );
     expect(icon.size, 16);
   });
+
+  // DS-CMP-22: the id row sits in a card of the screen, not bare on the
+  // scroll after the timeline.
+  testWidgets('the id row sits in a card', (tester) async {
+    const id = '09150348-1a2b-4c3d-8e9f-0a1b2c3d99b5';
+    await _pumpTradeDetail(
+      tester,
+      orderId: id,
+      isBuyer: true,
+      status: OrderStatus.active,
+    );
+
+    final card = find.ancestor(
+      of: find.text('09150348…99b5', skipOffstage: false),
+      matching: find.byWidgetPredicate(
+        (w) =>
+            w is Container &&
+            w.decoration is BoxDecoration &&
+            (w.decoration! as BoxDecoration).border != null &&
+            (w.decoration! as BoxDecoration).borderRadius ==
+                BorderRadius.circular(18),
+        skipOffstage: false,
+      ),
+    );
+    expect(card, findsOneWidget);
+  });
 }

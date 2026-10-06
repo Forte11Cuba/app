@@ -133,6 +133,33 @@ void main() {
     expect(find.text('${_en.tradeWord} d5f425ca…99b5'), findsOneWidget);
   });
 
+  // DS-CMP-22: a mention reads the id in the figures face, like every id,
+  // in the header's line with a row and in the fallback title without one.
+  testWidgets('the header sets the short id in the figures face', (
+    tester,
+  ) async {
+    await _pump(
+      tester,
+      notices: [_status(_longId, 'success', 1)],
+      rows: [_row(_longId, status: OrderStatus.success, isSelling: true)],
+    );
+    expect(
+      _idSpanFont(tester, 'Bank transfer · d5f425ca…99b5'),
+      AppFonts.figures,
+    );
+  });
+
+  testWidgets('the fallback title sets the short id in the figures face', (
+    tester,
+  ) async {
+    await _pump(tester, notices: [_status(_longId, 'success', 1)]);
+
+    expect(
+      _idSpanFont(tester, '${_en.tradeWord} d5f425ca…99b5'),
+      AppFonts.figures,
+    );
+  });
+
   testWidgets('the latest event shows its whole title and its message', (
     tester,
   ) async {
@@ -269,4 +296,18 @@ void main() {
       expect(notifier.state, hasLength(1));
     });
   });
+}
+
+/// The font of the span reading the short id inside the line [plain].
+String? _idSpanFont(WidgetTester tester, String plain) {
+  final text = tester.widget<Text>(find.text(plain));
+  String? font;
+  text.textSpan?.visitChildren((span) {
+    if (span is TextSpan && span.text == 'd5f425ca…99b5') {
+      font = span.style?.fontFamily;
+      return false;
+    }
+    return true;
+  });
+  return font;
 }
