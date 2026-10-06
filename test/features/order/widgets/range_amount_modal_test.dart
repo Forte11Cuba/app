@@ -66,15 +66,33 @@ void main() {
     expect(result(), 25000);
   });
 
-  testWidgets("reads the locale's decimal separator", (tester) async {
+  // The take sends the amount as an integer (`Payload::Amount(amt as i64)`),
+  // so a fraction would be truncated on the wire without the user knowing.
+  // The field never accepts one.
+  testWidgets('accepts no fraction, as the wire amount is whole', (
+    tester,
+  ) async {
     final result = await _open(tester, locale: const Locale('es'));
 
     await tester.enterText(find.byType(TextField), '2500,5');
     await tester.pump();
+    expect(find.text('2.500'), findsOneWidget);
+
     await tester.tap(find.text('Enviar'));
     await tester.pumpAndSettle();
+    expect(result(), 2500);
+  });
 
-    expect(result(), 2500.5);
+  testWidgets('a zero amount still gets the range error', (tester) async {
+    await _open(tester, locale: const Locale('en'));
+
+    await tester.enterText(find.byType(TextField), '0');
+    await tester.pump();
+
+    expect(
+      find.text('Amount must be between 2,000 and 998,000'),
+      findsOneWidget,
+    );
   });
 
   testWidgets('words the range error with grouped bounds', (tester) async {
