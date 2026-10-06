@@ -7,6 +7,7 @@ import 'package:mostro/core/app_theme.dart';
 import 'package:mostro/core/trade_palette.dart';
 import 'package:mostro/features/chat/providers/chat_providers.dart';
 import 'package:mostro/l10n/app_localizations.dart';
+import 'package:mostro/shared/widgets/tab_app_bar.dart' show CountBadge;
 
 /// The chat card of an active trade: the counterpart's alias, the unread
 /// badge from the message stream, and a tap into the room. The alias is the
@@ -126,25 +127,19 @@ class _Avatar extends StatelessWidget {
             Positioned(
               right: 0,
               top: -3,
+              // The shared badge (99+ past 99), ringed in the card's surface
+              // to stand off the icon. A Container insets its child by the
+              // border, so 13 + 2 × 1.5 keeps it 16 high.
               child: Container(
-                constraints: const BoxConstraints(minWidth: 16),
-                height: 16,
-                padding: const EdgeInsets.symmetric(horizontal: 4),
-                alignment: Alignment.center,
                 decoration: BoxDecoration(
-                  color: book.lime,
                   borderRadius: BorderRadius.circular(999),
                   border: Border.all(color: book.surface, width: 1.5),
                 ),
-                child: Text(
-                  '$unread',
-                  style: TextStyle(
-                    fontFamily: AppFonts.figures,
-                    fontSize: 10,
-                    fontWeight: FontWeight.w700,
-                    height: 1,
-                    color: book.onLime,
-                  ),
+                child: CountBadge(
+                  count: unread,
+                  background: book.lime,
+                  foreground: book.onLime,
+                  size: 13,
                 ),
               ),
             ),
