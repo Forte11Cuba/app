@@ -91,12 +91,12 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         theme: buildDarkTheme(),
-        home: MediaQuery(
-          data: const MediaQueryData(
+        home: const MediaQuery(
+          data: MediaQueryData(
             size: Size(320, 200),
             textScaler: TextScaler.linear(2),
           ),
-          child: const Scaffold(
+          child: Scaffold(
             body: OrderDataRow(
               icon: Icons.person_outline_rounded,
               label: 'Venditore',

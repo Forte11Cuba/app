@@ -247,6 +247,9 @@ class OrderDataValue extends StatelessWidget {
     );
     final aside = trailing;
     if (aside == null) return value;
+    // Value and note share the room and each ellipsizes past its half, so
+    // a long note (or a large text scale) never pushes the row out of its
+    // card, and the reputation stays in view beside a long name.
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
