@@ -213,7 +213,7 @@ class _BondPayoutInvoiceScreenState
         icon: Icons.check_circle_outline,
         title: l10n.bondClaimCompletedTitle,
         body: l10n.bondClaimCompletedBody(
-          formatInvoiceSats(claim.amountSats.toInt()),
+          formatInvoiceSats(claim.amountSats.toInt(), l10n.localeName),
         ),
       ),
       BondClaimPhase.expired => InvoiceTimeUpView(
@@ -272,7 +272,9 @@ class _BondPayoutInvoiceScreenState
     return InvoiceHeroCard(
       label: l10n.bondClaimShareLabel,
       sats: sats,
-      semanticsLabel: l10n.bondClaimShareSemantics(sats.toString()),
+      semanticsLabel: l10n.bondClaimShareSemantics(
+        formatInvoiceSats(sats, l10n.localeName),
+      ),
       contextLine: context_.isEmpty ? null : l10n.bondClaimContext(context_),
       automationId: AutomationIds.bondClaimAmount,
       automationLabel: sats.toString(),
@@ -344,7 +346,12 @@ class _BondPayoutInvoiceScreenState
               const SizedBox(height: 8),
               TextButton(
                 onPressed: () => setState(() => _manualMode = true),
-                child: Text(l10n.enterInvoiceManually),
+                child: Text(
+                  l10n.enterInvoiceManually,
+                  style: TextStyle(
+                    color: OrderBookPalette.of(context).limeText,
+                  ),
+                ),
               ).withAutomationId(AutomationIds.bondClaimManual),
             ],
           ] else ...[
@@ -490,7 +497,7 @@ class _BondPayoutInvoiceScreenState
       padding: const EdgeInsets.fromLTRB(16, 4, 4, 14),
       decoration: BoxDecoration(
         color: book.surface,
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(18),
         border: Border.all(
           color: _focus.hasFocus ? pal.fieldFocusBorder : pal.cardBorder,
         ),

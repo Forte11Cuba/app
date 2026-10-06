@@ -126,10 +126,10 @@ void main() {
     );
   });
 
-  /// Rust emits `CantDo(InvalidFiatCurrency)` as the bare marker.
+  /// Rust returns `CantDo(InvalidFiatCurrency)` as `CantDo:InvalidFiatCurrency`.
   test('maps a refused currency to the pick-another guidance', () {
     expect(
-      localizedDaemonError(l10n, 'InvalidFiatCurrency', fallback: 'x'),
+      localizedDaemonError(l10n, 'CantDo:InvalidFiatCurrency', fallback: 'x'),
       l10n.invalidFiatCurrencyError,
     );
   });

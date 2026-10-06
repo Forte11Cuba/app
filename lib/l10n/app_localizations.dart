@@ -4168,6 +4168,12 @@ abstract class AppLocalizations {
   /// **'No longer available'**
   String get takeOrderUnavailable;
 
+  /// Snackbar when a take fails for a reason the app has no specific message for
+  ///
+  /// In en, this message translates to:
+  /// **'Could not take the order. Please try again.'**
+  String get takeOrderFailed;
+
   /// Replaces the countdown in the app bar once the order is gone
   ///
   /// In en, this message translates to:

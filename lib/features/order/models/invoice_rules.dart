@@ -4,6 +4,7 @@
 /// return.
 library;
 
+import 'package:intl/intl.dart';
 import 'package:mostro/src/rust/api/types.dart' as rust_types;
 import 'package:mostro/src/rust/api/types.dart'
     show
@@ -23,21 +24,11 @@ String invoiceOrderTag(String orderId) =>
 
 // ── Amounts ───────────────────────────────────────────────────────────────────
 
-const _thinSpace = ' ';
-
-/// Whole sats without a thousands separator up to five digits (`25000`), and
-/// grouped by a thin space from six on (`300 000`).
-String formatInvoiceSats(int sats) {
-  final digits = sats.abs().toString();
-  final sign = sats < 0 ? '-' : '';
-  if (digits.length <= 5) return '$sign$digits';
-  final buffer = StringBuffer();
-  for (var i = 0; i < digits.length; i++) {
-    if (i > 0 && (digits.length - i) % 3 == 0) buffer.write(_thinSpace);
-    buffer.write(digits[i]);
-  }
-  return '$sign$buffer';
-}
+/// Whole sats grouped the way the locale groups every other amount in the
+/// app (`2.439` in `es`, `2,439` in `en`), so an invoice screen reads like the
+/// order it belongs to (#720).
+String formatInvoiceSats(int sats, String locale) =>
+    NumberFormat.decimalPattern(locale).format(sats);
 
 /// The Mostro fee a hold invoice of [holdSats] carries, given the node's fee
 /// as a fraction ([nodeFee], `0.006` = 0.6 %), or null when it cannot be
@@ -226,16 +217,21 @@ InvoiceCheck invoiceCheckFromVerdict(
     ),
 };
 
-/// An msat amount as sats: `250`, or `250.5` when it carries a remainder.
-String formatInvoiceMsat(int msat) {
-  final sats = msat ~/ 1000;
-  final rest = msat % 1000;
-  if (rest == 0) return formatInvoiceSats(sats);
-  final fraction = rest
+/// An msat amount as sats: `2.439`, or `2.439,5` when it carries a remainder,
+/// in [locale]'s separators.
+///
+/// The whole sats and the remainder are formatted apart, in integer
+/// arithmetic: `msat / 1000` as a double would round an amount past 2^53.
+String formatInvoiceMsat(int msat, String locale) {
+  final format = NumberFormat.decimalPattern(locale);
+  final whole = format.format(msat ~/ 1000);
+  final remainder = (msat % 1000).abs();
+  if (remainder == 0) return whole;
+  final fraction = remainder
       .toString()
       .padLeft(3, '0')
       .replaceFirst(RegExp(r'0+$'), '');
-  return '${formatInvoiceSats(sats)}.$fraction';
+  return '$whole${format.symbols.DECIMAL_SEP}$fraction';
 }
 
 /// Whether [check] lets the buyer submit.
@@ -258,8 +254,9 @@ bool invoiceCheckAllowsSubmit(InvoiceCheck check) => switch (check) {
 /// Kebab-case like `order.status`, and never the row's sentence, which is
 /// translated.
 String? invoiceCheckWord(InvoiceCheck check) => switch (check) {
-  InvoiceCheckNone() || InvoiceCheckPending() || InvoiceCheckUnverified() =>
-    null,
+  InvoiceCheckNone() ||
+  InvoiceCheckPending() ||
+  InvoiceCheckUnverified() => null,
   InvoiceCheckAddress() => 'address',
   InvoiceCheckValid() => 'valid',
   InvoiceCheckError(:final problem) => switch (problem) {

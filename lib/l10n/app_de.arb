@@ -809,6 +809,7 @@
   "takeOrderButton": "Order annehmen",
   "takeOrderTaking": "Wird angenommen…",
   "takeOrderUnavailable": "Nicht mehr verfügbar",
+  "takeOrderFailed": "Die Bestellung konnte nicht angenommen werden. Bitte versuche es erneut.",
   "takeOrderClosed": "Geschlossen",
   "easterEggWhitepaper": "31. Oktober 2008: neun Seiten, niemandes Erlaubnis. Frohes Halloween.",
   "easterEggGenesis": "The Times 03/Jan/2009 Chancellor on brink of second bailout for banks",

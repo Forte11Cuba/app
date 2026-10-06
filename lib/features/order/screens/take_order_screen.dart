@@ -294,9 +294,21 @@ class _TakeOrderScreenState extends ConsumerState<TakeOrderScreen> {
       showOrderDetailSnackBar(context, l10n.orderAlreadyTaken);
       return;
     }
+    if (msg.contains('InvalidOrderStatus')) {
+      // The daemon says the order is no longer pending (taken, canceled or
+      // expired before the book caught up): it cannot be taken again.
+      setState(() => _cta = TakeOrderCta.unavailable);
+      showOrderDetailSnackBar(context, l10n.orderNoLongerActive);
+      return;
+    }
     // Every shared daemon marker (timeout, storage, node capability /
-    // protocol) maps centrally.
-    final display = localizedDaemonError(l10n, msg, fallback: msg);
+    // protocol) maps centrally. Anything else gets the localized generic
+    // failure, never the raw error text (#719).
+    final display = localizedDaemonError(
+      l10n,
+      msg,
+      fallback: l10n.takeOrderFailed,
+    );
     showOrderDetailSnackBar(context, display);
   }
 
@@ -356,14 +368,26 @@ class _TakeOrderScreenState extends ConsumerState<TakeOrderScreen> {
     final order = live ?? _lastOrder;
     final l10n = AppLocalizations.of(context);
 
+    final book = OrderBookPalette.of(context);
+    void back() => context.canPop() ? context.pop() : context.go(AppRoute.home);
+
     if (order == null) {
       return Scaffold(
-        appBar: AppBar(title: Text(l10n.orderNotFoundTitle)),
-        body: Center(child: Text(l10n.orderNotFoundMessage)),
+        backgroundColor: book.bg,
+        appBar: orderDetailAppBar(
+          context,
+          title: l10n.orderNotFoundTitle,
+          onBack: back,
+        ),
+        body: Center(
+          child: Text(
+            l10n.orderNotFoundMessage,
+            style: TextStyle(color: book.textBody),
+          ),
+        ),
       );
     }
 
-    final book = OrderBookPalette.of(context);
     final flags = ref.watch(currencyFlagsProvider);
     final privacyMode = ref.watch(privacyModeProvider);
     // Not while a take is in flight: the user's own take moves the order out
@@ -384,8 +408,7 @@ class _TakeOrderScreenState extends ConsumerState<TakeOrderScreen> {
       appBar: orderDetailAppBar(
         context,
         title: widget.isBuying ? l10n.tabBuyBtc : l10n.tabSellBtc,
-        onBack:
-            () => context.canPop() ? context.pop() : context.go(AppRoute.home),
+        onBack: back,
         trailing: ValueListenableBuilder<Duration>(
           valueListenable: _remaining,
           builder:
@@ -446,7 +469,7 @@ class _TakeOrderScreenState extends ConsumerState<TakeOrderScreen> {
                     color: book.textTertiary,
                   ),
                 ),
-                const SizedBox(width: 9),
+                const SizedBox(width: 8),
                 Expanded(
                   child: Text(
                     [

@@ -420,11 +420,13 @@ class _PayLightningInvoiceScreenState
                       label: l10n.invoiceToPayLabel,
                       sats: amountSats,
                       semanticsLabel: l10n.invoicePaySemantics(
-                        amountSats.toString(),
+                        formatInvoiceSats(amountSats, l10n.localeName),
                       ),
                       contextLine:
                           fee != null && fee > 0
-                              ? l10n.invoiceFeeIncluded(formatInvoiceSats(fee))
+                              ? l10n.invoiceFeeIncluded(
+                                formatInvoiceSats(fee, l10n.localeName),
+                              )
                               : null,
                       // The invoice itself is only rendered as a QR, so the
                       // readout is what an automated driver can correlate
@@ -434,19 +436,19 @@ class _PayLightningInvoiceScreenState
                       child: _qr(l10n, invoice),
                     ),
                     if (remaining != null) ...[
-                      const SizedBox(height: 11),
+                      const SizedBox(height: 12),
                       InvoiceTimeBand(
                         remaining: remaining,
                         sentence: l10n.invoiceExpiresIn,
                         hours: l10n.invoiceCountdownHours,
                       ),
                     ],
-                    const SizedBox(height: 11),
+                    const SizedBox(height: 12),
                     InvoiceHoldNote(
                       sentence: l10n.invoiceHoldNote,
                       boldWord: 'hold',
                     ),
-                    const SizedBox(height: 11),
+                    const SizedBox(height: 12),
                     InvoiceCounterpartCard(
                       rows: [
                         invoiceCounterpartRow(
@@ -483,6 +485,7 @@ class _PayLightningInvoiceScreenState
       child: Container(
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
+          // design-check: ignore DS-COL-1 — a QR code must be pure black on white to scan
           color: Colors.white,
           borderRadius: BorderRadius.circular(14),
         ),
@@ -490,6 +493,7 @@ class _PayLightningInvoiceScreenState
           data: invoice,
           size: 168,
           padding: EdgeInsets.zero,
+          // design-check: ignore DS-COL-1 — a QR code must be pure black on white to scan
           backgroundColor: Colors.white,
           semanticsLabel: l10n.invoiceQrSemantics(invoice),
         ),

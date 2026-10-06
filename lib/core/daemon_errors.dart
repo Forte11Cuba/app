@@ -49,8 +49,8 @@ String localizedDaemonError(
   }
   // The node does not list the order's currency in its
   // `fiat_currencies_accepted`. The picker offers only those, so this is a
-  // list that changed, or arrived, after the currency was picked. Rust emits
-  // the bare marker.
+  // list that changed, or arrived, after the currency was picked. Rust
+  // returns it as `CantDo:InvalidFiatCurrency` (`cant_do_message`).
   if (raw.contains('InvalidFiatCurrency')) {
     return l10n.invalidFiatCurrencyError;
   }
