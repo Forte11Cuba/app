@@ -154,12 +154,11 @@ class _Header extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colors = Theme.of(context).extension<AppColors>();
+    final book = OrderBookPalette.of(context);
     final pal = ActivityPalette.of(context);
     final l10n = AppLocalizations.of(context);
     final locale = Localizations.localeOf(context).toString();
-    final green = colors?.mostroGreen ?? const Color(0xFF8CC63F);
-    final textSec = colors?.textSecondary ?? const Color(0xFFB0B3C6);
+    final textSec = book.textSecondary;
     final shortId =
         fallbackId.length > 8 ? fallbackId.substring(0, 8) : fallbackId;
     final row = this.row;
@@ -211,7 +210,7 @@ class _Header extends StatelessWidget {
                 title,
                 style: Theme.of(context).textTheme.bodyMedium!.copyWith(
                   fontWeight: FontWeight.w600,
-                  color: Colors.white,
+                  color: book.textPrimary,
                 ),
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
@@ -234,11 +233,11 @@ class _Header extends StatelessWidget {
             width: 20,
             height: 20,
             alignment: Alignment.center,
-            decoration: BoxDecoration(color: green, shape: BoxShape.circle),
+            decoration: BoxDecoration(color: book.lime, shape: BoxShape.circle),
             child: Text(
               '$unreadCount',
-              style: const TextStyle(
-                color: Colors.black,
+              style: TextStyle(
+                color: book.onLime,
                 fontSize: 11,
                 fontWeight: FontWeight.w700,
               ),
