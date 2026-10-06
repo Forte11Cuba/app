@@ -83,4 +83,34 @@ void main() {
     expect(taps, 1);
     handle.dispose();
   });
+
+  testWidgets('a long trailing note stays inside a narrow row', (tester) async {
+    tester.view.physicalSize = const Size(320, 200);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildDarkTheme(),
+        home: MediaQuery(
+          data: const MediaQueryData(
+            size: Size(320, 200),
+            textScaler: TextScaler.linear(2),
+          ),
+          child: const Scaffold(
+            body: OrderDataRow(
+              icon: Icons.person_outline_rounded,
+              label: 'Venditore',
+              value: OrderDataValue(
+                'bright-fox-41',
+                trailing: 'nessuna operazione',
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    expect(tester.takeException(), isNull);
+    expect(find.text('nessuna operazione'), findsOneWidget);
+  });
 }
