@@ -238,7 +238,7 @@ class _InvoiceInputFieldState extends State<InvoiceInputField>
           if (sats != null) ...[
             const SizedBox(width: 4),
             Text(
-              '${formatInvoiceSats(sats)} sats',
+              '${formatInvoiceSats(sats, l10n.localeName)} sats',
               style: TextStyle(
                 fontFamily: AppFonts.figures,
                 fontSize: 11,
@@ -328,7 +328,9 @@ class _InvoiceInputFieldState extends State<InvoiceInputField>
               child: Semantics(
                 label:
                     sats != null && widget.isValid
-                        ? l10n.invoiceFilledSemantics(formatInvoiceSats(sats))
+                        ? l10n.invoiceFilledSemantics(
+                          formatInvoiceSats(sats, l10n.localeName),
+                        )
                         : _filledLabel(l10n),
                 excludeSemantics: true,
                 button: true,

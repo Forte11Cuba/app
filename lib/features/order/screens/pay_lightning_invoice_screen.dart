@@ -420,11 +420,13 @@ class _PayLightningInvoiceScreenState
                       label: l10n.invoiceToPayLabel,
                       sats: amountSats,
                       semanticsLabel: l10n.invoicePaySemantics(
-                        amountSats.toString(),
+                        formatInvoiceSats(amountSats, l10n.localeName),
                       ),
                       contextLine:
                           fee != null && fee > 0
-                              ? l10n.invoiceFeeIncluded(formatInvoiceSats(fee))
+                              ? l10n.invoiceFeeIncluded(
+                                formatInvoiceSats(fee, l10n.localeName),
+                              )
                               : null,
                       // The invoice itself is only rendered as a QR, so the
                       // readout is what an automated driver can correlate

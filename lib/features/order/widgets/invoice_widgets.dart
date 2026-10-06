@@ -208,7 +208,10 @@ class InvoiceHeroCard extends StatelessWidget {
         textBaseline: TextBaseline.alphabetic,
         children: [
           Text(
-            formatInvoiceSats(sats),
+            formatInvoiceSats(
+              sats,
+              Localizations.localeOf(context).toString(),
+            ),
             style: TextStyle(
               fontFamily: AppFonts.figures,
               fontSize: 38,

@@ -292,7 +292,10 @@ class BondAmountRow extends StatelessWidget {
                   TextSpan(
                     children: [
                       TextSpan(
-                        text: formatInvoiceSats(sats),
+                        text: formatInvoiceSats(
+                          sats,
+                          Localizations.localeOf(context).toString(),
+                        ),
                         style: TextStyle(
                           fontFamily: AppFonts.figures,
                           fontSize: 22,

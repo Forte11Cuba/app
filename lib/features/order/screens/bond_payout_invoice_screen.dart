@@ -213,7 +213,7 @@ class _BondPayoutInvoiceScreenState
         icon: Icons.check_circle_outline,
         title: l10n.bondClaimCompletedTitle,
         body: l10n.bondClaimCompletedBody(
-          formatInvoiceSats(claim.amountSats.toInt()),
+          formatInvoiceSats(claim.amountSats.toInt(), l10n.localeName),
         ),
       ),
       BondClaimPhase.expired => InvoiceTimeUpView(
@@ -272,7 +272,9 @@ class _BondPayoutInvoiceScreenState
     return InvoiceHeroCard(
       label: l10n.bondClaimShareLabel,
       sats: sats,
-      semanticsLabel: l10n.bondClaimShareSemantics(sats.toString()),
+      semanticsLabel: l10n.bondClaimShareSemantics(
+        formatInvoiceSats(sats, l10n.localeName),
+      ),
       contextLine: context_.isEmpty ? null : l10n.bondClaimContext(context_),
       automationId: AutomationIds.bondClaimAmount,
       automationLabel: sats.toString(),

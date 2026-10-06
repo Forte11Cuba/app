@@ -911,7 +911,9 @@ class _AddLightningInvoiceScreenState
           InvoiceHeroCard(
             label: l10n.invoiceYouReceiveLabel,
             sats: sats.toInt(),
-            semanticsLabel: l10n.invoiceReceiveSemantics(sats.toString()),
+            semanticsLabel: l10n.invoiceReceiveSemantics(
+              formatInvoiceSats(sats.toInt(), l10n.localeName),
+            ),
             contextLine: _heroContext(l10n, trade),
             automationId: AutomationIds.invoiceAmount,
             automationLabel: sats.toString(),
@@ -983,7 +985,7 @@ class _AddLightningInvoiceScreenState
         InvoiceCheckUnverified() => null,
         InvoiceCheckAddress() => l10n.invoiceValidAddress,
         InvoiceCheckValid(:final sats) => l10n.invoiceValidInvoice(
-          formatInvoiceSats(sats),
+          formatInvoiceSats(sats, l10n.localeName),
         ),
         InvoiceCheckError(
           :final problem,
@@ -995,8 +997,8 @@ class _AddLightningInvoiceScreenState
         ) =>
           switch (problem) {
             InvoiceProblem.wrongAmount => l10n.invoiceErrorWrongAmount(
-              formatInvoiceMsat(actualMsat ?? 0),
-              formatInvoiceSats(expectedSats ?? 0),
+              formatInvoiceMsat(actualMsat ?? 0, l10n.localeName),
+              formatInvoiceSats(expectedSats ?? 0, l10n.localeName),
             ),
             InvoiceProblem.wrongNetwork => l10n.invoiceErrorWrongNetwork(
               invoiceNetwork ?? '?',

@@ -37,7 +37,7 @@ class BondClaimBanner extends ConsumerWidget {
       deadlineAt: platformInt64ToInt(claim.deadlineAt),
       now: now,
     );
-    final sats = formatInvoiceSats(claim.amountSats.toInt());
+    final sats = formatInvoiceSats(claim.amountSats.toInt(), l10n.localeName);
     final locale = Localizations.localeOf(context).toString();
     String date(int secs) => DateFormat.yMMMd(
       locale,
