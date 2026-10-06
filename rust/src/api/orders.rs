@@ -247,8 +247,16 @@ fn order_locks() -> &'static std::sync::Mutex<HashMap<String, Arc<tokio::sync::M
 /// Callers must not hold this guard while waiting on a daemon reply — the
 /// reply is delivered by `dispatch_mostro_message`, which takes the same lock.
 async fn lock_order(order_id: &str) -> tokio::sync::OwnedMutexGuard<()> {
+    lock_in(order_locks(), order_id).await
+}
+
+/// The per-key lock for `order_id` in `registry`; see [`lock_order`].
+async fn lock_in(
+    registry: &std::sync::Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
+    order_id: &str,
+) -> tokio::sync::OwnedMutexGuard<()> {
     let lock = {
-        let Ok(mut map) = order_locks().lock() else {
+        let Ok(mut map) = registry.lock() else {
             log::warn!(
                 "[orders] order-lock registry poisoned — order={order_id} runs unserialized"
             );
