@@ -26,6 +26,27 @@ void main() {
     caseSensitive: false,
   );
 
+  test('the guard knows every gender and number of "chosen"', () {
+    const retired = [
+      'chosen',
+      'elegido', 'elegida', 'elegidos', 'elegidas',
+      'choisi', 'choisie', 'choisis', 'choisies',
+      'scelto', 'scelta', 'scelti', 'scelte',
+      'gekozen',
+      'gewählt', 'gewählte', 'gewählten', 'gewählter', 'gewähltes',
+    ];
+    for (final word in retired) {
+      expect(chosen.hasMatch('2 méthodes $word'), isTrue, reason: word);
+    }
+    // The glossary's own words never trip it.
+    for (final word in [
+      'selected', 'seleccionadas', 'sélectionnées', 'selezionate',
+      'geselecteerd', 'ausgewählt', 'ausgewählte',
+    ]) {
+      expect(chosen.hasMatch('2 $word'), isFalse, reason: word);
+    }
+  });
+
   for (final locale in locales) {
     test('$locale: payment methods are "selected", never "chosen"', () {
       final drift = {
