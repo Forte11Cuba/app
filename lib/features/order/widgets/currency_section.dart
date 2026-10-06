@@ -179,7 +179,7 @@ class _CurrencyPickerDialogState extends ConsumerState<_CurrencyPickerDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final colors = Theme.of(context).extension<AppColors>();
+    final palette = OrderBookPalette.of(context);
     final currencies = ref.watch(offeredFiatCurrenciesProvider);
     final loaded = currencies.valueOrNull ?? const <FiatCurrency>[];
     final filtered = loaded.where((c) {
@@ -188,6 +188,10 @@ class _CurrencyPickerDialogState extends ConsumerState<_CurrencyPickerDialog> {
       return c.code.toLowerCase().contains(q) ||
           c.name.toLowerCase().contains(q);
     }).toList();
+    final border = OutlineInputBorder(
+      borderRadius: BorderRadius.circular(14),
+      borderSide: BorderSide(color: palette.border),
+    );
 
     return MostroDialog(
       title: AppLocalizations.of(context).selectCurrencyDialogTitle,
@@ -198,9 +202,21 @@ class _CurrencyPickerDialogState extends ConsumerState<_CurrencyPickerDialog> {
             autofocus: true,
             autocorrect: false,
             enableSuggestions: false,
+            style: TextStyle(fontSize: 14, color: palette.textPrimary),
             decoration: InputDecoration(
+              isDense: true,
+              filled: true,
+              fillColor: palette.inset,
+              border: border,
+              enabledBorder: border,
+              focusedBorder: border,
               hintText: AppLocalizations.of(context).searchCurrenciesHint,
-              prefixIcon: const Icon(Icons.search),
+              hintStyle: TextStyle(fontSize: 13, color: palette.textFaint),
+              prefixIcon: Icon(
+                Icons.search,
+                size: 16,
+                color: palette.textTertiary,
+              ),
             ),
             onChanged: (v) => setState(() => _query = v),
           ).withAutomationId(AutomationIds.orderCreateCurrencySearch),
@@ -213,7 +229,7 @@ class _CurrencyPickerDialogState extends ConsumerState<_CurrencyPickerDialog> {
                     ? Center(
                         child: Text(
                           AppLocalizations.of(context).noCurrenciesFoundMessage,
-                          style: TextStyle(color: colors?.textSubtle),
+                          style: TextStyle(color: palette.textTertiary),
                         ),
                       )
                     : ListView.builder(
@@ -224,7 +240,7 @@ class _CurrencyPickerDialogState extends ConsumerState<_CurrencyPickerDialog> {
                             contentPadding: EdgeInsets.zero,
                             leading: Text(
                               c.flag,
-                              style: const TextStyle(fontSize: 20),
+                              style: const TextStyle(fontSize: 19),
                             ),
                             title: Text(c.code),
                             // A code the node accepts but the catalogue
@@ -235,12 +251,12 @@ class _CurrencyPickerDialogState extends ConsumerState<_CurrencyPickerDialog> {
                                     : Text(
                                       c.name,
                                       style: TextStyle(
-                                        color: colors?.textSubtle,
+                                        color: palette.textTertiary,
                                         fontSize: 12,
                                       ),
                                     ),
                             selected: c.code == widget.selected,
-                            selectedColor: colors?.mostroGreen,
+                            selectedColor: palette.limeText,
                             onTap: () => widget.onSelect(c.code),
                           ).withAutomationId(
                             AutomationIds.orderCreateCurrencyOption(c.code),
