@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
@@ -21,10 +22,12 @@ const _scannerOrientation = MethodChannel(
 Future<void> _pump(
   WidgetTester tester, {
   required void Function(String) onDetected,
+  Locale? locale,
 }) async {
   await tester.pumpWidget(
     MaterialApp(
       theme: buildDarkTheme(),
+      locale: locale,
       localizationsDelegates: const [
         AppLocalizations.delegate,
         GlobalMaterialLocalizations.delegate,
@@ -32,7 +35,12 @@ Future<void> _pump(
         GlobalCupertinoLocalizations.delegate,
       ],
       supportedLocales: AppLocalizations.supportedLocales,
-      home: Scaffold(body: PlatformAwareQrScanner(onDetected: onDetected)),
+      // As every caller hosts it: the body of a Scaffold under an app bar,
+      // which the keyboard shrinks.
+      home: Scaffold(
+        appBar: AppBar(title: const Text('Scan')),
+        body: PlatformAwareQrScanner(onDetected: onDetected),
+      ),
     ),
   );
   await tester.pump();
@@ -128,5 +136,38 @@ void main() {
       },
       variant: TargetPlatformVariant.only(TargetPlatform.android),
     );
+  });
+  // DS-A11Y-4: the longest translation, doubled, on the narrowest phone —
+  // with the keyboard up as well, since typing into the paste field raises
+  // it: on a phone browser, and on a phone whose camera was refused.
+  group('PlatformAwareQrScanner paste form fits', () {
+    for (final keyboard in [0.0, 280.0]) {
+      testWidgets(
+        'German at 2x on a 320 dp screen, keyboard inset $keyboard',
+        (tester) async {
+          tester.view.physicalSize = const Size(320, 640);
+          tester.view.devicePixelRatio = 1.0;
+          tester.view.viewInsets = FakeViewPadding(bottom: keyboard);
+          tester.platformDispatcher.textScaleFactorTestValue = 2.0;
+          addTearDown(tester.view.resetPhysicalSize);
+          addTearDown(tester.view.resetDevicePixelRatio);
+          addTearDown(tester.view.resetViewInsets);
+          addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+          if (defaultTargetPlatform == TargetPlatform.android) {
+            _denyCameraPermission(tester);
+          }
+
+          await _pump(tester, onDetected: (_) {}, locale: const Locale('de'));
+          await tester.pumpAndSettle();
+
+          expect(find.byType(TextField), findsOneWidget);
+          expect(tester.takeException(), isNull);
+        },
+        variant: const TargetPlatformVariant({
+          TargetPlatform.linux,
+          TargetPlatform.android,
+        }),
+      );
+    }
   });
 }
