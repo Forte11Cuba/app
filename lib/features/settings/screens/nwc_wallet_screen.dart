@@ -179,6 +179,9 @@ class _NwcWalletScreenState extends ConsumerState<NwcWalletScreen> {
               ),
               decoration: InputDecoration(
                 isDense: true,
+                // The card is the field's surface: left to the theme, v1's
+                // fill would paint behind the underline (DS-CMP-19).
+                filled: false,
                 // The real scheme rather than `NWC URI`: the user recognises
                 // what is already on their clipboard.
                 hintText: l10n.nwcUriPlaceholder,
@@ -188,7 +191,7 @@ class _NwcWalletScreenState extends ConsumerState<NwcWalletScreen> {
                   fontWeight: FontWeight.w500,
                   color: pal.placeholder,
                 ),
-                contentPadding: const EdgeInsets.only(bottom: 9),
+                contentPadding: const EdgeInsets.only(bottom: 10),
                 enabledBorder: UnderlineInputBorder(
                   borderSide: BorderSide(color: pal.fieldUnderline),
                 ),
