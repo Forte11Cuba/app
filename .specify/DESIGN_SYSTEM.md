@@ -306,6 +306,25 @@ DS-CMP-7), and text scaling in §3 (DS-TYP-7). In addition:
 | DS-L10N-1 | **MUST.** Every user-facing string comes from `AppLocalizations`, in all six ARB files (en, es, fr, de, it, nl). CI fails on an untranslated key. | test |
 | DS-L10N-2 | **MUST.** A layout is sized for the longest translation, usually German, never for English. A button label fits or scales down, and never truncates a verb. | review |
 | DS-L10N-3 | **MUST.** Numbers, amounts and dates are formatted for the locale, never by hand. | review |
+| DS-L10N-4 | **MUST.** One word per concept, in every locale: a string names a trade concept with the word the glossary below gives it, and a new concept joins the glossary in the same change that first uses it. Protocol jargon ("hold", "bolt11", "NIP") is not shown to the user as a term to know; the string says what it does in plain words. | review |
+
+**Glossary.** The words the app uses, in English and Spanish; the other locales keep the same
+one-to-one choice in their ARB files.
+
+| Concept | en | es | Not |
+|---|---|---|---|
+| An offer in the book | order | orden | oferta |
+| Accepting someone else's order | take | tomar | aceptar |
+| The two sides | seller, buyer | vendedor, comprador | — |
+| The other person in a trade | counterpart | contraparte | — |
+| A taken order, until it ends | trade | operación | intercambio |
+| The anti-abuse amount a node asks for | deposit | depósito | fianza, garantía |
+| Paying the invoice that keeps sats in escrow | lock (the sats) | bloquear (los sats) | — |
+| Sats a hold invoice keeps in the payer's wallet | held | retenidos | "hold" as a term |
+| The seller handing the sats over | release | liberar | — |
+| A Lightning payment request | invoice | factura | — |
+| A trade a solver decides | dispute | disputa | — |
+| Payment methods the user ticked | selected | seleccionado(s) | elegido(s), chosen |
 
 ---
 
@@ -392,6 +411,8 @@ DS-SHP-4 and the `textTheme` roles of DS-TYP-4 joined them).
 | The create-order screen states the maker's deposit in `OrderPreviewBar` (`notice`), with a shield icon, inside the action bar rather than as an `ExplanatoryNote` in the body. | §6.3 | DS-CMP-25 |
 | Modal answers that do not repeat their opener: the open-dispute confirmation answers "Yes" (`dispute_confirmation_dialog.dart`), the Cashu send dialog "Confirm" (`cashu_wallet_screen.dart`) and the new-user dialog "Continue" (`account_screen.dart`). | §6.1 | DS-CMP-26 |
 | `ThemeData` holds v1's defaults: scaffold background `#1B1E28`, app bar, filled-underline input decoration, and no button themes (so a bare button is a stadium). 16 unstyled Material buttons, 11 app bars and 11 scaffolds on the theme background, and 13 text fields that leave part of their decoration to the theme rely on them, mostly in the Cashu, chat, dispute and notification screens and in error states. One redesigned field is among them: the premium field in `price_section.dart` sets only `border: InputBorder.none`, so the v1 fill shows behind the percentage. Moving the theme's defaults to the redesign values would make a bare widget look right and retire most of these. | §1 | DS-CMP-12, DS-CMP-17 to DS-CMP-19 |
+| Words the glossary (§9) retires are still in use: "intercambio" next to "operación" for a trade, "fianza" next to "depósito", and "hold invoice" / "factura hold" in the seller's waiting and payment steps and in About. | §9 | DS-L10N-4 |
+| `ThemeData` holds v1's defaults: scaffold background `#1B1E28`, app bar, filled-underline input decoration, and no button themes (so a bare button is a stadium). 16 unstyled Material buttons, 11 app bars and 11 scaffolds on the theme background, and 14 text fields that leave part of their decoration to the theme rely on them, mostly in the Cashu, chat, dispute and notification screens and in error states. Redesigned fields are among them: `UnderlineAmountField` and the premium field in `price_section.dart` set only `border: InputBorder.none`, so the v1 fill shows behind the amount (`add_order_5b_single_fixed_dark.png`). Moving the theme's defaults to the redesign values would make a bare widget look right and retire most of these. | §1 | DS-CMP-12, DS-CMP-17 to DS-CMP-19 |
 
 ---
 
