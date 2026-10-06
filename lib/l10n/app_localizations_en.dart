@@ -1570,7 +1570,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get enterInvoiceManually => 'Enter invoice manually';
 
   @override
-  String get submitButton => 'Submit';
+  String get rangeAmountTakeAction => 'Take order';
 
   @override
   String get buyerReputation => 'Buyer reputation';

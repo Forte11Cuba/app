@@ -461,7 +461,7 @@
   "waitingForTradeAmount": "En attente du montant de la transaction — veuillez réessayer sous peu.",
   "fetchingTradeAmount": "Récupération du montant de la transaction…",
   "enterInvoiceManually": "Saisir la facture manuellement",
-  "submitButton": "Envoyer",
+  "rangeAmountTakeAction": "Prendre l'ordre",
   "buyerReputation": "Réputation de l'acheteur",
   "sellerReputation": "Réputation du vendeur",
   "ratingStatLabel": "note",

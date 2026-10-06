@@ -2866,11 +2866,11 @@ abstract class AppLocalizations {
   /// **'Enter invoice manually'**
   String get enterInvoiceManually;
 
-  /// Generic submit button label
+  /// Answer of the range amount dialog, opened from the take-order button. Same wording as takeOrderButton (DS-CMP-26).
   ///
   /// In en, this message translates to:
-  /// **'Submit'**
-  String get submitButton;
+  /// **'Take order'**
+  String get rangeAmountTakeAction;
 
   /// Title of the counterpart reputation card when the taker is the buyer
   ///

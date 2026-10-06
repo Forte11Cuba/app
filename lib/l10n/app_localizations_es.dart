@@ -1586,7 +1586,7 @@ class AppLocalizationsEs extends AppLocalizations {
   String get enterInvoiceManually => 'Ingresar factura manualmente';
 
   @override
-  String get submitButton => 'Enviar';
+  String get rangeAmountTakeAction => 'Tomar orden';
 
   @override
   String get buyerReputation => 'Reputación del comprador';
