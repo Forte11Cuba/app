@@ -1162,23 +1162,41 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen>
       borderRadius: BorderRadius.circular(8),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 6),
-        child: Row(
+        // The id on the left and the date on the right, as one line while
+        // they fit; on a narrow screen or with large text the date moves to
+        // a line of its own and the id gives way (DS-SPC-5, DS-A11Y-4).
+        child: Wrap(
+          alignment: WrapAlignment.spaceBetween,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          runSpacing: 4,
           children: [
-            Text(l10n.tradeIdLabel, style: faint),
-            const SizedBox(width: 8),
-            // The visible id is shortened; the readout carries the whole id.
-            Text(
-              _shortId(widget.orderId),
-              style: TextStyle(
-                fontFamily: AppFonts.figures,
-                fontSize: 11,
-                fontWeight: FontWeight.w500,
-                color: book.textTertiary,
-              ),
-            ).withAutomationId(AutomationIds.orderId, label: widget.orderId),
-            const SizedBox(width: 8),
-            Icon(Icons.copy_outlined, size: 14, color: book.textTertiary),
-            const Spacer(),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(l10n.tradeIdLabel, style: faint),
+                const SizedBox(width: 8),
+                // The visible id is shortened; the readout carries the
+                // whole id, and a tap copies it.
+                Flexible(
+                  child: Text(
+                    _shortId(widget.orderId),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontFamily: AppFonts.figures,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w500,
+                      color: book.textTertiary,
+                    ),
+                  ).withAutomationId(
+                    AutomationIds.orderId,
+                    label: widget.orderId,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Icon(Icons.copy_outlined, size: 14, color: book.textTertiary),
+              ],
+            ),
             if (order != null)
               Text(_createdLabel(l10n, order.createdAt), style: faint),
           ],
