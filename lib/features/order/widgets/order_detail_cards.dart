@@ -201,10 +201,16 @@ class OrderDataRow extends StatelessWidget {
       ),
     );
     if (onTap == null) return row;
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(12),
-      child: row,
+    // A custom tappable is announced as a button (DS-A11Y-1); its label is
+    // still the row's own text, and the automation ids inside it stay.
+    return Semantics(
+      button: true,
+      enabled: true,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: row,
+      ),
     );
   }
 }
