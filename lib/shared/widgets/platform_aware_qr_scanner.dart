@@ -180,7 +180,9 @@ class _PasteFallback extends StatelessWidget {
     final book = OrderBookPalette.of(context);
     final l10n = AppLocalizations.of(context);
 
-    return Padding(
+    // Scrolls because the keyboard is up whenever the field is in use: on a
+    // narrow phone at a large text size the form is taller than what is left.
+    return SingleChildScrollView(
       padding: const EdgeInsets.all(AppSpacing.lg),
       child: Column(
         mainAxisSize: MainAxisSize.min,
