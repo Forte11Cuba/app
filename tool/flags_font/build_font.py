@@ -15,8 +15,9 @@ DirectWrite draws it only on Windows 11. Core Text draws neither, which is why
 iOS and macOS keep their own emoji font.
 
 The subset keeps the 26 regional indicators and every flag they spell, since
-a node's region can be any country, plus U+1F30D, which `fiat.json` uses for
-the CFA francs. Licence: SIL OFL 1.1, `assets/fonts/noto_flags/LICENSE.txt`.
+a node's region can be any country, plus the two globes: U+1F30D, which
+`fiat.json` uses for the CFA francs, and U+1F310, the default node's region in
+`rust/src/config.rs`. Licence: SIL OFL 1.1, `assets/fonts/noto_flags/LICENSE.txt`.
 
 Run after changing the pin or the code points:
 
@@ -27,6 +28,7 @@ Run after changing the pin or the code points:
 
 import hashlib
 import json
+import re
 import sys
 import tempfile
 import urllib.request
@@ -38,6 +40,7 @@ from fontTools.ttLib import TTFont
 ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT / "assets/fonts/noto_flags/NotoFlags.ttf"
 FIAT = ROOT / "assets/data/fiat.json"
+NODES = ROOT / "rust/src/config.rs"
 
 COMMIT = "1ffdd21391dd1f25c081fa93a9dea0c7c029442b"
 SOURCE = (
@@ -48,6 +51,7 @@ SHA256 = "2c7ede2f5438f9c1da098778bd681535933a345334008bb03fc51119f6b1cd72"
 
 REGIONAL_INDICATORS = range(0x1F1E6, 0x1F1FF + 1)
 EARTH_AFRICA = 0x1F30D
+GLOBE_WITH_MERIDIANS = 0x1F310
 
 
 def download(dest: Path) -> None:
@@ -66,14 +70,17 @@ def build(source: Path) -> None:
     options.name_languages = ["*"]
     font = TTFont(source)
     subsetter = subset.Subsetter(options)
-    subsetter.populate(unicodes=[*REGIONAL_INDICATORS, EARTH_AFRICA])
+    subsetter.populate(
+        unicodes=[*REGIONAL_INDICATORS, EARTH_AFRICA, GLOBE_WITH_MERIDIANS]
+    )
     subsetter.subset(font)
     OUT.parent.mkdir(parents=True, exist_ok=True)
     font.save(OUT)
 
 
 def check() -> None:
-    """Every flag the currency list shows is in the font, as one glyph."""
+    """Every flag a currency or a trusted node shows is in the font, as one
+    glyph."""
     font = TTFont(OUT)
     cmap = font.getBestCmap()
     ligatures = set()
@@ -82,11 +89,14 @@ def check() -> None:
             for first, entries in getattr(table, "ligatures", {}).items():
                 for entry in entries:
                     ligatures.add((first, *entry.Component))
+    symbols = [(c["code"], c["flag"]) for c in json.loads(FIAT.read_text())]
+    for region in re.findall(r'region: "([^"]+)"', NODES.read_text()):
+        symbols.append((region, region.split(" ")[0]))
     missing = []
-    for currency in json.loads(FIAT.read_text()):
-        glyphs = tuple(cmap.get(ord(c)) for c in currency["flag"])
+    for name, symbol in symbols:
+        glyphs = tuple(cmap.get(ord(c)) for c in symbol)
         if None in glyphs or (len(glyphs) > 1 and glyphs not in ligatures):
-            missing.append(currency["code"])
+            missing.append(name)
     if missing:
         sys.exit(f"flags missing from {OUT.name}: {', '.join(missing)}")
 
