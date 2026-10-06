@@ -564,9 +564,9 @@ class InvoiceCounterpartCard extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: pal.subtleFill,
+        color: book.surface,
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: pal.subtleBorder),
+        border: Border.all(color: pal.cardBorder),
       ),
       child: Column(
         children: [
@@ -634,31 +634,35 @@ class _InvoiceOrderIdRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final book = OrderBookPalette.of(context);
-    return Material(
-      type: MaterialType.transparency,
-      child: InkWell(
-        onTap: () => copyOrderId(context, orderId),
-        borderRadius: BorderRadius.circular(12),
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(minHeight: 48),
-          child: Row(
-            children: [
-              Text(
-                AppLocalizations.of(context).orderDetailIdLabel,
-                style: TextStyle(fontSize: 12, color: book.textSecondary),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Align(
-                  alignment: AlignmentDirectional.centerEnd,
-                  child: OrderIdValue(
-                    orderId: orderId,
-                    color: book.textStrong,
-                    automationId: automationId,
+    return Semantics(
+      button: true,
+      label: AppLocalizations.of(context).copyOrderIdTooltip,
+      child: Material(
+        type: MaterialType.transparency,
+        child: InkWell(
+          onTap: () => copyOrderId(context, orderId),
+          borderRadius: BorderRadius.circular(12),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(minHeight: 48),
+            child: Row(
+              children: [
+                Text(
+                  AppLocalizations.of(context).orderDetailIdLabel,
+                  style: TextStyle(fontSize: 12, color: book.textSecondary),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Align(
+                    alignment: AlignmentDirectional.centerEnd,
+                    child: OrderIdValue(
+                      orderId: orderId,
+                      color: book.textStrong,
+                      automationId: automationId,
+                    ),
                   ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
