@@ -1461,6 +1461,31 @@ void main() {
         expect(tester.takeException(), isNull);
       });
     }
+
+    // DS-A11Y-4: the disputed bar gained the buyer's Cancel; the seller's
+    // carries Release and Cancel side by side under View dispute.
+    for (final isBuyer in [true, false]) {
+      testWidgets('the disputed bar in German, 320dp, 2x text '
+          '(isBuyer: $isBuyer)', (tester) async {
+        tester.view.physicalSize = const Size(320, 760);
+        tester.view.devicePixelRatio = 1.0;
+        tester.platformDispatcher.textScaleFactorTestValue = 2.0;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+
+        await _pumpTradeDetail(
+          tester,
+          orderId: 'order-de-dispute-$isBuyer',
+          isBuyer: isBuyer,
+          status: OrderStatus.dispute,
+          locale: const Locale('de'),
+        );
+
+        expect(tester.takeException(), isNull);
+        expect(find.byType(OutlinedButton), findsNWidgets(isBuyer ? 1 : 2));
+      });
+    }
   });
 
   group('the cancel dialog says what the cancel does', () {
@@ -1491,6 +1516,8 @@ void main() {
       ),
       (OrderStatus.active, 'cooperative', l10n.cancelTradeDialogContent),
       (OrderStatus.fiatSent, 'cooperative', l10n.cancelTradeDialogContent),
+      // mostrod cancels from `dispute` as from `active`.
+      (OrderStatus.dispute, 'cooperative', l10n.cancelTradeDialogContent),
     ]) {
       testWidgets('${status.name}: the $kind cancel', (tester) async {
         await _pumpTradeDetail(
