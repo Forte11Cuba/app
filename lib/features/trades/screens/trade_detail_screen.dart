@@ -1111,45 +1111,56 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen>
 
   // ── ID and date ──────────────────────────────────────────────────────────
 
-  /// Last row of the scroll; tapping anywhere on it copies the id.
+  /// Last card of the scroll, the trade's ID row (DS-CMP-22); tapping
+  /// anywhere on it copies the id.
   Widget _idRow(
     AppLocalizations l10n,
     OrderBookPalette book,
     OrderItem? order,
   ) {
     final faint = TextStyle(fontSize: 11, color: book.textFaint);
-    return InkWell(
-      onTap: () => copyOrderId(context, widget.orderId),
-      borderRadius: BorderRadius.circular(8),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 6),
-        // Id on the left, date on the right; the date takes a line of its
-        // own when both do not fit, and the id ellipsizes when even it alone
-        // does not (German at 2x text, 320dp: DS-A11Y-4).
-        child: Wrap(
-          alignment: WrapAlignment.spaceBetween,
-          crossAxisAlignment: WrapCrossAlignment.center,
-          spacing: 8,
-          runSpacing: 4,
-          children: [
-            Row(
-              mainAxisSize: MainAxisSize.min,
+    return Container(
+      decoration: BoxDecoration(
+        color: book.surface,
+        border: Border.all(color: book.border),
+        borderRadius: BorderRadius.circular(18),
+      ),
+      child: Material(
+        type: MaterialType.transparency,
+        child: InkWell(
+          onTap: () => copyOrderId(context, widget.orderId),
+          borderRadius: BorderRadius.circular(18),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            // Id on the left, date on the right; the date takes a line of its
+            // own when both do not fit, and the id ellipsizes when even it alone
+            // does not (German at 2x text, 320dp: DS-A11Y-4).
+            child: Wrap(
+              alignment: WrapAlignment.spaceBetween,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              spacing: 8,
+              runSpacing: 4,
               children: [
-                Text(l10n.tradeIdLabel, style: faint),
-                const SizedBox(width: 8),
-                // DS-CMP-22: the short id and the copy icon; the readout
-                // carries the whole id.
-                Flexible(
-                  child: OrderIdValue(
-                    orderId: widget.orderId,
-                    color: book.textTertiary,
-                  ),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(l10n.tradeIdLabel, style: faint),
+                    const SizedBox(width: 8),
+                    // DS-CMP-22: the short id and the copy icon; the readout
+                    // carries the whole id.
+                    Flexible(
+                      child: OrderIdValue(
+                        orderId: widget.orderId,
+                        color: book.textTertiary,
+                      ),
+                    ),
+                  ],
                 ),
+                if (order != null)
+                  Text(_createdLabel(l10n, order.createdAt), style: faint),
               ],
             ),
-            if (order != null)
-              Text(_createdLabel(l10n, order.createdAt), style: faint),
-          ],
+          ),
         ),
       ),
     );

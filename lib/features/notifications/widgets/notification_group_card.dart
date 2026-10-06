@@ -166,26 +166,45 @@ class _Header extends StatelessWidget {
     final row = this.row;
     final hasTrade = row != null && !row.claimOnly;
 
-    final String title;
-    final String subtitle;
+    // The id is a figure: its own span in the figures face, wherever the
+    // line places it.
+    final idSpan = TextSpan(
+      text: shortId,
+      style: const TextStyle(fontFamily: AppFonts.figures),
+    );
+    final InlineSpan title;
+    final InlineSpan? subtitle;
     if (!hasTrade) {
-      title = '${isDisputeGroup ? l10n.disputeWord : l10n.tradeWord} $shortId';
-      subtitle = row == null ? '' : paymentMethodLabel(row.paymentMethod);
-    } else {
-      title = tradeAmountSummary(
-        l10n,
-        isSelling: row.isSelling,
-        fiatAmount: row.fiatAmount,
-        fiatAmountMin: row.fiatAmountMin,
-        fiatAmountMax: row.fiatAmountMax,
-        fiatCode: row.fiatCode,
-        sats: row.amountSats,
-        locale: locale,
+      title = TextSpan(
+        children: [
+          TextSpan(
+            text: '${isDisputeGroup ? l10n.disputeWord : l10n.tradeWord} ',
+          ),
+          idSpan,
+        ],
       );
-      subtitle = [
-        paymentMethodLabel(row.paymentMethod),
-        shortId,
-      ].where((s) => s.isNotEmpty).join(' · ');
+      final method = row == null ? '' : paymentMethodLabel(row.paymentMethod);
+      subtitle = method.isEmpty ? null : TextSpan(text: method);
+    } else {
+      title = TextSpan(
+        text: tradeAmountSummary(
+          l10n,
+          isSelling: row.isSelling,
+          fiatAmount: row.fiatAmount,
+          fiatAmountMin: row.fiatAmountMin,
+          fiatAmountMax: row.fiatAmountMax,
+          fiatCode: row.fiatCode,
+          sats: row.amountSats,
+          locale: locale,
+        ),
+      );
+      final method = paymentMethodLabel(row.paymentMethod);
+      subtitle = TextSpan(
+        children: [
+          if (method.isNotEmpty) TextSpan(text: '$method · '),
+          if (shortId.isNotEmpty) idSpan,
+        ],
+      );
     }
     final (icon, iconColor) =
         isDispute
@@ -208,7 +227,7 @@ class _Header extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
+              Text.rich(
                 title,
                 style: Theme.of(context).textTheme.bodyMedium!.copyWith(
                   fontWeight: FontWeight.w600,
@@ -217,8 +236,8 @@ class _Header extends StatelessWidget {
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
               ),
-              if (subtitle.isNotEmpty)
-                Text(
+              if (subtitle != null && subtitle.toPlainText().isNotEmpty)
+                Text.rich(
                   subtitle,
                   style: Theme.of(
                     context,
