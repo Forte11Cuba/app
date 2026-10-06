@@ -103,7 +103,7 @@ class TradeCountdown extends StatelessWidget {
               formatTradeCountdown(remaining),
               style: TextStyle(
                 fontFamily: AppFonts.figures,
-                fontSize: 16,
+                fontSize: 17,
                 fontWeight: FontWeight.w700,
                 color: color,
               ),
