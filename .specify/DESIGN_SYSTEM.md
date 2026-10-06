@@ -226,11 +226,12 @@ Reuse before building (principle 4). These are the parts a new screen is assembl
 | ID | Rule | Check |
 |---|---|---|
 | DS-CMP-3 | **MUST.** A screen state has at most **one** primary call to action: filled lime, `onLime` ink, radius 16, 15/w600, vertical padding 14. When the user can only wait, it has none (`TradeActionBar`). Reuse `OrderPrimaryButton`, `TradeActionBar` or `InvoicePrimaryButton`. | review |
-| DS-CMP-4 | **MUST.** Secondary actions are outlined (`border` token, `textBody` ink) with the same radius as their primary. Cancel and dispute are never two red buttons of the same weight. A dismissal ("Close", "Not now") is a text link. | review |
-| DS-CMP-5 | **MUST.** A filled red button is used only for the answer to an irreversible question inside a modal (DS-CMP-2). On a page, danger is an outlined or link action in `danger` ink. | review |
+| DS-CMP-4 | **MUST.** Secondary actions are outlined (`border` token, `textBody` ink) with the same radius as their primary. Cancel and dispute are never two red buttons of the same weight. A way out (a dismissal, a cancel) is placed and weighted as DS-CMP-20 says. | review |
+| DS-CMP-5 | **MUST.** A filled red button is used only for the answer to an irreversible question inside a modal (DS-CMP-2). On a page, danger is an outlined or link action in `danger` ink, chosen as DS-CMP-20 says. | review |
 | DS-CMP-6 | **MUST.** Every tappable target is at least **48 × 48** dp. A small glyph is padded out to it, as `_OrderBookAppBar` does with `_target = 48`. | review |
 | DS-CMP-7 | **MUST.** An icon-only button has a `tooltip` or a semantic label. | review |
 | DS-CMP-17 | **MUST.** A `FilledButton`, `OutlinedButton` or `ElevatedButton` always passes `style:` (radius and palette colors as DS-CMP-3 and DS-CMP-4 say), or comes from a shared component that does (`OrderPrimaryButton`, `ModalAction`). Without one it is the theme's stadium in v1 colors. A `TextButton` used as a link colors its label from the palette, or is a `ModalLink`. | auto |
+| DS-CMP-20 | **MUST.** A screen's way out is weighted by what it undoes. **Leaving without consequence** (discarding a form, closing a finished screen, "Not now", skipping) is a text link in `textSecondary` under the screen's actions (`InvoiceCancelLink` with `danger: false`), or the back arrow alone. It is never an outlined button beside the primary, which would give leaving the weight of acting. **Cancelling something that exists** (a published order, a trade, a bond window) is in `danger` ink and always asks first, through a `MostroDialog` whose answer is `ModalTone.destructive` (DS-CMP-2). It is an outlined button when it shares the action bar with the primary (`TradeActionBar`'s secondary, `_CancelButton` on `/my_order`), and a link when it sits under the screen's actions (`InvoiceCancelLink` with `danger: true`). | review |
 
 ### 6.3 Cards, rows and chips
 
@@ -238,6 +239,7 @@ Reuse before building (principle 4). These are the parts a new screen is assembl
 |---|---|---|
 | DS-CMP-8 | **MUST.** A card or row sits on `surface`, has radius 18, padding 14 and no elevation. When tappable, it is `Material` + `InkWell`, so the ripple follows the radius. | review |
 | DS-CMP-9 | **MUST.** A status chip is a pill: 6-px dot, upper-case 10-sp label, padding 8 × 4 (horizontal × vertical), 6 between dot and label, with a tinted fill and border from the area's `chip*` tokens (`TradeListChip`, `TradeStatusChip`). The legacy `StatusChip` / `RoleBadge` with `AppColors.status*` is not used in new code. | review |
+| DS-CMP-22 | **MUST.** An order or trade id reads `shortOrderId`: the first 8 characters, `…`, the last 4 (`09150348…99b5`), in `AppFonts.figures`. It sits in an "ID" row of the screen's card, never in the app bar. The whole row copies the full id: it shows a visible `copy_rounded` icon, 16, in the area's lime icon ink, and confirms with the "Copied" snackbar (DS-CMP-15). The full id is shown only where it must be read whole, in the dispute info card. A mention that is not a control (a notification line) uses the same short form, without copy. `OrderIdRow` is the reference. | review |
 
 ### 6.4 Inputs
 
@@ -381,7 +383,7 @@ DS-SHP-4 and the `textTheme` roles of DS-TYP-4 joined them).
 | No test checks 3:1 for non-text, and none uses Flutter's `meetsGuideline` for tap targets or labels. | §8 | DS-COL-7, DS-CMP-6 |
 | `app_theme.dart` cites `test/core/accent_consistency_test.dart`, which does not exist. The check lives in `modal_contrast_test.dart`. | §2.1 | — |
 | About 100 reads of `AppColors` in the legacy areas and in a few redesigned files. | §2.2 | DS-COL-11 |
-| `ThemeData` holds v1's defaults: scaffold background `#1B1E28`, app bar, filled-underline input decoration, and no button themes (so a bare button is a stadium). 16 unstyled Material buttons, 11 app bars and 11 scaffolds on the theme background, and 14 text fields that leave part of their decoration to the theme rely on them, mostly in the Cashu, chat, dispute and notification screens and in error states. Redesigned fields are among them: `UnderlineAmountField` and the premium field in `price_section.dart` set only `border: InputBorder.none`, so the v1 fill shows behind the amount (`add_order_5b_single_fixed_dark.png`). Moving the theme's defaults to the redesign values would make a bare widget look right and retire most of these. | §1 | DS-CMP-12, DS-CMP-17 to DS-CMP-19 |
+| `ThemeData` holds v1's defaults: scaffold background `#1B1E28`, app bar, filled-underline input decoration, and no button themes (so a bare button is a stadium). 16 unstyled Material buttons, 11 app bars and 11 scaffolds on the theme background, and 13 text fields that leave part of their decoration to the theme rely on them, mostly in the Cashu, chat, dispute and notification screens and in error states. One redesigned field is among them: the premium field in `price_section.dart` sets only `border: InputBorder.none`, so the v1 fill shows behind the percentage. Moving the theme's defaults to the redesign values would make a bare widget look right and retire most of these. | §1 | DS-CMP-12, DS-CMP-17 to DS-CMP-19 |
 
 ---
 

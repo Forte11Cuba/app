@@ -3127,6 +3127,20 @@ class AppLocalizationsEs extends AppLocalizations {
   String get bondRemoveFromDevice => 'Quitar de este dispositivo';
 
   @override
+  String get bondLeaveMakerTitle => '¿No publicar esta orden?';
+
+  @override
+  String get bondLeaveMakerBody =>
+      'La orden no se publica y su factura de depósito se cancela.';
+
+  @override
+  String get bondLeaveTakerTitle => '¿No tomar esta orden?';
+
+  @override
+  String get bondLeaveTakerBody =>
+      'La orden sigue en el libro para otros y la factura de depósito se cancela.';
+
+  @override
   String get bondKeepWaiting => 'Seguir esperando';
 
   @override
@@ -3329,9 +3343,6 @@ class AppLocalizationsEs extends AppLocalizations {
 
   @override
   String get bondRequestFailed => 'El nodo no reenvió la factura del depósito';
-
-  @override
-  String get invoiceOrderIdCopied => 'ID de la orden copiado';
 
   @override
   String get invoiceYouReceiveLabel => 'Vas a recibir';

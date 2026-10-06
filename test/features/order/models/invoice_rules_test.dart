@@ -4,16 +4,6 @@ import 'package:mostro/src/rust/api/types.dart' as rust_types;
 import 'package:mostro/src/rust/api/types.dart' show InvoiceVerdict;
 
 void main() {
-  group('invoiceOrderTag', () {
-    test('keeps the first eight characters behind a hash', () {
-      expect(invoiceOrderTag('09150348-1a2b-4c3d'), '#09150348');
-    });
-
-    test('keeps a short id whole', () {
-      expect(invoiceOrderTag('order-1'), '#order-1');
-    });
-  });
-
   // Issue #720: the invoice screens grouped sats by hand (none up to five
   // digits, a thin space above) while every other screen used the locale's
   // separator, so `2439 sats` sat next to `≈ 1.449 sats`.

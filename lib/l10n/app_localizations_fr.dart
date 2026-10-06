@@ -3134,6 +3134,20 @@ class AppLocalizationsFr extends AppLocalizations {
   String get bondRemoveFromDevice => 'Retirer de cet appareil';
 
   @override
+  String get bondLeaveMakerTitle => 'Ne pas publier cet ordre ?';
+
+  @override
+  String get bondLeaveMakerBody =>
+      'L\'ordre ne sera pas publié et sa facture de dépôt est annulée.';
+
+  @override
+  String get bondLeaveTakerTitle => 'Ne pas prendre cet ordre ?';
+
+  @override
+  String get bondLeaveTakerBody =>
+      'L\'ordre reste dans le carnet pour les autres et la facture de dépôt est annulée.';
+
+  @override
   String get bondKeepWaiting => 'Continuer d\'attendre';
 
   @override
@@ -3337,9 +3351,6 @@ class AppLocalizationsFr extends AppLocalizations {
   @override
   String get bondRequestFailed =>
       'Le nœud n\'a pas renvoyé la facture du dépôt';
-
-  @override
-  String get invoiceOrderIdCopied => 'ID de l\'ordre copié';
 
   @override
   String get invoiceYouReceiveLabel => 'Tu vas recevoir';

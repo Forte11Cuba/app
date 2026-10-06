@@ -3141,6 +3141,20 @@ class AppLocalizationsDe extends AppLocalizations {
   String get bondRemoveFromDevice => 'Von diesem Gerät entfernen';
 
   @override
+  String get bondLeaveMakerTitle => 'Diese Order nicht veröffentlichen?';
+
+  @override
+  String get bondLeaveMakerBody =>
+      'Die Order wird nicht veröffentlicht und ihre Einlage-Rechnung wird storniert.';
+
+  @override
+  String get bondLeaveTakerTitle => 'Diese Order nicht annehmen?';
+
+  @override
+  String get bondLeaveTakerBody =>
+      'Die Order bleibt für andere im Orderbuch und die Einlage-Rechnung wird storniert.';
+
+  @override
   String get bondKeepWaiting => 'Weiter warten';
 
   @override
@@ -3344,9 +3358,6 @@ class AppLocalizationsDe extends AppLocalizations {
   @override
   String get bondRequestFailed =>
       'Der Node hat die Einlage-Rechnung nicht erneut gesendet';
-
-  @override
-  String get invoiceOrderIdCopied => 'Order-ID kopiert';
 
   @override
   String get invoiceYouReceiveLabel => 'Du erhältst';

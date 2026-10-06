@@ -892,6 +892,28 @@ void main() {
       expect(find.text(_en.tradeHeadlinePayoutPending), findsNothing);
     });
 
+    // DS-CMP-20: skipping the rating undoes nothing, so it is a neutral
+    // link, not an outlined button as heavy as sending the rating.
+    testWidgets('skipping the rating is a neutral link', (tester) async {
+      await _pumpTradeDetail(
+        tester,
+        orderId: 'order-seller-skips',
+        isBuyer: false,
+        status: OrderStatus.settledHoldInvoice,
+        ratingRoute: true,
+      );
+      expect(
+        find.widgetWithText(OutlinedButton, _en.closeRatingButton),
+        findsNothing,
+      );
+      final link = find.widgetWithText(TextButton, _en.closeRatingButton);
+      expect(link, findsOneWidget);
+      final label = tester.widget<RichText>(
+        find.descendant(of: link, matching: find.byType(RichText)),
+      );
+      expect(label.text.style?.color, OrderBookPalette.dark.textSecondary);
+    });
+
     testWidgets('who already rated is not offered the form again', (
       tester,
     ) async {
@@ -1414,7 +1436,7 @@ void main() {
           ),
         );
         // The visible id is shortened around an ellipsis.
-        expect(find.text('a-ver…0123', skipOffstage: false), findsOneWidget);
+        expect(find.text('a-very-l…0123', skipOffstage: false), findsOneWidget);
       } finally {
         semantics.dispose();
       }
@@ -2272,5 +2294,75 @@ void main() {
         expect(find.byType(TradeChatCard).hitTestable(), findsOneWidget);
       });
     }
+  });
+
+  // Issue #724, DS-CMP-22: the trade's id row reads the same short form as
+  // every other screen (8 + 4, not 5 + 4), beside the copy icon of 16.
+  testWidgets('the id row reads the short id with the copy icon', (
+    tester,
+  ) async {
+    const id = '09150348-1a2b-4c3d-8e9f-0a1b2c3d99b5';
+    await _pumpTradeDetail(
+      tester,
+      orderId: id,
+      isBuyer: true,
+      status: OrderStatus.active,
+    );
+
+    expect(find.text('09150348…99b5', skipOffstage: false), findsOneWidget);
+    final icon = tester.widget<Icon>(
+      find.byIcon(Icons.copy_rounded, skipOffstage: false),
+    );
+    expect(icon.size, 16);
+  });
+
+  // DS-CMP-22: the id row sits in a card of the screen, not bare on the
+  // scroll after the timeline.
+  testWidgets('the id row sits in a card', (tester) async {
+    const id = '09150348-1a2b-4c3d-8e9f-0a1b2c3d99b5';
+    await _pumpTradeDetail(
+      tester,
+      orderId: id,
+      isBuyer: true,
+      status: OrderStatus.active,
+    );
+
+    final card = find.ancestor(
+      of: find.text('09150348…99b5', skipOffstage: false),
+      matching: find.byWidgetPredicate(
+        (w) =>
+            w is Container &&
+            w.decoration is BoxDecoration &&
+            (w.decoration! as BoxDecoration).border != null &&
+            (w.decoration! as BoxDecoration).borderRadius ==
+                BorderRadius.circular(18),
+        skipOffstage: false,
+      ),
+    );
+    expect(card, findsOneWidget);
+  });
+
+  // DS-CMP-6 and DS-A11Y-1: the id card is a copy button at least 48 high.
+  testWidgets('the id row is a button of at least 48 dp', (tester) async {
+    const id = '09150348-1a2b-4c3d-8e9f-0a1b2c3d99b5';
+    final semantics = tester.ensureSemantics();
+    await _pumpTradeDetail(
+      tester,
+      orderId: id,
+      isBuyer: true,
+      status: OrderStatus.active,
+    );
+
+    final row = find.ancestor(
+      of: find.text('09150348…99b5', skipOffstage: false),
+      matching: find.byType(InkWell, skipOffstage: false),
+    );
+    expect(row, findsOneWidget);
+    expect(tester.getSize(row).height, greaterThanOrEqualTo(48));
+    expect(
+      tester.getSemantics(row),
+      isSemantics(isButton: true, hasTapAction: true),
+    );
+    semantics.dispose();
   });
 }

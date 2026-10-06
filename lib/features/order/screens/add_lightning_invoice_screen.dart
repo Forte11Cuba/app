@@ -719,9 +719,6 @@ class _AddLightningInvoiceScreenState
     final canPop = Navigator.of(context).canPop();
     final appBar = InvoiceAppBar(
       title: l10n.invoiceReceiveTitle,
-      orderId: widget.orderId,
-      orderIdAutomationId: AutomationIds.invoiceOrderId,
-      copiedMessage: l10n.invoiceOrderIdCopied,
       onBack: canPop ? () => Navigator.of(context).maybePop() : null,
     );
 
@@ -742,25 +739,27 @@ class _AddLightningInvoiceScreenState
       return Scaffold(
         backgroundColor: book.bg,
         appBar: appBar,
-        body: Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const CircularProgressIndicator(),
-              const SizedBox(height: AppSpacing.md),
-              Text(
-                l10n.fetchingTradeAmount,
-                style: TextStyle(color: book.textSecondary),
-              ),
-              const SizedBox(height: AppSpacing.md),
-              TextButton(
-                onPressed: () => setState(() => _manualMode = true),
-                child: Text(
-                  l10n.enterInvoiceManually,
-                  style: TextStyle(color: book.limeText),
+        body: _withId(
+          Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const CircularProgressIndicator(),
+                const SizedBox(height: AppSpacing.md),
+                Text(
+                  l10n.fetchingTradeAmount,
+                  style: TextStyle(color: book.textSecondary),
                 ),
-              ).withAutomationId(AutomationIds.invoiceManual),
-            ],
+                const SizedBox(height: AppSpacing.md),
+                TextButton(
+                  onPressed: () => setState(() => _manualMode = true),
+                  child: Text(
+                    l10n.enterInvoiceManually,
+                    style: TextStyle(color: book.limeText),
+                  ),
+                ).withAutomationId(AutomationIds.invoiceManual),
+              ],
+            ),
           ),
         ),
       );
@@ -776,70 +775,72 @@ class _AddLightningInvoiceScreenState
       return Scaffold(
         backgroundColor: book.bg,
         appBar: appBar,
-        body: Padding(
-          padding: const EdgeInsets.all(AppSpacing.lg),
-          child: Column(
-            children: [
-              // The maker must see who took their order even when NWC
-              // auto-generates the invoice and the flow can proceed on its
-              // own — that is exactly where the decision matters most (#305).
-              if (trade?.peerRating != null) ...[
-                PeerReputationCard(
-                  rating: trade!.peerRating!,
-                  reviews: trade.peerReviews ?? 0,
-                  days: trade.peerDaysOnMostro,
-                  counterpartIsBuyer: false,
-                ),
-                const SizedBox(height: AppSpacing.lg),
-              ],
-              Expanded(
-                child: Center(
-                  // The wallet is asked once, when the widget mounts: before
-                  // the node's window is known the invoice would get the
-                  // margin alone, and a node with a longer window refuses it.
-                  child:
-                      ref.watch(mostroNodeProvider).isLoading
-                          ? const CircularProgressIndicator()
-                          : NwcInvoiceWidget(
-                            amountSats: sats.toInt(),
-                            expirySecs: nwcInvoiceExpirySecs(
-                              _nodeContext().minRemainingSecs,
-                            ),
-                            generateInvoice: widget.generateInvoice,
-                            onInvoiceConfirmed: (invoice) async {
-                              _invoiceController.text = invoice;
-                              // Nothing else moves this screen on when the invoice
-                              // is held back, and the widget has already stopped
-                              // drawing: without the form, the screen stays blank.
-                              final sent = await _submit(ref);
-                              if (!sent && mounted && !_navigated) {
-                                setState(() => _manualMode = true);
-                              }
-                            },
-                            onFallbackToManual:
-                                () => setState(() => _manualMode = true),
-                          ),
-                ),
-              ),
-              // A generated invoice the daemon refuses needs the same
-              // persistent reason as a typed one.
-              if (error != null) ...[
-                const SizedBox(height: AppSpacing.md),
-                error,
-                // The readout tells the buyer to add a new invoice, but this
-                // branch has no form — its only other way out is leaving and
-                // reopening the screen, which regenerates and resubmits the
-                // wallet's (equally refused) invoice. Offer manual entry.
-                const SizedBox(height: AppSpacing.md),
-                TextButton(
-                  onPressed: () => setState(() => _manualMode = true),
-                  child: Text(
-                    l10n.enterInvoiceManually,
-                    style: TextStyle(color: book.limeText),
+        body: _withId(
+          Padding(
+            padding: const EdgeInsets.all(AppSpacing.lg),
+            child: Column(
+              children: [
+                // The maker must see who took their order even when NWC
+                // auto-generates the invoice and the flow can proceed on its
+                // own — that is exactly where the decision matters most (#305).
+                if (trade?.peerRating != null) ...[
+                  PeerReputationCard(
+                    rating: trade!.peerRating!,
+                    reviews: trade.peerReviews ?? 0,
+                    days: trade.peerDaysOnMostro,
+                    counterpartIsBuyer: false,
                   ),
-                ).withAutomationId(AutomationIds.invoiceManual),
+                  const SizedBox(height: AppSpacing.lg),
+                ],
+                Expanded(
+                  child: Center(
+                    // The wallet is asked once, when the widget mounts: before
+                    // the node's window is known the invoice would get the
+                    // margin alone, and a node with a longer window refuses it.
+                    child:
+                        ref.watch(mostroNodeProvider).isLoading
+                            ? const CircularProgressIndicator()
+                            : NwcInvoiceWidget(
+                              amountSats: sats.toInt(),
+                              expirySecs: nwcInvoiceExpirySecs(
+                                _nodeContext().minRemainingSecs,
+                              ),
+                              generateInvoice: widget.generateInvoice,
+                              onInvoiceConfirmed: (invoice) async {
+                                _invoiceController.text = invoice;
+                                // Nothing else moves this screen on when the invoice
+                                // is held back, and the widget has already stopped
+                                // drawing: without the form, the screen stays blank.
+                                final sent = await _submit(ref);
+                                if (!sent && mounted && !_navigated) {
+                                  setState(() => _manualMode = true);
+                                }
+                              },
+                              onFallbackToManual:
+                                  () => setState(() => _manualMode = true),
+                            ),
+                  ),
+                ),
+                // A generated invoice the daemon refuses needs the same
+                // persistent reason as a typed one.
+                if (error != null) ...[
+                  const SizedBox(height: AppSpacing.md),
+                  error,
+                  // The readout tells the buyer to add a new invoice, but this
+                  // branch has no form — its only other way out is leaving and
+                  // reopening the screen, which regenerates and resubmits the
+                  // wallet's (equally refused) invoice. Offer manual entry.
+                  const SizedBox(height: AppSpacing.md),
+                  TextButton(
+                    onPressed: () => setState(() => _manualMode = true),
+                    child: Text(
+                      l10n.enterInvoiceManually,
+                      style: TextStyle(color: book.limeText),
+                    ),
+                  ).withAutomationId(AutomationIds.invoiceManual),
+                ],
               ],
-            ],
+            ),
           ),
         ),
       );
@@ -859,20 +860,30 @@ class _AddLightningInvoiceScreenState
         builder:
             (context, remaining, _) =>
                 remaining == Duration.zero && !_submitting
-                    ? InvoiceTimeUpView(
-                      title: l10n.invoiceTimeUpTitle,
-                      body: l10n.invoiceTimeUpBody,
-                      actionLabel: l10n.invoiceBackToBook,
-                      onAction: () {
-                        _navigated = true;
-                        refreshTrades(ref);
-                        context.go(AppRoute.home);
-                      },
+                    ? _withId(
+                      InvoiceTimeUpView(
+                        title: l10n.invoiceTimeUpTitle,
+                        body: l10n.invoiceTimeUpBody,
+                        actionLabel: l10n.invoiceBackToBook,
+                        onAction: () {
+                          _navigated = true;
+                          refreshTrades(ref);
+                          context.go(AppRoute.home);
+                        },
+                      ),
                     )
                     : _scrollableForm(l10n, sats, trade),
       ),
     );
   }
+
+  /// [body] under the order's ID card, for the states without the form's
+  /// counterpart card (DS-CMP-22).
+  Widget _withId(Widget body) => InvoiceOrderIdBody(
+    orderId: widget.orderId,
+    automationId: AutomationIds.invoiceOrderId,
+    child: body,
+  );
 
   Widget _scrollableForm(
     AppLocalizations l10n,
@@ -955,10 +966,14 @@ class _AddLightningInvoiceScreenState
           const SizedBox(height: 8),
           invoiceCheckRow(check: check, sentence: validation),
         ],
-        if (trade != null) ...[
-          const SizedBox(height: 12),
-          InvoiceCounterpartCard(rows: _counterpartRows(l10n, trade)),
-        ],
+        // Always drawn: the order's ID row is in it (DS-CMP-22), and the
+        // counterpart rows join once the trade loads.
+        const SizedBox(height: 12),
+        InvoiceCounterpartCard(
+          rows: trade == null ? const [] : _counterpartRows(l10n, trade),
+          orderId: widget.orderId,
+          orderIdAutomationId: AutomationIds.invoiceOrderId,
+        ),
         const Spacer(),
         const SizedBox(height: 16),
         InvoicePrimaryButton(
@@ -970,7 +985,8 @@ class _AddLightningInvoiceScreenState
         const SizedBox(height: 4),
         InvoiceCancelLink(
           label: l10n.invoiceCancelTrade,
-          danger: false,
+          // It cancels the trade, not just the screen (DS-CMP-20).
+          danger: true,
           onPressed: (_submitting || _canceling) ? null : _cancelOrder,
         ).withAutomationId(AutomationIds.invoiceCancel),
       ],

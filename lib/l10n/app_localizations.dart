@@ -5260,6 +5260,30 @@ abstract class AppLocalizations {
   /// **'Remove from this device'**
   String get bondRemoveFromDevice;
 
+  /// Confirm dialog title before a maker drops an order still waiting for its deposit (DS-CMP-20)
+  ///
+  /// In en, this message translates to:
+  /// **'Don\'t publish this order?'**
+  String get bondLeaveMakerTitle;
+
+  /// Body of that dialog: what dropping the unpublished order does
+  ///
+  /// In en, this message translates to:
+  /// **'The order won\'t be published and its deposit invoice is cancelled.'**
+  String get bondLeaveMakerBody;
+
+  /// Confirm dialog title before a taker leaves an order whose deposit is not paid yet (DS-CMP-20)
+  ///
+  /// In en, this message translates to:
+  /// **'Don\'t take this order?'**
+  String get bondLeaveTakerTitle;
+
+  /// Body of that dialog: the order stays available to others
+  ///
+  /// In en, this message translates to:
+  /// **'The order stays in the book for others and the deposit invoice is cancelled.'**
+  String get bondLeaveTakerBody;
+
   /// Dialog action: keep the order and stay on the deposit screen
   ///
   /// In en, this message translates to:
@@ -5589,12 +5613,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'The node did not resend the deposit invoice'**
   String get bondRequestFailed;
-
-  /// Snackbar after tapping the order id in the invoice app bar
-  ///
-  /// In en, this message translates to:
-  /// **'Order ID copied'**
-  String get invoiceOrderIdCopied;
 
   /// 13a hero card label above the amount (rendered uppercase)
   ///
