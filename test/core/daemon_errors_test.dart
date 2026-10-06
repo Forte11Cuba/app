@@ -126,15 +126,10 @@ void main() {
     );
   });
 
-  /// Rust has no marker of its own for `CantDo(InvalidFiatCurrency)`: it
-  /// reaches Dart inside the generic rejection prose, matched by substring.
+  /// Rust emits `CantDo(InvalidFiatCurrency)` as the bare marker.
   test('maps a refused currency to the pick-another guidance', () {
     expect(
-      localizedDaemonError(
-        l10n,
-        'Order rejected by Mostro: InvalidFiatCurrency',
-        fallback: 'x',
-      ),
+      localizedDaemonError(l10n, 'InvalidFiatCurrency', fallback: 'x'),
       l10n.invalidFiatCurrencyError,
     );
   });

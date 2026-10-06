@@ -4420,6 +4420,10 @@ async fn dispatch_mostro_message(
                 // actions on existing orders keep working. Marker only, no
                 // prose: Dart maps `MaintenanceMode` to a localized message.
                 "MaintenanceMode" => "MaintenanceMode".to_string(),
+                // The order's currency is not in the node's
+                // `fiat_currencies_accepted`. Marker only: Dart maps it to a
+                // localized message.
+                "InvalidFiatCurrency" => "InvalidFiatCurrency".to_string(),
                 // The local trade-key counter is behind the daemon's (the seed
                 // traded elsewhere, or was imported without a restore). Marker
                 // only: create/take resync and retry once on it
@@ -13452,6 +13456,40 @@ mod tests {
                     &anyhow::anyhow!("{message}")
                 ));
             }
+            _ => panic!("the rejection must reach the waiting request"),
+        }
+    }
+
+    /// A currency the node does not accept reaches the waiting request as the
+    /// bare marker, which Dart localizes, not as English prose.
+    #[tokio::test]
+    async fn an_invalid_fiat_currency_rejection_carries_the_bare_marker() {
+        use mostro_core::error::CantDoReason;
+        use mostro_core::message::{Action, Payload};
+
+        let order_uuid = uuid::Uuid::new_v4();
+        let key = "test-invalid-fiat-currency-pubkey";
+        let mut rx = register_dispute_request(key.to_string(), 75, 7);
+
+        dispatch_mostro_message(
+            dispute_reply_message(
+                order_uuid,
+                75,
+                7,
+                Action::CantDo,
+                Some(Payload::CantDo(Some(CantDoReason::InvalidFiatCurrency))),
+            ),
+            "test-invalid-fiat-currency",
+            key,
+            7,
+        )
+        .await;
+
+        match rx.try_recv() {
+            Ok(Wake {
+                reply: DaemonReply::Rejected { message, .. },
+                ..
+            }) => assert_eq!(message, "InvalidFiatCurrency"),
             _ => panic!("the rejection must reach the waiting request"),
         }
     }

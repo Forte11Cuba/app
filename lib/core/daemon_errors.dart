@@ -49,8 +49,8 @@ String localizedDaemonError(
   }
   // The node does not list the order's currency in its
   // `fiat_currencies_accepted`. The picker offers only those, so this is a
-  // list that changed, or arrived, after the currency was picked. The Rust
-  // core words it as "Order rejected by Mostro: InvalidFiatCurrency".
+  // list that changed, or arrived, after the currency was picked. Rust emits
+  // the bare marker.
   if (raw.contains('InvalidFiatCurrency')) {
     return l10n.invalidFiatCurrencyError;
   }
