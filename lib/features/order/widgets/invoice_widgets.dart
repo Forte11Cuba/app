@@ -11,6 +11,7 @@ import 'package:mostro/features/order/widgets/hero_amount_card.dart';
 import 'package:mostro/features/order/widgets/order_detail_cards.dart';
 import 'package:mostro/l10n/app_localizations.dart';
 import 'package:mostro/shared/providers/peer_nym_provider.dart';
+import 'package:mostro/shared/utils/countdown.dart';
 import 'package:mostro/src/rust/api/types.dart' show TradeInfo;
 
 /// Building blocks shared by the two invoice screens
@@ -248,11 +249,11 @@ class _InvoiceTimeBandState extends State<InvoiceTimeBand>
     final urgent = isInvoiceCountdownUrgent(widget.remaining);
     final ink = urgent ? pal.errorInk : pal.timeInk;
     final figureColor = urgent ? pal.errorInk : pal.timeFigure;
-    final time = formatInvoiceCountdown(widget.remaining, hours: widget.hours);
+    final time = formatCountdown(widget.remaining, hours: widget.hours);
     final (before, after) = _splitAround(widget.sentence);
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 11),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       decoration: BoxDecoration(
         color: urgent ? pal.errorFill : pal.timeFill,
         borderRadius: BorderRadius.circular(16),
@@ -260,8 +261,8 @@ class _InvoiceTimeBandState extends State<InvoiceTimeBand>
       ),
       child: Row(
         children: [
-          Icon(Icons.schedule, size: 15, color: figureColor),
-          const SizedBox(width: 9),
+          Icon(Icons.schedule, size: 14, color: figureColor),
+          const SizedBox(width: 8),
           Expanded(
             child: Semantics(
               label: widget.sentence(time),

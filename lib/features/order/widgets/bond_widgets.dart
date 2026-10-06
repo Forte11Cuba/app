@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:mostro/core/app_theme.dart';
 import 'package:mostro/core/invoice_palette.dart';
 import 'package:mostro/features/order/models/invoice_rules.dart';
+import 'package:mostro/shared/utils/countdown.dart';
 
 /// One of the three things that can happen to the bonded sats (handoff 14,
 /// "fila de consecuencia"): the icon's shape and colour are the information,
@@ -337,7 +338,7 @@ class BondAmountRow extends StatelessWidget {
                   ),
                   const SizedBox(width: 6),
                   Text(
-                    formatInvoiceCountdown(remaining, hours: hours),
+                    formatCountdown(remaining, hours: hours),
                     style: TextStyle(
                       fontFamily: AppFonts.figures,
                       fontSize: 12,
