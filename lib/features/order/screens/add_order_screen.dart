@@ -148,7 +148,8 @@ class _AddOrderScreenState extends ConsumerState<AddOrderScreen> {
   /// but only while the form is untouched: once an amount or a payment
   /// method is in, switching would reinterpret the amount and drop the
   /// methods that belong to the old currency. The build then shows the
-  /// currency as refused and keeps Publish disabled instead.
+  /// currency as refused and keeps Publish disabled instead. Only the form's
+  /// currency changes: the default currency in settings is never written.
   void _keepFiatAccepted(List<String>? accepted) {
     if (!_untouched) return;
     final selected = ref.read(selectedFiatCodeProvider.notifier);

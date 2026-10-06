@@ -12,6 +12,9 @@ import 'package:mostro/shared/utils/fiat_currencies.dart';
 import 'package:mostro/shared/widgets/mostro_modal.dart';
 import 'package:mostro/src/rust/api/node_stats.dart' as node_stats_api;
 
+/// The picker's boxed search field (DS-CMP-11).
+const _kSearchFieldRadius = 14.0;
+
 /// Provider for the currently selected fiat code in the create-order form.
 final selectedFiatCodeProvider = StateProvider<String>((_) => 'USD');
 
@@ -203,8 +206,12 @@ class _CurrencyPickerDialogState extends ConsumerState<_CurrencyPickerDialog> {
           c.name.toLowerCase().contains(q);
     }).toList();
     final border = OutlineInputBorder(
-      borderRadius: BorderRadius.circular(14),
+      borderRadius: BorderRadius.circular(_kSearchFieldRadius),
       borderSide: BorderSide(color: palette.border),
+    );
+    // The field opens focused, so the focus has to show (DS-COL-7).
+    final focusBorder = border.copyWith(
+      borderSide: BorderSide(color: palette.limeText),
     );
 
     return MostroDialog(
@@ -223,7 +230,7 @@ class _CurrencyPickerDialogState extends ConsumerState<_CurrencyPickerDialog> {
               fillColor: palette.inset,
               border: border,
               enabledBorder: border,
-              focusedBorder: border,
+              focusedBorder: focusBorder,
               hintText: AppLocalizations.of(context).searchCurrenciesHint,
               hintStyle: TextStyle(fontSize: 13, color: palette.textFaint),
               prefixIcon: Icon(

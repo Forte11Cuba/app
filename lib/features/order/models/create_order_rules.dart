@@ -43,7 +43,7 @@ bool fiatRefused(String current, List<String>? accepted) =>
 
 /// The currency the form keeps once the node's list is known: [current] when
 /// the node accepts it or sets no limit, otherwise the first code the node
-/// lists. The user's default currency in settings is not changed.
+/// lists.
 String fiatForNode(String current, List<String>? accepted) =>
     fiatRefused(current, accepted) ? accepted!.first : current;
 
