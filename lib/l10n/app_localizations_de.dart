@@ -3638,6 +3638,10 @@ class AppLocalizationsDe extends AppLocalizations {
       'Dein Konto ist nicht mit diesem Mostro-Knoten synchronisiert, daher wurde die Order abgelehnt. Versuche es gleich noch einmal';
 
   @override
+  String get invalidFiatCurrencyError =>
+      'Dieser Mostro-Knoten akzeptiert diese Währung nicht, daher wurde die Order abgelehnt. Wähle eine andere Währung';
+
+  @override
   String get recoveringTradesMessage =>
       'Konto importiert. Deine Trades werden von Mostro wiederhergestellt…';
 

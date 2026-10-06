@@ -1121,6 +1121,7 @@
   "chatCardMessage": "{count, plural, =1{1 nuovo messaggio dalla tua controparte} other{{count} nuovi messaggi dalla tua controparte}}",
   "chatCardSolverMessage": "{count, plural, =1{1 nuovo messaggio dal mediatore della disputa} other{{count} nuovi messaggi dal mediatore della disputa}}",
   "invalidTradeIndexError": "Il tuo account non è sincronizzato con questo nodo Mostro, che ha quindi rifiutato l'ordine. Riprova tra un momento",
+  "invalidFiatCurrencyError": "Questo nodo Mostro non accetta questa valuta, quindi ha rifiutato l'ordine. Scegli un'altra valuta",
   "recoveringTradesMessage": "Account importato. Recupero dei tuoi scambi da Mostro…",
   "recoveredTradesMessage": "{count, plural, =0{Account importato. Non avevi scambi in corso} =1{Account importato. 1 scambio recuperato} other{Account importato. {count} scambi recuperati}}",
   "recoverTradesFailedMessage": "Account importato, ma Mostro non ha risposto: i tuoi scambi in corso non sono stati recuperati",

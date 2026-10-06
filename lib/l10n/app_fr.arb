@@ -1121,6 +1121,7 @@
   "chatCardMessage": "{count, plural, =1{1 nouveau message de votre contrepartie} other{{count} nouveaux messages de votre contrepartie}}",
   "chatCardSolverMessage": "{count, plural, =1{1 nouveau message du médiateur du litige} other{{count} nouveaux messages du médiateur du litige}}",
   "invalidTradeIndexError": "Votre compte n'est pas synchronisé avec ce nœud Mostro, qui a donc refusé l'ordre. Réessayez dans un instant",
+  "invalidFiatCurrencyError": "Ce nœud Mostro n'accepte pas cette devise, il a donc refusé l'ordre. Choisissez une autre devise",
   "recoveringTradesMessage": "Compte importé. Récupération de vos échanges depuis Mostro…",
   "recoveredTradesMessage": "{count, plural, =0{Compte importé. Vous n'aviez aucun échange en cours} =1{Compte importé. 1 échange récupéré} other{Compte importé. {count} échanges récupérés}}",
   "recoverTradesFailedMessage": "Compte importé, mais Mostro n'a pas répondu : vos échanges en cours n'ont pas été récupérés",

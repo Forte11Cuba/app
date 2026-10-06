@@ -3626,6 +3626,10 @@ class AppLocalizationsIt extends AppLocalizations {
       'Il tuo account non è sincronizzato con questo nodo Mostro, che ha quindi rifiutato l\'ordine. Riprova tra un momento';
 
   @override
+  String get invalidFiatCurrencyError =>
+      'Questo nodo Mostro non accetta questa valuta, quindi ha rifiutato l\'ordine. Scegli un\'altra valuta';
+
+  @override
   String get recoveringTradesMessage =>
       'Account importato. Recupero dei tuoi scambi da Mostro…';
 

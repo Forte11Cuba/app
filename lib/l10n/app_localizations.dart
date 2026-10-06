@@ -6040,6 +6040,12 @@ abstract class AppLocalizations {
   /// **'Your account is out of sync with this Mostro node, so it refused the order. Try again in a moment'**
   String get invalidTradeIndexError;
 
+  /// Error shown when the Mostro node refuses a new order with CantDo(InvalidFiatCurrency): its fiat_currencies_accepted list does not include the order's currency
+  ///
+  /// In en, this message translates to:
+  /// **'This Mostro node does not accept that currency, so it refused the order. Pick another currency'**
+  String get invalidFiatCurrencyError;
+
   /// Snackbar shown on the Account screen right after a mnemonic import, while the app asks Mostro for the identity's trades in progress
   ///
   /// In en, this message translates to:

@@ -3619,6 +3619,10 @@ class AppLocalizationsEs extends AppLocalizations {
       'Tu cuenta no está sincronizada con este nodo Mostro, así que rechazó la orden. Inténtalo de nuevo en un momento';
 
   @override
+  String get invalidFiatCurrencyError =>
+      'Este nodo Mostro no acepta esa moneda, así que rechazó la orden. Elige otra moneda';
+
+  @override
   String get recoveringTradesMessage =>
       'Cuenta importada. Recuperando tus operaciones desde Mostro…';
 

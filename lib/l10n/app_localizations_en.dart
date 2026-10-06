@@ -3593,6 +3593,10 @@ class AppLocalizationsEn extends AppLocalizations {
       'Your account is out of sync with this Mostro node, so it refused the order. Try again in a moment';
 
   @override
+  String get invalidFiatCurrencyError =>
+      'This Mostro node does not accept that currency, so it refused the order. Pick another currency';
+
+  @override
   String get recoveringTradesMessage =>
       'Account imported. Recovering your trades from Mostro…';
 

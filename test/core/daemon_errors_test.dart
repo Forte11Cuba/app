@@ -126,6 +126,19 @@ void main() {
     );
   });
 
+  /// Rust has no marker of its own for `CantDo(InvalidFiatCurrency)`: it
+  /// reaches Dart inside the generic rejection prose, matched by substring.
+  test('maps a refused currency to the pick-another guidance', () {
+    expect(
+      localizedDaemonError(
+        l10n,
+        'Order rejected by Mostro: InvalidFiatCurrency',
+        fallback: 'x',
+      ),
+      l10n.invalidFiatCurrencyError,
+    );
+  });
+
   /// mostro-core 0.14.6 adds `CantDoReason::MaintenanceMode`: the node is
   /// draining and refuses new orders and takes. Rust emits the bare marker;
   /// some wrappers prepend their own context, so match it by substring like

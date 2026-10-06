@@ -3631,6 +3631,10 @@ class AppLocalizationsFr extends AppLocalizations {
       'Votre compte n\'est pas synchronisé avec ce nœud Mostro, qui a donc refusé l\'ordre. Réessayez dans un instant';
 
   @override
+  String get invalidFiatCurrencyError =>
+      'Ce nœud Mostro n\'accepte pas cette devise, il a donc refusé l\'ordre. Choisissez une autre devise';
+
+  @override
   String get recoveringTradesMessage =>
       'Compte importé. Récupération de vos échanges depuis Mostro…';
 

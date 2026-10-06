@@ -3621,6 +3621,10 @@ class AppLocalizationsNl extends AppLocalizations {
       'Je account loopt niet gelijk met deze Mostro-node, dus de order is geweigerd. Probeer het zo weer';
 
   @override
+  String get invalidFiatCurrencyError =>
+      'Deze Mostro-node accepteert deze valuta niet, dus de order is geweigerd. Kies een andere valuta';
+
+  @override
   String get recoveringTradesMessage =>
       'Account geïmporteerd. Je trades worden bij Mostro opgehaald…';
 
