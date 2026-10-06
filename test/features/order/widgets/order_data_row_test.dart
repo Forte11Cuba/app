@@ -6,9 +6,7 @@ import 'package:mostro/features/order/widgets/order_detail_cards.dart';
 /// DS-CMP-24: a data row's icon and padding are on their scales — a 16-dp
 /// icon (DS-ICO-3) and 14 above and below (DS-SPC-2).
 void main() {
-  testWidgets('a data row sits on the icon and spacing scales', (
-    tester,
-  ) async {
+  testWidgets('a data row sits on the icon and spacing scales', (tester) async {
     await tester.pumpWidget(
       MaterialApp(
         theme: buildDarkTheme(),
@@ -34,5 +32,55 @@ void main() {
           .first,
     );
     expect(padding.padding, const EdgeInsets.symmetric(vertical: 14));
+  });
+
+  testWidgets('a tappable data row is announced as a button (DS-A11Y-1)', (
+    tester,
+  ) async {
+    final handle = tester.ensureSemantics();
+    var taps = 0;
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildDarkTheme(),
+        home: Scaffold(
+          body: Column(
+            children: [
+              OrderDataRow(
+                icon: Icons.credit_card_outlined,
+                label: 'Pagas con',
+                value: const OrderDataValue('Mercado Pago +2'),
+                onTap: () => taps++,
+              ),
+              const OrderDataRow(
+                icon: Icons.calendar_today_outlined,
+                label: 'Publicada',
+                value: OrderDataValue('hace 2 h'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    expect(
+      tester.getSemantics(find.text('Pagas con')),
+      matchesSemantics(
+        label: 'Pagas con\nMercado Pago +2',
+        isButton: true,
+        hasEnabledState: true,
+        isEnabled: true,
+        hasTapAction: true,
+        isFocusable: true,
+        hasFocusAction: true,
+      ),
+    );
+    expect(
+      tester.getSemantics(find.text('Publicada')),
+      isNot(matchesSemantics(isButton: true)),
+    );
+
+    await tester.tap(find.text('Pagas con'));
+    expect(taps, 1);
+    handle.dispose();
   });
 }
