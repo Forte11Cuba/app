@@ -471,7 +471,7 @@ class _PayBondInvoiceScreenState extends ConsumerState<PayBondInvoiceScreen>
                         child: _qr(l10n, invoice),
                       ),
                       if (remaining != null) ...[
-                        const SizedBox(height: 11),
+                        const SizedBox(height: 12),
                         InvoiceTimeBand(
                           remaining: remaining,
                           sentence:
@@ -481,12 +481,12 @@ class _PayBondInvoiceScreenState extends ConsumerState<PayBondInvoiceScreen>
                           hours: l10n.invoiceCountdownHours,
                         ),
                       ],
-                      const SizedBox(height: 11),
+                      const SizedBox(height: 12),
                       BondConsequenceCard(
                         rows: _consequences(l10n, slashOnTimeout),
                       ),
                     ],
-                    const SizedBox(height: 11),
+                    const SizedBox(height: 12),
                     BondExplainerToggle(
                       label: l10n.bondWhyTitle,
                       open: open,
@@ -497,13 +497,13 @@ class _PayBondInvoiceScreenState extends ConsumerState<PayBondInvoiceScreen>
                                   .toggle(),
                     ).withAutomationId(AutomationIds.bondExplainer),
                     if (open) ...[
-                      const SizedBox(height: 11),
+                      const SizedBox(height: 12),
                       BondExplainerBody(
                         paragraphs: _explainer(l10n, slashOnTimeout),
                         linkLabel: l10n.bondReadDocs,
                         onLink: _openDocs,
                       ),
-                      const SizedBox(height: 11),
+                      const SizedBox(height: 12),
                       InvoiceCounterpartCard(
                         rows: _context(
                           l10n,
@@ -610,10 +610,11 @@ class _PayBondInvoiceScreenState extends ConsumerState<PayBondInvoiceScreen>
 
   Widget _qr(AppLocalizations l10n, String invoice) => Center(
     child: SizedBox.square(
-      dimension: 150 + 2 * 11,
+      dimension: 150 + 2 * 12,
       child: Container(
-        padding: const EdgeInsets.all(11),
+        padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
+          // design-check: ignore DS-COL-1 — a QR code must be pure black on white to scan
           color: Colors.white,
           borderRadius: BorderRadius.circular(14),
         ),
@@ -621,6 +622,7 @@ class _PayBondInvoiceScreenState extends ConsumerState<PayBondInvoiceScreen>
           data: invoice,
           size: 150,
           padding: EdgeInsets.zero,
+          // design-check: ignore DS-COL-1 — a QR code must be pure black on white to scan
           backgroundColor: Colors.white,
           semanticsLabel: l10n.invoiceQrSemantics(invoice),
         ),
@@ -670,7 +672,7 @@ class _PayBondInvoiceScreenState extends ConsumerState<PayBondInvoiceScreen>
                     : () => _copy(invoice),
           ),
         ),
-        const SizedBox(width: 9),
+        const SizedBox(width: 8),
         Expanded(
           child: InvoiceSecondaryButton(
             icon: Icons.share,
@@ -696,7 +698,7 @@ class _PayBondInvoiceScreenState extends ConsumerState<PayBondInvoiceScreen>
           onPressed: () => _openWallet(invoice),
         ),
       // 14b hides copy / share: whoever is reading is not scanning.
-      if (!open) ...[const SizedBox(height: 9), secondaries],
+      if (!open) ...[const SizedBox(height: 8), secondaries],
       const SizedBox(height: 4),
       _leaveLink(l10n, maker: maker),
     ];
@@ -788,14 +790,14 @@ class _PayBondInvoiceScreenState extends ConsumerState<PayBondInvoiceScreen>
       unawaited(_closeExpiredWindow());
     }
     return InvoiceTimeUpView(
-        title: l10n.bondExpiredTitle,
-        body: maker ? l10n.bondExpiredBodyMaker : l10n.bondExpiredBody,
-        actionLabel: l10n.invoiceBackToBook,
-        onAction: () {
-          _navigated = true;
-          refreshTrades(ref);
-          context.go(AppRoute.home);
-        },
-      );
+      title: l10n.bondExpiredTitle,
+      body: maker ? l10n.bondExpiredBodyMaker : l10n.bondExpiredBody,
+      actionLabel: l10n.invoiceBackToBook,
+      onAction: () {
+        _navigated = true;
+        refreshTrades(ref);
+        context.go(AppRoute.home);
+      },
+    );
   }
 }
