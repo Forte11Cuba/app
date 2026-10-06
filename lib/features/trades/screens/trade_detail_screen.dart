@@ -13,6 +13,8 @@ import 'package:mostro/core/automation/automation_ids.dart';
 import 'package:mostro/core/daemon_errors.dart';
 import 'package:mostro/features/about/providers/mostro_node_provider.dart';
 import 'package:mostro/features/account/providers/privacy_mode_provider.dart';
+import 'package:mostro/features/chat/models/chat_list_rules.dart';
+import 'package:mostro/features/chat/providers/chat_list_provider.dart';
 import 'package:mostro/features/chat/providers/chat_providers.dart';
 import 'package:mostro/features/disputes/providers/disputes_providers.dart';
 import 'package:mostro/features/home/providers/home_order_providers.dart';
@@ -87,6 +89,10 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen>
     const Duration(seconds: _kCountdownSeconds),
   );
 
+  /// Whether the content has scrolled under the pinned chat card, which then
+  /// draws a line under itself. A notifier so a scroll repaints that line only.
+  final ValueNotifier<bool> _scrolledUnderChat = ValueNotifier(false);
+
   /// The window as measured when the screen loaded — the fallback for the
   /// countdown bar when the node does not advertise its expiration.
   Duration _loadedWindow = const Duration(seconds: _kCountdownSeconds);
@@ -122,6 +128,7 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen>
   void dispose() {
     _tick?.cancel();
     _remaining.dispose();
+    _scrolledUnderChat.dispose();
     super.dispose();
   }
 
@@ -710,6 +717,14 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen>
             .watch(chatRoomsNotifierProvider)
             .where((r) => r.orderId == widget.orderId)
             .firstOrNull;
+    // The chat card stays above the scroll while the conversation is open,
+    // a completed trade's hour included (#642): the counterpart is one tap
+    // away wherever the user scrolled to.
+    final chatOpen =
+        ref.watch(chatRowStateProvider(widget.orderId)).group ==
+        ChatGroup.active;
+    final pinsChat =
+        view.showsChat || (view.isCompleted && room != null && chatOpen);
 
     // No trade row and not the maker: this is no longer a trade of this
     // user's. A take lost before going active (its own cancel, a waiting
@@ -755,68 +770,87 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen>
         ),
         actions: [_buildOverflowMenu(book)],
       ),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(18, 4, 18, 16),
+      body: Column(
         children: [
-          _chatArea(view),
-          const SizedBox(height: 12),
-          AnimatedSwitcher(
-            duration: const Duration(milliseconds: 200),
-            child: KeyedSubtree(
-              key: ValueKey(status),
-              child:
-                  view.isCompleted
-                      ? _completedCard(
-                        l10n,
-                        status,
-                        canRate,
-                        order,
-                        amount,
-                        room?.displayHandle(l10n),
-                      )
-                      : _stepBlock(
-                        l10n,
-                        view,
-                        status,
-                        isBuyer,
-                        order,
-                        amount: amount,
-                        summary: summary,
-                        loadFailed: loadFailed,
+          _pinnedChat(pinsChat, book),
+          Expanded(
+            child: NotificationListener<ScrollUpdateNotification>(
+              onNotification: (notification) {
+                if (notification.depth == 0) {
+                  _scrolledUnderChat.value = notification.metrics.pixels > 0;
+                }
+                return false;
+              },
+              child: ListView(
+                // Under a pinned card, its 8 dp and these 4 dp make the
+                // 12 dp gap it had inside the scroll.
+                padding: const EdgeInsets.fromLTRB(18, 4, 18, 16),
+                children: [
+                  if (!pinsChat) ...[
+                    _lockedChatNote(view),
+                    const SizedBox(height: 12),
+                  ],
+                  AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 200),
+                    child: KeyedSubtree(
+                      key: ValueKey(status),
+                      child:
+                          view.isCompleted
+                              ? _completedCard(
+                                l10n,
+                                status,
+                                canRate,
+                                order,
+                                amount,
+                                room?.displayHandle(l10n),
+                              )
+                              : _stepBlock(
+                                l10n,
+                                view,
+                                status,
+                                isBuyer,
+                                order,
+                                amount: amount,
+                                summary: summary,
+                                loadFailed: loadFailed,
+                              ),
+                    ),
+                  ),
+                  // The share of a slashed bond, when the daemon offered one
+                  // (docs/ANTI_ABUSE_BOND.md §8.3); nothing otherwise.
+                  BondClaimBanner(orderId: widget.orderId),
+                  // The node slashed this user's own bond: a fact that
+                  // outlives the notification (docs/ANTI_ABUSE_BOND.md §8.3).
+                  BondSlashedNotice(orderId: widget.orderId),
+                  // A pending cooperative-cancel request, this side's or the
+                  // counterparty's (protocol `cancel.md`); nothing otherwise.
+                  CancelRequestNotice(orderId: widget.orderId),
+                  if (view.showsReputation && peerRating != null) ...[
+                    const SizedBox(height: 12),
+                    CounterpartReputationRow(
+                      rating: peerRating,
+                      reviews: trade!.peerReviews ?? 0,
+                      days: trade.peerDaysOnMostro,
+                      counterpartIsBuyer: !isBuyer,
+                    ),
+                  ],
+                  if (view.step >= 0) ...[
+                    const SizedBox(height: 12),
+                    AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 200),
+                      child: TradeTimeline(
+                        key: ValueKey(view.step),
+                        steps: _steps(l10n, isBuyer),
+                        current: view.step,
                       ),
-            ),
-          ),
-          // The share of a slashed bond, when the daemon offered one
-          // (docs/ANTI_ABUSE_BOND.md §8.3); nothing otherwise.
-          BondClaimBanner(orderId: widget.orderId),
-          // The node slashed this user's own bond: a fact that outlives the
-          // notification (docs/ANTI_ABUSE_BOND.md §8.3).
-          BondSlashedNotice(orderId: widget.orderId),
-          // A pending cooperative-cancel request, this side's or the
-          // counterparty's (protocol `cancel.md`); nothing otherwise.
-          CancelRequestNotice(orderId: widget.orderId),
-          if (view.showsReputation && peerRating != null) ...[
-            const SizedBox(height: 12),
-            CounterpartReputationRow(
-              rating: peerRating,
-              reviews: trade!.peerReviews ?? 0,
-              days: trade.peerDaysOnMostro,
-              counterpartIsBuyer: !isBuyer,
-            ),
-          ],
-          if (view.step >= 0) ...[
-            const SizedBox(height: 12),
-            AnimatedSwitcher(
-              duration: const Duration(milliseconds: 200),
-              child: TradeTimeline(
-                key: ValueKey(view.step),
-                steps: _steps(l10n, isBuyer),
-                current: view.step,
+                    ),
+                  ],
+                  const SizedBox(height: 12),
+                  _idRow(l10n, book, order),
+                ],
               ),
             ),
-          ],
-          const SizedBox(height: 12),
-          _idRow(l10n, book, order),
+          ),
         ],
       ),
       bottomNavigationBar:
@@ -828,38 +862,68 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen>
 
   // ── Chat ─────────────────────────────────────────────────────────────────
 
-  /// The chat card slides in once the trade is active (fade + 8dp, 220 ms);
-  /// the lock line before it fades out (150 ms). Nothing in either state.
-  Widget _chatArea(TradeView view) {
-    final Widget child;
-    if (view.showsChat) {
-      child = TradeChatCard(
-        key: const ValueKey('chat'),
-        orderId: widget.orderId,
-      );
-    } else if (!view.isCompleted && view.step >= 0) {
-      child = const TradeChatLockedLine(key: ValueKey('locked'));
-    } else {
-      child = const SizedBox.shrink(key: ValueKey('none'));
-    }
+  /// The chat card, pinned above the scrolling content while the
+  /// conversation is open: it slides in (fade + 8dp, 220 ms) and draws a line
+  /// under itself once content scrolls beneath it. Nothing otherwise.
+  Widget _pinnedChat(bool pinned, OrderBookPalette book) {
+    final Widget child =
+        pinned
+            ? ValueListenableBuilder<bool>(
+              key: const ValueKey('chat'),
+              valueListenable: _scrolledUnderChat,
+              // A border paints over the padding without adding height, so
+              // the line costs no layout.
+              builder:
+                  (context, scrolled, card) => DecoratedBox(
+                    decoration: BoxDecoration(
+                      border: Border(
+                        bottom: BorderSide(
+                          color: scrolled ? book.navBorder : Colors.transparent,
+                        ),
+                      ),
+                    ),
+                    child: card,
+                  ),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(18, 4, 18, 8),
+                child: TradeChatCard(orderId: widget.orderId),
+              ),
+            )
+            : const SizedBox.shrink(key: ValueKey('none'));
     return AnimatedSwitcher(
       duration: const Duration(milliseconds: 220),
       reverseDuration: const Duration(milliseconds: 150),
       switchInCurve: Curves.easeOut,
-      transitionBuilder:
-          (child, animation) => FadeTransition(
-            opacity: animation,
-            child: SlideTransition(
-              position: Tween<Offset>(
-                begin: const Offset(0, 0.12),
-                end: Offset.zero,
-              ).animate(animation),
-              child: child,
-            ),
-          ),
+      transitionBuilder: _chatTransition,
       child: child,
     );
   }
+
+  /// What stands in for the chat before the trade is active: a note that
+  /// scrolls with the content, never pinned. It fades out (150 ms) when the
+  /// trade turns active and the card takes the top.
+  Widget _lockedChatNote(TradeView view) => AnimatedSwitcher(
+    duration: const Duration(milliseconds: 220),
+    reverseDuration: const Duration(milliseconds: 150),
+    switchInCurve: Curves.easeOut,
+    transitionBuilder: _chatTransition,
+    child:
+        !view.isCompleted && view.step >= 0
+            ? const TradeChatLockedLine(key: ValueKey('locked'))
+            : const SizedBox.shrink(key: ValueKey('none')),
+  );
+
+  static Widget _chatTransition(Widget child, Animation<double> animation) =>
+      FadeTransition(
+        opacity: animation,
+        child: SlideTransition(
+          position: Tween<Offset>(
+            begin: const Offset(0, 0.12),
+            end: Offset.zero,
+          ).animate(animation),
+          child: child,
+        ),
+      );
 
   // ── Step block ───────────────────────────────────────────────────────────
 

@@ -25,6 +25,9 @@ import 'package:mostro/features/trades/providers/trades_providers.dart';
 import 'package:mostro/features/trades/screens/trade_detail_screen.dart';
 import 'package:mostro/features/trades/widgets/cancel_request_notice.dart';
 import 'package:mostro/features/trades/widgets/trade_chat_card.dart';
+import 'package:mostro/features/chat/models/chat_list_rules.dart';
+import 'package:mostro/features/chat/providers/chat_list_provider.dart';
+import 'package:mostro/features/chat/providers/chat_providers.dart';
 import 'package:mostro/features/trades/widgets/trade_completed_card.dart';
 import 'package:mostro/features/trades/widgets/trade_step_block.dart';
 import 'package:mostro/features/trades/widgets/trade_timeline.dart';
@@ -66,9 +69,12 @@ Future<ProviderContainer> _pumpTradeDetail(
   bool roleKnown = true,
   bool privacyMode = false,
   NotificationsNotifier? notifications,
+  ChatRowState? chatState,
 }) async {
   final container = createContainer(
     overrides: [
+      if (chatState != null)
+        chatRowStateProvider(orderId).overrideWithValue(chatState),
       if (notifications != null)
         notificationsProvider.overrideWith((_) => notifications),
       if (privacyMode)
@@ -2075,5 +2081,123 @@ void main() {
       // Let the button's and the snackbar's timers run out.
       await tester.pump(const Duration(seconds: 5));
     });
+  });
+
+  group('the chat card stays pinned above the scroll', () {
+    Finder inList(Type type) => find.descendant(
+      of: find.byType(ListView),
+      matching: find.byType(type),
+    );
+
+    testWidgets('scrolling to the bottom leaves it in place, tappable', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(360, 560);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+      await _pumpTradeDetail(
+        tester,
+        orderId: 'order-pinned',
+        isBuyer: true,
+        status: OrderStatus.active,
+      );
+      expect(inList(TradeChatCard), findsNothing);
+      final before = tester.getTopLeft(find.byType(TradeChatCard));
+
+      await tester.scrollUntilVisible(
+        find.text(_en.tradeIdLabel),
+        200,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.pumpAndSettle();
+
+      expect(tester.getTopLeft(find.byType(TradeChatCard)), before);
+      expect(find.byType(TradeChatCard).hitTestable(), findsOneWidget);
+    });
+
+    testWidgets('the lock note before the trade is active scrolls with the '
+        'content', (tester) async {
+      await _pumpTradeDetail(
+        tester,
+        orderId: 'order-locked',
+        isBuyer: true,
+        status: OrderStatus.waitingPayment,
+      );
+      expect(inList(TradeChatLockedLine), findsOneWidget);
+      expect(find.byType(TradeChatCard), findsNothing);
+    });
+
+    const room = ChatRoomState(
+      orderId: 'order-done',
+      peerPubkey: 'peer',
+      peerHandle: 'bright-fox-41',
+      peerIconIndex: 3,
+      peerColorHue: 120,
+      isSelling: false,
+    );
+
+    for (final (name, chatState, shown) in [
+      (
+        'keeps it during its hour',
+        const ChatRowState(group: ChatGroup.active, tone: ChatAvatarTone.waiting),
+        true,
+      ),
+      (
+        'drops it once the hour is over',
+        const ChatRowState(group: ChatGroup.closed, tone: ChatAvatarTone.closed),
+        false,
+      ),
+    ]) {
+      testWidgets('a completed trade $name (#642)', (tester) async {
+        final container = await _pumpTradeDetail(
+          tester,
+          orderId: 'order-done',
+          isBuyer: true,
+          status: OrderStatus.success,
+          chatState: chatState,
+        );
+        container.read(chatRoomsNotifierProvider.notifier).upsertRoom(room);
+        await _settle(tester);
+
+        expect(find.byType(TradeChatCard), shown ? findsOneWidget : findsNothing);
+        expect(inList(TradeChatCard), findsNothing);
+      });
+    }
+
+    // DS-A11Y-4: the pinned card leaves the rest reachable at 320 dp, 2x text,
+    // in German.
+    for (final status in [
+      OrderStatus.active,
+      OrderStatus.fiatSent,
+      OrderStatus.dispute,
+    ]) {
+      testWidgets('German, 320dp, 2x text: the content still scrolls under it '
+          '($status)', (tester) async {
+        tester.view.physicalSize = const Size(320, 760);
+        tester.view.devicePixelRatio = 1.0;
+        tester.platformDispatcher.textScaleFactorTestValue = 2.0;
+        addTearDown(tester.view.reset);
+        addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+
+        await _pumpTradeDetail(
+          tester,
+          orderId: 'order-pinned-de-$status',
+          // The buyer's active step header still overflows here (its chip,
+          // #712); the seller's does not, and the card is the same.
+          isBuyer: status != OrderStatus.active,
+          status: status,
+          locale: const Locale('de'),
+        );
+        expect(tester.takeException(), isNull);
+
+        await tester.scrollUntilVisible(
+          find.text(lookupAppLocalizations(const Locale('de')).tradeIdLabel),
+          200,
+          scrollable: find.byType(Scrollable).first,
+        );
+        expect(tester.takeException(), isNull);
+        expect(find.byType(TradeChatCard).hitTestable(), findsOneWidget);
+      });
+    }
   });
 }
