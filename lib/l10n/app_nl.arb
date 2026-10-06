@@ -808,6 +808,7 @@
   "takeOrderButton": "Order accepteren",
   "takeOrderTaking": "Accepteren…",
   "takeOrderUnavailable": "Niet meer beschikbaar",
+  "takeOrderFailed": "De order kon niet worden aangenomen. Probeer het opnieuw.",
   "takeOrderClosed": "Gesloten",
   "easterEggWhitepaper": "31 oktober 2008: negen pagina's, niemand om toestemming gevraagd. Fijne Halloween.",
   "easterEggGenesis": "The Times 03/Jan/2009 Chancellor on brink of second bailout for banks",

@@ -808,6 +808,7 @@
   "takeOrderButton": "Tomar orden",
   "takeOrderTaking": "Tomando…",
   "takeOrderUnavailable": "Ya no está disponible",
+  "takeOrderFailed": "No se pudo tomar la orden. Inténtalo de nuevo.",
   "takeOrderClosed": "Cerrada",
   "easterEggWhitepaper": "31 de octubre de 2008: nueve páginas, sin pedirle permiso a nadie. Feliz Halloween.",
   "easterEggGenesis": "The Times 03/Jan/2009 Chancellor on brink of second bailout for banks",

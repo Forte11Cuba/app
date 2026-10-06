@@ -3085,6 +3085,37 @@ pub(crate) async fn subscribe_daemon_messages(
     });
 }
 
+/// What a waiting caller receives for a daemon `CantDo` [reason]: prose for
+/// the reasons the screens still match as prose (#373 turns those into markers
+/// too), a bare marker for the rest.
+fn cant_do_message(reason: &str) -> String {
+    match reason {
+        "OutOfRangeSatsAmount" => "Order rejected: sats amount is out of the allowed range.".to_string(),
+        "OutOfRangeFiatAmount" => "Order rejected: fiat amount is out of the allowed range.".to_string(),
+        "InvalidAmount" => "Order rejected: invalid amount.".to_string(),
+        "InvalidInvoice" => "Order rejected: invalid Lightning invoice.".to_string(),
+        "IsNotYourOrder" => "Order rejected: this order does not belong to you.".to_string(),
+        "NotAllowedByStatus" => "Action rejected: not allowed in the current order status.".to_string(),
+        "OrderAlreadyCanceled" => "Order is already canceled.".to_string(),
+        // mostro-core 0.14.6: the node is draining (e.g. before a
+        // Lightning node migration) and refuses new orders and takes;
+        // actions on existing orders keep working. Marker only, no
+        // prose: Dart maps `MaintenanceMode` to a localized message.
+        "MaintenanceMode" => "MaintenanceMode".to_string(),
+        // The local trade-key counter is behind the daemon's (the seed
+        // traded elsewhere, or was imported without a restore). Marker
+        // only: create/take resync and retry once on it
+        // (mostro::trade_index), and Dart localizes it if that fails.
+        crate::mostro::trade_index::INVALID_TRADE_INDEX => {
+            crate::mostro::trade_index::INVALID_TRADE_INDEX.to_string()
+        }
+        // Any other reason: a stable marker, never prose naming the enum.
+        // Dart matches the reason by substring and falls back to the
+        // screen's own localized failure (#719).
+        other => format!("CantDo:{other}"),
+    }
+}
+
 /// Dispatch a Mostro `Message` recovered from a kind-14 NIP-44 reply.
 ///
 /// The caller recovers the `UnwrappedMessage` via
@@ -4407,28 +4438,7 @@ async fn dispatch_mostro_message(
                 Some(mostro_core::message::Payload::CantDo(None)) => "unknown".to_string(),
                 _ => "unknown".to_string(),
             };
-            let message = match reason.as_str() {
-                "OutOfRangeSatsAmount" => "Order rejected: sats amount is out of the allowed range.".to_string(),
-                "OutOfRangeFiatAmount" => "Order rejected: fiat amount is out of the allowed range.".to_string(),
-                "InvalidAmount" => "Order rejected: invalid amount.".to_string(),
-                "InvalidInvoice" => "Order rejected: invalid Lightning invoice.".to_string(),
-                "IsNotYourOrder" => "Order rejected: this order does not belong to you.".to_string(),
-                "NotAllowedByStatus" => "Action rejected: not allowed in the current order status.".to_string(),
-                "OrderAlreadyCanceled" => "Order is already canceled.".to_string(),
-                // mostro-core 0.14.6: the node is draining (e.g. before a
-                // Lightning node migration) and refuses new orders and takes;
-                // actions on existing orders keep working. Marker only, no
-                // prose: Dart maps `MaintenanceMode` to a localized message.
-                "MaintenanceMode" => "MaintenanceMode".to_string(),
-                // The local trade-key counter is behind the daemon's (the seed
-                // traded elsewhere, or was imported without a restore). Marker
-                // only: create/take resync and retry once on it
-                // (mostro::trade_index), and Dart localizes it if that fails.
-                crate::mostro::trade_index::INVALID_TRADE_INDEX => {
-                    crate::mostro::trade_index::INVALID_TRADE_INDEX.to_string()
-                }
-                other => format!("Order rejected by Mostro: {other}"),
-            };
+            let message = cant_do_message(&reason);
 
             // A refused escrow submission (phase C5) has its own record, for
             // the same reason: the seller's key may hold another request's.
@@ -12369,6 +12379,15 @@ mod tests {
         // A different action never matches, even with the right nonce.
         let other = MessageKind::new(None, Some(42), Some(7), Action::RestoreSession, None);
         assert!(!is_matching_last_trade_index_reply(&other, 42));
+    }
+
+    /// A reason without its own arm reaches the caller as a stable marker the
+    /// screens can localize, never as English prose naming the enum (#719).
+    #[test]
+    fn an_unmapped_cant_do_reason_reaches_the_caller_as_a_marker() {
+        let message = cant_do_message("InvalidOrderStatus");
+        assert_eq!(message, "CantDo:InvalidOrderStatus");
+        assert!(!message.contains("Order rejected"));
     }
 
     #[test]

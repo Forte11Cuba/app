@@ -3185,6 +3185,10 @@
   "@takeOrderUnavailable": {
     "description": "'Take order' once the order was taken by someone else or expired"
   },
+  "takeOrderFailed": "Could not take the order. Please try again.",
+  "@takeOrderFailed": {
+    "description": "Snackbar when a take fails for a reason the app has no specific message for"
+  },
   "takeOrderClosed": "Closed",
   "@takeOrderClosed": {
     "description": "Replaces the countdown in the app bar once the order is gone"
