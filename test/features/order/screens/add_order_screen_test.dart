@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mostro/core/app_theme.dart';
 import 'package:mostro/core/create_order_palette.dart';
+import 'package:mostro/core/mostro_defaults.dart';
 import 'package:mostro/features/about/models/mostro_instance.dart';
 import 'package:mostro/features/about/providers/mostro_node_provider.dart';
 import 'package:mostro/features/home/providers/home_order_providers.dart';
@@ -17,6 +18,7 @@ import 'package:mostro/features/order/screens/add_order_screen.dart';
 import 'package:mostro/features/order/widgets/currency_section.dart';
 import 'package:mostro/features/order/widgets/payment_method_section.dart';
 import 'package:mostro/features/order/widgets/price_section.dart';
+import 'package:mostro/features/settings/providers/mostro_nodes_provider.dart';
 import 'package:mostro/l10n/app_localizations.dart';
 import 'package:mostro/shared/utils/fiat_currencies.dart';
 import 'package:mostro/shared/widgets/mostro_modal.dart';
@@ -37,7 +39,8 @@ Future<ProviderContainer> _pump(
   String orderType = 'sell',
   Locale locale = const Locale('en'),
   MostroInstance node = _node,
-  Completer<MostroInstance?>? nodeArrives,
+  List<String> accepted = const [],
+  Map<String, Completer<List<String>>>? acceptedByNode,
   int? bondEstimate,
 }) async {
   tester.view.physicalSize = const Size(400, 1600);
@@ -45,8 +48,11 @@ Future<ProviderContainer> _pump(
   addTearDown(tester.view.reset);
   final container = createContainer(
     overrides: [
-      mostroNodeProvider.overrideWith(
-        (ref) => nodeArrives?.future ?? Future.value(node),
+      mostroNodeProvider.overrideWith((ref) async => node),
+      activeNodeCurrenciesProvider.overrideWith(
+        (ref) =>
+            acceptedByNode?[ref.watch(activeMostroPubkeyProvider)]!.future ??
+            Future.value(accepted),
       ),
       bondEstimateProvider.overrideWith((ref, sats) async => bondEstimate),
       exchangeRateProvider.overrideWith(
@@ -402,10 +408,7 @@ void main() {
     testWidgets('offers only the currencies the node accepts', (tester) async {
       await _pump(
         tester,
-        node: const MostroInstance(
-          pubKey: 'npub-test',
-          fiatCurrenciesAccepted: 'ars',
-        ),
+        accepted: const ['ARS'],
       );
       await openPicker(tester);
       expect(pickerCodes(tester), ['ARS']);
@@ -424,10 +427,7 @@ void main() {
     ) async {
       await _pump(
         tester,
-        node: const MostroInstance(
-          pubKey: 'npub-test',
-          fiatCurrenciesAccepted: 'CUP,ARS',
-        ),
+        accepted: const ['CUP', 'ARS'],
       );
       await openPicker(tester);
       expect(pickerCodes(tester), ['ARS', 'CUP']);
@@ -435,6 +435,26 @@ void main() {
         find.ancestor(of: find.text('CUP'), matching: find.byType(ListTile)),
       );
       expect(cup.subtitle, isNull);
+    });
+
+    testWidgets("a node switch drops the previous node's list", (
+      tester,
+    ) async {
+      final nodeA = Completer<List<String>>()..complete(const ['ARS']);
+      final nodeB = Completer<List<String>>();
+      final container = await _pump(
+        tester,
+        acceptedByNode: {defaultMostroPubkey: nodeA, 'node-b': nodeB},
+      );
+      expect(container.read(acceptedFiatCodesProvider), ['ARS']);
+
+      container.read(mostroPubkeyProvider.notifier).state = 'node-b';
+      await tester.pump();
+      expect(container.read(acceptedFiatCodesProvider), isNull);
+
+      nodeB.complete(const ['USD']);
+      await tester.pumpAndSettle();
+      expect(container.read(acceptedFiatCodesProvider), ['USD']);
     });
   });
 
@@ -444,10 +464,7 @@ void main() {
     ) async {
       final container = await _pump(
         tester,
-        node: const MostroInstance(
-          pubKey: 'npub-test',
-          fiatCurrenciesAccepted: 'ARS,EUR',
-        ),
+        accepted: const ['ARS', 'EUR'],
       );
       expect(container.read(selectedFiatCodeProvider), 'ARS');
     });
@@ -455,10 +472,7 @@ void main() {
     testWidgets('keeps the default when the node accepts it', (tester) async {
       final container = await _pump(
         tester,
-        node: const MostroInstance(
-          pubKey: 'npub-test',
-          fiatCurrenciesAccepted: 'ARS,USD',
-        ),
+        accepted: const ['ARS', 'USD'],
       );
       expect(container.read(selectedFiatCodeProvider), 'USD');
     });
@@ -466,16 +480,14 @@ void main() {
     testWidgets("moves off USD when the node's list arrives late", (
       tester,
     ) async {
-      final nodeArrives = Completer<MostroInstance?>();
-      final container = await _pump(tester, nodeArrives: nodeArrives);
+      final listArrives = Completer<List<String>>();
+      final container = await _pump(
+        tester,
+        acceptedByNode: {defaultMostroPubkey: listArrives},
+      );
       expect(container.read(selectedFiatCodeProvider), 'USD');
 
-      nodeArrives.complete(
-        const MostroInstance(
-          pubKey: 'npub-test',
-          fiatCurrenciesAccepted: 'ARS',
-        ),
-      );
+      listArrives.complete(const ['ARS']);
       await tester.pumpAndSettle();
 
       expect(container.read(selectedFiatCodeProvider), 'ARS');

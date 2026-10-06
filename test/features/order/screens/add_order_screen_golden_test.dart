@@ -37,6 +37,7 @@ Future<ProviderContainer> _pump(
   final container = createContainer(
     overrides: [
       mostroNodeProvider.overrideWith((ref) async => _node),
+      activeNodeCurrenciesProvider.overrideWith((ref) async => const []),
       exchangeRateProvider.overrideWith(
         (ref, code) async => switch (code) {
           'USD' => 100000.0,

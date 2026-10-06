@@ -5,23 +5,6 @@ import 'package:mostro/features/about/models/mostro_instance.dart'
 import 'package:mostro/features/order/models/create_order_rules.dart';
 
 void main() {
-  group('acceptedFiatCodes', () {
-    test('normalizes the tag as Rust does, in the node order', () {
-      expect(acceptedFiatCodes(' ars, ves ,BRL,ars,, eur'), [
-        'ARS',
-        'VES',
-        'BRL',
-        'EUR',
-      ]);
-    });
-
-    test('no event or an empty list sets no limit', () {
-      expect(acceptedFiatCodes(null), isNull);
-      expect(acceptedFiatCodes(''), isNull);
-      expect(acceptedFiatCodes(' , '), isNull);
-    });
-  });
-
   group('fiatForNode', () {
     test('keeps an accepted currency', () {
       expect(fiatForNode('USD', ['ARS', 'USD']), 'USD');
