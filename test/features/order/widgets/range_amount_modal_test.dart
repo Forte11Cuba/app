@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mostro/core/app_theme.dart';
 import 'package:mostro/features/order/widgets/range_amount_modal.dart';
 import 'package:mostro/l10n/app_localizations.dart';
+import 'package:mostro/shared/widgets/mostro_modal.dart';
 
 /// Opens the range dialog in [locale] and returns a reader for its result.
 Future<double? Function()> _open(
@@ -46,6 +47,25 @@ Future<double? Function()> _open(
 }
 
 void main() {
+  // Issue #730, DS-CMP-26: the dialog opens from "Take order" and answered
+  // "Submit". Its answer repeats the opener, in every language.
+  for (final locale in AppLocalizations.supportedLocales) {
+    testWidgets('answers with the take button\'s verb in $locale', (
+      tester,
+    ) async {
+      final l10n = lookupAppLocalizations(locale);
+      await _open(tester, locale: locale);
+
+      expect(
+        find.descendant(
+          of: find.byType(ModalFooter),
+          matching: find.text(l10n.takeOrderButton),
+        ),
+        findsOneWidget,
+      );
+    });
+  }
+
   // Issue #720: the dialog printed its bounds by hand (`2000 – 998000`)
   // right under a card that groups them (`2.000 – 998.000`).
   testWidgets("shows the bounds with the locale's grouping", (tester) async {
@@ -61,7 +81,7 @@ void main() {
     await tester.pump();
     expect(find.text('25.000'), findsOneWidget);
 
-    await tester.tap(find.text('Enviar'));
+    await tester.tap(find.text('Tomar orden'));
     await tester.pumpAndSettle();
     expect(result(), 25000);
   });
@@ -78,7 +98,7 @@ void main() {
     await tester.pump();
     expect(find.text('2.500'), findsOneWidget);
 
-    await tester.tap(find.text('Enviar'));
+    await tester.tap(find.text('Tomar orden'));
     await tester.pumpAndSettle();
     expect(result(), 2500);
   });
