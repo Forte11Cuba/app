@@ -4,7 +4,6 @@ import 'package:intl/intl.dart';
 import 'package:mostro/core/app_theme.dart';
 import 'package:mostro/core/automation/automation_ids.dart';
 import 'package:mostro/core/create_order_palette.dart';
-import 'package:mostro/features/order/models/create_order_rules.dart';
 import 'package:mostro/features/order/widgets/underline_amount_field.dart';
 import 'package:mostro/l10n/app_localizations.dart';
 import 'package:mostro/shared/widgets/mostro_modal.dart';
@@ -52,15 +51,12 @@ class _RangeAmountDialogState extends State<_RangeAmountDialog> {
 
   NumberFormat get _fiat => NumberFormat('#,##0.##', _locale);
 
-  /// The typed amount without the grouping the field adds, or null.
+  /// The typed amount without the grouping the field adds, or null while the
+  /// field is empty. Whole units only: the take sends it as an integer. Zero
+  /// parses, so it gets the range error like any other value under [min].
   double? get _parsed {
-    final symbols = _fiat.symbols;
-    final canonical = canonicalAmount(
-      _controller.text,
-      groupSeparator: symbols.GROUP_SEP,
-      decimalSeparator: symbols.DECIMAL_SEP,
-    );
-    return canonical == null ? null : double.parse(canonical);
+    final digits = _controller.text.replaceAll(_fiat.symbols.GROUP_SEP, '');
+    return int.tryParse(digits)?.toDouble();
   }
 
   bool get _isValid {
@@ -108,10 +104,12 @@ class _RangeAmountDialogState extends State<_RangeAmountDialog> {
             autofocus: true,
             hintText: '0',
             hasError: error != null,
+            keyboardType: TextInputType.number,
             inputFormatters: [
               ThousandsInputFormatter(
                 groupSeparator: symbols.GROUP_SEP,
                 decimalSeparator: symbols.DECIMAL_SEP,
+                allowDecimals: false,
               ),
             ],
             trailing: Text(
