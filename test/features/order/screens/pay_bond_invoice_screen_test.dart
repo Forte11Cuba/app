@@ -174,9 +174,8 @@ void main() {
     expect(find.text('Read the documentation'), findsOneWidget);
     expect(
       find.textContaining(
-        'It is a hold invoice: your wallet reserves the sats without sending '
-        'them; when the trade completes, the reservation is cancelled on its '
-        'own.',
+        'Your wallet holds the sats without sending them; when the trade '
+        'completes, they are released on their own.',
         findRichText: true,
       ),
       findsOneWidget,

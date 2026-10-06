@@ -1674,9 +1674,9 @@ class AppLocalizationsDe extends AppLocalizations {
     String _temp0 = intl.Intl.pluralLogic(
       count,
       locale: localeName,
-      other: '$count gewählt',
-      one: '1 gewählt',
-      zero: 'keine gewählt',
+      other: '$count ausgewählt',
+      one: '1 ausgewählt',
+      zero: 'keine ausgewählt',
     );
     return '$_temp0';
   }
@@ -3058,9 +3058,8 @@ class AppLocalizationsDe extends AppLocalizations {
       'Mostro verwahrt keine Gelder und kann daher niemanden bestrafen, der einen Handel abbricht; das übernimmt die Einlage, und sie schützt alle Nutzer vor Betrügern.';
 
   @override
-  String bondWhyHold(String hold) {
-    return 'Es ist eine $hold-Rechnung: deine Wallet reserviert die Sats, ohne sie zu senden; beim Abschluss wird die Reservierung von selbst aufgehoben.';
-  }
+  String get bondWhyHold =>
+      'Deine Wallet hält die Sats zurück, ohne sie zu senden; beim Abschluss des Handels werden sie von selbst freigegeben.';
 
   @override
   String get bondWhyDispute =>
@@ -3472,9 +3471,8 @@ class AppLocalizationsDe extends AppLocalizations {
   String get invoiceOpenWallet => 'In meiner Wallet öffnen';
 
   @override
-  String invoiceHoldNote(String hold) {
-    return 'Das ist eine $hold-Rechnung: Die Sats werden zurückgehalten und verlassen deine Wallet erst, wenn du die Zahlung des Käufers bestätigst.';
-  }
+  String get invoiceHoldNote =>
+      'Die Sats werden zurückgehalten: Sie verlassen deine Wallet erst, wenn du die Zahlung des Käufers bestätigst.';
 
   @override
   String invoiceQrSemantics(String invoice) {
@@ -3689,7 +3687,7 @@ class AppLocalizationsDe extends AppLocalizations {
       locale: localeName,
       other: '$count Methoden ausgewählt',
       one: '1 Methode ausgewählt',
-      zero: 'Wähle mindestens eine Methode',
+      zero: 'Wähle mindestens eine Methode aus',
     );
     return '$_temp0';
   }

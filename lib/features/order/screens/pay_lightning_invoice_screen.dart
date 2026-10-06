@@ -446,16 +446,7 @@ class _PayLightningInvoiceScreenState
                       ),
                     ],
                     const SizedBox(height: 12),
-                    ExplanatoryNote.rich(
-                      spans: figureSpans(
-                        l10n.invoiceHoldNote('hold'),
-                        'hold',
-                        TextStyle(
-                          fontWeight: FontWeight.w700,
-                          color: OrderBookPalette.of(context).textStrong,
-                        ),
-                      ),
-                    ),
+                    ExplanatoryNote(text: l10n.invoiceHoldNote),
                     const SizedBox(height: 12),
                     OrderDataCard(
                       rows: [
