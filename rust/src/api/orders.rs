@@ -12376,6 +12376,15 @@ mod tests {
         assert!(!is_matching_last_trade_index_reply(&other, 42));
     }
 
+    /// A reason without its own arm reaches the caller as a stable marker the
+    /// screens can localize, never as English prose naming the enum (#719).
+    #[test]
+    fn an_unmapped_cant_do_reason_reaches_the_caller_as_a_marker() {
+        let message = cant_do_message("InvalidOrderStatus");
+        assert_eq!(message, "CantDo:InvalidOrderStatus");
+        assert!(!message.contains("Order rejected"));
+    }
+
     #[test]
     fn a_cant_do_refusal_matches_only_our_nonce() {
         use mostro_core::message::{Action, MessageKind};
