@@ -17,12 +17,14 @@ import 'package:mostro/features/order/providers/bond_providers.dart';
 import 'package:mostro/features/order/providers/exchange_rate_provider.dart';
 import 'package:mostro/features/order/providers/trade_state_provider.dart';
 import 'package:mostro/features/order/screens/take_order_screen.dart';
+import 'package:mostro/features/order/widgets/order_detail_cards.dart';
 import 'package:mostro/l10n/app_localizations.dart';
 import 'package:mostro/l10n/app_localizations_en.dart';
 import 'package:mostro/src/rust/api/types.dart';
 import 'package:mostro/shared/utils/fiat_currencies.dart';
 
 import '../../../support/fake_orders.dart';
+import '../../../support/explanatory_note_finders.dart';
 import '../../../support/fake_trades.dart';
 import '../../../support/provider_harness.dart';
 
@@ -186,6 +188,20 @@ void main() {
         );
         expect(find.text('Take order'), findsOneWidget);
         expect(find.text('Close'), findsNothing);
+      });
+    });
+
+    testWidgets('explains the escrow in a body note led by the lock', (
+      tester,
+    ) async {
+      await withClock(Clock.fixed(kFakeNow), () async {
+        await _pump(tester, order: _order());
+        expectExplanatoryNote(
+          tester,
+          find.textContaining('the seller locks the sats'),
+          notInside: find.byType(OrderDetailActionBar),
+        );
+        expect(find.byIcon(Icons.shield_outlined), findsNothing);
       });
     });
 
@@ -564,6 +580,28 @@ void main() {
           findsOneWidget,
         );
         expect(find.text('Take order'), findsOneWidget);
+      });
+    });
+
+    testWidgets('puts the deposit in the same body note as the escrow', (
+      tester,
+    ) async {
+      await withClock(Clock.fixed(kFakeNow), () async {
+        await _pump(
+          tester,
+          order: _order(),
+          node: const instance.MostroInstance(
+            pubKey: 'node',
+            bondPolicy: instance.BondPolicy.enabled,
+            bondApplyTo: instance.BondApplyTo.take,
+          ),
+          bondEstimate: 1500,
+        );
+        expectExplanatoryNote(
+          tester,
+          find.textContaining(en.takeOrderBondNoticeEstimate('1,500')),
+          notInside: find.byType(OrderDetailActionBar),
+        );
       });
     });
 
