@@ -206,11 +206,12 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen>
   }
 
   /// The wire-level status a screen status stands for, where a cancel
-  /// request can be open: only `active` and `fiatSent` map back one-to-one;
-  /// everything else is a status no request is open in.
+  /// request can be open: only `active`, `fiatSent` and `disputed` map back
+  /// one-to-one; everything else is a status no request is open in.
   static OrderStatus _orderStatus(TradeStatus status) => switch (status) {
     TradeStatus.active => OrderStatus.active,
     TradeStatus.fiatSent => OrderStatus.fiatSent,
+    TradeStatus.disputed => OrderStatus.dispute,
     _ => OrderStatus.pending,
   };
 
