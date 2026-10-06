@@ -181,10 +181,10 @@ class OrderDataRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final book = OrderBookPalette.of(context);
     final row = Padding(
-      padding: const EdgeInsets.symmetric(vertical: 13),
+      padding: const EdgeInsets.symmetric(vertical: 14),
       child: Row(
         children: [
-          Icon(icon, size: 15, color: book.textTertiary),
+          Icon(icon, size: 16, color: book.textTertiary),
           const SizedBox(width: 10),
           Text(
             label,
