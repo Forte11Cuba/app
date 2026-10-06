@@ -3342,9 +3342,6 @@ class AppLocalizationsEs extends AppLocalizations {
   String get bondRequestFailed => 'El nodo no reenvió la factura del depósito';
 
   @override
-  String get invoiceOrderIdCopied => 'ID de la orden copiado';
-
-  @override
   String get invoiceYouReceiveLabel => 'Vas a recibir';
 
   @override

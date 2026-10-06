@@ -294,7 +294,8 @@ class OrderPaymentMethodsRow extends StatelessWidget {
 
 // ── Order id row ──────────────────────────────────────────────────────────────
 
-/// `09150348…99b5` with a copy icon; the whole row copies the full id.
+/// `09150348…99b5` with a copy icon; the whole row copies the full id. The
+/// reference of DS-CMP-22.
 class OrderIdRow extends StatelessWidget {
   const OrderIdRow({super.key, required this.orderId});
 
@@ -303,35 +304,60 @@ class OrderIdRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final book = OrderBookPalette.of(context);
-    final l10n = AppLocalizations.of(context);
     return OrderDataRow(
       icon: Icons.link_rounded,
-      label: l10n.orderDetailIdLabel,
-      onTap: () => _copy(context, l10n),
-      value: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
+      label: AppLocalizations.of(context).orderDetailIdLabel,
+      onTap: () => copyOrderId(context, orderId),
+      value: OrderIdValue(orderId: orderId, color: book.textMuted),
+    );
+  }
+}
+
+/// The value side of an id row (DS-CMP-22): the short id in figures and the
+/// copy icon. The readout under [automationId] carries the full id.
+class OrderIdValue extends StatelessWidget {
+  const OrderIdValue({
+    super.key,
+    required this.orderId,
+    required this.color,
+    this.automationId = AutomationIds.orderId,
+  });
+
+  final String orderId;
+  final Color color;
+  final String automationId;
+
+  @override
+  Widget build(BuildContext context) {
+    final book = OrderBookPalette.of(context);
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Flexible(
+          child: Text(
             shortOrderId(orderId),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
             style: TextStyle(
               fontFamily: AppFonts.figures,
               fontSize: 12,
               fontWeight: FontWeight.w500,
-              color: book.textMuted,
+              color: color,
             ),
-          ).withAutomationId(AutomationIds.orderId, label: orderId),
-          const SizedBox(width: 8),
-          Icon(Icons.copy_rounded, size: 15, color: book.limeIcon),
-        ],
-      ),
+          ).withAutomationId(automationId, label: orderId),
+        ),
+        const SizedBox(width: 8),
+        Icon(Icons.copy_rounded, size: 16, color: book.limeIcon),
+      ],
     );
   }
+}
 
-  void _copy(BuildContext context, AppLocalizations l10n) {
-    Clipboard.setData(ClipboardData(text: orderId));
-    HapticFeedback.selectionClick();
-    showOrderDetailSnackBar(context, l10n.orderIdCopied);
-  }
+/// Copies the full [orderId] and confirms it (DS-CMP-22, DS-CMP-15).
+void copyOrderId(BuildContext context, String orderId) {
+  Clipboard.setData(ClipboardData(text: orderId));
+  HapticFeedback.selectionClick();
+  showOrderDetailSnackBar(context, AppLocalizations.of(context).orderIdCopied);
 }
 
 /// The screens' snackbar: surface fill, radius 12, two seconds.

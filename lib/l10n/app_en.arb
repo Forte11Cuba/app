@@ -3899,8 +3899,6 @@
   "@bondRequestAgain": {"description": "14 action: same-take re-request of the bond bolt11"},
   "bondRequestFailed": "The node did not resend the deposit invoice",
   "@bondRequestFailed": {"description": "Snackbar when the re-request fails"},
-  "invoiceOrderIdCopied": "Order ID copied",
-  "@invoiceOrderIdCopied": {"description": "Snackbar after tapping the order id in the invoice app bar"},
   "invoiceYouReceiveLabel": "You will receive",
   "@invoiceYouReceiveLabel": {"description": "13a hero card label above the amount (rendered uppercase)"},
   "invoiceToPayLabel": "To pay",

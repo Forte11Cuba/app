@@ -160,23 +160,20 @@ class _BondPayoutInvoiceScreenState
     final canPop = Navigator.of(context).canPop();
     final appBar = InvoiceAppBar(
       title: l10n.bondClaimTitle,
-      orderId: widget.orderId,
-      orderIdAutomationId: AutomationIds.bondClaimOrderId,
-      copiedMessage: l10n.invoiceOrderIdCopied,
       onBack: canPop ? () => Navigator.of(context).maybePop() : null,
     );
     if (claimAsync.isLoading && claim == null) {
       return Scaffold(
         backgroundColor: book.bg,
         appBar: appBar,
-        body: const Center(child: CircularProgressIndicator()),
+        body: _withId(const Center(child: CircularProgressIndicator())),
       );
     }
     if (claim == null) {
       return Scaffold(
         backgroundColor: book.bg,
         appBar: appBar,
-        body: Center(child: Text(l10n.bondClaimMissing)),
+        body: _withId(Center(child: Text(l10n.bondClaimMissing))),
       );
     }
     final now = clock.now().millisecondsSinceEpoch ~/ 1000;
@@ -233,11 +230,13 @@ class _BondPayoutInvoiceScreenState
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const SizedBox(width: 1, height: 1).withAutomationId(
-            AutomationIds.bondClaimStatus,
-            label: phase.name,
-          ),
-          Expanded(child: body),
+          const SizedBox(
+            width: 1,
+            height: 1,
+          ).withAutomationId(AutomationIds.bondClaimStatus, label: phase.name),
+          // The claim screen has no counterpart card: the order's ID card
+          // heads every phase (DS-CMP-22).
+          Expanded(child: _withId(body)),
         ],
       ),
     );
@@ -261,6 +260,13 @@ class _BondPayoutInvoiceScreenState
       locale,
     ).add_Hm().format(DateTime.fromMillisecondsSinceEpoch(unixSecs * 1000));
   }
+
+  /// [body] under the order's ID card (DS-CMP-22).
+  Widget _withId(Widget body) => InvoiceOrderIdBody(
+    orderId: widget.orderId,
+    automationId: AutomationIds.bondClaimOrderId,
+    child: body,
+  );
 
   Widget _hero(AppLocalizations l10n, BondClaim claim, int deadlineAt) {
     final sats = claim.amountSats.toInt();

@@ -3317,9 +3317,6 @@ class AppLocalizationsEn extends AppLocalizations {
   String get bondRequestFailed => 'The node did not resend the deposit invoice';
 
   @override
-  String get invoiceOrderIdCopied => 'Order ID copied';
-
-  @override
   String get invoiceYouReceiveLabel => 'You will receive';
 
   @override

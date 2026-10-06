@@ -3350,9 +3350,6 @@ class AppLocalizationsFr extends AppLocalizations {
       'Le nœud n\'a pas renvoyé la facture du dépôt';
 
   @override
-  String get invoiceOrderIdCopied => 'ID de l\'ordre copié';
-
-  @override
   String get invoiceYouReceiveLabel => 'Tu vas recevoir';
 
   @override

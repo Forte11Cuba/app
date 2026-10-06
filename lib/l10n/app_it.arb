@@ -1049,7 +1049,6 @@
   "bondInvoiceMissing": "Questo dispositivo non ha una copia della fattura del deposito. Richiedila al nodo per continuare a prendere l'ordine.",
   "bondRequestAgain": "Richiedi di nuovo la fattura",
   "bondRequestFailed": "Il nodo non ha reinviato la fattura del deposito",
-  "invoiceOrderIdCopied": "ID dell'ordine copiato",
   "invoiceYouReceiveLabel": "Riceverai",
   "invoiceToPayLabel": "Da pagare",
   "invoiceReceiveSemantics": "{sats} satoshi da ricevere",

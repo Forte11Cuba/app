@@ -15,13 +15,6 @@ import 'package:mostro/src/rust/api/types.dart'
         InvoiceVerdict_Valid,
         InvoiceVerdict_Rejected;
 
-// ── Order id ──────────────────────────────────────────────────────────────────
-
-/// `#09150348`: the app bar shows the first eight characters of the UUID;
-/// tapping it copies the whole id.
-String invoiceOrderTag(String orderId) =>
-    '#${orderId.length <= 8 ? orderId : orderId.substring(0, 8)}';
-
 // ── Amounts ───────────────────────────────────────────────────────────────────
 
 /// Whole sats grouped the way the locale groups every other amount in the
