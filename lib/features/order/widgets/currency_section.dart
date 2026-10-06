@@ -5,12 +5,11 @@ import 'package:mostro/core/app_theme.dart';
 import 'package:mostro/core/automation/automation_id.dart';
 import 'package:mostro/core/automation/automation_ids.dart';
 import 'package:mostro/core/create_order_palette.dart';
-import 'package:mostro/features/about/providers/mostro_node_provider.dart';
 import 'package:mostro/features/order/models/create_order_rules.dart';
+import 'package:mostro/features/settings/providers/node_stats_provider.dart';
 import 'package:mostro/l10n/app_localizations.dart';
 import 'package:mostro/shared/utils/fiat_currencies.dart';
 import 'package:mostro/shared/widgets/mostro_modal.dart';
-import 'package:mostro/src/rust/api/node_stats.dart' as node_stats_api;
 
 /// The picker's boxed search field (DS-CMP-11).
 const _kSearchFieldRadius = 14.0;
@@ -30,19 +29,8 @@ final selectedFiatCurrencyProvider = Provider<FiatCurrency?>((ref) {
   return null;
 });
 
-/// The active node's `fiat_currencies_accepted`, as Rust parsed it from the
-/// node's cached kind 38385 event ([node_stats_api.cachedMostroNodeStats]):
-/// a local read, warmed at startup, with no relay round trip. Empty for a
-/// node never seen, or one that sets no limit.
-final activeNodeCurrenciesProvider = FutureProvider.autoDispose<List<String>>((
-  ref,
-) async {
-  final pubkey = ref.watch(activeMostroPubkeyProvider);
-  final rows = await node_stats_api.cachedMostroNodeStats(pubkeys: [pubkey]);
-  return rows.isEmpty ? const [] : rows.first.acceptedCurrencies;
-});
-
-/// The fiat codes the active node accepts, or null when it sets no limit
+/// The fiat codes the active node accepts ([activeNodeCurrenciesProvider]),
+/// or null when it sets no limit
 /// (an empty list, which mostrod reads as "any currency"). Also null while
 /// the cache is read, for a node never seen, or when the read fails: the
 /// form never waits on it, and the node still refuses a currency it does not

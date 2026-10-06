@@ -11,6 +11,7 @@ import 'package:mostro/features/order/providers/exchange_rate_provider.dart';
 import 'package:mostro/features/order/providers/payment_methods_provider.dart';
 import 'package:mostro/features/order/screens/add_order_screen.dart';
 import 'package:mostro/features/order/widgets/currency_section.dart';
+import 'package:mostro/features/settings/providers/node_stats_provider.dart';
 import 'package:mostro/features/order/widgets/payment_method_section.dart';
 import 'package:mostro/features/order/widgets/price_section.dart';
 import 'package:mostro/l10n/app_localizations.dart';

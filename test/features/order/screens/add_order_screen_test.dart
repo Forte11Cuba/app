@@ -16,6 +16,7 @@ import 'package:mostro/features/order/providers/order_side_provider.dart';
 import 'package:mostro/features/order/providers/payment_methods_provider.dart';
 import 'package:mostro/features/order/screens/add_order_screen.dart';
 import 'package:mostro/features/order/widgets/currency_section.dart';
+import 'package:mostro/features/settings/providers/node_stats_provider.dart';
 import 'package:mostro/features/order/widgets/payment_method_section.dart';
 import 'package:mostro/features/order/widgets/price_section.dart';
 import 'package:mostro/features/settings/providers/mostro_nodes_provider.dart';
@@ -42,6 +43,7 @@ Future<ProviderContainer> _pump(
   MostroInstance node = _node,
   List<String> accepted = const [],
   Map<String, Completer<List<String>>>? acceptedByNode,
+  List<String> Function()? cachedList,
   int? bondEstimate,
 }) async {
   tester.view.physicalSize = const Size(400, 1600);
@@ -53,7 +55,7 @@ Future<ProviderContainer> _pump(
       activeNodeCurrenciesProvider.overrideWith(
         (ref) =>
             acceptedByNode?[ref.watch(activeMostroPubkeyProvider)]!.future ??
-            Future.value(accepted),
+            Future.value(cachedList?.call() ?? accepted),
       ),
       bondEstimateProvider.overrideWith((ref, sats) async => bondEstimate),
       exchangeRateProvider.overrideWith(
@@ -436,6 +438,25 @@ void main() {
         find.ancestor(of: find.text('CUP'), matching: find.byType(ListTile)),
       );
       expect(cup.subtitle, isNull);
+    });
+
+    testWidgets('rereads the list once the cache is written', (tester) async {
+      var cached = const <String>[];
+      final container = await _pump(tester, cachedList: () => cached);
+      await openPicker(tester);
+      expect(pickerCodes(tester), ['USD', 'ARS']);
+      await tester.tapAt(Offset.zero);
+      await tester.pumpAndSettle();
+
+      // What the startup warm-up and the node selector's fetch do once
+      // they have written the node's kind 38385 event.
+      cached = const ['ARS'];
+      container.invalidate(activeNodeCurrenciesProvider);
+      await tester.pumpAndSettle();
+
+      expect(container.read(selectedFiatCodeProvider), 'ARS');
+      await openPicker(tester);
+      expect(pickerCodes(tester), ['ARS']);
     });
 
     testWidgets("a node switch drops the previous node's list", (
