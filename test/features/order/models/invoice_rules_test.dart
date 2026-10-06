@@ -14,15 +14,32 @@ void main() {
     });
   });
 
+  // Issue #720: the invoice screens grouped sats by hand (none up to five
+  // digits, a thin space above) while every other screen used the locale's
+  // separator, so `2439 sats` sat next to `≈ 1.449 sats`.
   group('formatInvoiceSats', () {
-    test('has no separator up to five digits', () {
-      expect(formatInvoiceSats(250), '250');
-      expect(formatInvoiceSats(99999), '99999');
+    test("groups thousands with the locale's separator", () {
+      expect(formatInvoiceSats(2439, 'es'), '2.439');
+      expect(formatInvoiceSats(2439, 'en'), '2,439');
+      expect(formatInvoiceSats(1234567, 'es'), '1.234.567');
+      expect(formatInvoiceSats(300000, 'en'), '300,000');
     });
 
-    test('groups by a thin space from six digits', () {
-      expect(formatInvoiceSats(300000), '300 000');
-      expect(formatInvoiceSats(1234567), '1 234 567');
+    test('leaves three digits or fewer alone', () {
+      expect(formatInvoiceSats(250, 'es'), '250');
+      expect(formatInvoiceSats(0, 'en'), '0');
+    });
+  });
+
+  group('formatInvoiceMsat', () {
+    test('shows whole sats like formatInvoiceSats', () {
+      expect(formatInvoiceMsat(2439000, 'es'), '2.439');
+    });
+
+    test("keeps a sub-sat remainder behind the locale's decimal separator", () {
+      expect(formatInvoiceMsat(2439500, 'es'), '2.439,5');
+      expect(formatInvoiceMsat(2439500, 'en'), '2,439.5');
+      expect(formatInvoiceMsat(250001, 'en'), '250.001');
     });
   });
 
