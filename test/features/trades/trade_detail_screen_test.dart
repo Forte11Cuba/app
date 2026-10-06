@@ -884,6 +884,28 @@ void main() {
       expect(find.text(_en.tradeHeadlinePayoutPending), findsNothing);
     });
 
+    // DS-CMP-20: skipping the rating undoes nothing, so it is a neutral
+    // link, not an outlined button as heavy as sending the rating.
+    testWidgets('skipping the rating is a neutral link', (tester) async {
+      await _pumpTradeDetail(
+        tester,
+        orderId: 'order-seller-skips',
+        isBuyer: false,
+        status: OrderStatus.settledHoldInvoice,
+        ratingRoute: true,
+      );
+      expect(
+        find.widgetWithText(OutlinedButton, _en.closeRatingButton),
+        findsNothing,
+      );
+      final link = find.widgetWithText(TextButton, _en.closeRatingButton);
+      expect(link, findsOneWidget);
+      final label = tester.widget<RichText>(
+        find.descendant(of: link, matching: find.byType(RichText)),
+      );
+      expect(label.text.style?.color, OrderBookPalette.dark.textSecondary);
+    });
+
     testWidgets('who already rated is not offered the form again', (
       tester,
     ) async {

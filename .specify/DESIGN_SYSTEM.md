@@ -226,11 +226,12 @@ Reuse before building (principle 4). These are the parts a new screen is assembl
 | ID | Rule | Check |
 |---|---|---|
 | DS-CMP-3 | **MUST.** A screen state has at most **one** primary call to action: filled lime, `onLime` ink, radius 16, 15/w600, vertical padding 14. When the user can only wait, it has none (`TradeActionBar`). Reuse `OrderPrimaryButton`, `TradeActionBar` or `InvoicePrimaryButton`. | review |
-| DS-CMP-4 | **MUST.** Secondary actions are outlined (`border` token, `textBody` ink) with the same radius as their primary. Cancel and dispute are never two red buttons of the same weight. A dismissal ("Close", "Not now") is a text link. | review |
-| DS-CMP-5 | **MUST.** A filled red button is used only for the answer to an irreversible question inside a modal (DS-CMP-2). On a page, danger is an outlined or link action in `danger` ink. | review |
+| DS-CMP-4 | **MUST.** Secondary actions are outlined (`border` token, `textBody` ink) with the same radius as their primary. Cancel and dispute are never two red buttons of the same weight. A way out (a dismissal, a cancel) is placed and weighted as DS-CMP-20 says. | review |
+| DS-CMP-5 | **MUST.** A filled red button is used only for the answer to an irreversible question inside a modal (DS-CMP-2). On a page, danger is an outlined or link action in `danger` ink, chosen as DS-CMP-20 says. | review |
 | DS-CMP-6 | **MUST.** Every tappable target is at least **48 × 48** dp. A small glyph is padded out to it, as `_OrderBookAppBar` does with `_target = 48`. | review |
 | DS-CMP-7 | **MUST.** An icon-only button has a `tooltip` or a semantic label. | review |
 | DS-CMP-17 | **MUST.** A `FilledButton`, `OutlinedButton` or `ElevatedButton` always passes `style:` (radius and palette colors as DS-CMP-3 and DS-CMP-4 say), or comes from a shared component that does (`OrderPrimaryButton`, `ModalAction`). Without one it is the theme's stadium in v1 colors. A `TextButton` used as a link colors its label from the palette, or is a `ModalLink`. | auto |
+| DS-CMP-20 | **MUST.** A screen's way out is weighted by what it undoes. **Leaving without consequence** (discarding a form, closing a finished screen, "Not now", skipping) is a text link in `textSecondary` under the screen's actions (`InvoiceCancelLink` with `danger: false`), or the back arrow alone. It is never an outlined button beside the primary, which would give leaving the weight of acting. **Cancelling something that exists** (a published order, a trade, a bond window) is in `danger` ink and always asks first, through a `MostroDialog` whose answer is `ModalTone.destructive` (DS-CMP-2). It is an outlined button when it shares the action bar with the primary (`TradeActionBar`'s secondary, `_CancelButton` on `/my_order`), and a link when it sits under the screen's actions (`InvoiceCancelLink` with `danger: true`). | review |
 
 ### 6.3 Cards, rows and chips
 

@@ -134,8 +134,12 @@ My Trades row carries the same verb and files the trade under "your turn".
 §6.2), the screen offers `order.payBond` (`Pay deposit`), which opens
 `/pay_bond/:orderId`, and no `trade.cancel`: the daemon refuses a cancel in
 this window. On that screen `bond.cancel` reads `Don't publish the order` and
-drops the order locally (nothing was published, nothing charged); a taker's
-reads `Don't take the order` and is a daemon cancel. Once the deposit is
+sends the daemon a cancel that waits for its answer (`docs/ANTI_ABUSE_BOND.md`
+§6.2): the order closes unpublished, or a deposit that locked first leaves it
+published (a snackbar says so), or an older node refuses and a dialog offers
+`bond.remove_from_device`; a taker's reads `Don't take the order` and is a
+daemon cancel too. Either opens a
+confirmation first (DS-CMP-20), whose affirmative is `bond.cancel.confirm`. Once the deposit is
 paid the daemon publishes the order and `/my_order` reads `pending`.
 
 **A slashed bond is explained on tap.** Tapping a bond-slashed notification opens a

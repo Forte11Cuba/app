@@ -3123,6 +3123,20 @@ class AppLocalizationsNl extends AppLocalizations {
   String get bondRemoveFromDevice => 'Verwijderen van dit apparaat';
 
   @override
+  String get bondLeaveMakerTitle => 'Deze order niet publiceren?';
+
+  @override
+  String get bondLeaveMakerBody =>
+      'De order wordt niet gepubliceerd en de borgfactuur wordt geannuleerd.';
+
+  @override
+  String get bondLeaveTakerTitle => 'Deze order niet accepteren?';
+
+  @override
+  String get bondLeaveTakerBody =>
+      'De order blijft voor anderen in het orderboek en de borgfactuur wordt geannuleerd.';
+
+  @override
   String get bondKeepWaiting => 'Blijven wachten';
 
   @override

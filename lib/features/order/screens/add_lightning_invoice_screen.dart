@@ -970,7 +970,8 @@ class _AddLightningInvoiceScreenState
         const SizedBox(height: 4),
         InvoiceCancelLink(
           label: l10n.invoiceCancelTrade,
-          danger: false,
+          // It cancels the trade, not just the screen (DS-CMP-20).
+          danger: true,
           onPressed: (_submitting || _canceling) ? null : _cancelOrder,
         ).withAutomationId(AutomationIds.invoiceCancel),
       ],
