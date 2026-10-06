@@ -3085,7 +3085,9 @@ pub(crate) async fn subscribe_daemon_messages(
     });
 }
 
-/// What a waiting caller receives for a daemon `CantDo` [reason].
+/// What a waiting caller receives for a daemon `CantDo` [reason]: prose for
+/// the reasons the screens still match as prose (#373 turns those into markers
+/// too), a bare marker for the rest.
 fn cant_do_message(reason: &str) -> String {
     match reason {
         "OutOfRangeSatsAmount" => "Order rejected: sats amount is out of the allowed range.".to_string(),
@@ -3107,7 +3109,10 @@ fn cant_do_message(reason: &str) -> String {
         crate::mostro::trade_index::INVALID_TRADE_INDEX => {
             crate::mostro::trade_index::INVALID_TRADE_INDEX.to_string()
         }
-        other => format!("Order rejected by Mostro: {other}"),
+        // Any other reason: a stable marker, never prose naming the enum.
+        // Dart matches the reason by substring and falls back to the
+        // screen's own localized failure (#719).
+        other => format!("CantDo:{other}"),
     }
 }
 

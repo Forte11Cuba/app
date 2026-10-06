@@ -2465,6 +2465,10 @@ class AppLocalizationsDe extends AppLocalizations {
   String get takeOrderUnavailable => 'Nicht mehr verfügbar';
 
   @override
+  String get takeOrderFailed =>
+      'Die Bestellung konnte nicht angenommen werden. Bitte versuche es erneut.';
+
+  @override
   String get takeOrderClosed => 'Geschlossen';
 
   @override

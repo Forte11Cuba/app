@@ -294,9 +294,21 @@ class _TakeOrderScreenState extends ConsumerState<TakeOrderScreen> {
       showOrderDetailSnackBar(context, l10n.orderAlreadyTaken);
       return;
     }
+    if (msg.contains('InvalidOrderStatus')) {
+      // The daemon says the order is no longer pending (taken, canceled or
+      // expired before the book caught up): it cannot be taken again.
+      setState(() => _cta = TakeOrderCta.unavailable);
+      showOrderDetailSnackBar(context, l10n.orderNoLongerActive);
+      return;
+    }
     // Every shared daemon marker (timeout, storage, node capability /
-    // protocol) maps centrally.
-    final display = localizedDaemonError(l10n, msg, fallback: msg);
+    // protocol) maps centrally. Anything else gets the localized generic
+    // failure, never the raw error text (#719).
+    final display = localizedDaemonError(
+      l10n,
+      msg,
+      fallback: l10n.takeOrderFailed,
+    );
     showOrderDetailSnackBar(context, display);
   }
 

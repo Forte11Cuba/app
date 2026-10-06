@@ -2452,6 +2452,10 @@ class AppLocalizationsNl extends AppLocalizations {
   String get takeOrderUnavailable => 'Niet meer beschikbaar';
 
   @override
+  String get takeOrderFailed =>
+      'De order kon niet worden aangenomen. Probeer het opnieuw.';
+
+  @override
   String get takeOrderClosed => 'Gesloten';
 
   @override
