@@ -346,7 +346,8 @@ Consequences the client must design around:
 ### 3.5 Server changes web needs
 
 Both are small, and both are prerequisites this client cannot work around. Proposed
-upstream as [mostro-push-server#44](https://github.com/MostroP2P/mostro-push-server/issues/44):
+upstream as [mostro-push-server#44](https://github.com/MostroP2P/mostro-push-server/issues/44)
+and shipped in [mostro-push-server#48](https://github.com/MostroP2P/mostro-push-server/pull/48):
 
 1. **Accept `platform: "web"`** in `/api/register` (`Platform` enum, the
    `android`/`ios` validation in `routes.rs`, the `/api/status` counts). The FCM v1
@@ -788,7 +789,8 @@ refusals, now) → Vec<Action>` (`Register`, `Unregister`, `NoteUnwanted`, `Note
 
 HTTP in `api/push.rs` behind a `PushServer` trait (`register`, `unregister`,
 `notify`) so tests inject a fake. The wasm build uses the same `reqwest` client for
-registration; `notify` is unused there until the server answers CORS (§3.5).
+registration and for `notify`, which the server answers with CORS since
+mostro-push-server#48 (§3.5).
 
 ### 8.2 Bridge surface — `rust/src/api/push.rs`
 
