@@ -42,9 +42,12 @@ class InputSourceAction extends StatelessWidget {
             : lime
             ? book.limeInk
             : book.textBody;
+    // DS-A11Y-1: the node is named by [label] itself, not by whatever text
+    // sits inside it, which is excluded so it is not read twice.
     final action = Semantics(
       button: true,
       enabled: enabled,
+      label: label,
       child: Material(
         color: lime ? pal.scanFill : pal.buttonFill,
         borderRadius: const BorderRadius.all(Radius.circular(14)),
@@ -72,13 +75,15 @@ class InputSourceAction extends StatelessWidget {
                   children: [
                     Icon(icon, size: 14, color: ink),
                     const SizedBox(width: 6),
-                    Text(
-                      label,
-                      maxLines: 1,
-                      style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: lime ? FontWeight.w600 : FontWeight.w500,
-                        color: ink,
+                    ExcludeSemantics(
+                      child: Text(
+                        label,
+                        maxLines: 1,
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: lime ? FontWeight.w600 : FontWeight.w500,
+                          color: ink,
+                        ),
                       ),
                     ),
                   ],
