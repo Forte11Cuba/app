@@ -1238,6 +1238,7 @@
   "cashuReceiveButton": "Ontvangen",
   "cashuSendButton": "Versturen",
   "cashuReceiveHint": "Plak of scan een Cashu-token",
+  "qrScanUnavailable": "Niet beschikbaar op dit apparaat",
   "cashuAmountLabel": "Bedrag in sats",
   "cashuReceived": "{sats} sats ontvangen",
   "cashuSyncButton": "Synchroniseren met mint",

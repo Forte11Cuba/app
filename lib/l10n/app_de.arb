@@ -1238,6 +1238,7 @@
   "cashuReceiveButton": "Empfangen",
   "cashuSendButton": "Senden",
   "cashuReceiveHint": "Cashu-Token einfügen oder scannen",
+  "qrScanUnavailable": "Auf diesem Gerät nicht verfügbar",
   "cashuAmountLabel": "Betrag in Sats",
   "cashuReceived": "{sats} Sats empfangen",
   "cashuSyncButton": "Mit der Mint synchronisieren",

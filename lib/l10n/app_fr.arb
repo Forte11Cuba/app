@@ -1238,6 +1238,7 @@
   "cashuReceiveButton": "Recevoir",
   "cashuSendButton": "Envoyer",
   "cashuReceiveHint": "Collez ou scannez un token Cashu",
+  "qrScanUnavailable": "Non disponible sur cet appareil",
   "cashuAmountLabel": "Montant en sats",
   "cashuReceived": "{sats} sats reçus",
   "cashuSyncButton": "Synchroniser avec la mint",

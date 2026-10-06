@@ -6742,6 +6742,12 @@ abstract class AppLocalizations {
   /// **'Paste or scan a Cashu token'**
   String get cashuReceiveHint;
 
+  /// Tooltip of a disabled Scan QR action (NWC wallet, Cashu wallet) where the device has no usable camera (desktop, web)
+  ///
+  /// In en, this message translates to:
+  /// **'Not available on this device'**
+  String get qrScanUnavailable;
+
   /// Cashu wallet — amount field when exporting a token
   ///
   /// In en, this message translates to:

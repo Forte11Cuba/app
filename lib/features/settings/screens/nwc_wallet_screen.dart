@@ -139,6 +139,9 @@ class _NwcWalletScreenState extends ConsumerState<NwcWalletScreen> {
     final book = OrderBookPalette.of(context);
     final pal = SettingsPalette.of(context);
     final focused = _uriFocus.hasFocus;
+    // Read once, so whether Scan QR works and the reason it gives cannot
+    // disagree.
+    final canScan = canScanQr();
     return DecoratedBox(
       decoration: BoxDecoration(
         color: book.surface,
@@ -215,7 +218,13 @@ class _NwcWalletScreenState extends ConsumerState<NwcWalletScreen> {
                   child: InputSourceAction(
                     icon: Icons.qr_code_scanner,
                     label: l10n.scanQrButtonLabel,
-                    onTap: () => setState(() => _showScanner = true),
+                    // Where there is no camera, the scanner would only be a
+                    // second paste field over this one: off, and says why.
+                    onTap:
+                        canScan
+                            ? () => setState(() => _showScanner = true)
+                            : null,
+                    tooltip: canScan ? null : l10n.qrScanUnavailable,
                     accent: true,
                   ),
                 ),

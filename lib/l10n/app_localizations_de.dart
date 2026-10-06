@@ -4082,6 +4082,9 @@ class AppLocalizationsDe extends AppLocalizations {
   String get cashuReceiveHint => 'Cashu-Token einfügen oder scannen';
 
   @override
+  String get qrScanUnavailable => 'Auf diesem Gerät nicht verfügbar';
+
+  @override
   String get cashuAmountLabel => 'Betrag in Sats';
 
   @override

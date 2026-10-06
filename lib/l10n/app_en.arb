@@ -4324,6 +4324,8 @@
   "@cashuSendButton": {"description": "Cashu wallet — button that exports ecash as a token"},
   "cashuReceiveHint": "Paste or scan a Cashu token",
   "@cashuReceiveHint": {"description": "Cashu wallet — placeholder in the token scanner"},
+  "qrScanUnavailable": "Not available on this device",
+  "@qrScanUnavailable": {"description": "Tooltip of a disabled Scan QR action (NWC wallet, Cashu wallet) where the device has no usable camera (desktop, web)"},
   "cashuAmountLabel": "Amount in sats",
   "@cashuAmountLabel": {"description": "Cashu wallet — amount field when exporting a token"},
   "cashuReceived": "Received {sats} sats",
