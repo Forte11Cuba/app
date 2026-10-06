@@ -292,7 +292,10 @@ class BondAmountRow extends StatelessWidget {
                   TextSpan(
                     children: [
                       TextSpan(
-                        text: formatInvoiceSats(sats),
+                        text: formatInvoiceSats(
+                          sats,
+                          Localizations.localeOf(context).toString(),
+                        ),
                         style: TextStyle(
                           fontFamily: AppFonts.figures,
                           fontSize: 22,
@@ -316,7 +319,7 @@ class BondAmountRow extends StatelessWidget {
           ),
           if (remaining != null)
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 7),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
               decoration: BoxDecoration(
                 color: urgent ? palette.errorFill : palette.timeFill,
                 borderRadius: BorderRadius.circular(999),
@@ -329,10 +332,10 @@ class BondAmountRow extends StatelessWidget {
                 children: [
                   Icon(
                     Icons.schedule,
-                    size: 13,
+                    size: 12,
                     color: urgent ? palette.errorInk : palette.timeFigure,
                   ),
-                  const SizedBox(width: 5),
+                  const SizedBox(width: 6),
                   Text(
                     formatInvoiceCountdown(remaining, hours: hours),
                     style: TextStyle(

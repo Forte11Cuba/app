@@ -88,7 +88,7 @@ void main() {
   ) async {
     await withClock(clockAt, () async {
       await _pump(tester, claim: _claim());
-      expect(find.text('1500'), findsOneWidget);
+      expect(find.text('1,500'), findsOneWidget);
       expect(_label(tester, AutomationIds.bondClaimAmount), '1500');
       expect(_label(tester, AutomationIds.bondClaimStatus), 'pending');
       expect(find.textContaining('Claim before'), findsOneWidget);

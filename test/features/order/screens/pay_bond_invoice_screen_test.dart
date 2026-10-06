@@ -93,7 +93,7 @@ void main() {
   ) async {
     await _pump(tester, trade: fakeTrade(bond: _bond()), slashOnTimeout: false);
 
-    expect(find.text('1648'), findsOneWidget);
+    expect(find.text('1,648'), findsOneWidget);
     expect(find.byType(QrImageView), findsOneWidget);
     // Whole sentences: the bold part is spliced into the l10n message and
     // the prose on both sides of it must survive.
