@@ -1640,6 +1640,10 @@ mod tests {
         /// Every settings write fails while this holds; clearing it is the
         /// storage recovering.
         unwritable: std::sync::atomic::AtomicBool,
+        /// Whether a wipe succeeds; it fails unless a test says otherwise.
+        wipes_succeed: std::sync::atomic::AtomicBool,
+        /// Stand-ins for the rows an identity produced, by owner.
+        rows: std::sync::Mutex<std::collections::BTreeSet<String>>,
         wipes: std::sync::atomic::AtomicUsize,
     }
 
@@ -1649,8 +1653,20 @@ mod tests {
                 settings: Default::default(),
                 unreadable: false,
                 unwritable: Default::default(),
+                wipes_succeed: Default::default(),
+                rows: Default::default(),
                 wipes: Default::default(),
             }
+        }
+        fn wipes_succeed(&self, succeed: bool) {
+            self.wipes_succeed
+                .store(succeed, std::sync::atomic::Ordering::SeqCst);
+        }
+        fn add_rows(&self, owner: &str) {
+            self.rows.lock().unwrap().insert(owner.to_string());
+        }
+        fn rows(&self) -> std::collections::BTreeSet<String> {
+            self.rows.lock().unwrap().clone()
         }
         /// Every settings write fails until [`Self::recover`].
         fn unwritable() -> Self {
@@ -1694,7 +1710,11 @@ mod tests {
         }
         async fn clear_identity_data(&self) -> Result<()> {
             self.wipes.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            anyhow::bail!("injected wipe failure")
+            if !self.wipes_succeed.load(std::sync::atomic::Ordering::SeqCst) {
+                anyhow::bail!("injected wipe failure");
+            }
+            self.rows.lock().unwrap().clear();
+            Ok(())
         }
         async fn get_setting(&self, key: &str) -> Result<Option<String>> {
             if self.unreadable {
@@ -1762,7 +1782,7 @@ mod tests {
             unimplemented!()
         }
         async fn get_identity(&self) -> Result<Option<IdentityInfo>> {
-            unimplemented!()
+            Ok(None)
         }
         async fn update_trade_peer_reputation(
             &self,
@@ -2167,6 +2187,247 @@ mod tests {
         assert!(
             intent < release && intent < take,
             "the intent must be recorded before the identity is given up"
+        );
+    }
+
+    // ── Concurrent transitions (review round 4 of #573) ─────────────────────
+
+    /// Where a [`PausingHooks`] deletion stops until the test resumes it.
+    #[derive(PartialEq)]
+    enum PauseAt {
+        /// Giving back the subscriptions: the intent is recorded, the slot
+        /// still holds the identity.
+        Release,
+        /// Unregistering push: the slot is empty, the rows not yet wiped.
+        Unregister,
+    }
+
+    /// [`DeletionHooks`] that touch nothing of the process and pause at one
+    /// point: the test learns the deletion got there, does what a competing
+    /// transition would, then lets it go on.
+    struct PausingHooks {
+        at: PauseAt,
+        reached: std::sync::Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
+        resume: tokio::sync::Mutex<Option<tokio::sync::oneshot::Receiver<()>>>,
+    }
+
+    impl PausingHooks {
+        fn at(
+            at: PauseAt,
+        ) -> (
+            &'static Self,
+            tokio::sync::oneshot::Receiver<()>,
+            tokio::sync::oneshot::Sender<()>,
+        ) {
+            let (reached_tx, reached_rx) = tokio::sync::oneshot::channel();
+            let (resume_tx, resume_rx) = tokio::sync::oneshot::channel();
+            let hooks = Box::leak(Box::new(Self {
+                at,
+                reached: std::sync::Mutex::new(Some(reached_tx)),
+                resume: tokio::sync::Mutex::new(Some(resume_rx)),
+            }));
+            (hooks, reached_rx, resume_tx)
+        }
+
+        async fn pause_if(&self, point: PauseAt) {
+            if self.at != point {
+                return;
+            }
+            if let Some(reached) = self.reached.lock().unwrap().take() {
+                let _ = reached.send(());
+            }
+            if let Some(resume) = self.resume.lock().await.take() {
+                let _ = resume.await;
+            }
+        }
+    }
+
+    impl DeletionHooks for PausingHooks {
+        async fn release_subscriptions(&self) {
+            self.pause_if(PauseAt::Release).await;
+        }
+        async fn unregister_push(&self) {
+            self.pause_if(PauseAt::Unregister).await;
+        }
+        async fn forget_state(&self) {}
+    }
+
+    /// [`DeletionHooks`] that touch nothing and never pause.
+    struct NoHooks;
+
+    impl DeletionHooks for NoHooks {
+        async fn release_subscriptions(&self) {}
+        async fn unregister_push(&self) {}
+        async fn forget_state(&self) {}
+    }
+
+    /// A slot and a store of the test's own, leaked so spawned transitions can
+    /// borrow them.
+    fn private_lifecycle() -> (&'static IdentitySlot, &'static WipeFailingStore) {
+        (
+            Box::leak(Box::new(IdentitySlot::new())),
+            Box::leak(Box::new(WipeFailingStore::new())),
+        )
+    }
+
+    /// Put an identity in `slot` directly, as a launch would have; returns
+    /// its phrase and public key.
+    async fn install(slot: &IdentitySlot) -> (Vec<String>, String) {
+        let words = key_ops::generate_mnemonic().unwrap();
+        let keys = key_ops::derive_master_key(&words).unwrap();
+        let public_key = keys.public_key().to_hex();
+        *slot.state.write().await = Some(IdentityState {
+            mnemonic_words: words.clone(),
+            keys,
+            identity_info: IdentityInfo {
+                public_key: public_key.clone(),
+                display_name: None,
+                privacy_mode: false,
+                trade_key_index: 0,
+                created_at: 0,
+            },
+        });
+        (words, public_key)
+    }
+
+    /// Let every spawned transition run until it finishes or blocks.
+    async fn settle() {
+        for _ in 0..64 {
+            tokio::task::yield_now().await;
+        }
+    }
+
+    /// The end state no schedule may reach: rows still on disk, nobody in the
+    /// slot to own them, no marker to say so — and a new identity let in.
+    async fn assert_no_identity_installs_over_unmarked_rows(
+        slot: &'static IdentitySlot,
+        store: &'static WipeFailingStore,
+    ) {
+        let rows = store.rows();
+        let vacant = slot.state.read().await.is_none();
+        let marker = store.setting(crate::db::settings_keys::IDENTITY_WIPE_PENDING);
+        assert!(
+            rows.is_empty() || !vacant || marker.is_some(),
+            "rows {rows:?} stay with an empty slot and no wipe-pending marker"
+        );
+        if vacant && !rows.is_empty() {
+            store.wipes_succeed(false);
+            assert!(
+                create_in(slot, Some(store)).await.is_err(),
+                "a new identity was installed over the rows {rows:?}"
+            );
+        }
+    }
+
+    /// ermeme's schedule: a deletion of A pauses while giving back its
+    /// subscriptions; a second deletion of A succeeds, clearing the shared
+    /// marker, and B is created and trades. The first deletion then takes B,
+    /// and its wipe fails — with no marker left to stop the next identity.
+    #[tokio::test]
+    async fn a_deletion_paused_before_the_take_cannot_lose_the_marker() {
+        let (slot, store) = private_lifecycle();
+        let (_, a) = install(slot).await;
+        store.add_rows(&a);
+        store.wipes_succeed(true);
+        let (hooks, reached, resume) = PausingHooks::at(PauseAt::Release);
+
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async {
+                let first = tokio::task::spawn_local(delete_in(slot, Some(store), hooks, true));
+                reached.await.unwrap();
+                let second = tokio::task::spawn_local(delete_in(slot, Some(store), &NoHooks, true));
+                let create = tokio::task::spawn_local(create_in(slot, Some(store)));
+                settle().await;
+                if let Some(state) = slot.state.read().await.as_ref() {
+                    store.add_rows(&state.identity_info.public_key);
+                }
+
+                store.wipes_succeed(false);
+                resume.send(()).unwrap();
+                let _ = first.await.unwrap();
+                let _ = second.await.unwrap();
+                let _ = create.await.unwrap();
+            })
+            .await;
+
+        assert_no_identity_installs_over_unmarked_rows(slot, store).await;
+    }
+
+    /// The same-owner variant: while the deletion of A is paused, A itself is
+    /// loaded again (a launch reload, an import of the same phrase). The load
+    /// releases A's marker as its own; the deletion then retires the reloaded
+    /// A and its wipe fails, leaving the rows unmarked behind an empty slot.
+    #[tokio::test]
+    async fn a_reload_during_a_paused_deletion_cannot_release_its_marker() {
+        let (slot, store) = private_lifecycle();
+        let (words, a) = install(slot).await;
+        store.add_rows(&a);
+        let (hooks, reached, resume) = PausingHooks::at(PauseAt::Release);
+        let (tx, _rx) = private_channel();
+        let tx: &'static broadcast::Sender<u32> = Box::leak(Box::new(tx));
+
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async {
+                let delete = tokio::task::spawn_local(delete_in(slot, Some(store), hooks, true));
+                reached.await.unwrap();
+                let reload =
+                    tokio::task::spawn_local(load_in(slot, Some(store), tx, words, 0, false, None));
+                settle().await;
+
+                resume.send(()).unwrap();
+                let _ = delete.await.unwrap();
+                let _ = reload.await.unwrap();
+            })
+            .await;
+
+        assert_no_identity_installs_over_unmarked_rows(slot, store).await;
+    }
+
+    /// A replacement that lands while a deletion is between retiring the
+    /// identity and wiping its rows: the deletion's wipe then takes the new
+    /// identity's rows with the old ones.
+    #[tokio::test]
+    async fn a_replacement_never_lands_before_the_deletion_wipes() {
+        let (slot, store) = private_lifecycle();
+        let (_, a) = install(slot).await;
+        store.add_rows(&a);
+        store.wipes_succeed(true);
+        let (hooks, reached, resume) = PausingHooks::at(PauseAt::Unregister);
+
+        let replaced_early = tokio::task::LocalSet::new()
+            .run_until(async {
+                let delete = tokio::task::spawn_local(delete_in(slot, Some(store), hooks, true));
+                reached.await.unwrap();
+                let create = tokio::task::spawn_local(create_in(slot, Some(store)));
+                settle().await;
+                let replaced_early = slot
+                    .state
+                    .read()
+                    .await
+                    .as_ref()
+                    .map(|state| state.identity_info.public_key.clone());
+                if let Some(b) = &replaced_early {
+                    store.add_rows(b);
+                }
+
+                resume.send(()).unwrap();
+                delete.await.unwrap().unwrap();
+                create.await.unwrap().unwrap();
+                replaced_early
+            })
+            .await;
+
+        if let Some(b) = replaced_early {
+            assert!(
+                store.rows().contains(&b),
+                "the deletion of the previous identity wiped the new one's rows"
+            );
+        }
+        assert!(
+            slot.state.read().await.is_some(),
+            "the replacement still lands"
         );
     }
 
