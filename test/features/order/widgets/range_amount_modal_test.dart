@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mostro/core/app_theme.dart';
@@ -10,12 +11,20 @@ import 'package:mostro/shared/widgets/mostro_modal.dart';
 Future<double? Function()> _open(
   WidgetTester tester, {
   required Locale locale,
+  double textScale = 1.0,
 }) async {
   double? result;
   await tester.pumpWidget(
     MaterialApp(
       theme: buildDarkTheme(),
       locale: locale,
+      builder:
+          (context, child) => MediaQuery(
+            data: MediaQuery.of(
+              context,
+            ).copyWith(textScaler: TextScaler.linear(textScale)),
+            child: child!,
+          ),
       localizationsDelegates: const [
         AppLocalizations.delegate,
         GlobalMaterialLocalizations.delegate,
@@ -68,6 +77,26 @@ void main() {
 
   // Issue #720: the dialog printed its bounds by hand (`2000 – 998000`)
   // right under a card that groups them (`2.000 – 998.000`).
+  // DS-A11Y-4: the dialog's answer is a verb now, and German's is the
+  // longest ("Order annehmen"). At 320 dp and 2x text the dialog must not
+  // overflow, and the answer must not break onto a second line.
+  testWidgets('fits at 320 dp and 2x text in German', (tester) async {
+    tester.view.physicalSize = const Size(320, 640);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+    const locale = Locale('de');
+    final l10n = lookupAppLocalizations(locale);
+
+    await _open(tester, locale: locale, textScale: 2.0);
+
+    expect(tester.takeException(), isNull);
+    final answer = tester.renderObject<RenderParagraph>(
+      find.text(l10n.rangeAmountTakeAction),
+    );
+    final line = answer.getFullHeightForCaret(const TextPosition(offset: 0));
+    expect(answer.size.height, lessThan(line * 1.5), reason: 'one line');
+  });
+
   testWidgets("shows the bounds with the locale's grouping", (tester) async {
     await _open(tester, locale: const Locale('es'));
 
