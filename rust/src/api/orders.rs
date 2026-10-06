@@ -13143,6 +13143,63 @@ mod tests {
         assert_eq!(row.completed_at, Some(published));
     }
 
+    /// #716: a relay that lags serves an older revision of the same order
+    /// after the newer one arrived from another relay. A stranger's `success`
+    /// removed nothing (the order was never in the book), and the older
+    /// `pending` that followed put a finished order back in the book. Taking
+    /// it failed with `InvalidOrderStatus`.
+    #[tokio::test]
+    async fn an_older_revision_does_not_bring_a_finished_order_back() {
+        let node = nostr_sdk::prelude::Keys::generate();
+        let order_id = uuid::Uuid::new_v4().to_string();
+
+        let newer = book_event_at(&order_id, "success", &node, 2_000);
+        ingest_order_event_with(&newer, Publish::WhenBatchEnds).await;
+        let older = book_event_at(&order_id, "pending", &node, 1_000);
+        ingest_order_event_with(&older, Publish::WhenBatchEnds).await;
+
+        assert!(
+            order_book().get_order(&order_id).await.is_none(),
+            "an older pending must not resurrect an order a newer revision ended"
+        );
+    }
+
+    /// #716: the newest revision wins over a live entry too. An older
+    /// `pending` must not overwrite a newer `in-progress`.
+    #[tokio::test]
+    async fn an_older_revision_does_not_overwrite_a_newer_one() {
+        let node = nostr_sdk::prelude::Keys::generate();
+        let order_id = uuid::Uuid::new_v4().to_string();
+
+        let newer = book_event_at(&order_id, "in-progress", &node, 2_000);
+        ingest_order_event_with(&newer, Publish::WhenBatchEnds).await;
+        let older = book_event_at(&order_id, "pending", &node, 1_000);
+        ingest_order_event_with(&older, Publish::WhenBatchEnds).await;
+
+        let entry = order_book().get_order(&order_id).await.expect("book entry");
+        assert_eq!(entry.status, OrderStatus::InProgress);
+    }
+
+    /// #716: the guard drops only what is older. A newer revision still
+    /// applies, and one dated the same second as the last still applies: the
+    /// daemon can publish two revisions within one second.
+    #[tokio::test]
+    async fn a_newer_or_same_second_revision_still_applies() {
+        let node = nostr_sdk::prelude::Keys::generate();
+        let order_id = uuid::Uuid::new_v4().to_string();
+
+        let first = book_event_at(&order_id, "pending", &node, 1_000);
+        ingest_order_event_with(&first, Publish::WhenBatchEnds).await;
+        let same_second = book_event_at(&order_id, "in-progress", &node, 1_000);
+        ingest_order_event_with(&same_second, Publish::WhenBatchEnds).await;
+        let entry = order_book().get_order(&order_id).await.expect("book entry");
+        assert_eq!(entry.status, OrderStatus::InProgress);
+
+        let newer = book_event_at(&order_id, "success", &node, 2_000);
+        ingest_order_event_with(&newer, Publish::WhenBatchEnds).await;
+        assert!(order_book().get_order(&order_id).await.is_none());
+    }
+
     /// #642: the payout check and the sweep date a completion by the book's
     /// revision; when that time could not be fetched, none is made up.
     #[tokio::test]
