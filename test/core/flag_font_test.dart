@@ -68,5 +68,21 @@ void main() {
         expect(_fallbackOf(tester, 'Mostro $_argentina'), contains(_flags));
       });
     }
+
+    test('is the fallback everywhere but native iOS and macOS', () {
+      expect(AppFonts.flags, _flags);
+      for (final platform in TargetPlatform.values) {
+        final apple =
+            platform == TargetPlatform.iOS || platform == TargetPlatform.macOS;
+        // Core Text cannot draw CBDT; Apple's own emoji font has every flag.
+        expect(
+          flagFontFallback(platform, web: false),
+          apple ? isNull : [_flags],
+          reason: '$platform',
+        );
+        // The web engine draws with its own FreeType on every device.
+        expect(flagFontFallback(platform, web: true), [_flags]);
+      }
+    });
   });
 }
