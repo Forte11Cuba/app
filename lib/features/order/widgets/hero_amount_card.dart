@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 
 import 'package:mostro/core/app_theme.dart';
 import 'package:mostro/core/automation/automation_id.dart';
@@ -20,7 +21,6 @@ class HeroAmountCard extends StatelessWidget {
     this.second,
     this.footer,
     this.child,
-    this.fit = true,
   });
 
   /// `You pay`, `To pay`: what the figure is, in sentence case.
@@ -46,12 +46,6 @@ class HeroAmountCard extends StatelessWidget {
 
   /// A QR, under everything else in the same card.
   final Widget? child;
-
-  /// Drops the figure from 38 to 26 when it does not fit at 38. That needs
-  /// the card's width, which a card inside an `IntrinsicHeight` (the invoice
-  /// screens) cannot measure; there a sats figure fits at 38 anyway, and one
-  /// that would not wraps instead.
-  final bool fit;
 
   static const double _full = 38;
   static const double _compact = 26;
@@ -87,32 +81,11 @@ class HeroAmountCard extends StatelessWidget {
       ],
     );
 
-    Widget amount =
-        fit
-            ? LayoutBuilder(
-              builder: (context, constraints) {
-                final scaler = MediaQuery.textScalerOf(context);
-                final direction = Directionality.of(context);
-                double width(String text, TextStyle style) {
-                  final painter = TextPainter(
-                    text: TextSpan(text: text, style: style),
-                    textDirection: direction,
-                    textScaler: scaler,
-                    maxLines: 1,
-                  )..layout();
-                  final w = painter.width;
-                  painter.dispose();
-                  return w;
-                }
-
-                final needed =
-                    width(figure, _figureStyle(_full, book.textPrimary)) +
-                    _unitGap +
-                    width(unit, unitStyle);
-                return row(needed <= constraints.maxWidth ? _full : _compact);
-              },
-            )
-            : row(_full);
+    // 38 when the figure and its unit fit on the card's line, else 26
+    // (DS-CMP-23), chosen at layout from the row's intrinsic width: the
+    // invoice screens lay the card out under an IntrinsicHeight, which a
+    // LayoutBuilder cannot answer.
+    Widget amount = _FitChoice(full: row(_full), compact: row(_compact));
     final announced = semanticsLabel;
     if (announced != null) {
       amount = Semantics(
@@ -219,6 +192,107 @@ class HeroContextLine extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Shows [full] when its natural width fits the line, else [compact]. The
+/// choice is made at layout and answers intrinsic sizes, so it works under
+/// an `IntrinsicHeight`. Only the chosen child is painted, hit-tested,
+/// announced and found by test finders (as `IndexedStack` does).
+class _FitChoice extends MultiChildRenderObjectWidget {
+  _FitChoice({required Widget full, required Widget compact})
+    : super(children: [full, compact]);
+
+  @override
+  _RenderFitChoice createRenderObject(BuildContext context) =>
+      _RenderFitChoice();
+
+  @override
+  MultiChildRenderObjectElement createElement() => _FitChoiceElement(this);
+}
+
+class _FitChoiceElement extends MultiChildRenderObjectElement {
+  _FitChoiceElement(super.widget);
+
+  @override
+  void debugVisitOnstageChildren(ElementVisitor visitor) {
+    final chosen = (renderObject as _RenderFitChoice).chosen;
+    if (children.length > chosen) visitor(children.elementAt(chosen));
+  }
+}
+
+class _FitChoiceParentData extends ContainerBoxParentData<RenderBox> {}
+
+class _RenderFitChoice extends RenderBox
+    with
+        ContainerRenderObjectMixin<RenderBox, _FitChoiceParentData>,
+        RenderBoxContainerDefaultsMixin<RenderBox, _FitChoiceParentData> {
+  /// 0 for the full figure, 1 for the compact one.
+  int chosen = 0;
+
+  RenderBox get _full => firstChild!;
+  RenderBox get _compact => lastChild!;
+  RenderBox get _shown => chosen == 0 ? _full : _compact;
+
+  RenderBox _pick(double width) =>
+      _full.getMaxIntrinsicWidth(double.infinity) <= width ? _full : _compact;
+
+  @override
+  void setupParentData(RenderBox child) {
+    if (child.parentData is! _FitChoiceParentData) {
+      child.parentData = _FitChoiceParentData();
+    }
+  }
+
+  @override
+  double computeMinIntrinsicWidth(double height) =>
+      _compact.getMinIntrinsicWidth(height);
+
+  @override
+  double computeMaxIntrinsicWidth(double height) =>
+      _full.getMaxIntrinsicWidth(height);
+
+  @override
+  double computeMinIntrinsicHeight(double width) =>
+      _pick(width).getMinIntrinsicHeight(width);
+
+  @override
+  double computeMaxIntrinsicHeight(double width) =>
+      _pick(width).getMaxIntrinsicHeight(width);
+
+  @override
+  Size computeDryLayout(BoxConstraints constraints) =>
+      _pick(constraints.maxWidth).getDryLayout(constraints);
+
+  @override
+  double? computeDryBaseline(
+    BoxConstraints constraints,
+    TextBaseline baseline,
+  ) => _pick(constraints.maxWidth).getDryBaseline(constraints, baseline);
+
+  @override
+  void performLayout() {
+    chosen = identical(_pick(constraints.maxWidth), _full) ? 0 : 1;
+    // Both are laid out so neither is left dirty; only the chosen one shows.
+    _full.layout(constraints, parentUsesSize: chosen == 0);
+    _compact.layout(constraints, parentUsesSize: chosen == 1);
+    size = _shown.size;
+  }
+
+  @override
+  double? computeDistanceToActualBaseline(TextBaseline baseline) =>
+      _shown.getDistanceToActualBaseline(baseline);
+
+  @override
+  void paint(PaintingContext context, Offset offset) =>
+      context.paintChild(_shown, offset);
+
+  @override
+  bool hitTestChildren(BoxHitTestResult result, {required Offset position}) =>
+      _shown.hitTest(result, position: position);
+
+  @override
+  void visitChildrenForSemantics(RenderObjectVisitor visitor) =>
+      visitor(_shown);
 }
 
 class _HeroLabel extends StatelessWidget {

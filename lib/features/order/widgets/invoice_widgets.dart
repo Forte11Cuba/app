@@ -157,8 +157,6 @@ class InvoiceHeroCard extends StatelessWidget {
       automationId: automationId,
       automationLabel: automationLabel,
       footer: line == null ? null : HeroContextLine(line),
-      // Inside the screens' IntrinsicHeight, which cannot measure a fit.
-      fit: false,
       child: child,
     );
   }
