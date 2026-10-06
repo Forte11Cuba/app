@@ -184,6 +184,7 @@ Either party can open a dispute during an active trade if they cannot resolve a 
 6. **Given** the admin resolves in the seller's favor, **When** resolution is processed, **Then** the hold invoice is canceled, and the chat shows "The administrator canceled the order and refunded you."
 7. **Given** the seller taps "Release" during a dispute, **When** confirmed, **Then** the dispute closes and the order transitions to success without admin involvement.
 8. **Given** the user opens the dispute chat, **When** it renders, **Then** it opens with v1's information card, in v1's wording, which scrolls with the messages: "Dispute with [role]: [handle]" with the dispute's status chip, the full order ID and dispute ID on labelled lines in monospace (wrapped, never shortened, tap to copy), and, while the dispute is open, the status sentence for its status and three instructions. Once the dispute is resolved the card shows neither: the resolved outcome follows it. The card never points to the chat's shared key (#415, #680).
+9. **Given** a trade is in dispute, **When** either party views Trade Detail, **Then** both see "View dispute" and a Cancel button (the seller also sees Release). Cancel is the cooperative cancel mostrod accepts in `dispute` as in `active`: the first party's asks, the other's accepts, ending the trade and closing the dispute as cooperatively canceled. A cancel request made before the dispute opened stays open through it, so its notice stays, the requester gets no second Cancel and the counterparty's reads "Accept cancel".
 
 ---
 
