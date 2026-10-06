@@ -2988,7 +2988,7 @@ class AppLocalizationsEs extends AppLocalizations {
   String get bondTitle => 'Depósito de garantía';
 
   @override
-  String get bondRefundableLabel => 'DEPÓSITO REEMBOLSABLE';
+  String get bondRefundableLabel => 'Depósito reembolsable';
 
   @override
   String get bondComesBack => 'vuelve a ti al completar';
@@ -3153,7 +3153,7 @@ class AppLocalizationsEs extends AppLocalizations {
   String get bondClaimTitle => 'Reclama tu parte';
 
   @override
-  String get bondClaimShareLabel => 'TU PARTE';
+  String get bondClaimShareLabel => 'Tu parte';
 
   @override
   String bondClaimShareSemantics(String sats) {

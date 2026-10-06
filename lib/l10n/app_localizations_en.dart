@@ -2963,7 +2963,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get bondTitle => 'Anti-abuse deposit';
 
   @override
-  String get bondRefundableLabel => 'REFUNDABLE DEPOSIT';
+  String get bondRefundableLabel => 'Refundable deposit';
 
   @override
   String get bondComesBack => 'comes back to you when the trade completes';
@@ -3128,7 +3128,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get bondClaimTitle => 'Claim your share';
 
   @override
-  String get bondClaimShareLabel => 'YOUR SHARE';
+  String get bondClaimShareLabel => 'Your share';
 
   @override
   String bondClaimShareSemantics(String sats) {
