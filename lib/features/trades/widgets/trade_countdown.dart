@@ -4,6 +4,7 @@ import 'package:mostro/core/app_theme.dart';
 import 'package:mostro/core/trade_palette.dart';
 import 'package:mostro/l10n/app_localizations.dart';
 import 'package:mostro/shared/utils/countdown.dart';
+import 'package:mostro/shared/widgets/countdown_urgency_announcer.dart';
 
 /// The countdown of the step block: label + time, a progress bar that fills
 /// with the elapsed share of the window, and an optional note. Formatted and
@@ -59,8 +60,11 @@ class TradeCountdown extends StatelessWidget {
                 style: TextStyle(fontSize: 11, color: book.textTertiary),
               ),
             ),
-            Semantics(
-              liveRegion: tone == CountdownTone.urgent,
+            CountdownUrgencyAnnouncer(
+              urgent: tone == CountdownTone.urgent,
+              message:
+                  '$label '
+                  '${formatCountdown(remaining, hours: l10n.invoiceCountdownHours)}',
               child: Text(
                 formatCountdown(remaining, hours: l10n.invoiceCountdownHours),
                 style: TextStyle(

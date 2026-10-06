@@ -12,6 +12,7 @@ import 'package:mostro/features/order/widgets/order_detail_cards.dart';
 import 'package:mostro/l10n/app_localizations.dart';
 import 'package:mostro/shared/providers/peer_nym_provider.dart';
 import 'package:mostro/shared/utils/countdown.dart';
+import 'package:mostro/shared/widgets/countdown_urgency_announcer.dart';
 import 'package:mostro/src/rust/api/types.dart' show TradeInfo;
 
 /// Building blocks shared by the two invoice screens
@@ -260,48 +261,51 @@ class _InvoiceTimeBandState extends State<InvoiceTimeBand>
     final time = formatCountdown(widget.remaining, hours: widget.hours);
     final (before, after) = _splitAround(widget.sentence);
 
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-      decoration: BoxDecoration(
-        color: urgent ? pal.errorFill : pal.timeFill,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: urgent ? pal.errorBorder : pal.timeBorder),
-      ),
-      child: Row(
-        children: [
-          Icon(Icons.schedule, size: 14, color: figureColor),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Semantics(
-              label: widget.sentence(time),
-              liveRegion: urgent,
-              excludeSemantics: true,
-              child: AnimatedBuilder(
-                animation: _pulse,
-                builder:
-                    (context, _) => Text.rich(
-                      TextSpan(
-                        style: TextStyle(fontSize: 12, color: ink),
-                        children: [
-                          TextSpan(text: before),
-                          TextSpan(
-                            text: time,
-                            style: TextStyle(
-                              fontFamily: AppFonts.figures,
-                              fontWeight: FontWeight.w700,
-                              color: figureColor.withValues(
-                                alpha: 1 - 0.65 * _pulse.value,
+    return CountdownUrgencyAnnouncer(
+      urgent: urgent,
+      message: widget.sentence(time),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          color: urgent ? pal.errorFill : pal.timeFill,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: urgent ? pal.errorBorder : pal.timeBorder),
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.schedule, size: 14, color: figureColor),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Semantics(
+                label: widget.sentence(time),
+                excludeSemantics: true,
+                child: AnimatedBuilder(
+                  animation: _pulse,
+                  builder:
+                      (context, _) => Text.rich(
+                        TextSpan(
+                          style: TextStyle(fontSize: 12, color: ink),
+                          children: [
+                            TextSpan(text: before),
+                            TextSpan(
+                              text: time,
+                              style: TextStyle(
+                                fontFamily: AppFonts.figures,
+                                fontWeight: FontWeight.w700,
+                                color: figureColor.withValues(
+                                  alpha: 1 - 0.65 * _pulse.value,
+                                ),
                               ),
                             ),
-                          ),
-                          TextSpan(text: after),
-                        ],
+                            TextSpan(text: after),
+                          ],
+                        ),
                       ),
-                    ),
+                ),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

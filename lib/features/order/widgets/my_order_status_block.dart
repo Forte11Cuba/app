@@ -14,6 +14,7 @@ import 'package:mostro/features/trades/screens/trade_detail_screen.dart'
     show TradeStatusMachineName, tradeStatusFromOrderStatus;
 import 'package:mostro/l10n/app_localizations.dart';
 import 'package:mostro/shared/utils/countdown.dart';
+import 'package:mostro/shared/widgets/countdown_urgency_announcer.dart';
 
 /// The one coloured block of the maker's own order (handoff 6b): a dot, the
 /// status, and on the right what the state has to say — the time left while
@@ -261,8 +262,11 @@ class _MyOrderStatusBlockState extends State<MyOrderStatusBlock>
       _remaining,
       window: expiresAt?.difference(widget.order.createdAt),
     );
-    return Semantics(
-      liveRegion: tone == CountdownTone.urgent,
+    return CountdownUrgencyAnnouncer(
+      urgent: tone == CountdownTone.urgent,
+      message:
+          '${l10n.countdownExpiresInLabel} '
+          '${formatCountdown(_remaining, hours: l10n.invoiceCountdownHours)}',
       child: Text.rich(
         TextSpan(
           children: [

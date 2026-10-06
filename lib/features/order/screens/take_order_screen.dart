@@ -30,6 +30,7 @@ import 'package:mostro/features/trades/providers/trades_providers.dart'
     show refreshTrades;
 import 'package:mostro/l10n/app_localizations.dart';
 import 'package:mostro/shared/utils/countdown.dart';
+import 'package:mostro/shared/widgets/countdown_urgency_announcer.dart';
 import 'package:mostro/src/rust/api/settings.dart' as settings_api;
 import 'package:mostro/src/rust/api/types.dart';
 
@@ -525,8 +526,11 @@ class _CountdownRow extends StatelessWidget {
     return OrderDataRow(
       icon: Icons.schedule_rounded,
       label: l10n.countdownExpiresInLabel,
-      value: Semantics(
-        liveRegion: tone == CountdownTone.urgent,
+      value: CountdownUrgencyAnnouncer(
+        urgent: tone == CountdownTone.urgent,
+        message:
+            '${l10n.countdownExpiresInLabel} '
+            '${formatCountdown(remaining, hours: l10n.invoiceCountdownHours)}',
         child: Text(
           formatCountdown(remaining, hours: l10n.invoiceCountdownHours),
           style: figures.copyWith(color: color),

@@ -13,6 +13,7 @@ import 'package:mostro/features/order/providers/trade_state_provider.dart';
 import 'package:mostro/features/trades/providers/trades_providers.dart';
 import 'package:mostro/l10n/app_localizations.dart';
 import 'package:mostro/shared/utils/countdown.dart';
+import 'package:mostro/shared/widgets/countdown_urgency_announcer.dart';
 import 'package:mostro/shared/widgets/status_chip.dart';
 import 'package:mostro/src/rust/api/orders.dart' as orders_api;
 import 'package:mostro/src/rust/api/types.dart' as rust_types;
@@ -315,8 +316,11 @@ class _CountdownChipState extends State<_CountdownChip> {
         ],
         Icon(Icons.schedule, size: 12, color: color),
         const SizedBox(width: 4),
-        Semantics(
-          liveRegion: urgent,
+        CountdownUrgencyAnnouncer(
+          urgent: urgent,
+          message: l10n.timeLeftLabel(
+            formatCountdown(remaining, hours: l10n.invoiceCountdownHours),
+          ),
           child: Text(
             l10n.timeLeftLabel(
               formatCountdown(remaining, hours: l10n.invoiceCountdownHours),

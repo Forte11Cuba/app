@@ -4,6 +4,7 @@ import 'package:mostro/core/app_theme.dart';
 import 'package:mostro/core/invoice_palette.dart';
 import 'package:mostro/features/order/models/invoice_rules.dart';
 import 'package:mostro/shared/utils/countdown.dart';
+import 'package:mostro/shared/widgets/countdown_urgency_announcer.dart';
 
 /// One of the three things that can happen to the bonded sats (handoff 14,
 /// "fila de consecuencia"): the icon's shape and colour are the information,
@@ -358,8 +359,10 @@ class BondAmountRow extends StatelessWidget {
                         color: urgent ? palette.errorInk : palette.timeFigure,
                       ),
                       const SizedBox(width: 6),
-                      Semantics(
-                        liveRegion: urgent,
+                      CountdownUrgencyAnnouncer(
+                        urgent: urgent,
+                        message:
+                            '$timeLabel ${formatCountdown(remaining, hours: hours)}',
                         child: Text(
                           formatCountdown(remaining, hours: hours),
                           style: TextStyle(
