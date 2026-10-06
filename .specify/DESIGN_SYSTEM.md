@@ -221,6 +221,7 @@ Reuse before building (principle 4). These are the parts a new screen is assembl
 |---|---|---|
 | DS-CMP-1 | **MUST.** Every dialog and bottom sheet goes through `showMostroDialog` / `showMostroSheet` with `MostroDialog` / `MostroSheet` (`lib/shared/widgets/mostro_modal.dart`). Buttons are `ModalAction`s and links are `ModalLink`s. | test (`modal_guard_test.dart`) |
 | DS-CMP-2 | **MUST.** A modal has at most one primary action, "the answer", on the right or on top when the actions stack. The secondary is "the way out". An irreversible answer uses `ModalTone.destructive`. While it runs, the action shows `busy`; the modal is not swapped for a spinner. | review |
+| DS-CMP-26 | **MUST.** The answer of a modal opened by a named action repeats that action's verb, in a key of its own: the range dialog opened from "Take order" answers "Take order", not "Submit"; a cancel confirmation answers "Yes, cancel". A generic answer ("OK", "Yes", "Confirm", "Continue", "Submit") is kept for a modal that only informs. The answer's key holds the same wording as the opener in every language, so a translator can keep them together. | review |
 
 ### 6.2 Buttons
 
@@ -386,6 +387,7 @@ DS-SHP-4 and the `textTheme` roles of DS-TYP-4 joined them).
 | `app_theme.dart` cites `test/core/accent_consistency_test.dart`, which does not exist. The check lives in `modal_contrast_test.dart`. | §2.1 | — |
 | About 100 reads of `AppColors` in the legacy areas and in a few redesigned files. | §2.2 | DS-COL-11 |
 | The create-order screen states the maker's deposit in `OrderPreviewBar` (`notice`), with a shield icon, inside the action bar rather than as an `ExplanatoryNote` in the body. | §6.3 | DS-CMP-25 |
+| Modal answers that do not repeat their opener: the open-dispute confirmation answers "Yes" (`dispute_confirmation_dialog.dart`), the Cashu send dialog "Confirm" (`cashu_wallet_screen.dart`) and the new-user dialog "Continue" (`account_screen.dart`). | §6.1 | DS-CMP-26 |
 | `ThemeData` holds v1's defaults: scaffold background `#1B1E28`, app bar, filled-underline input decoration, and no button themes (so a bare button is a stadium). 16 unstyled Material buttons, 11 app bars and 11 scaffolds on the theme background, and 13 text fields that leave part of their decoration to the theme rely on them, mostly in the Cashu, chat, dispute and notification screens and in error states. One redesigned field is among them: the premium field in `price_section.dart` sets only `border: InputBorder.none`, so the v1 fill shows behind the percentage. Moving the theme's defaults to the redesign values would make a bare widget look right and retire most of these. | §1 | DS-CMP-12, DS-CMP-17 to DS-CMP-19 |
 
 ---
