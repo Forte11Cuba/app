@@ -142,9 +142,10 @@ New tokens take these values (DS-COL-8). Format: dark / light.
 
 | ID | Rule | Check |
 |---|---|---|
-| DS-TYP-1 | **MUST.** Two families, both through `AppFonts`: `AppFonts.ui` (Outfit) for interface text, which is the theme default and needs no setting, and `AppFonts.figures` (Manrope). No family is named as a string literal. Machine strings (invoices, keys, hashes, event ids) MAY use `'monospace'`. | auto |
+| DS-TYP-1 | **MUST.** Two families, both through `AppFonts`: `AppFonts.ui` (Outfit) for interface text, which is the theme default and needs no setting, and `AppFonts.figures` (Manrope). A third, `AppFonts.flags`, is a fallback for flags only (DS-TYP-8). No family is named as a string literal. Machine strings (invoices, keys, hashes, event ids) MAY use `'monospace'`. | auto |
 | DS-TYP-2 | **MUST.** Figures that line up or get compared use `AppFonts.figures`, with tabular digits: amounts, sats, fiat, premiums, ratings, counters, countdowns. | review |
 | DS-TYP-3 | **MUST.** Manrope always sets `fontWeight` explicitly to 500, 600 or 700. Only those weights are bundled; an unset (400) weight renders as Medium. | review |
+| DS-TYP-8 | **MUST.** A flag (a currency's, a node's region) is drawn from `AppFonts.flags`, the flags of Noto Color Emoji bundled with the app, never left to the OS: Linux and Windows have no flag glyphs and print two boxed letters (`AR`). Both themes carry it as `fontFamilyFallback`, so text that inherits the theme needs nothing; a style with `inherit: false` or its own `fontFamilyFallback` adds `flagFontFallback`. iOS and macOS are the exception: Core Text cannot draw the font's bitmaps (CBDT), and their own emoji font has every flag. The font is built by `tool/flags_font/build_font.py`, never edited by hand. | test (`flag_font_test.dart`) |
 
 ### 3.2 Scale
 
