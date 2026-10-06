@@ -18,6 +18,9 @@ import 'package:mostro/src/rust/api/types.dart' show OrderStatus;
 
 final _en = AppLocalizationsEn();
 
+/// A full-length id, so the short form (DS-CMP-22) has a head and a tail.
+const _longId = 'd5f425ca-1111-4c3d-8e9f-0a1b2c3d99b5';
+
 NotificationModel _status(String orderId, String status, int hour) =>
     NotificationModel.tradeStatus(
       orderId: orderId,
@@ -109,10 +112,8 @@ void main() {
     // Arrange / Act
     await _pump(
       tester,
-      notices: [_status('d5f425ca-1111', 'success', 1)],
-      rows: [
-        _row('d5f425ca-1111', status: OrderStatus.success, isSelling: true),
-      ],
+      notices: [_status(_longId, 'success', 1)],
+      rows: [_row(_longId, status: OrderStatus.success, isSelling: true)],
     );
 
     // Assert
@@ -120,15 +121,16 @@ void main() {
       find.text('${_en.tradesDirectionSell} · 50,000 ARS · 95,004 sats'),
       findsOneWidget,
     );
-    expect(find.text('Bank transfer · #d5f425ca'), findsOneWidget);
+    // DS-CMP-22: the same short form as every other id.
+    expect(find.text('Bank transfer · d5f425ca…99b5'), findsOneWidget);
   });
 
   testWidgets('without its row the header falls back to the short id', (
     tester,
   ) async {
-    await _pump(tester, notices: [_status('d5f425ca-1111', 'success', 1)]);
+    await _pump(tester, notices: [_status(_longId, 'success', 1)]);
 
-    expect(find.text('${_en.tradeWord} #d5f425ca'), findsOneWidget);
+    expect(find.text('${_en.tradeWord} d5f425ca…99b5'), findsOneWidget);
   });
 
   testWidgets('the latest event shows its whole title and its message', (

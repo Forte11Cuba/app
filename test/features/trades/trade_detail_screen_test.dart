@@ -2098,4 +2098,24 @@ void main() {
       await tester.pump(const Duration(seconds: 5));
     });
   });
+
+  // Issue #724, DS-CMP-22: the trade's id row reads the same short form as
+  // every other screen (8 + 4, not 5 + 4), beside the copy icon of 16.
+  testWidgets('the id row reads the short id with the copy icon', (
+    tester,
+  ) async {
+    const id = '09150348-1a2b-4c3d-8e9f-0a1b2c3d99b5';
+    await _pumpTradeDetail(
+      tester,
+      orderId: id,
+      isBuyer: true,
+      status: OrderStatus.active,
+    );
+
+    expect(find.text('09150348…99b5', skipOffstage: false), findsOneWidget);
+    final icon = tester.widget<Icon>(
+      find.byIcon(Icons.copy_rounded, skipOffstage: false),
+    );
+    expect(icon.size, 16);
+  });
 }
