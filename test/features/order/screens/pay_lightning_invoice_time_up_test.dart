@@ -28,7 +28,11 @@ void main() {
   final now = DateTime.utc(2026, 9, 12, 12);
   final nowSeconds = now.millisecondsSinceEpoch ~/ 1000;
 
-  Future<void> pump(WidgetTester tester, {required int deadline}) async {
+  Future<void> pump(
+    WidgetTester tester, {
+    required int deadline,
+    OrderKind kind = OrderKind.sell,
+  }) async {
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
@@ -37,6 +41,8 @@ void main() {
             (ref, id) => Stream.value(
               fakeTrade(
                 id: id,
+                status: OrderStatus.waitingPayment,
+                kind: kind,
                 holdInvoice: 'lnbc1000n1holdinvoice',
                 amountSats: BigInt.from(1000),
               ),
@@ -75,13 +81,32 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
-  testWidgets('keeps the hold invoice at 00:00', (tester) async {
-    await withClock(Clock.fixed(now), () async {
-      await pump(tester, deadline: nowSeconds - 1);
+  // The seller owes the payment: as the taker of a buy order, mostrod puts
+  // the order back in the book when the step runs out; as the maker of a
+  // sell order, it cancels it.
+  for (final side in const [
+    (
+      kind: OrderKind.buy,
+      notice:
+          'Time is up. If it is not completed, Mostro will return the order '
+          'to the book shortly.',
+    ),
+    (
+      kind: OrderKind.sell,
+      notice:
+          'Time is up. If it is not completed, Mostro will cancel the order '
+          'shortly.',
+    ),
+  ]) {
+    testWidgets('keeps the hold invoice at 00:00 on a ${side.kind.name} '
+        'order and says what Mostro is about to do', (tester) async {
+      await withClock(Clock.fixed(now), () async {
+        await pump(tester, deadline: nowSeconds - 1, kind: side.kind);
+      });
+      expect(find.byType(InvoiceTimeUpView), findsNothing);
+      expect(_semantics('pay.invoice.text'), findsOneWidget);
+      expect(find.text(side.notice), findsOneWidget);
+      await tester.pumpWidget(const SizedBox.shrink());
     });
-    expect(find.byType(InvoiceTimeUpView), findsNothing);
-    expect(_semantics('pay.invoice.text'), findsOneWidget);
-    expect(find.text(l10n.invoiceStepElapsed), findsOneWidget);
-    await tester.pumpWidget(const SizedBox.shrink());
-  });
+  }
 }
