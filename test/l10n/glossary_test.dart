@@ -20,9 +20,12 @@ void main() {
     };
   }
 
-  // The glossary's retired verbs for ticking a payment method.
+  // The glossary's retired verbs for ticking a payment method, in every
+  // gender and number. "ausgewählt" (the glossary's German) is not
+  // "gewählt": no word boundary inside it.
   final chosen = RegExp(
-    r'\b(chosen|elegid[oa]s?|choisi[es]?|scelt[oi]|gekozen|gewählt)\b',
+    r'\b(chosen|elegid[oa]s?|choisie?s?|scelt[oaie]|gekozen'
+    r'|gewählt(?:e[nmrs]?)?)\b',
     caseSensitive: false,
   );
 
