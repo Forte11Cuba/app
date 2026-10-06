@@ -11,6 +11,7 @@ import 'package:mostro/features/order/providers/exchange_rate_provider.dart';
 import 'package:mostro/features/order/providers/trade_state_provider.dart';
 import 'package:mostro/features/order/screens/pay_bond_invoice_screen.dart';
 import 'package:mostro/features/order/widgets/invoice_widgets.dart';
+import 'package:mostro/features/order/widgets/order_detail_cards.dart';
 import 'package:mostro/features/settings/providers/nwc_provider.dart';
 import 'package:mostro/features/trades/providers/trades_providers.dart';
 import 'package:mostro/l10n/app_localizations.dart';
@@ -191,6 +192,22 @@ void main() {
     await _pump(tester, trade: fakeTrade(bond: _bond()), explainerOpen: true);
     expect(find.byType(QrImageView), findsNothing);
     expect(find.text('Read the documentation'), findsOneWidget);
+  });
+
+  testWidgets('the deposit context reads as data rows (DS-CMP-24)', (
+    tester,
+  ) async {
+    await _pump(tester, trade: fakeTrade(bond: _bond()), explainerOpen: true);
+    final row = find.ancestor(
+      of: find.text('You buy 100 USD'),
+      matching: find.byType(OrderDataRow),
+    );
+    expect(row, findsOneWidget);
+    expect(find.descendant(of: row, matching: find.byType(Icon)), findsOne);
+    expect(
+      find.ancestor(of: row, matching: find.byType(OrderDataCard)),
+      findsOneWidget,
+    );
   });
 
   testWidgets('a row without its bolt11 offers the same-take re-request', (
