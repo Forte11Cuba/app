@@ -344,7 +344,12 @@ class _BondPayoutInvoiceScreenState
               const SizedBox(height: 8),
               TextButton(
                 onPressed: () => setState(() => _manualMode = true),
-                child: Text(l10n.enterInvoiceManually),
+                child: Text(
+                  l10n.enterInvoiceManually,
+                  style: TextStyle(
+                    color: OrderBookPalette.of(context).limeText,
+                  ),
+                ),
               ).withAutomationId(AutomationIds.bondClaimManual),
             ],
           ] else ...[

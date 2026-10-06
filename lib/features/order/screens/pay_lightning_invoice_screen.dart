@@ -483,6 +483,7 @@ class _PayLightningInvoiceScreenState
       child: Container(
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
+          // design-check: ignore DS-COL-1 — a QR code must be pure black on white to scan
           color: Colors.white,
           borderRadius: BorderRadius.circular(14),
         ),
@@ -490,6 +491,7 @@ class _PayLightningInvoiceScreenState
           data: invoice,
           size: 168,
           padding: EdgeInsets.zero,
+          // design-check: ignore DS-COL-1 — a QR code must be pure black on white to scan
           backgroundColor: Colors.white,
           semanticsLabel: l10n.invoiceQrSemantics(invoice),
         ),
