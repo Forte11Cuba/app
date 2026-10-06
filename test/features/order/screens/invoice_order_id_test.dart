@@ -16,7 +16,7 @@ import 'package:mostro/features/order/screens/add_lightning_invoice_screen.dart'
 import 'package:mostro/features/order/screens/bond_payout_invoice_screen.dart';
 import 'package:mostro/features/order/screens/pay_bond_invoice_screen.dart';
 import 'package:mostro/features/order/screens/pay_lightning_invoice_screen.dart';
-import 'package:mostro/features/order/widgets/invoice_widgets.dart';
+import 'package:mostro/features/order/widgets/order_detail_cards.dart';
 import 'package:mostro/features/settings/providers/nwc_provider.dart';
 import 'package:mostro/features/trades/providers/trades_providers.dart';
 import 'package:mostro/l10n/app_localizations.dart';
@@ -66,7 +66,7 @@ Future<void> _expectIdRowInCard(
     findsNothing,
     reason: 'DS-CMP-22: never in the app bar',
   );
-  final card = find.byType(InvoiceCounterpartCard);
+  final card = find.byType(OrderDataCard);
   expect(find.descendant(of: card, matching: readout), findsOneWidget);
   expect(
     find.descendant(of: card, matching: find.text(_shortId)),

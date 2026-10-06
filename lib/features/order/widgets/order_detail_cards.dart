@@ -209,25 +209,53 @@ class OrderDataRow extends StatelessWidget {
   }
 }
 
-/// Plain value text of a data row.
+/// Plain value text of a data row (DS-CMP-24): in the figures face when
+/// [figures] (an amount or a count), with [trailing] — something said about
+/// the value, like the counterpart's reputation — after it.
 class OrderDataValue extends StatelessWidget {
-  const OrderDataValue(this.text, {super.key});
+  const OrderDataValue(
+    this.text, {
+    super.key,
+    this.figures = false,
+    this.trailing,
+  });
 
   final String text;
+  final bool figures;
+  final String? trailing;
 
   @override
   Widget build(BuildContext context) {
     final book = OrderBookPalette.of(context);
-    return Text(
+    final value = Text(
       text,
       maxLines: 1,
       overflow: TextOverflow.ellipsis,
       textAlign: TextAlign.end,
       style: TextStyle(
+        fontFamily: figures ? AppFonts.figures : null,
         fontSize: 12,
         fontWeight: FontWeight.w500,
         color: book.textStrong,
       ),
+    );
+    final aside = trailing;
+    if (aside == null) return value;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Flexible(child: value),
+        const SizedBox(width: 8),
+        Text(
+          aside,
+          style: TextStyle(
+            fontFamily: AppFonts.figures,
+            fontSize: 11,
+            fontWeight: FontWeight.w600,
+            color: book.textSecondary,
+          ),
+        ),
+      ],
     );
   }
 }
@@ -295,20 +323,40 @@ class OrderPaymentMethodsRow extends StatelessWidget {
 // ── Order id row ──────────────────────────────────────────────────────────────
 
 /// `09150348…99b5` with a copy icon; the whole row copies the full id. The
-/// reference of DS-CMP-22.
+/// reference of DS-CMP-22, and the ID row of every data card (DS-CMP-24).
+/// At least 48 high, the minimum target (DS-CMP-6).
 class OrderIdRow extends StatelessWidget {
-  const OrderIdRow({super.key, required this.orderId});
+  const OrderIdRow({
+    super.key,
+    required this.orderId,
+    this.automationId = AutomationIds.orderId,
+  });
 
   final String orderId;
+
+  /// The readout carrying the full id, which each screen names its own.
+  final String automationId;
 
   @override
   Widget build(BuildContext context) {
     final book = OrderBookPalette.of(context);
-    return OrderDataRow(
-      icon: Icons.link_rounded,
-      label: AppLocalizations.of(context).orderDetailIdLabel,
-      onTap: () => copyOrderId(context, orderId),
-      value: OrderIdValue(orderId: orderId, color: book.textMuted),
+    final l10n = AppLocalizations.of(context);
+    return Semantics(
+      button: true,
+      hint: l10n.copyOrderIdTooltip,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minHeight: 48),
+        child: OrderDataRow(
+          icon: Icons.link_rounded,
+          label: l10n.orderDetailIdLabel,
+          onTap: () => copyOrderId(context, orderId),
+          value: OrderIdValue(
+            orderId: orderId,
+            color: book.textMuted,
+            automationId: automationId,
+          ),
+        ),
+      ),
     );
   }
 }

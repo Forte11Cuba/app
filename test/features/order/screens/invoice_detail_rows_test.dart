@@ -144,7 +144,8 @@ void _expectCounterpartRows(WidgetTester tester) {
     findsOneWidget,
   );
 
-  // Both facts are rows of one card, split by its hairline.
+  // Both facts are rows of one card, with the order's ID row (DS-CMP-22),
+  // split by its hairlines.
   expect(
     find.ancestor(of: counterpart, matching: find.byType(OrderDataCard)),
     findsOneWidget,
@@ -154,7 +155,14 @@ void _expectCounterpartRows(WidgetTester tester) {
     matching: find.byType(OrderDataCard),
   );
   expect(find.descendant(of: card, matching: fiat), findsOneWidget);
-  expect(find.descendant(of: card, matching: find.byType(Divider)), findsOne);
+  expect(
+    find.descendant(of: card, matching: find.byType(OrderIdRow)),
+    findsOneWidget,
+  );
+  expect(
+    find.descendant(of: card, matching: find.byType(Divider)),
+    findsNWidgets(2),
+  );
 }
 
 void main() {

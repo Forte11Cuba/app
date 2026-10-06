@@ -19,6 +19,7 @@ import 'package:mostro/features/order/providers/trade_state_provider.dart';
 import 'package:mostro/features/order/widgets/invoice_clock.dart';
 import 'package:mostro/features/order/widgets/invoice_input_field.dart';
 import 'package:mostro/features/order/widgets/invoice_widgets.dart';
+import 'package:mostro/features/order/widgets/order_detail_cards.dart';
 import 'package:mostro/features/settings/providers/nwc_provider.dart';
 import 'package:mostro/features/settings/providers/settings_provider.dart';
 import 'package:mostro/features/trades/providers/trades_providers.dart'
@@ -967,12 +968,16 @@ class _AddLightningInvoiceScreenState
           invoiceCheckRow(check: check, sentence: validation),
         ],
         // Always drawn: the order's ID row is in it (DS-CMP-22), and the
-        // counterpart rows join once the trade loads.
+        // counterpart rows join once the trade loads (DS-CMP-24).
         const SizedBox(height: 12),
-        InvoiceCounterpartCard(
-          rows: trade == null ? const [] : _counterpartRows(l10n, trade),
-          orderId: widget.orderId,
-          orderIdAutomationId: AutomationIds.invoiceOrderId,
+        OrderDataCard(
+          rows: [
+            if (trade != null) ..._counterpartRows(l10n, trade),
+            OrderIdRow(
+              orderId: widget.orderId,
+              automationId: AutomationIds.invoiceOrderId,
+            ),
+          ],
         ),
         const Spacer(),
         const SizedBox(height: 16),
@@ -1038,19 +1043,15 @@ class _AddLightningInvoiceScreenState
     return parts.isEmpty ? null : parts.join(' · ');
   }
 
-  List<InvoiceCardRow> _counterpartRows(
-    AppLocalizations l10n,
-    TradeInfo trade,
-  ) {
+  List<Widget> _counterpartRows(AppLocalizations l10n, TradeInfo trade) {
     final fiat = formatInvoiceFiat(l10n, trade);
-    final method = trade.order.paymentMethod.trim();
     return [
       invoiceCounterpartRow(ref, l10n, trade, l10n.invoiceSellerLabel),
       if (fiat != null)
-        (
-          label: l10n.invoiceYouPayLabel,
-          value: method.isEmpty ? fiat : '$fiat · $method',
-          trailing: null,
+        invoiceFiatRow(
+          l10n.invoiceYouPayLabel,
+          fiat,
+          trade.order.paymentMethod,
         ),
     ];
   }
