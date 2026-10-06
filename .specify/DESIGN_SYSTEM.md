@@ -239,6 +239,7 @@ Reuse before building (principle 4). These are the parts a new screen is assembl
 |---|---|---|
 | DS-CMP-8 | **MUST.** A card or row sits on `surface`, has radius 18, padding 14 and no elevation. When tappable, it is `Material` + `InkWell`, so the ripple follows the radius. | review |
 | DS-CMP-9 | **MUST.** A status chip is a pill: 6-px dot, upper-case 10-sp label, padding 8 × 4 (horizontal × vertical), 6 between dot and label, with a tinted fill and border from the area's `chip*` tokens (`TradeListChip`, `TradeStatusChip`). The legacy `StatusChip` / `RoleBadge` with `AppColors.status*` is not used in new code. | review |
+| DS-CMP-22 | **MUST.** An order or trade id reads `shortOrderId`: the first 8 characters, `…`, the last 4 (`09150348…99b5`), in `AppFonts.figures`. It sits in an "ID" row of the screen's card, never in the app bar. The whole row copies the full id: it shows a visible `copy_rounded` icon, 16, in the area's lime icon ink, and confirms with the "Copied" snackbar (DS-CMP-15). The full id is shown only where it must be read whole, in the dispute info card. A mention that is not a control (a notification line) uses the same short form, without copy. `OrderIdRow` is the reference. | review |
 
 ### 6.4 Inputs
 
