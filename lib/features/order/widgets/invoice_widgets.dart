@@ -380,7 +380,15 @@ class _InvoiceTimeBandState extends State<InvoiceTimeBand>
           Expanded(
             child:
                 elapsed != null
-                    ? Text(elapsed, style: TextStyle(fontSize: 12, color: ink))
+                    // Appears while the user watches the countdown: announced
+                    // (DS-A11Y-2). The ticking figure below is not.
+                    ? Semantics(
+                      liveRegion: true,
+                      child: Text(
+                        elapsed,
+                        style: TextStyle(fontSize: 12, color: ink),
+                      ),
+                    )
                     : Semantics(
                       label: widget.sentence(time),
                       excludeSemantics: true,
