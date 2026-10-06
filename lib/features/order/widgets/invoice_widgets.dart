@@ -539,7 +539,13 @@ class InvoiceCancelLink extends StatelessWidget {
       style: TextButton.styleFrom(
         foregroundColor: danger ? pal.cancelDanger : book.textSecondary,
         minimumSize: const Size.fromHeight(_kHitTarget),
-        textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
+        // A button's textStyle replaces the theme's instead of merging with
+        // it: without a family the label falls back to the platform font.
+        textStyle: const TextStyle(
+          fontFamily: AppFonts.ui,
+          fontSize: 13,
+          fontWeight: FontWeight.w500,
+        ),
       ),
       child: Text(label),
     );
