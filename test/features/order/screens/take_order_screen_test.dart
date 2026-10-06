@@ -163,6 +163,57 @@ TextSpan _figureOf(WidgetTester tester, String prefix) {
 }
 
 void main() {
+  // DS-CMP-21 (#723): a time left says what runs out and sits in the body,
+  // never as a bare clock in the app bar, and hours never read as `23:12`.
+  group('TakeOrderScreen countdown', () {
+    testWidgets('is a labeled row of the data card, not an app-bar clock', (
+      tester,
+    ) async {
+      await withClock(Clock.fixed(kFakeNow), () async {
+        await _pump(tester, order: _order());
+
+        final row = find.ancestor(
+          of: find.text('Expires in'),
+          matching: find.byType(OrderDataRow),
+        );
+        expect(row, findsOneWidget);
+        expect(
+          find.descendant(of: row, matching: find.text('23 h 12')),
+          findsOneWidget,
+        );
+        expect(find.text('23:12'), findsNothing);
+        expect(
+          find.descendant(
+            of: find.byType(AppBar),
+            matching: find.byIcon(Icons.schedule_rounded),
+          ),
+          findsNothing,
+        );
+      });
+    });
+
+    testWidgets('names the end in the same row once the order is gone', (
+      tester,
+    ) async {
+      await withClock(Clock.fixed(kFakeNow), () async {
+        await _pump(
+          tester,
+          order: _order(expiresIn: const Duration(seconds: -1)),
+        );
+
+        final row = find.ancestor(
+          of: find.text('Closed'),
+          matching: find.byType(OrderDataRow),
+        );
+        expect(row, findsOneWidget);
+        expect(
+          find.descendant(of: row, matching: find.text('Status')),
+          findsOneWidget,
+        );
+      });
+    });
+  });
+
   group('TakeOrderScreen buying BTC', () {
     testWidgets('shows what is paid, received, and who sells', (tester) async {
       await withClock(Clock.fixed(kFakeNow), () async {

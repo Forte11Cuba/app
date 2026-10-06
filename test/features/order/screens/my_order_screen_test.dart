@@ -87,6 +87,19 @@ Color? _colorOf(WidgetTester tester, String text) =>
     tester.widget<Text>(find.text(text)).style?.color;
 
 void main() {
+  // DS-CMP-21 (#723): the waiting order's countdown says what runs out, and
+  // hours never read as `23:12`.
+  testWidgets('the waiting countdown is labeled and reads hours as h mm', (
+    tester,
+  ) async {
+    await withClock(Clock.fixed(kFakeNow), () async {
+      await _pump(tester, order: _order());
+
+      expect(find.text('Expires in 23 h 12'), findsOneWidget);
+      expect(find.text('23:12'), findsNothing);
+    });
+  });
+
   group('MyOrderScreen waiting for a taker', () {
     testWidgets('shows the three blocks and both actions', (tester) async {
       await withClock(Clock.fixed(kFakeNow), () async {
@@ -129,8 +142,9 @@ void main() {
       });
     });
 
-    testWidgets('shows the fixed sats when the maker fixed them',
-        (tester) async {
+    testWidgets('shows the fixed sats when the maker fixed them', (
+      tester,
+    ) async {
       await withClock(Clock.fixed(kFakeNow), () async {
         await _pump(tester, order: _order(amountSats: BigInt.from(4000)));
 
@@ -171,8 +185,10 @@ void main() {
           },
         );
         addTearDown(
-          () => tester.binding.defaultBinaryMessenger
-              .setMockMethodCallHandler(SystemChannels.platform, null),
+          () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+            SystemChannels.platform,
+            null,
+          ),
         );
         await _pump(tester, order: _order());
 
@@ -230,8 +246,9 @@ void main() {
   });
 
   group('MyOrderScreen after the order moved on', () {
-    testWidgets('reads taken while the payment is pending, without Cancel',
-        (tester) async {
+    testWidgets('reads taken while the payment is pending, without Cancel', (
+      tester,
+    ) async {
       await withClock(Clock.fixed(kFakeNow), () async {
         await _pump(
           tester,
