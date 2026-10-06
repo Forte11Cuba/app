@@ -1146,7 +1146,7 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen>
               ),
             ).withAutomationId(AutomationIds.orderId, label: widget.orderId),
             const SizedBox(width: 8),
-            Icon(Icons.copy_outlined, size: 13, color: book.textTertiary),
+            Icon(Icons.copy_outlined, size: 12, color: book.textTertiary),
             const Spacer(),
             if (order != null)
               Text(_createdLabel(l10n, order.createdAt), style: faint),
