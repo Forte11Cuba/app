@@ -1618,6 +1618,11 @@ class AppLocalizationsFr extends AppLocalizations {
   }
 
   @override
+  String orderCurrencyNotAccepted(String currency) {
+    return 'Ce nœud Mostro n\'accepte pas $currency. Choisissez une autre devise';
+  }
+
+  @override
   String orderAmountOutOfRangeFiat(int min, int max, String currency) {
     return 'Le montant doit être compris entre $min et $max $currency pour ce nœud Mostro';
   }

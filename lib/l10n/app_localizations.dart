@@ -2914,6 +2914,12 @@ abstract class AppLocalizations {
   /// **'Amount must be between {min} and {max} sats for this Mostro node'**
   String orderAmountOutOfRange(int min, int max);
 
+  /// Shown in place of the order preview, with Publish disabled, when the active Mostro node does not list the selected currency in fiat_currencies_accepted and the user already entered an amount or payment methods
+  ///
+  /// In en, this message translates to:
+  /// **'This Mostro node does not accept {currency}. Pick another currency'**
+  String orderCurrencyNotAccepted(String currency);
+
   /// Shown when a market-price order amount converts outside the node min/max order amount, with the range expressed in the user's fiat currency
   ///
   /// In en, this message translates to:

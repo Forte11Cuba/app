@@ -469,6 +469,7 @@
   "daysActiveStatLabel": "giorni attivo",
   "timeRemainingLabel": "Tempo rimanente: {time}",
   "orderAmountOutOfRange": "L'importo deve essere compreso tra {min} e {max} sats per questo nodo Mostro",
+  "orderCurrencyNotAccepted": "Questo nodo Mostro non accetta {currency}. Scegli un'altra valuta",
   "orderAmountOutOfRangeFiat": "L'importo deve essere compreso tra {min} e {max} {currency} per questo nodo Mostro",
   "priceTypeMarket": "Mercato",
   "priceTypeFixed": "Fisso",

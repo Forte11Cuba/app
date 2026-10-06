@@ -469,6 +469,7 @@
   "daysActiveStatLabel": "dagen actief",
   "timeRemainingLabel": "Resterende tijd: {time}",
   "orderAmountOutOfRange": "Het bedrag moet tussen {min} en {max} sats liggen voor deze Mostro-node",
+  "orderCurrencyNotAccepted": "Deze Mostro-node accepteert geen {currency}. Kies een andere valuta",
   "orderAmountOutOfRangeFiat": "Het bedrag moet tussen {min} en {max} {currency} liggen voor deze Mostro-node",
   "priceTypeMarket": "Markt",
   "priceTypeFixed": "Vast",

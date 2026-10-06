@@ -1621,6 +1621,11 @@ class AppLocalizationsDe extends AppLocalizations {
   }
 
   @override
+  String orderCurrencyNotAccepted(String currency) {
+    return 'Dieser Mostro-Knoten akzeptiert $currency nicht. Wähle eine andere Währung';
+  }
+
+  @override
   String orderAmountOutOfRangeFiat(int min, int max, String currency) {
     return 'Der Betrag muss für diesen Mostro-Knoten zwischen $min und $max $currency liegen';
   }

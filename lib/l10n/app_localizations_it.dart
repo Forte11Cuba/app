@@ -1612,6 +1612,11 @@ class AppLocalizationsIt extends AppLocalizations {
   }
 
   @override
+  String orderCurrencyNotAccepted(String currency) {
+    return 'Questo nodo Mostro non accetta $currency. Scegli un\'altra valuta';
+  }
+
+  @override
   String orderAmountOutOfRangeFiat(int min, int max, String currency) {
     return 'L\'importo deve essere compreso tra $min e $max $currency per questo nodo Mostro';
   }

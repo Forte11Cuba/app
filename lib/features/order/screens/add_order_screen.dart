@@ -144,12 +144,25 @@ class _AddOrderScreenState extends ConsumerState<AddOrderScreen> {
     super.dispose();
   }
 
-  /// Moves the form off a currency the node does not accept ([fiatForNode]).
+  /// Moves the form off a currency the node does not accept ([fiatForNode]),
+  /// but only while the form is untouched: once an amount or a payment
+  /// method is in, switching would reinterpret the amount and drop the
+  /// methods that belong to the old currency. The build then shows the
+  /// currency as refused and keeps Publish disabled instead.
   void _keepFiatAccepted(List<String>? accepted) {
+    if (!_untouched) return;
     final selected = ref.read(selectedFiatCodeProvider.notifier);
     final next = fiatForNode(selected.state, accepted);
     if (next != selected.state) selected.state = next;
   }
+
+  /// No amount, no fixed sats and no payment method entered yet.
+  bool get _untouched =>
+      _amountController.text.isEmpty &&
+      _minController.text.isEmpty &&
+      _maxController.text.isEmpty &&
+      ref.read(fixedSatsProvider).isEmpty &&
+      ref.read(allPaymentMethodsProvider).isEmpty;
 
   // ── Locale-aware amounts ──────────────────────────────────────────────────
 
@@ -450,11 +463,13 @@ class _AddOrderScreenState extends ConsumerState<AddOrderScreen> {
     final symbols = _symbols(context);
 
     // The node's list can land after the form opened, or change with a node
-    // switch: a currency it does not accept gives way to its first one.
+    // switch: on an untouched form a currency it does not accept gives way to
+    // its first one; otherwise the currency stays and is shown as refused.
     ref.listen<List<String>?>(
       acceptedFiatCodesProvider,
       (_, accepted) => _keepFiatAccepted(accepted),
     );
+    final accepted = ref.watch(acceptedFiatCodesProvider);
 
     final side = ref.watch(orderSideProvider);
     final methods = ref.watch(allPaymentMethodsProvider);
@@ -465,6 +480,7 @@ class _AddOrderScreenState extends ConsumerState<AddOrderScreen> {
     final premium = ref.watch(premiumValueProvider);
     final node = ref.watch(mostroNodeProvider).valueOrNull;
     final amounts = _amounts(isRange, symbols);
+    final currencyRefused = fiatRefused(fiatCode, accepted);
 
     final satsRangeError = (!isMarket && !isRange && fixedSatsStr.isNotEmpty)
         ? satsOutOfNodeRange(
@@ -491,13 +507,16 @@ class _AddOrderScreenState extends ConsumerState<AddOrderScreen> {
           amounts: amounts,
         ) &&
         satsRangeError == null &&
-        fiatRangeError == null;
-    final rangeWarning = _rangeWarning(
-      l10n: l10n,
-      satsRangeError: satsRangeError,
-      fiatRangeError: fiatRangeError,
-      fiatCode: fiatCode,
-    );
+        fiatRangeError == null &&
+        !currencyRefused;
+    final rangeWarning = currencyRefused
+        ? l10n.orderCurrencyNotAccepted(fiatCode)
+        : _rangeWarning(
+            l10n: l10n,
+            satsRangeError: satsRangeError,
+            fiatRangeError: fiatRangeError,
+            fiatCode: fiatCode,
+          );
     // A node that bonds makers asks for a deposit before publishing
     // (docs/ANTI_ABUSE_BOND.md §6.2): said here, before the tap.
     final bondNotice = makerBondApplies(

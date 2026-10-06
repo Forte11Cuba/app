@@ -5,6 +5,14 @@ import 'package:mostro/features/about/models/mostro_instance.dart'
 import 'package:mostro/features/order/models/create_order_rules.dart';
 
 void main() {
+  group('fiatRefused', () {
+    test('only a listed node can refuse a currency', () {
+      expect(fiatRefused('USD', ['ARS']), isTrue);
+      expect(fiatRefused('ARS', ['ARS']), isFalse);
+      expect(fiatRefused('USD', null), isFalse);
+    });
+  });
+
   group('fiatForNode', () {
     test('keeps an accepted currency', () {
       expect(fiatForNode('USD', ['ARS', 'USD']), 'USD');

@@ -1598,6 +1598,11 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
+  String orderCurrencyNotAccepted(String currency) {
+    return 'This Mostro node does not accept $currency. Pick another currency';
+  }
+
+  @override
   String orderAmountOutOfRangeFiat(int min, int max, String currency) {
     return 'Amount must be between $min and $max $currency for this Mostro node';
   }

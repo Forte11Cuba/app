@@ -469,6 +469,7 @@
   "daysActiveStatLabel": "jours actifs",
   "timeRemainingLabel": "Temps restant : {time}",
   "orderAmountOutOfRange": "Le montant doit être compris entre {min} et {max} sats pour ce nœud Mostro",
+  "orderCurrencyNotAccepted": "Ce nœud Mostro n'accepte pas {currency}. Choisissez une autre devise",
   "orderAmountOutOfRangeFiat": "Le montant doit être compris entre {min} et {max} {currency} pour ce nœud Mostro",
   "priceTypeMarket": "Marché",
   "priceTypeFixed": "Fixe",

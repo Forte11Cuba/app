@@ -19,6 +19,7 @@ import 'package:mostro/features/order/widgets/currency_section.dart';
 import 'package:mostro/features/order/widgets/payment_method_section.dart';
 import 'package:mostro/features/order/widgets/price_section.dart';
 import 'package:mostro/features/settings/providers/mostro_nodes_provider.dart';
+import 'package:mostro/features/settings/providers/settings_provider.dart';
 import 'package:mostro/l10n/app_localizations.dart';
 import 'package:mostro/shared/utils/fiat_currencies.dart';
 import 'package:mostro/shared/widgets/mostro_modal.dart';
@@ -467,6 +468,8 @@ void main() {
         accepted: const ['ARS', 'EUR'],
       );
       expect(container.read(selectedFiatCodeProvider), 'ARS');
+      // The form's currency only: the default in settings is not written.
+      expect(container.read(settingsProvider).defaultFiatCode, isNull);
     });
 
     testWidgets('keeps the default when the node accepts it', (tester) async {
@@ -488,6 +491,65 @@ void main() {
       expect(container.read(selectedFiatCodeProvider), 'USD');
 
       listArrives.complete(const ['ARS']);
+      await tester.pumpAndSettle();
+
+      expect(container.read(selectedFiatCodeProvider), 'ARS');
+    });
+
+    testWidgets('a late list keeps what the user entered and refuses it', (
+      tester,
+    ) async {
+      final listArrives = Completer<List<String>>();
+      final container = await _pump(
+        tester,
+        acceptedByNode: {defaultMostroPubkey: listArrives},
+      );
+      await tester.enterText(_amountField(), '100');
+      container.read(selectedPaymentMethodsProvider.notifier).state = ['Zelle'];
+      await tester.pumpAndSettle();
+      expect(_publishButton(tester).onPressed, isNotNull);
+
+      listArrives.complete(const ['ARS']);
+      await tester.pumpAndSettle();
+
+      expect(container.read(selectedFiatCodeProvider), 'USD');
+      expect(container.read(selectedPaymentMethodsProvider), ['Zelle']);
+      expect(tester.widget<TextField>(_amountField()).controller!.text, '100');
+      expect(
+        find.text('This Mostro node does not accept USD. Pick another currency'),
+        findsOneWidget,
+      );
+      expect(_publishButton(tester).onPressed, isNull);
+    });
+
+    testWidgets("a node switch moves an untouched form to the new node's list", (
+      tester,
+    ) async {
+      final nodeA = Completer<List<String>>()..complete(const ['ARS', 'USD']);
+      final nodeB = Completer<List<String>>()..complete(const ['ARS']);
+      final container = await _pump(
+        tester,
+        acceptedByNode: {defaultMostroPubkey: nodeA, 'node-b': nodeB},
+      );
+      expect(container.read(selectedFiatCodeProvider), 'USD');
+
+      container.read(mostroPubkeyProvider.notifier).state = 'node-b';
+      await tester.pumpAndSettle();
+
+      expect(container.read(selectedFiatCodeProvider), 'ARS');
+    });
+
+    testWidgets('a pick survives the same list arriving again', (
+      tester,
+    ) async {
+      final container = await _pump(tester, accepted: const ['USD', 'ARS']);
+      await tester.tap(find.byType(CurrencyInlineSelector));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('ARS'));
+      await tester.pumpAndSettle();
+      expect(container.read(selectedFiatCodeProvider), 'ARS');
+
+      container.invalidate(activeNodeCurrenciesProvider);
       await tester.pumpAndSettle();
 
       expect(container.read(selectedFiatCodeProvider), 'ARS');
