@@ -363,8 +363,8 @@ pub async fn delete_identity() -> Result<()> {
 /// The parameters exist for the identity lifecycle test (#553): the database
 /// and the in-memory stores are process-wide, and tests run in parallel
 /// against them, so a real wipe there deletes the rows other tests are
-/// asserting on. The test injects doubles and asserts the wiring instead,
-/// while the wipe itself is covered where it can run alone
+/// asserting on. The test injects a throwaway store and doubles for the
+/// effects instead, while the full wipe is covered where it can run alone
 /// (`clear_identity_data_wipes_the_identity_and_keeps_the_device`,
 /// `clearing_the_store_leaves_no_chats_and_no_unread_count`). There is no
 /// switch to skip the wipe: a deletion always wipes, so no argument of
@@ -1099,9 +1099,8 @@ mod tests {
         }
     }
 
-    /// Ordered record of the deletion effects, shared by the two doubles so
-    /// the lifecycle test can assert the wiring of `delete_identity_inner`
-    /// as one literal call sequence (#553).
+    /// Ordered record of the deletion's non-store effects, so the lifecycle
+    /// test can assert the wiring of `delete_identity_inner` (#553).
     #[derive(Default)]
     struct CallLog(std::sync::Mutex<Vec<&'static str>>);
 
@@ -1127,203 +1126,6 @@ mod tests {
         }
         async fn forget_identity_state(&self) {
             self.0.push("forget_identity_state");
-        }
-    }
-
-    /// A `Storage` that records the deletion path's writes. Same discipline
-    /// as `FailingStore`: everything the path under test must not reach is
-    /// `unimplemented!()`, so an unexpected call is a test failure, not a
-    /// silent success.
-    struct SpyStore<'a>(&'a CallLog);
-
-    impl Storage for SpyStore<'_> {
-        async fn delete_identity(&self) -> Result<()> {
-            self.0.push("delete_identity");
-            Ok(())
-        }
-        async fn clear_trade_keys(&self) -> Result<()> {
-            self.0.push("clear_trade_keys");
-            Ok(())
-        }
-        async fn clear_identity_data(&self) -> Result<()> {
-            self.0.push("clear_identity_data");
-            Ok(())
-        }
-        async fn save_identity(&self, _identity: &IdentityInfo) -> Result<()> {
-            unimplemented!()
-        }
-        async fn save_order(&self, _order: &crate::api::types::OrderInfo) -> Result<()> {
-            unimplemented!()
-        }
-        async fn get_order(&self, _id: &str) -> Result<Option<crate::api::types::OrderInfo>> {
-            unimplemented!()
-        }
-        async fn delete_order(&self, _id: &str) -> Result<()> {
-            unimplemented!()
-        }
-        async fn list_orders(&self) -> Result<Vec<crate::api::types::OrderInfo>> {
-            unimplemented!()
-        }
-        async fn save_trade(&self, _trade: &crate::api::types::TradeInfo) -> Result<()> {
-            unimplemented!()
-        }
-        async fn get_trade(&self, _id: &str) -> Result<Option<crate::api::types::TradeInfo>> {
-            unimplemented!()
-        }
-        async fn list_trades(&self) -> Result<Vec<crate::api::types::TradeInfo>> {
-            unimplemented!()
-        }
-        async fn save_message(&self, _msg: &crate::api::types::ChatMessage) -> Result<()> {
-            unimplemented!()
-        }
-        async fn list_messages(
-            &self,
-            _trade_id: &str,
-        ) -> Result<Vec<crate::api::types::ChatMessage>> {
-            unimplemented!()
-        }
-        async fn list_unread_messages(&self) -> Result<Vec<crate::api::types::ChatMessage>> {
-            unimplemented!()
-        }
-        async fn mark_messages_read(&self, _trade_id: &str) -> Result<()> {
-            unimplemented!()
-        }
-        async fn message_exists(&self, _id: &str) -> Result<bool> {
-            unimplemented!()
-        }
-        async fn save_relay(&self, _relay: &crate::api::types::RelayInfo) -> Result<()> {
-            unimplemented!()
-        }
-        async fn delete_relay(&self, _url: &str) -> Result<()> {
-            unimplemented!()
-        }
-        async fn list_relays(&self) -> Result<Vec<crate::api::types::RelayInfo>> {
-            unimplemented!()
-        }
-        async fn get_identity(&self) -> Result<Option<IdentityInfo>> {
-            unimplemented!()
-        }
-        async fn update_trade_peer_reputation(
-            &self,
-            _order_id: &str,
-            _rating: f64,
-            _reviews: u32,
-            _days: u32,
-        ) -> Result<()> {
-            unimplemented!()
-        }
-        async fn update_trade_bond(
-            &self,
-            _order_id: &str,
-            _bond: &crate::api::types::BondInfo,
-        ) -> Result<()> {
-            unimplemented!()
-        }
-        async fn mark_trade_rated(&self, _order_id: &str, _rated_at: i64) -> Result<()> {
-            unimplemented!()
-        }
-        async fn set_cooperative_cancel_state(
-            &self,
-            _order_id: &str,
-            _state: crate::api::types::CooperativeCancelState,
-        ) -> Result<()> {
-            unimplemented!()
-        }
-        async fn update_trade_counterparty(
-            &self,
-            _order_id: &str,
-            _counterparty_pubkey: &str,
-        ) -> Result<()> {
-            unimplemented!()
-        }
-        async fn save_bond_claim(&self, _claim: &crate::api::types::BondClaim) -> Result<()> {
-            unimplemented!()
-        }
-        async fn get_bond_claim(
-            &self,
-            _node_pubkey: &str,
-            _order_id: &str,
-        ) -> Result<Option<crate::api::types::BondClaim>> {
-            unimplemented!()
-        }
-        async fn list_bond_claims(&self) -> Result<Vec<crate::api::types::BondClaim>> {
-            unimplemented!()
-        }
-        async fn delete_bond_claim(&self, _node_pubkey: &str, _order_id: &str) -> Result<()> {
-            unimplemented!()
-        }
-        async fn save_queued_message(
-            &self,
-            _msg: &crate::queue::outbox::QueuedMessage,
-        ) -> Result<()> {
-            unimplemented!()
-        }
-        async fn list_queued_messages(
-            &self,
-        ) -> Result<Vec<crate::queue::outbox::QueuedMessage>> {
-            unimplemented!()
-        }
-        async fn update_queued_message_status(
-            &self,
-            _id: &str,
-            _status: crate::api::types::QueuedMessageStatus,
-        ) -> Result<()> {
-            unimplemented!()
-        }
-        async fn delete_queued_message(&self, _id: &str) -> Result<()> {
-            unimplemented!()
-        }
-        async fn save_trade_key(&self, _order_id: &str, _key_index: u32) -> Result<()> {
-            unimplemented!()
-        }
-        async fn get_trade_key(&self, _order_id: &str) -> Result<Option<u32>> {
-            unimplemented!()
-        }
-        async fn get_order_id_by_trade_index(&self, _key_index: u32) -> Result<Option<String>> {
-            unimplemented!()
-        }
-        async fn delete_trade_key(&self, _order_id: &str) -> Result<()> {
-            unimplemented!()
-        }
-        async fn get_setting(&self, _key: &str) -> Result<Option<String>> {
-            unimplemented!()
-        }
-        async fn set_setting(&self, _key: &str, _value: &str) -> Result<()> {
-            unimplemented!()
-        }
-        async fn delete_setting(&self, _key: &str) -> Result<()> {
-            unimplemented!()
-        }
-        async fn save_active_mostro_pubkey(&self, _pubkey: &str) -> Result<()> {
-            unimplemented!()
-        }
-        async fn get_active_mostro_pubkey(&self) -> Result<Option<String>> {
-            unimplemented!()
-        }
-        async fn get_trade_by_order_id(
-            &self,
-            _order_id: &str,
-        ) -> Result<Option<crate::api::types::TradeInfo>> {
-            unimplemented!()
-        }
-        async fn delete_trade_by_order_id(&self, _order_id: &str) -> Result<()> {
-            unimplemented!()
-        }
-        async fn update_trade_order_id(
-            &self,
-            _old_order_id: &str,
-            _new_order_id: &str,
-        ) -> Result<()> {
-            unimplemented!()
-        }
-        async fn update_trade_fields(
-            &self,
-            _order_id: &str,
-            _status: Option<crate::api::types::OrderStatus>,
-            _hold_invoice: Option<String>,
-            _amount_sats: Option<u64>,
-        ) -> Result<()> {
-            unimplemented!()
         }
     }
 
@@ -1503,28 +1305,46 @@ mod tests {
             Some(1)
         );
 
-        // The deletion wiring (#553), asserted with doubles so the
-        // process-wide stores stay untouched — see `delete_identity_inner`.
-        // Every wipe effect runs (#533's acceptance criteria). Contract in
-        // this sequence: `release_identity_subscriptions` comes first, while
-        // the identity still exists. The rest is today's order, pinned
-        // because a wiring test reads cheapest as a literal transcript — not
-        // because it is semantic.
-        let wiped = CallLog::default();
-        delete_identity_inner(Some(&SpyStore(&wiped)), &SpyEffects(&wiped))
+        // What the deletion must wipe from the store, and what it must keep.
+        db.save_trade_key("order-a", 21).await.unwrap();
+        let cursor = crate::db::settings_keys::status_cursor("order-a");
+        db.set_setting(&cursor, "1").await.unwrap();
+        db.set_setting(crate::db::settings_keys::PUSH_ENABLED, "false")
+            .await
+            .unwrap();
+
+        // The deletion wiring (#553), against this test's throwaway store and
+        // with doubles for the effects, so the process-wide subscriptions,
+        // push registrations and in-memory stores stay untouched — see
+        // `delete_identity_inner`. Every wipe effect runs (#533's acceptance
+        // criteria). Contract in this sequence:
+        // `release_identity_subscriptions` comes first, while the identity
+        // still exists. The rest is today's order, pinned because a wiring
+        // test reads cheapest as a literal transcript — not because it is
+        // semantic.
+        let effects = CallLog::default();
+        delete_identity_inner(Some(&db), &SpyEffects(&effects))
             .await
             .unwrap();
         assert_eq!(
-            wiped.calls(),
+            effects.calls(),
             [
                 "release_identity_subscriptions",
                 "unregister_push",
-                "delete_identity",
-                "clear_trade_keys",
-                "clear_identity_data",
                 "forget_identity_state",
             ],
             "a deletion must run every wipe effect",
+        );
+        assert!(db.get_identity().await.unwrap().is_none());
+        assert_eq!(db.get_trade_key("order-a").await.unwrap(), None);
+        assert_eq!(db.get_setting(&cursor).await.unwrap(), None);
+        assert_eq!(
+            db.get_setting(crate::db::settings_keys::PUSH_ENABLED)
+                .await
+                .unwrap()
+                .as_deref(),
+            Some("false"),
+            "a deletion keeps the device's preferences",
         );
         assert!(get_identity().await.unwrap().is_none());
         assert_eq!(identity_generation().await, None);
@@ -1557,9 +1377,10 @@ mod tests {
         assert_ne!(reloaded, generation);
         assert!(while_identity_current(generation, async {}).await.is_none());
         let again = CallLog::default();
-        delete_identity_inner(Some(&SpyStore(&again)), &SpyEffects(&again))
+        delete_identity_inner(Some(&db), &SpyEffects(&again))
             .await
             .unwrap();
+        assert_eq!(again.calls().len(), 3, "every deletion runs every effect");
         assert!(get_identity().await.unwrap().is_none());
     }
 }
