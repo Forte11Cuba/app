@@ -597,7 +597,6 @@
   "aboutDaysValue": "{count, plural, =1{{count} dag} other{{count} dagen}}",
   "aboutCashuEscrowSection": "Cashu-escrow",
   "aboutCashuMintUrlLabel": "Mint",
-  "aboutCashuMintNotAdvertised": "Niet opgegeven",
   "aboutCashuLocktimeLabel": "Locktime van de escrow",
   "aboutCashuSettlementMarginLabel": "Afwikkelingsmarge",
   "escrowModeLightning": "Lightning",
@@ -1250,7 +1249,7 @@
   "lockEscrowClockInvalid": "De klok van je apparaat klopt niet, dus de escrow kan niet correct worden getimed. Corrigeer de datum en probeer het opnieuw.",
   "lockEscrowRetry": "Opnieuw versturen",
   "lockEscrowPendingSubmission": "Je escrow is vergrendeld, maar de node heeft het nog niet bevestigd. Opnieuw proberen is veilig — hij wordt niet een tweede keer vergrendeld.",
-  "lockEscrowMintUnknown": "Deze node heeft zijn mint niet gepubliceerd, dus er is geen plek om de escrow te vergrendelen.",
+  "lockEscrowMintNotSupported": "Deze node laat elke order zijn eigen mint kiezen, en deze versie van de app kan de escrow alleen vergrendelen op een node met één mint.",
   "lockEscrowNotRecorded": "De escrow heeft de node bereikt, maar dit apparaat kon er geen kopie van opslaan. De trade kan doorgaan, maar dit apparaat kan de escrow niet terugvorderen.",
   "lockEscrowRejectedToken": "De node heeft deze escrow niet geaccepteerd. Hij is opzijgezet — hij komt naar je terug als zijn vergrendeling afloopt — en de volgende poging vergrendelt een nieuwe.",
   "lockEscrowRejectedMint": "De node gebruikt een andere mint. Deze escrow is opzijgezet — hij komt naar je terug als zijn vergrendeling afloopt. Controleer de mint van de node voordat je het opnieuw probeert.",
@@ -1270,5 +1269,8 @@
   "messageMenuHint": "Berichtmenu openen",
   "moreReactions": "Meer reacties",
   "messageReactionLabel": "Reactie: {emoji}",
-  "reactionSendFailed": "De reactie kon niet worden verstuurd. Probeer het opnieuw."
+  "reactionSendFailed": "De reactie kon niet worden verstuurd. Probeer het opnieuw.",
+  "cashuAnyMint": "Elke mint",
+  "settingsMintLabel": "Mint",
+  "settingsMintCopied": "Mint-URL gekopieerd"
 }

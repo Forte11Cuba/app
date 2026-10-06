@@ -4,7 +4,7 @@ Auto-generated from all feature plans. Last updated: 2026-09-17
 
 ## Active Technologies
 - Rust stable 1.94+ (core); Dart 3.x / Flutter 3.x (UI shell) (004-mostro-p2p-client)
-- nostr-sdk 0.45+, mostro-core 0.16.0, flutter_rust_bridge 2.11.1, Riverpod (state),
+- nostr-sdk 0.45+, mostro-core 0.17.1, flutter_rust_bridge 2.11.1, Riverpod (state),
   go_router (navigation), sqlx (SQLite, native) / indexed_db_futures (IndexedDB, web),
   sembast (Dart UI-layer state), bip32/bip39 (keys), chacha20poly1305 (file encryption)
 - Sembast (Dart, all platforms) for UI-layer state; SQLite via `sqlx` (Rust, native) /
