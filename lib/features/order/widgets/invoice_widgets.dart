@@ -603,7 +603,7 @@ class InvoiceCounterpartCard extends StatelessWidget {
     final pal = InvoicePalette.of(context);
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: pal.subtleFill,
         borderRadius: BorderRadius.circular(18),
@@ -612,7 +612,7 @@ class InvoiceCounterpartCard extends StatelessWidget {
       child: Column(
         children: [
           for (var i = 0; i < rows.length; i++) ...[
-            if (i > 0) const SizedBox(height: 7),
+            if (i > 0) const SizedBox(height: 8),
             Row(
               crossAxisAlignment: CrossAxisAlignment.baseline,
               textBaseline: TextBaseline.alphabetic,
