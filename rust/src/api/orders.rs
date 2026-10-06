@@ -340,6 +340,13 @@ struct BookState {
     /// user's `is_mine`, `ours` and local status out of the book (#552
     /// review round 3).
     ownership_epoch: u64,
+    /// The `created_at` of the newest Kind 38383 revision applied to each
+    /// order, kept after its entry is removed. Relays do not all hold the
+    /// latest revision: one that lags serves an older event after the newer
+    /// one arrived from another, and that older event is dropped (#716).
+    /// Emptied with the book on a node switch ([`OrderBook::clear`]), so it
+    /// holds one entry per order seen from the active node.
+    newest_revision: HashMap<String, i64>,
 }
 
 /// A Kind 38383 order classified against the identity that was current when
@@ -356,6 +363,9 @@ pub(crate) struct IngestedOrder {
     ours: bool,
     /// [`BookState::ownership_epoch`] when the classification began.
     epoch: u64,
+    /// The event's own `created_at`, which the apply compares with the
+    /// newest revision of the order already applied (#716).
+    revision_at: Option<i64>,
 }
 
 impl BookState {
@@ -377,6 +387,15 @@ impl BookState {
             revision: self.revision,
             order,
         });
+    }
+
+    /// Whether a revision of `order_id` dated `at` is older than one already
+    /// applied. A revision from the same second is not: the daemon can
+    /// publish two in one second, and the later one must still apply.
+    fn is_stale(&self, order_id: &str, at: i64) -> bool {
+        self.newest_revision
+            .get(order_id)
+            .is_some_and(|&newest| at < newest)
     }
 
     /// Whether anything was there to remove.
@@ -489,6 +508,7 @@ impl OrderBook {
             book.replace_all(Vec::new(), &self.delta_tx);
             // Emptied for another node, whose relay has confirmed nothing.
             book.loaded = false;
+            book.newest_revision.clear();
         }
         let _ = self.tx.send(Vec::new());
     }
@@ -821,9 +841,19 @@ impl OrderBook {
             wire,
             ours,
             epoch,
+            revision_at,
         } = ingested;
         let (touched, changed) = {
             let mut book = self.orders.write().await;
+            // Under the lock: an ingest can pass the early check in
+            // `ingest_order_event_with` while a newer one is still being
+            // classified, and apply after it.
+            if let Some(at) = revision_at {
+                if book.is_stale(&wire.id, at) {
+                    return;
+                }
+                book.newest_revision.insert(wire.id.clone(), at);
+            }
             let (order, ours) = if book.ownership_epoch == epoch {
                 (order, ours)
             } else {
@@ -854,6 +884,12 @@ impl OrderBook {
 
     pub(crate) fn subscribe(&self) -> broadcast::Receiver<Vec<OrderInfo>> {
         self.tx.subscribe()
+    }
+
+    /// Whether a Kind 38383 revision of `order_id` dated `at` is older than
+    /// one the book already applied (#716).
+    async fn is_stale_revision(&self, order_id: &str, at: i64) -> bool {
+        self.orders.read().await.is_stale(order_id, at)
     }
 
     /// Remember `order`, as parsed from a Kind 38383 event, as the daemon's
@@ -8776,6 +8812,15 @@ async fn ingest_order_event_with(event: &nostr_sdk::prelude::Event, publish: Pub
             );
             let book = order_book();
             let revision_at = event.created_at.as_secs() as i64;
+            // Before the classification, which can write the trade row and
+            // the wire note: an older revision must reach neither.
+            if book.is_stale_revision(&info.id, revision_at).await {
+                log::debug!(
+                    "[orders] dropped older revision of order id={} at={revision_at}",
+                    info.id
+                );
+                return;
+            }
             let ingested = classify_ingested_order(info, book, Some(revision_at)).await;
             // The d-tag task may be gone (idled out) by the time a slow
             // payout completes: this feed then carries the seller's
@@ -8939,6 +8984,7 @@ async fn classify_ingested_order(
         wire,
         ours,
         epoch,
+        revision_at,
     }
 }
 
@@ -11268,6 +11314,7 @@ mod tests {
             order,
             ours,
             epoch,
+            revision_at: None,
         }
     }
 
