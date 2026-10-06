@@ -7,7 +7,7 @@ import '../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'types.dart';
 
-// These functions are ignored because they are not marked as `pub`: `clear_logs_and_report`, `create_in`, `current_bip39_seed`, `delete_identity_inner`, `delete_in`, `derive_trade_key_with`, `ensure_trade_key_index_at_least_with`, `ensure_trade_key_index_at_least`, `forget_identity_state`, `get_active_keys`, `get_active_trade_keys_up_to`, `get_active_trade_keys`, `get_transport_identity_keys`, `identity_generation`, `identity_lock`, `identity_slot`, `import_nsec_in`, `load_in`, `new`, `publish_index`, `reconcile_and_publish_to`, `reconcile_trade_key_index`, `record_wipe_intent`, `release_own_wipe_marker`, `require_durable_storage`, `retry_pending_wipe_if_vacant_in`, `retry_pending_wipe_if_vacant`, `retry_pending_wipe`, `trade_key_index_tx`, `while_identity_current`, `wipe_identity_rows`
+// These functions are ignored because they are not marked as `pub`: `clear_logs_and_report`, `create_in`, `current_bip39_seed`, `delete_identity_inner`, `delete_in`, `derive_trade_key_with`, `ensure_trade_key_index_at_least_with`, `ensure_trade_key_index_at_least`, `forget_identity_state`, `get_active_keys`, `get_active_trade_keys_up_to`, `get_active_trade_keys`, `get_transport_identity_keys`, `identity_generation`, `identity_lock`, `identity_slot`, `import_in`, `import_nsec_in`, `load_in`, `load_unlocked`, `new`, `publish_index`, `reconcile_and_publish_to`, `reconcile_trade_key_index`, `record_wipe_intent`, `release_own_wipe_marker`, `require_durable_storage`, `retry_pending_wipe_if_vacant_in`, `retry_pending_wipe`, `trade_key_index_tx`, `while_identity_current`, `wipe_identity_rows`
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `AppDeletionHooks`, `IdentitySlot`, `IdentityState`, `RecoveryProgress`
 // These functions are ignored (category: IgnoreBecauseExplicitAttribute): `forget_state`, `release_subscriptions`, `unregister_push`
 // These functions have error during generation (see debug logs or enable `stop_on_error: true` for more details): `forget_state`, `release_subscriptions`, `unregister_push`
@@ -60,6 +60,9 @@ Future<IdentityInfo> importFromMnemonic({
 
 /// Import identity from an nsec (bech32-encoded Nostr secret key).
 /// Note: nsec import produces a single key with no BIP-39 mnemonic backup.
+///
+/// Gated like [`import_from_mnemonic`]: into an empty slot only after a
+/// pending wipe is settled, refusing with `PendingWipeFailed` otherwise.
 Future<IdentityInfo> importFromNsec({required String nsec}) =>
     RustLib.instance.api.crateApiIdentityImportFromNsec(nsec: nsec);
 

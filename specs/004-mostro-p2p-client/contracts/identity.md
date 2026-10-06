@@ -75,7 +75,11 @@ Import identity from nsec (bech32-encoded private key).
 
 **Validation**: MUST be valid bech32 nsec format.
 
-**Errors**: `InvalidKey`, `StorageError`.
+**Pending wipe**: gated like `import_from_mnemonic` — retries a pending data
+wipe while no identity is loaded, and refuses with `PendingWipeFailed` when it
+fails again (issue #555).
+
+**Errors**: `InvalidKey`, `StorageError`, `PendingWipeFailed`.
 
 ---
 
@@ -160,6 +164,15 @@ deleting without it would let the replacement install over the rows a failed
 wipe kept, with nothing left to say so. A crash between the marker and the
 wipe leaves the identity's mnemonic in secure storage, so the next launch
 reloads it and drops the marker (below).
+
+Every transition of the identity slot — `create_identity`,
+`load_identity_from_mnemonic`, `import_from_mnemonic`, `import_from_nsec` and
+this deletion — runs alone, from its first read of the slot to its last
+write: a deletion holds that turn through the wipe. Otherwise, while it waits
+on the relays, the push server or the store, a second deletion could clear
+the marker it recorded, a reload of the same identity release it, or a
+replacement land before the wipe and lose its rows to it. Readers of the
+loaded identity never wait on a transition's I/O.
 
 A failed wipe is never turned into a failed deletion: by then the identity
 is already gone. It is reported **after** the log clear (so the failure is

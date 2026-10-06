@@ -272,7 +272,9 @@ bridged by flutter_rust_bridge.
   the wipe off it while the slot is empty, refusing the new identity (`PendingWipeFailed`) if it
   fails again or the marker is unreadable. The launch reload never wipes — with a live identity
   that would take its payout claims, which no restore brings back — it only drops a marker that
-  names the identity it reloaded, whose rows are its own (issue #555).
+  names the identity it reloaded, whose rows are its own (issue #555). Every slot transition
+  (create, load, both imports, delete) holds `IdentitySlot::lifecycle` end to end — a deletion
+  through its wipe — so none interleaves with another; a new one must too (a source scan checks).
 - **`OrderInfo::created_at` is when the order was created, not the event's time.** It comes from
   the NIP-69 `published_at` tag (mostro#1000), then the legacy `created_at` tag (daemon builds
   between mostro#971 and #1000), then the event's time on older nodes; a tag value is capped at

@@ -33,8 +33,9 @@ struct IdentityState {
 /// The loaded identity and the generation that tells it from the next one.
 ///
 /// The process has one ([`identity_slot`]); the lifecycle seams (`create_in`,
-/// `load_in`, `delete_in`) take it as a parameter so a test can drive them on
-/// a slot of its own, without racing the tests that share the global one.
+/// `load_in`, `import_in`, `import_nsec_in`, `delete_in`) take it as a
+/// parameter so a test can drive them on a slot of its own, without racing
+/// the tests that share the global one.
 #[flutter_rust_bridge::frb(ignore)]
 struct IdentitySlot {
     state: RwLock<Option<IdentityState>>,
@@ -42,6 +43,15 @@ struct IdentitySlot {
     /// that started under one identity apart from the next — even when the
     /// same mnemonic is imported again, which a pubkey comparison would not.
     generation: std::sync::atomic::AtomicU64,
+    /// Held by every transition of the slot — creation, load, import,
+    /// deletion — from its first read to its last write, so none interleaves
+    /// with another (review round 4 of #573). A deletion awaits the relays,
+    /// the push server and the store between reading its owner and wiping
+    /// that owner's rows; without this, a second deletion could clear the
+    /// marker it recorded, a reload release it, or a replacement land before
+    /// the wipe and lose its rows to it. Readers of the identity take only
+    /// `state`, so none of them waits on a transition's I/O.
+    lifecycle: tokio::sync::Mutex<()>,
 }
 
 #[flutter_rust_bridge::frb(ignore)]
@@ -50,6 +60,7 @@ impl IdentitySlot {
         Self {
             state: RwLock::const_new(None),
             generation: std::sync::atomic::AtomicU64::new(0),
+            lifecycle: tokio::sync::Mutex::const_new(()),
         }
     }
 }
@@ -197,6 +208,7 @@ async fn create_in<S: Storage>(
     slot: &IdentitySlot,
     db: Option<&S>,
 ) -> Result<IdentityCreationResult> {
+    let _transition = slot.lifecycle.lock().await;
     let mut guard = slot.state.write().await;
     if guard.is_some() {
         bail!("AlreadyExists");
@@ -263,6 +275,29 @@ pub async fn load_identity_from_mnemonic(
 /// [`load_identity_from_mnemonic`] on `slot`, against `db`, publishing the
 /// reconciled trade-key counter to `tx`.
 async fn load_in<S: Storage>(
+    slot: &IdentitySlot,
+    db: Option<&S>,
+    tx: &broadcast::Sender<u32>,
+    words: Vec<String>,
+    trade_key_index: u32,
+    privacy_mode: bool,
+    created_at: Option<i64>,
+) -> Result<IdentityInfo> {
+    let _transition = slot.lifecycle.lock().await;
+    load_unlocked(
+        slot,
+        db,
+        tx,
+        words,
+        trade_key_index,
+        privacy_mode,
+        created_at,
+    )
+    .await
+}
+
+/// [`load_in`] for a caller already holding `slot.lifecycle`.
+async fn load_unlocked<S: Storage>(
     slot: &IdentitySlot,
     db: Option<&S>,
     tx: &broadcast::Sender<u32>,
@@ -352,11 +387,14 @@ pub async fn import_from_mnemonic(words: Vec<String>, recover: bool) -> Result<I
     if recover && privacy_mode {
         bail!("PrivacyModeRecoveryUnavailable");
     }
-    // An import replaces the deleted identity just as a creation does, so it
-    // settles a pending wipe first — and refuses, like a creation, when it
-    // cannot (issue #555).
-    retry_pending_wipe_if_vacant().await?;
-    let info = load_identity_from_mnemonic(words, 0, privacy_mode, None).await?;
+    let info = import_in(
+        identity_slot(),
+        crate::db::app_db::db(),
+        trade_key_index_tx(),
+        words,
+        privacy_mode,
+    )
+    .await?;
     if recover {
         // NOTE: recovery is best-effort relative to the import, but this `?`
         // propagates a restore failure AFTER the identity has already been
@@ -369,14 +407,39 @@ pub async fn import_from_mnemonic(words: Vec<String>, recover: bool) -> Result<I
     Ok(info)
 }
 
-/// Import identity from an nsec (bech32-encoded Nostr secret key).
-/// Note: nsec import produces a single key with no BIP-39 mnemonic backup.
-pub async fn import_from_nsec(nsec: String) -> Result<IdentityInfo> {
-    import_nsec_in(identity_slot(), nsec).await
+/// The install half of [`import_from_mnemonic`], on `slot` against `db`: the
+/// pending-wipe retry and the load, as one transition — a creation slipping
+/// in between would find the slot it left empty.
+async fn import_in<S: Storage>(
+    slot: &IdentitySlot,
+    db: Option<&S>,
+    tx: &broadcast::Sender<u32>,
+    words: Vec<String>,
+    privacy_mode: bool,
+) -> Result<IdentityInfo> {
+    let _transition = slot.lifecycle.lock().await;
+    // An import replaces the deleted identity just as a creation does, so it
+    // settles a pending wipe first — and refuses, like a creation, when it
+    // cannot (issue #555).
+    retry_pending_wipe_if_vacant_in(slot, db).await?;
+    load_unlocked(slot, db, tx, words, 0, privacy_mode, None).await
 }
 
-/// [`import_from_nsec`] on `slot`.
-async fn import_nsec_in(slot: &IdentitySlot, nsec: String) -> Result<IdentityInfo> {
+/// Import identity from an nsec (bech32-encoded Nostr secret key).
+/// Note: nsec import produces a single key with no BIP-39 mnemonic backup.
+///
+/// Gated like [`import_from_mnemonic`]: into an empty slot only after a
+/// pending wipe is settled, refusing with `PendingWipeFailed` otherwise.
+pub async fn import_from_nsec(nsec: String) -> Result<IdentityInfo> {
+    import_nsec_in(identity_slot(), crate::db::app_db::db(), nsec).await
+}
+
+/// [`import_from_nsec`] on `slot`, against `db`.
+async fn import_nsec_in<S: Storage>(
+    slot: &IdentitySlot,
+    db: Option<&S>,
+    nsec: String,
+) -> Result<IdentityInfo> {
     let keys =
         Keys::parse(&nsec).map_err(|e| anyhow!("InvalidKey: {e}"))?;
     let public_key = keys.public_key().to_hex();
@@ -390,6 +453,8 @@ async fn import_nsec_in(slot: &IdentitySlot, nsec: String) -> Result<IdentityInf
         created_at: now,
     };
 
+    let _transition = slot.lifecycle.lock().await;
+    retry_pending_wipe_if_vacant_in(slot, db).await?;
     let mut guard = slot.state.write().await;
     *guard = Some(IdentityState {
         mnemonic_words: vec![], // no mnemonic for nsec imports
@@ -508,6 +573,9 @@ async fn delete_in<S: Storage>(
     hooks: &impl DeletionHooks,
     wipe_data: bool,
 ) -> Result<Vec<String>> {
+    // Held to the end: the owner read here is the identity the take below
+    // retires, and no transition sees the slot or the marker in between.
+    let _transition = slot.lifecycle.lock().await;
     let Some(owner) = slot
         .state
         .read()
@@ -711,16 +779,12 @@ async fn retry_pending_wipe<S: Storage>(db: &S) -> Result<()> {
     Ok(())
 }
 
-/// [`retry_pending_wipe`] for the import, which does not hold the identity
-/// lock up to the install: retries only while the slot is empty, checked
-/// under the write lock. Dart deletes the current identity before importing,
-/// so that is every import it makes; a slot already taken is the launch
-/// reload's case, where a retry would take the live identity's data.
-async fn retry_pending_wipe_if_vacant() -> Result<()> {
-    retry_pending_wipe_if_vacant_in(identity_slot(), crate::db::app_db::db()).await
-}
-
-/// [`retry_pending_wipe_if_vacant`] on `slot`, against `db`.
+/// [`retry_pending_wipe`] for the imports, which may find the slot taken:
+/// retries only while it is empty. Dart deletes the current identity before
+/// importing, so that is every import it makes; a slot already taken is the
+/// launch reload's case, where a retry would take the live identity's data.
+/// The caller holds `slot.lifecycle`, so the slot stays as checked until it
+/// installs.
 async fn retry_pending_wipe_if_vacant_in<S: Storage>(
     slot: &IdentitySlot,
     db: Option<&S>,
@@ -2477,17 +2541,20 @@ mod tests {
             "the retry must run after the guard and before the install"
         );
 
-        let body = body_of("pub async fn import_from_mnemonic(");
-        let retry = body
-            .find("retry_pending_wipe_if_vacant().await?")
-            .expect("the import retries the pending wipe and stops on failure");
-        let load = body
-            .find("load_identity_from_mnemonic(")
-            .expect("the import loads the phrase");
-        assert!(
-            retry < load,
-            "the retry must run before the import installs"
-        );
+        for import in ["async fn import_in<", "async fn import_nsec_in<"] {
+            let body = body_of(import);
+            let retry = body
+                .find("retry_pending_wipe_if_vacant_in(slot, db).await?")
+                .expect("the import retries the pending wipe and stops on failure");
+            let install = body
+                .find("load_unlocked(")
+                .or_else(|| body.find("*guard = Some"))
+                .expect("the import installs");
+            assert!(
+                retry < install,
+                "the retry must run before {import} installs"
+            );
+        }
 
         let body = body_of("async fn retry_pending_wipe_if_vacant_in<");
         let vacant = body
@@ -2498,7 +2565,7 @@ mod tests {
             .expect("and then retries");
         assert!(vacant < retry, "the slot is checked before the wipe");
 
-        let body = body_of("async fn load_in<");
+        let body = body_of("async fn load_unlocked<");
         assert!(
             !body.contains("retry_pending_wipe"),
             "the launch reload runs with a live identity — a wipe there takes its data"
@@ -2506,6 +2573,99 @@ mod tests {
         assert!(
             body.contains("release_own_wipe_marker(db, &public_key)"),
             "the launch reload settles a marker its own identity left"
+        );
+    }
+
+    /// Every transition holds the slot's lifecycle lock from its first read
+    /// to its last write (review round 4 of #573), and only transitions
+    /// install an identity: a new function that fills the slot without the
+    /// lock would reopen the interleavings the concurrent tests pin.
+    #[test]
+    fn every_transition_of_the_slot_holds_the_lifecycle_lock() {
+        let source = include_str!("identity.rs");
+        let production = &source[..source.find("#[cfg(test)]\nmod tests").expect("tests")];
+        let body_of = |signature: &str| {
+            let start = production.find(signature).expect(signature);
+            &production[start..start + production[start..].find("\n}\n").expect("it ends")]
+        };
+
+        for transition in [
+            "async fn create_in<",
+            "async fn load_in<",
+            "async fn import_in<",
+            "async fn import_nsec_in<",
+            "async fn delete_in<",
+        ] {
+            let body = body_of(transition);
+            let lock = body
+                .find("slot.lifecycle.lock().await")
+                .unwrap_or_else(|| panic!("{transition} must hold the lifecycle lock"));
+            let open = body.find(") -> Result<").expect("it returns a Result");
+            let open = open + body[open..].find("{\n").expect("its body opens");
+            // The first line of code that names the slot; comments may too.
+            let first_use = open
+                + body[open..]
+                    .match_indices("slot")
+                    .map(|(at, _)| at)
+                    .find(|&at| {
+                        let line_start = body[..open + at].rfind('\n').map_or(0, |n| n + 1);
+                        !body[line_start..open + at].trim_start().starts_with("//")
+                    })
+                    .expect("it uses the slot");
+            assert_eq!(
+                first_use, lock,
+                "{transition} must lock before anything else touches the slot"
+            );
+        }
+
+        let installs: Vec<&str> = production
+            .match_indices("= Some(IdentityState {")
+            .map(|(at, _)| {
+                let start = production[..at]
+                    .rfind("\nasync fn ")
+                    .expect("inside a function")
+                    + 1;
+                let name_end = start + production[start..].find('<').expect("generic");
+                &production[start..name_end]
+            })
+            .collect();
+        assert_eq!(
+            installs,
+            [
+                "async fn create_in",
+                "async fn load_unlocked",
+                "async fn import_nsec_in"
+            ],
+            "only the transitions install an identity"
+        );
+        assert_eq!(
+            production.matches("load_unlocked(").count(),
+            2,
+            "load_unlocked is reached only from load_in and import_in, which hold the lock"
+        );
+    }
+
+    /// The nsec import used to install over whatever the slot held, without
+    /// the pending-wipe gate: it is gated now like the phrase import.
+    #[tokio::test]
+    async fn an_nsec_import_is_refused_while_a_wipe_keeps_failing() {
+        let (slot, store) = private_lifecycle();
+        store.put_setting(crate::db::settings_keys::IDENTITY_WIPE_PENDING, "pubkey-a");
+        let nsec = Keys::generate().secret_key().to_bech32().unwrap();
+
+        let err = import_nsec_in(slot, Some(store), nsec.clone())
+            .await
+            .expect_err("the previous identity's rows are still on disk");
+        assert_eq!(err.to_string(), "PendingWipeFailed");
+        assert!(slot.state.read().await.is_none(), "nothing installed");
+
+        store.wipes_succeed(true);
+        import_nsec_in(slot, Some(store), nsec).await.unwrap();
+        assert!(slot.state.read().await.is_some());
+        assert_eq!(
+            store.setting(crate::db::settings_keys::IDENTITY_WIPE_PENDING),
+            None,
+            "the retry settled the marker"
         );
     }
 
