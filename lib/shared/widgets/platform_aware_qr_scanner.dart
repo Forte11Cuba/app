@@ -39,6 +39,11 @@ QrInput qrInputFor(bool isWeb, TargetPlatform platform) {
   };
 }
 
+/// Whether this build scans with the camera ([qrInputFor] answers
+/// [QrInput.camera]). Where it does not, a Scan QR action is disabled and
+/// says why, rather than opening a second paste field.
+bool canScanQr() => qrInputFor(kIsWeb, defaultTargetPlatform) == QrInput.camera;
+
 /// Platform-aware QR scanner.
 ///
 /// On **Android and iOS**: opens the device camera using `mobile_scanner`. If
@@ -123,7 +128,7 @@ class _PlatformAwareQrScannerState extends State<PlatformAwareQrScanner> {
 
   @override
   Widget build(BuildContext context) {
-    if (qrInputFor(kIsWeb, defaultTargetPlatform) == QrInput.paste) {
+    if (!canScanQr()) {
       return _pasteForm();
     }
     return _CameraScanner(onDetected: _emitOnce, onError: _pasteForm);
