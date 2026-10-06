@@ -60,6 +60,12 @@ class PushNotificationService {
   @visibleForTesting
   void Function(String destination)? navigate;
 
+  /// Whether the permission prompt only shows from a user gesture: on the
+  /// web, Safari and Firefox ignore one asked for at startup, and the token
+  /// request after it fails. Test seam.
+  @visibleForTesting
+  bool promptNeedsGesture = kIsWeb;
+
   /// The bridge hand-over, with its retry while storage is not ready.
   final TokenHandoff _handoff = TokenHandoff(
     setToken:
