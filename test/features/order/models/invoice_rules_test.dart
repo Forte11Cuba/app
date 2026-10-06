@@ -41,6 +41,15 @@ void main() {
       expect(formatInvoiceMsat(2439500, 'en'), '2,439.5');
       expect(formatInvoiceMsat(250001, 'en'), '250.001');
     });
+
+    // The verdict carries the invoice's amount as a u64: dividing by 1000 as a
+    // double would round it before NumberFormat sees it.
+    test('keeps every digit of an amount past double precision', () {
+      expect(
+        formatInvoiceMsat(9007199254740993, 'en'),
+        '9,007,199,254,740.993',
+      );
+    });
   });
 
   group('holdInvoiceFee', () {
