@@ -477,6 +477,34 @@ void main() {
       expect(find.text(_en.cancelTradeDialogContent), findsNothing);
     });
 
+    testWidgets('a dispute keeps the request: the buyer can accept it', (
+      tester,
+    ) async {
+      // mostrod leaves the request in place when a dispute opens; the
+      // counterparty's cancel then ends the trade and closes the dispute.
+      await _pumpTradeDetail(
+        tester,
+        orderId: 'order-coop-dispute',
+        isBuyer: true,
+        status: OrderStatus.dispute,
+        trades: [
+          fakeTrade(
+            id: 'coop-dispute',
+            status: OrderStatus.dispute,
+            cooperativeCancelState: CooperativeCancelState.requestedByPeer,
+          ),
+        ],
+      );
+
+      expect(find.text(_en.tradeCancelRequestedByPeerNotice), findsOneWidget);
+      expect(_filledButtonWithText(_en.viewDisputeButton), findsOneWidget);
+      expect(_outlinedButtonWithText(_en.acceptCancelButton), findsOneWidget);
+
+      await tester.tap(_outlinedButtonWithText(_en.acceptCancelButton));
+      await _settle(tester);
+      expect(find.text(_en.cancelTradeDialogContentAccept), findsOneWidget);
+    });
+
     testWidgets('a settled trade shows no stale request', (tester) async {
       await _pumpTradeDetail(
         tester,
@@ -1007,7 +1035,10 @@ void main() {
       },
     );
 
-    testWidgets('buyer + disputed: View dispute only', (tester) async {
+    testWidgets('buyer + disputed: View dispute and Cancel, no Release', (
+      tester,
+    ) async {
+      // mostrod accepts a cooperative cancel from either party in `dispute`.
       await _pumpTradeDetail(
         tester,
         orderId: 'order-6',
@@ -1016,7 +1047,9 @@ void main() {
       );
 
       expect(_filledButtonWithText(_en.viewDisputeButton), findsOneWidget);
-      expect(find.byType(OutlinedButton), findsNothing);
+      expect(_outlinedButtonWithText(_en.cancelTradeButton), findsOneWidget);
+      expect(_outlinedButtonWithText(_en.releaseSatsButton), findsNothing);
+      expect(_outlinedButtonWithText(_en.openDisputeButton), findsNothing);
     });
 
     testWidgets('cancelled: the reason, Close, no chat, no timeline', (
