@@ -717,14 +717,15 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen>
             .watch(chatRoomsNotifierProvider)
             .where((r) => r.orderId == widget.orderId)
             .firstOrNull;
-    // The chat card stays above the scroll while the conversation is open,
-    // a completed trade's hour included (#642): the counterpart is one tap
-    // away wherever the user scrolled to.
-    final chatOpen =
+    // The chat card stays above the scroll: the counterpart is one tap away
+    // wherever the user scrolled to. A finished trade that had a chat keeps
+    // it, open during a completed trade's hour (#642), then closed — its
+    // messages still read. Open or closed is the chat list's own rule.
+    final chatClosed =
         ref.watch(chatRowStateProvider(widget.orderId)).group ==
-        ChatGroup.active;
-    final pinsChat =
-        view.showsChat || (view.isCompleted && room != null && chatOpen);
+        ChatGroup.closed;
+    final finished = view.isCompleted || status == TradeStatus.cancelled;
+    final pinsChat = view.showsChat || (finished && room != null);
 
     // No trade row and not the maker: this is no longer a trade of this
     // user's. A take lost before going active (its own cancel, a waiting
@@ -772,7 +773,7 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen>
       ),
       body: Column(
         children: [
-          _pinnedChat(pinsChat, book),
+          _pinnedChat(pinsChat, book, closed: chatClosed),
           Expanded(
             child: NotificationListener<ScrollUpdateNotification>(
               onNotification: (notification) {
@@ -862,10 +863,15 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen>
 
   // ── Chat ─────────────────────────────────────────────────────────────────
 
-  /// The chat card, pinned above the scrolling content while the
-  /// conversation is open: it slides in (fade + 8dp, 220 ms) and draws a line
-  /// under itself once content scrolls beneath it. Nothing otherwise.
-  Widget _pinnedChat(bool pinned, OrderBookPalette book) {
+  /// The chat card, pinned above the scrolling content once the trade has a
+  /// chat, [closed] when the conversation has ended: it slides in (fade +
+  /// 8dp, 220 ms) and draws a line under itself once content scrolls beneath
+  /// it. Nothing otherwise.
+  Widget _pinnedChat(
+    bool pinned,
+    OrderBookPalette book, {
+    required bool closed,
+  }) {
     final Widget child =
         pinned
             ? ValueListenableBuilder<bool>(
@@ -886,7 +892,7 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen>
                   ),
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(18, 4, 18, 8),
-                child: TradeChatCard(orderId: widget.orderId),
+                child: TradeChatCard(orderId: widget.orderId, closed: closed),
               ),
             )
             : const SizedBox.shrink(key: ValueKey('none'));

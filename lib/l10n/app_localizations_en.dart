@@ -2204,6 +2204,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get tradeChatEncrypted => 'End-to-end encrypted chat';
 
   @override
+  String get tradeChatClosed => 'Conversation closed · view messages';
+
+  @override
   String get tradeBodyWaitingPaymentBuyer =>
       'They\'re paying the hold invoice. Once the sats are locked, it\'s your turn to pay the fiat.';
 

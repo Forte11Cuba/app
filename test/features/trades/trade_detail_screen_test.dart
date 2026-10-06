@@ -70,9 +70,11 @@ Future<ProviderContainer> _pumpTradeDetail(
   bool privacyMode = false,
   NotificationsNotifier? notifications,
   ChatRowState? chatState,
+  List<Override> extraOverrides = const [],
 }) async {
   final container = createContainer(
     overrides: [
+      ...extraOverrides,
       if (chatState != null)
         chatRowStateProvider(orderId).overrideWithValue(chatState),
       if (notifications != null)
@@ -2109,7 +2111,7 @@ void main() {
         200,
         scrollable: find.byType(Scrollable).first,
       );
-      await tester.pumpAndSettle();
+      await _settle(tester);
 
       expect(tester.getTopLeft(find.byType(TradeChatCard)), before);
       expect(find.byType(TradeChatCard).hitTestable(), findsOneWidget);
@@ -2136,16 +2138,16 @@ void main() {
       isSelling: false,
     );
 
-    for (final (name, chatState, shown) in [
+    for (final (name, chatState, closed) in [
       (
-        'keeps it during its hour',
+        'keeps it open during its hour',
         const ChatRowState(group: ChatGroup.active, tone: ChatAvatarTone.waiting),
-        true,
+        false,
       ),
       (
-        'drops it once the hour is over',
+        'keeps it, closed, once the hour is over',
         const ChatRowState(group: ChatGroup.closed, tone: ChatAvatarTone.closed),
-        false,
+        true,
       ),
     ]) {
       testWidgets('a completed trade $name (#642)', (tester) async {
@@ -2159,10 +2161,81 @@ void main() {
         container.read(chatRoomsNotifierProvider.notifier).upsertRoom(room);
         await _settle(tester);
 
-        expect(find.byType(TradeChatCard), shown ? findsOneWidget : findsNothing);
+        expect(find.byType(TradeChatCard), findsOneWidget);
         expect(inList(TradeChatCard), findsNothing);
+        expect(
+          find.text(_en.tradeChatClosed),
+          closed ? findsOneWidget : findsNothing,
+        );
       });
     }
+
+    testWidgets('a trade cancelled after it was active keeps it, closed', (
+      tester,
+    ) async {
+      final container = await _pumpTradeDetail(
+        tester,
+        orderId: 'order-done',
+        isBuyer: true,
+        status: OrderStatus.canceled,
+        chatState: const ChatRowState(
+          group: ChatGroup.closed,
+          tone: ChatAvatarTone.closed,
+        ),
+      );
+      container.read(chatRoomsNotifierProvider.notifier).upsertRoom(
+        room.copyWith(unreadCount: 3),
+      );
+      await _settle(tester);
+
+      expect(find.text(_en.tradeChatClosed), findsOneWidget);
+      // A closed conversation has nothing left to read as new.
+      expect(find.text('3'), findsNothing);
+    });
+
+    testWidgets('a trade cancelled before it was active has no card', (
+      tester,
+    ) async {
+      await _pumpTradeDetail(
+        tester,
+        orderId: 'order-never-active',
+        isBuyer: true,
+        status: OrderStatus.canceled,
+      );
+      expect(find.byType(TradeChatCard), findsNothing);
+    });
+
+    testWidgets('the card turns closed when the conversation ends on screen', (
+      tester,
+    ) async {
+      final chatState = StateProvider(
+        (_) => const ChatRowState(
+          group: ChatGroup.active,
+          tone: ChatAvatarTone.waiting,
+        ),
+      );
+      final container = await _pumpTradeDetail(
+        tester,
+        orderId: 'order-done',
+        isBuyer: true,
+        status: OrderStatus.success,
+        extraOverrides: [
+          chatRowStateProvider(
+            'order-done',
+          ).overrideWith((ref) => ref.watch(chatState)),
+        ],
+      );
+      container.read(chatRoomsNotifierProvider.notifier).upsertRoom(room);
+      await _settle(tester);
+      expect(find.text(_en.tradeChatEncrypted), findsOneWidget);
+
+      container.read(chatState.notifier).state = const ChatRowState(
+        group: ChatGroup.closed,
+        tone: ChatAvatarTone.closed,
+      );
+      await _settle(tester);
+      expect(find.text(_en.tradeChatClosed), findsOneWidget);
+    });
 
     // DS-A11Y-4: the pinned card leaves the rest reachable at 320 dp, 2x text,
     // in German.

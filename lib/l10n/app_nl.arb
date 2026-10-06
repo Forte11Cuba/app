@@ -639,6 +639,7 @@
     "description": "Line shown in place of the chat card until the trade is active"
   },
   "tradeChatEncrypted": "End-to-end versleutelde chat",
+  "tradeChatClosed": "Gesprek gesloten · berichten bekijken",
   "@tradeChatEncrypted": {
     "description": "Subtitle of the chat card under the counterpart alias"
   },

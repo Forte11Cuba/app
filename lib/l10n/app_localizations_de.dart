@@ -2233,6 +2233,9 @@ class AppLocalizationsDe extends AppLocalizations {
   String get tradeChatEncrypted => 'Ende-zu-Ende-verschlüsselter Chat';
 
   @override
+  String get tradeChatClosed => 'Unterhaltung beendet · Nachrichten ansehen';
+
+  @override
   String get tradeBodyWaitingPaymentBuyer =>
       'Der Verkäufer bezahlt die Hold-Rechnung. Sobald die Sats gesperrt sind, bist du mit der Fiat-Zahlung dran.';
 
