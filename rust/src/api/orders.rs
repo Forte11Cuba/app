@@ -23,6 +23,7 @@ use crate::mostro::status::{
     add_invoice_sync, cancellation_wipes_history, is_hard_terminal, map_core_status,
     peer_reputation, status_for_action, wire_status_applies,
 };
+use crate::nostr::first_answer::replaceable_rank;
 use crate::nostr::order_events::parse_order_event;
 
 // ── Per-trade key index map ───────────────────────────────────────────────────
@@ -348,14 +349,18 @@ struct BookState {
     /// user's `is_mine`, `ours` and local status out of the book (#552
     /// review round 3).
     ownership_epoch: u64,
-    /// The `created_at` of the newest Kind 38383 revision applied to each
-    /// order, kept after its entry is removed. Relays do not all hold the
-    /// latest revision: one that lags serves an older event after the newer
-    /// one arrived from another, and that older event is dropped (#716).
-    /// Emptied with the book on a node switch ([`OrderBook::clear`]), so it
-    /// holds one entry per order seen from the active node.
-    newest_revision: HashMap<String, i64>,
+    /// The rank ([`replaceable_rank`]) of the newest Kind 38383 revision
+    /// claimed for each order, kept after its entry is removed. Relays do not
+    /// all hold the latest revision: one that lags serves an older event after
+    /// the newer one arrived from another, and that older event is dropped
+    /// (#716). Emptied with the book on a node switch ([`OrderBook::clear`]),
+    /// so it holds one entry per order seen from the active node.
+    newest_revision: HashMap<String, RevisionRank>,
 }
+
+/// NIP-01's order among revisions of a replaceable event; see
+/// [`replaceable_rank`].
+type RevisionRank = (u64, std::cmp::Reverse<[u8; 32]>);
 
 /// A Kind 38383 order classified against the identity that was current when
 /// its classification began — see [`classify_ingested_order`].
@@ -371,9 +376,6 @@ pub(crate) struct IngestedOrder {
     ours: bool,
     /// [`BookState::ownership_epoch`] when the classification began.
     epoch: u64,
-    /// The event's own `created_at`, which the apply compares with the
-    /// newest revision of the order already applied (#716).
-    revision_at: Option<i64>,
 }
 
 impl BookState {
@@ -397,13 +399,20 @@ impl BookState {
         });
     }
 
-    /// Whether a revision of `order_id` dated `at` is older than one already
-    /// applied. A revision from the same second is not: the daemon can
-    /// publish two in one second, and the later one must still apply.
-    fn is_stale(&self, order_id: &str, at: i64) -> bool {
-        self.newest_revision
+    /// Record `rank` as the newest revision of `order_id`, unless one already
+    /// claimed outranks it: then nothing changes and the answer is `false`.
+    /// An equal rank is the same event again (another relay's copy, or the
+    /// d-tag subscription's), and is claimed as before.
+    fn claim_revision(&mut self, order_id: &str, rank: RevisionRank) -> bool {
+        if self
+            .newest_revision
             .get(order_id)
-            .is_some_and(|&newest| at < newest)
+            .is_some_and(|newest| rank < *newest)
+        {
+            return false;
+        }
+        self.newest_revision.insert(order_id.to_string(), rank);
+        true
     }
 
     /// Whether anything was there to remove.
@@ -849,19 +858,9 @@ impl OrderBook {
             wire,
             ours,
             epoch,
-            revision_at,
         } = ingested;
         let (touched, changed) = {
             let mut book = self.orders.write().await;
-            // Under the lock: an ingest can pass the early check in
-            // `ingest_order_event_with` while a newer one is still being
-            // classified, and apply after it.
-            if let Some(at) = revision_at {
-                if book.is_stale(&wire.id, at) {
-                    return;
-                }
-                book.newest_revision.insert(wire.id.clone(), at);
-            }
             let (order, ours) = if book.ownership_epoch == epoch {
                 (order, ours)
             } else {
@@ -894,10 +893,13 @@ impl OrderBook {
         self.tx.subscribe()
     }
 
-    /// Whether a Kind 38383 revision of `order_id` dated `at` is older than
-    /// one the book already applied (#716).
-    async fn is_stale_revision(&self, order_id: &str, at: i64) -> bool {
-        self.orders.read().await.is_stale(order_id, at)
+    /// Claim `event` as the newest revision of `order_id`; see
+    /// [`BookState::claim_revision`].
+    async fn claim_revision(&self, order_id: &str, event: &nostr_sdk::prelude::Event) -> bool {
+        self.orders
+            .write()
+            .await
+            .claim_revision(order_id, replaceable_rank(event))
     }
 
     /// Remember `order`, as parsed from a Kind 38383 event, as the daemon's
@@ -7230,7 +7232,8 @@ async fn apply_single_order_update(mut order: OrderInfo, revision_at: Option<i64
 /// What the single-order task made of one notification.
 #[derive(Debug, PartialEq)]
 enum SingleOrderEvent {
-    /// Not an event of this order from the node the task watches.
+    /// Not an event of this order from the node the task watches, or an
+    /// older revision than one already applied (#716).
     Ignored,
     /// Applied to the trade row and the book entry.
     Applied,
@@ -7276,6 +7279,11 @@ async fn handle_single_order_event(
         );
         return SingleOrderEvent::NodeChanged;
     }
+    // The firehose sees the same events: both claim from one record, so an
+    // older revision that reaches either one second is dropped (#716).
+    let Some(_revision) = claim_book_revision(order_id, event).await else {
+        return SingleOrderEvent::Ignored;
+    };
     log::info!(
         "[orders] d-tag update: order={} status={:?}",
         order_id,
@@ -7283,6 +7291,34 @@ async fn handle_single_order_event(
     );
     apply_single_order_update(order, Some(event.created_at.as_secs() as i64)).await;
     SingleOrderEvent::Applied
+}
+
+/// One mutex per order id, serializing the handling of its Kind 38383
+/// events across the firehose, the refetch and the d-tag subscription.
+/// Separate from [`order_locks`]: that lock is taken inside the handling
+/// (`note_public_success`), and a `tokio` mutex is not reentrant.
+static REVISION_LOCKS: OnceLock<std::sync::Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>> =
+    OnceLock::new();
+
+/// Serialize the handling of `order_id`'s Kind 38383 events and claim
+/// `event` as its newest revision. `None` when a revision already claimed
+/// outranks it: the event is from a relay that lags and changes nothing.
+/// Otherwise the guard is held until the handling ends, so a newer revision
+/// waits instead of running alongside and being overwritten by it.
+async fn claim_book_revision(
+    order_id: &str,
+    event: &nostr_sdk::prelude::Event,
+) -> Option<tokio::sync::OwnedMutexGuard<()>> {
+    let registry = REVISION_LOCKS.get_or_init(|| std::sync::Mutex::new(HashMap::new()));
+    let guard = lock_in(registry, order_id).await;
+    if order_book().claim_revision(order_id, event).await {
+        return Some(guard);
+    }
+    log::debug!(
+        "[orders] dropped older revision of order id={order_id} at={}",
+        event.created_at.as_secs()
+    );
+    None
 }
 
 /// Subscribe to K38383 updates for a single order (by `d`-tag) so that status
@@ -8818,17 +8854,13 @@ async fn ingest_order_event_with(event: &nostr_sdk::prelude::Event, publish: Pub
                 info.kind,
                 info.status
             );
+            // Held to the end: the classification below writes the trade row
+            // and the wire note, and an older revision must reach neither.
+            let Some(_revision) = claim_book_revision(&info.id, event).await else {
+                return;
+            };
             let book = order_book();
             let revision_at = event.created_at.as_secs() as i64;
-            // Before the classification, which can write the trade row and
-            // the wire note: an older revision must reach neither.
-            if book.is_stale_revision(&info.id, revision_at).await {
-                log::debug!(
-                    "[orders] dropped older revision of order id={} at={revision_at}",
-                    info.id
-                );
-                return;
-            }
             let ingested = classify_ingested_order(info, book, Some(revision_at)).await;
             // The d-tag task may be gone (idled out) by the time a slow
             // payout completes: this feed then carries the seller's
@@ -8992,7 +9024,6 @@ async fn classify_ingested_order(
         wire,
         ours,
         epoch,
-        revision_at,
     }
 }
 
@@ -11322,7 +11353,6 @@ mod tests {
             order,
             ours,
             epoch,
-            revision_at: None,
         }
     }
 
@@ -11354,7 +11384,16 @@ mod tests {
         author: &nostr_sdk::prelude::Keys,
     ) -> nostr_sdk::prelude::Event {
         use nostr::event::FinalizeEvent;
-        use nostr_sdk::prelude::{EventBuilder, Kind, Tag};
+        use nostr_sdk::prelude::{EventBuilder, Kind, Tag, Timestamp};
+        // Strictly increasing, so a test that ingests revisions in order sees
+        // the last one win: two built within one second would rank by id
+        // (NIP-01), and a random one of them would (#716).
+        static LAST_AT: std::sync::Mutex<u64> = std::sync::Mutex::new(0);
+        let at = {
+            let mut last = LAST_AT.lock().unwrap();
+            *last = (*last + 1).max(crate::rt::unix_now() as u64);
+            *last
+        };
         EventBuilder::new(Kind::from(38383u16), "")
             .tags([
                 Tag::parse(["d", order_id]).unwrap(),
@@ -11367,6 +11406,7 @@ mod tests {
                 Tag::parse(["fa", "20"]).unwrap(),
                 Tag::parse(["z", "order"]).unwrap(),
             ])
+            .custom_created_at(Timestamp::from_secs(at))
             .finalize(author)
             .unwrap()
     }
@@ -13235,24 +13275,67 @@ mod tests {
         assert_eq!(entry.status, OrderStatus::InProgress);
     }
 
-    /// #716: the guard drops only what is older. A newer revision still
-    /// applies, and one dated the same second as the last still applies: the
-    /// daemon can publish two revisions within one second.
+    /// #716 review: two revisions from one second rank as NIP-01 does, the
+    /// lowest id winning, whichever relay delivers first. A newer revision
+    /// still applies after both.
     #[tokio::test]
-    async fn a_newer_or_same_second_revision_still_applies() {
+    async fn same_second_revisions_rank_by_lowest_id_and_newer_ones_apply() {
         let node = nostr_sdk::prelude::Keys::generate();
+        for winner_first in [true, false] {
+            let order_id = uuid::Uuid::new_v4().to_string();
+            let pending = book_event_at(&order_id, "pending", &node, 1_000);
+            let in_progress = book_event_at(&order_id, "in-progress", &node, 1_000);
+            let (winner, loser, status) = if pending.id < in_progress.id {
+                (pending, in_progress, OrderStatus::Pending)
+            } else {
+                (in_progress, pending, OrderStatus::InProgress)
+            };
+            let order = if winner_first {
+                [&winner, &loser]
+            } else {
+                [&loser, &winner]
+            };
+            for event in order {
+                ingest_order_event_with(event, Publish::WhenBatchEnds).await;
+            }
+            let entry = order_book().get_order(&order_id).await.expect("book entry");
+            assert_eq!(entry.status, status, "winner_first={winner_first}");
+
+            let newer = book_event_at(&order_id, "success", &node, 2_000);
+            ingest_order_event_with(&newer, Publish::WhenBatchEnds).await;
+            assert!(order_book().get_order(&order_id).await.is_none());
+        }
+    }
+
+    /// #716 review: the d-tag subscription of a trade of ours receives the
+    /// same lagging relay's events. An older revision must change neither the
+    /// trade row nor the book entry, whichever path claimed the newer one.
+    #[tokio::test]
+    async fn the_d_tag_path_drops_an_older_revision() {
+        let db = bond_test_db().await;
+        let node = nostr_sdk::prelude::Keys::generate();
+        let node_hex = node.public_key().to_hex();
         let order_id = uuid::Uuid::new_v4().to_string();
+        // Before `active`: a `canceled` that reaches it wipes the trade.
+        db.save_trade(&seam_trade_row(&order_id, OrderStatus::WaitingPayment))
+            .await
+            .unwrap();
 
-        let first = book_event_at(&order_id, "pending", &node, 1_000);
-        ingest_order_event_with(&first, Publish::WhenBatchEnds).await;
-        let same_second = book_event_at(&order_id, "in-progress", &node, 1_000);
-        ingest_order_event_with(&same_second, Publish::WhenBatchEnds).await;
-        let entry = order_book().get_order(&order_id).await.expect("book entry");
-        assert_eq!(entry.status, OrderStatus::InProgress);
-
-        let newer = book_event_at(&order_id, "success", &node, 2_000);
+        let newer = book_event_at(&order_id, "in-progress", &node, 2_000);
         ingest_order_event_with(&newer, Publish::WhenBatchEnds).await;
-        assert!(order_book().get_order(&order_id).await.is_none());
+        let older = book_event_at(&order_id, "canceled", &node, 1_000);
+        let outcome = handle_single_order_event(&older, &order_id, &node.public_key(), || {
+            node_hex.clone()
+        })
+        .await;
+
+        assert_eq!(outcome, SingleOrderEvent::Ignored);
+        let row = db.get_trade_by_order_id(&order_id).await.unwrap();
+        assert_eq!(
+            row.map(|row| row.order.status),
+            Some(OrderStatus::WaitingPayment),
+            "an older canceled must not wipe the trade"
+        );
     }
 
     /// #642: the payout check and the sweep date a completion by the book's
