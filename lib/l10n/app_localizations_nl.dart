@@ -3342,9 +3342,6 @@ class AppLocalizationsNl extends AppLocalizations {
       'De node heeft de borg-invoice niet opnieuw gestuurd';
 
   @override
-  String get invoiceOrderIdCopied => 'Order-ID gekopieerd';
-
-  @override
   String get invoiceYouReceiveLabel => 'Je ontvangt';
 
   @override

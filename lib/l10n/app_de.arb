@@ -1049,7 +1049,6 @@
   "bondInvoiceMissing": "Dieses Gerät hat keine Kopie der Einlage-Rechnung. Fordere sie erneut vom Node an, um die Order weiter anzunehmen.",
   "bondRequestAgain": "Rechnung erneut anfordern",
   "bondRequestFailed": "Der Node hat die Einlage-Rechnung nicht erneut gesendet",
-  "invoiceOrderIdCopied": "Order-ID kopiert",
   "invoiceYouReceiveLabel": "Du erhältst",
   "invoiceToPayLabel": "Zu zahlen",
   "invoiceReceiveSemantics": "{sats} Satoshis zu erhalten",

@@ -1049,7 +1049,6 @@
   "bondInvoiceMissing": "Este dispositivo no tiene copia de la factura del depósito. Pídesela de nuevo al nodo para seguir tomando la orden.",
   "bondRequestAgain": "Pedir la factura de nuevo",
   "bondRequestFailed": "El nodo no reenvió la factura del depósito",
-  "invoiceOrderIdCopied": "ID de la orden copiado",
   "invoiceYouReceiveLabel": "Vas a recibir",
   "invoiceToPayLabel": "A pagar",
   "invoiceReceiveSemantics": "{sats} satoshis a recibir",

@@ -4,6 +4,8 @@ import 'package:mostro/core/activity_palette.dart';
 import 'package:mostro/core/app_theme.dart';
 import 'package:mostro/features/notifications/models/notification_model.dart';
 import 'package:mostro/features/notifications/models/notification_view_rules.dart';
+import 'package:mostro/features/order/models/order_detail_rules.dart'
+    show shortOrderId;
 import 'package:mostro/features/trades/models/trades_list_rules.dart';
 import 'package:mostro/features/trades/providers/trade_rows_provider.dart';
 import 'package:mostro/features/trades/widgets/trade_card.dart';
@@ -159,15 +161,15 @@ class _Header extends StatelessWidget {
     final l10n = AppLocalizations.of(context);
     final locale = Localizations.localeOf(context).toString();
     final textSec = book.textSecondary;
-    final shortId =
-        fallbackId.length > 8 ? fallbackId.substring(0, 8) : fallbackId;
+    // DS-CMP-22: the same short form as every other id, without copy.
+    final shortId = shortOrderId(fallbackId);
     final row = this.row;
     final hasTrade = row != null && !row.claimOnly;
 
     final String title;
     final String subtitle;
     if (!hasTrade) {
-      title = '${isDisputeGroup ? l10n.disputeWord : l10n.tradeWord} #$shortId';
+      title = '${isDisputeGroup ? l10n.disputeWord : l10n.tradeWord} $shortId';
       subtitle = row == null ? '' : paymentMethodLabel(row.paymentMethod);
     } else {
       title = tradeAmountSummary(
@@ -182,7 +184,7 @@ class _Header extends StatelessWidget {
       );
       subtitle = [
         paymentMethodLabel(row.paymentMethod),
-        '#$shortId',
+        shortId,
       ].where((s) => s.isNotEmpty).join(' · ');
     }
     final (icon, iconColor) =

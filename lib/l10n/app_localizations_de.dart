@@ -3357,9 +3357,6 @@ class AppLocalizationsDe extends AppLocalizations {
       'Der Node hat die Einlage-Rechnung nicht erneut gesendet';
 
   @override
-  String get invoiceOrderIdCopied => 'Order-ID kopiert';
-
-  @override
   String get invoiceYouReceiveLabel => 'Du erhältst';
 
   @override

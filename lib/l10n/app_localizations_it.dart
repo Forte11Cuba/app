@@ -3343,9 +3343,6 @@ class AppLocalizationsIt extends AppLocalizations {
       'Il nodo non ha reinviato la fattura del deposito';
 
   @override
-  String get invoiceOrderIdCopied => 'ID dell\'ordine copiato';
-
-  @override
   String get invoiceYouReceiveLabel => 'Riceverai';
 
   @override

@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
@@ -8,6 +7,7 @@ import 'package:mostro/core/automation/automation_id.dart';
 import 'package:mostro/core/automation/automation_ids.dart';
 import 'package:mostro/core/invoice_palette.dart';
 import 'package:mostro/features/order/models/invoice_rules.dart';
+import 'package:mostro/features/order/widgets/order_detail_cards.dart';
 import 'package:mostro/l10n/app_localizations.dart';
 import 'package:mostro/shared/providers/peer_nym_provider.dart';
 import 'package:mostro/src/rust/api/types.dart' show TradeInfo;
@@ -72,24 +72,12 @@ const _kSplitMarker = '\u{E000}';
 
 // ── App bar ───────────────────────────────────────────────────────────────────
 
-/// Back arrow, the action as title, and `#` + the first eight characters of
-/// the order id on the right; tapping the id copies the whole UUID.
+/// Back arrow and the action as title. The order id is not here: it is an ID
+/// row of the screen's card (DS-CMP-22).
 class InvoiceAppBar extends StatelessWidget implements PreferredSizeWidget {
-  const InvoiceAppBar({
-    super.key,
-    required this.title,
-    required this.orderId,
-    required this.orderIdAutomationId,
-    required this.copiedMessage,
-    this.onBack,
-  });
+  const InvoiceAppBar({super.key, required this.title, this.onBack});
 
   final String title;
-  final String orderId;
-  final String orderIdAutomationId;
-
-  /// Snackbar shown after the id is copied.
-  final String copiedMessage;
 
   /// Null hides the arrow (nothing to go back to).
   final VoidCallback? onBack;
@@ -123,44 +111,6 @@ class InvoiceAppBar extends StatelessWidget implements PreferredSizeWidget {
           color: book.textPrimary,
         ),
       ),
-      actions: [
-        Padding(
-          padding: const EdgeInsets.only(right: kInvoiceGutter - 8),
-          child: InkWell(
-            borderRadius: BorderRadius.circular(8),
-            onTap: () async {
-              await Clipboard.setData(ClipboardData(text: orderId));
-              if (!context.mounted) return;
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text(copiedMessage),
-                  duration: const Duration(seconds: 1),
-                ),
-              );
-            },
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(
-                minWidth: _kHitTarget,
-                minHeight: _kHitTarget,
-              ),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 8),
-                child: Center(
-                  child: Text(
-                    invoiceOrderTag(orderId),
-                    style: TextStyle(
-                      fontFamily: AppFonts.figures,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w500,
-                      color: book.textSecondary,
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ).withAutomationId(orderIdAutomationId, label: orderId),
-      ],
     );
   }
 }
@@ -208,10 +158,7 @@ class InvoiceHeroCard extends StatelessWidget {
         textBaseline: TextBaseline.alphabetic,
         children: [
           Text(
-            formatInvoiceSats(
-              sats,
-              Localizations.localeOf(context).toString(),
-            ),
+            formatInvoiceSats(sats, Localizations.localeOf(context).toString()),
             style: TextStyle(
               fontFamily: AppFonts.figures,
               fontSize: 38,
@@ -591,16 +538,28 @@ class InvoiceIconAction extends StatelessWidget {
 typedef InvoiceCardRow = ({String label, String value, String? trailing});
 
 /// Counterpart and fiat side of the trade, as label → value rows. The first
-/// row is a name; the rest are figures and use the figures face.
+/// row is a name; the rest are figures and use the figures face. With an
+/// [orderId], the last row is the order's ID row (DS-CMP-22); with no
+/// [rows], that row is the whole card.
 class InvoiceCounterpartCard extends StatelessWidget {
-  const InvoiceCounterpartCard({super.key, required this.rows});
+  const InvoiceCounterpartCard({
+    super.key,
+    this.rows = const [],
+    this.orderId,
+    this.orderIdAutomationId = AutomationIds.orderId,
+  });
 
   final List<InvoiceCardRow> rows;
+  final String? orderId;
+
+  /// The readout carrying the full id, which each screen names its own.
+  final String orderIdAutomationId;
 
   @override
   Widget build(BuildContext context) {
     final book = OrderBookPalette.of(context);
     final pal = InvoicePalette.of(context);
+    final orderId = this.orderId;
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(14),
@@ -650,8 +609,97 @@ class InvoiceCounterpartCard extends StatelessWidget {
               ],
             ),
           ],
+          if (orderId != null) ...[
+            if (rows.isNotEmpty) const SizedBox(height: 4),
+            _InvoiceOrderIdRow(
+              orderId: orderId,
+              automationId: orderIdAutomationId,
+            ),
+          ],
         ],
       ),
+    );
+  }
+}
+
+/// The ID row of [InvoiceCounterpartCard]: label, the short id and the copy
+/// icon; the whole row copies the full id (DS-CMP-22). 48 high, the minimum
+/// target (DS-CMP-6).
+class _InvoiceOrderIdRow extends StatelessWidget {
+  const _InvoiceOrderIdRow({required this.orderId, required this.automationId});
+
+  final String orderId;
+  final String automationId;
+
+  @override
+  Widget build(BuildContext context) {
+    final book = OrderBookPalette.of(context);
+    return Material(
+      type: MaterialType.transparency,
+      child: InkWell(
+        onTap: () => copyOrderId(context, orderId),
+        borderRadius: BorderRadius.circular(12),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 48),
+          child: Row(
+            children: [
+              Text(
+                AppLocalizations.of(context).orderDetailIdLabel,
+                style: TextStyle(fontSize: 12, color: book.textSecondary),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Align(
+                  alignment: AlignmentDirectional.centerEnd,
+                  child: OrderIdValue(
+                    orderId: orderId,
+                    color: book.textStrong,
+                    automationId: automationId,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// A state of an invoice screen with no card of its own (loading, waiting,
+/// paying through the wallet, closed): the order's ID card on top, [child]
+/// below, so the id reads the same in every state (DS-CMP-22).
+class InvoiceOrderIdBody extends StatelessWidget {
+  const InvoiceOrderIdBody({
+    super.key,
+    required this.orderId,
+    required this.automationId,
+    required this.child,
+  });
+
+  final String orderId;
+  final String automationId;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(
+            kInvoiceGutter,
+            8,
+            kInvoiceGutter,
+            0,
+          ),
+          child: InvoiceCounterpartCard(
+            orderId: orderId,
+            orderIdAutomationId: automationId,
+          ),
+        ),
+        Expanded(child: child),
+      ],
     );
   }
 }

@@ -20,6 +20,8 @@ import 'package:mostro/features/notifications/providers/notifications_provider.d
 import 'package:mostro/features/order/providers/invoice_providers.dart';
 import 'package:mostro/features/order/providers/trade_state_provider.dart';
 import 'package:mostro/features/order/widgets/invoice_clock.dart';
+import 'package:mostro/features/order/widgets/order_detail_cards.dart'
+    show OrderIdValue, copyOrderId;
 import 'package:mostro/features/rate/providers/rating_providers.dart';
 import 'package:mostro/features/trades/providers/release_pending_provider.dart';
 import 'package:mostro/features/trades/models/trade_status.dart';
@@ -506,16 +508,6 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen>
   }
 
   void _close() => context.canPop() ? context.pop() : context.go(AppRoute.home);
-
-  void _copyId() {
-    Clipboard.setData(ClipboardData(text: widget.orderId));
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(AppLocalizations.of(context).orderIdCopied),
-        duration: const Duration(seconds: 1),
-      ),
-    );
-  }
 
   // ── Status resolution ────────────────────────────────────────────────────
 
@@ -1127,7 +1119,7 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen>
   ) {
     final faint = TextStyle(fontSize: 11, color: book.textFaint);
     return InkWell(
-      onTap: _copyId,
+      onTap: () => copyOrderId(context, widget.orderId),
       borderRadius: BorderRadius.circular(8),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 6),
@@ -1145,26 +1137,14 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen>
               children: [
                 Text(l10n.tradeIdLabel, style: faint),
                 const SizedBox(width: 8),
-                // The visible id is shortened; the readout carries the whole
-                // id.
+                // DS-CMP-22: the short id and the copy icon; the readout
+                // carries the whole id.
                 Flexible(
-                  child: Text(
-                    _shortId(widget.orderId),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontFamily: AppFonts.figures,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w500,
-                      color: book.textTertiary,
-                    ),
-                  ).withAutomationId(
-                    AutomationIds.orderId,
-                    label: widget.orderId,
+                  child: OrderIdValue(
+                    orderId: widget.orderId,
+                    color: book.textTertiary,
                   ),
                 ),
-                const SizedBox(width: 8),
-                Icon(Icons.copy_outlined, size: 12, color: book.textTertiary),
               ],
             ),
             if (order != null)
@@ -1174,11 +1154,6 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen>
       ),
     );
   }
-
-  static String _shortId(String id) =>
-      id.length <= 12
-          ? id
-          : '${id.substring(0, 5)}…${id.substring(id.length - 4)}';
 
   /// `created today 17:41`, or `created 11 Sep 2026, 17:41` in the locale's
   /// own order — the same format as the own-order screen.

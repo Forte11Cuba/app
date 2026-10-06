@@ -381,9 +381,6 @@ class _PayBondInvoiceScreenState extends ConsumerState<PayBondInvoiceScreen>
     final canPop = Navigator.of(context).canPop();
     final appBar = InvoiceAppBar(
       title: l10n.bondTitle,
-      orderId: widget.orderId,
-      orderIdAutomationId: AutomationIds.bondOrderId,
-      copiedMessage: l10n.invoiceOrderIdCopied,
       onBack: canPop ? () => Navigator.of(context).maybePop() : null,
     );
 
@@ -391,14 +388,14 @@ class _PayBondInvoiceScreenState extends ConsumerState<PayBondInvoiceScreen>
       return Scaffold(
         backgroundColor: book.bg,
         appBar: appBar,
-        body: const Center(child: CircularProgressIndicator()),
+        body: _withId(const Center(child: CircularProgressIndicator())),
       );
     }
     if (trade == null) {
       return Scaffold(
         backgroundColor: book.bg,
         appBar: appBar,
-        body: Center(child: Text(l10n.tradeLoadError)),
+        body: _withId(Center(child: Text(l10n.tradeLoadError))),
       );
     }
 
@@ -418,7 +415,7 @@ class _PayBondInvoiceScreenState extends ConsumerState<PayBondInvoiceScreen>
         builder:
             (context, remaining, _) =>
                 remaining == Duration.zero && !_waiting
-                    ? _expired(l10n, maker: maker)
+                    ? _withId(_expired(l10n, maker: maker))
                     : _payable(
                       l10n,
                       trade: trade,
@@ -529,16 +526,23 @@ class _PayBondInvoiceScreenState extends ConsumerState<PayBondInvoiceScreen>
                         linkLabel: l10n.bondReadDocs,
                         onLink: _openDocs,
                       ),
-                      const SizedBox(height: 12),
-                      InvoiceCounterpartCard(
-                        rows: _context(
-                          l10n,
-                          trade,
-                          node?.bondAmountPct,
-                          maker: maker,
-                        ),
-                      ),
                     ],
+                    // The trade's context rows join the ID row (DS-CMP-22)
+                    // once the explainer is open.
+                    const SizedBox(height: 12),
+                    InvoiceCounterpartCard(
+                      rows:
+                          open
+                              ? _context(
+                                l10n,
+                                trade,
+                                node?.bondAmountPct,
+                                maker: maker,
+                              )
+                              : const [],
+                      orderId: widget.orderId,
+                      orderIdAutomationId: AutomationIds.bondOrderId,
+                    ),
                     const Spacer(),
                     const SizedBox(height: 16),
                     if (nwc)
@@ -767,32 +771,42 @@ class _PayBondInvoiceScreenState extends ConsumerState<PayBondInvoiceScreen>
     return Scaffold(
       backgroundColor: book.bg,
       appBar: appBar,
-      body: Padding(
-        padding: const EdgeInsets.all(kInvoiceGutter),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text(
-              maker ? l10n.bondInvoiceMissingMaker : l10n.bondInvoiceMissing,
-              textAlign: TextAlign.center,
-              style: TextStyle(color: book.textSecondary),
-            ),
-            const SizedBox(height: 16),
-            if (!maker)
-              InvoicePrimaryButton(
-                icon: Icons.refresh,
-                label: l10n.bondRequestAgain,
-                busy: _requesting,
-                onPressed: _requesting ? null : _requestAgain,
+      body: _withId(
+        Padding(
+          padding: const EdgeInsets.all(kInvoiceGutter),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                maker ? l10n.bondInvoiceMissingMaker : l10n.bondInvoiceMissing,
+                textAlign: TextAlign.center,
+                style: TextStyle(color: book.textSecondary),
               ),
-            const SizedBox(height: 4),
-            _leaveLink(l10n, maker: maker),
-          ],
+              const SizedBox(height: 16),
+              if (!maker)
+                InvoicePrimaryButton(
+                  icon: Icons.refresh,
+                  label: l10n.bondRequestAgain,
+                  busy: _requesting,
+                  onPressed: _requesting ? null : _requestAgain,
+                ),
+              const SizedBox(height: 4),
+              _leaveLink(l10n, maker: maker),
+            ],
+          ),
         ),
       ),
     );
   }
+
+  /// [body] under the order's ID card, for the states without the payable
+  /// screen's card (DS-CMP-22).
+  Widget _withId(Widget body) => InvoiceOrderIdBody(
+    orderId: widget.orderId,
+    automationId: AutomationIds.bondOrderId,
+    child: body,
+  );
 
   Future<void> _closeExpiredWindow() async {
     try {

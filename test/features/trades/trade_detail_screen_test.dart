@@ -1428,7 +1428,7 @@ void main() {
           ),
         );
         // The visible id is shortened around an ellipsis.
-        expect(find.text('a-ver…0123', skipOffstage: false), findsOneWidget);
+        expect(find.text('a-very-l…0123', skipOffstage: false), findsOneWidget);
       } finally {
         semantics.dispose();
       }

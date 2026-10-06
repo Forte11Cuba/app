@@ -5608,12 +5608,6 @@ abstract class AppLocalizations {
   /// **'The node did not resend the deposit invoice'**
   String get bondRequestFailed;
 
-  /// Snackbar after tapping the order id in the invoice app bar
-  ///
-  /// In en, this message translates to:
-  /// **'Order ID copied'**
-  String get invoiceOrderIdCopied;
-
   /// 13a hero card label above the amount (rendered uppercase)
   ///
   /// In en, this message translates to:

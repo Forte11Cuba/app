@@ -1049,7 +1049,6 @@
   "bondInvoiceMissing": "Cet appareil n'a pas de copie de la facture du dépôt. Redemande-la au nœud pour continuer à prendre l'ordre.",
   "bondRequestAgain": "Redemander la facture",
   "bondRequestFailed": "Le nœud n'a pas renvoyé la facture du dépôt",
-  "invoiceOrderIdCopied": "ID de l'ordre copié",
   "invoiceYouReceiveLabel": "Tu vas recevoir",
   "invoiceToPayLabel": "À payer",
   "invoiceReceiveSemantics": "{sats} satoshis à recevoir",

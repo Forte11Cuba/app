@@ -1049,7 +1049,6 @@
   "bondInvoiceMissing": "Dit apparaat heeft geen kopie van de borg-invoice. Vraag hem opnieuw bij de node op om de order alsnog te accepteren.",
   "bondRequestAgain": "De invoice opnieuw opvragen",
   "bondRequestFailed": "De node heeft de borg-invoice niet opnieuw gestuurd",
-  "invoiceOrderIdCopied": "Order-ID gekopieerd",
   "invoiceYouReceiveLabel": "Je ontvangt",
   "invoiceToPayLabel": "Te betalen",
   "invoiceReceiveSemantics": "{sats} satoshi te ontvangen",

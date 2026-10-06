@@ -256,9 +256,6 @@ class _PayLightningInvoiceScreenState
     final canPop = Navigator.of(context).canPop();
     final appBar = InvoiceAppBar(
       title: l10n.invoiceLockTitle,
-      orderId: widget.orderId,
-      orderIdAutomationId: AutomationIds.payOrderId,
-      copiedMessage: l10n.invoiceOrderIdCopied,
       onBack: canPop ? () => Navigator.of(context).maybePop() : null,
     );
     final tradeAsync = ref.watch(tradeInfoStreamProvider(widget.orderId));
@@ -277,14 +274,14 @@ class _PayLightningInvoiceScreenState
           () => Scaffold(
             backgroundColor: book.bg,
             appBar: appBar,
-            body: const Center(child: CircularProgressIndicator()),
+            body: _withId(const Center(child: CircularProgressIndicator())),
           ),
       error: (e, st) {
         debugPrint('[PayLightningInvoiceScreen] load error: $e\n$st');
         return Scaffold(
           backgroundColor: book.bg,
           appBar: appBar,
-          body: Center(child: Text(l10n.tradeLoadError)),
+          body: _withId(Center(child: Text(l10n.tradeLoadError))),
         );
       },
       data: (trade) {
@@ -296,17 +293,19 @@ class _PayLightningInvoiceScreenState
           return Scaffold(
             backgroundColor: book.bg,
             appBar: appBar,
-            body: Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  CircularProgressIndicator(color: book.lime),
-                  const SizedBox(height: 16),
-                  Text(
-                    l10n.tradeWaitingForHoldInvoice,
-                    style: TextStyle(color: book.textSecondary),
-                  ),
-                ],
+            body: _withId(
+              Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    CircularProgressIndicator(color: book.lime),
+                    const SizedBox(height: 16),
+                    Text(
+                      l10n.tradeWaitingForHoldInvoice,
+                      style: TextStyle(color: book.textSecondary),
+                    ),
+                  ],
+                ),
               ),
             ),
           );
@@ -317,43 +316,45 @@ class _PayLightningInvoiceScreenState
           return Scaffold(
             backgroundColor: book.bg,
             appBar: appBar,
-            body: Padding(
-              padding: const EdgeInsets.all(AppSpacing.lg),
-              child: Column(
-                children: [
-                  // The seller must see who took their order even when NWC
-                  // auto-pays the hold invoice — the app can settle without a
-                  // manual step, so this is where the decision matters (#305).
-                  if (peerTrade?.peerRating != null) ...[
-                    PeerReputationCard(
-                      rating: peerTrade!.peerRating!,
-                      reviews: peerTrade.peerReviews ?? 0,
-                      days: peerTrade.peerDaysOnMostro,
-                      counterpartIsBuyer: true,
+            body: _withId(
+              Padding(
+                padding: const EdgeInsets.all(AppSpacing.lg),
+                child: Column(
+                  children: [
+                    // The seller must see who took their order even when NWC
+                    // auto-pays the hold invoice — the app can settle without a
+                    // manual step, so this is where the decision matters (#305).
+                    if (peerTrade?.peerRating != null) ...[
+                      PeerReputationCard(
+                        rating: peerTrade!.peerRating!,
+                        reviews: peerTrade.peerReviews ?? 0,
+                        days: peerTrade.peerDaysOnMostro,
+                        counterpartIsBuyer: true,
+                      ),
+                      const SizedBox(height: AppSpacing.lg),
+                    ],
+                    Expanded(
+                      child: Center(
+                        // Once the wallet reports the payment, the pay button
+                        // must go: the widget re-enables it on its way out, and
+                        // an already-settled bolt11 sent again fails and drops
+                        // the seller into the manual QR for an invoice they
+                        // already paid (#244). mostrod's confirmation is what
+                        // leaves this screen, and it can take tens of seconds.
+                        child:
+                            _waiting
+                                ? _waitingForConfirmation(l10n)
+                                : NwcPaymentWidget(
+                                  bolt11: invoice,
+                                  amountSats: amountSats,
+                                  onPaymentSuccess: _onPaymentDetected,
+                                  onFallbackToManual:
+                                      () => setState(() => _manualMode = true),
+                                ),
+                      ),
                     ),
-                    const SizedBox(height: AppSpacing.lg),
                   ],
-                  Expanded(
-                    child: Center(
-                      // Once the wallet reports the payment, the pay button
-                      // must go: the widget re-enables it on its way out, and
-                      // an already-settled bolt11 sent again fails and drops
-                      // the seller into the manual QR for an invoice they
-                      // already paid (#244). mostrod's confirmation is what
-                      // leaves this screen, and it can take tens of seconds.
-                      child:
-                          _waiting
-                              ? _waitingForConfirmation(l10n)
-                              : NwcPaymentWidget(
-                                bolt11: invoice,
-                                amountSats: amountSats,
-                                onPaymentSuccess: _onPaymentDetected,
-                                onFallbackToManual:
-                                    () => setState(() => _manualMode = true),
-                              ),
-                    ),
-                  ),
-                ],
+                ),
               ),
             ),
           );
@@ -367,7 +368,7 @@ class _PayLightningInvoiceScreenState
             builder:
                 (context, remaining, _) =>
                     remaining == Duration.zero && !_waiting
-                        ? _expired(l10n)
+                        ? _withId(_expired(l10n))
                         : _payable(
                           l10n,
                           invoice: invoice,
@@ -464,6 +465,8 @@ class _PayLightningInvoiceScreenState
                             trailing: null,
                           ),
                       ],
+                      orderId: widget.orderId,
+                      orderIdAutomationId: AutomationIds.payOrderId,
                     ),
                     const Spacer(),
                     const SizedBox(height: 16),
@@ -475,6 +478,14 @@ class _PayLightningInvoiceScreenState
           ),
     );
   }
+
+  /// [body] under the order's ID card, for the states without a counterpart
+  /// card: the id reads the same while the invoice loads (DS-CMP-22).
+  Widget _withId(Widget body) => InvoiceOrderIdBody(
+    orderId: widget.orderId,
+    automationId: AutomationIds.payOrderId,
+    child: body,
+  );
 
   /// 168 dp of code inside a 12 dp white quiet zone. The tight box also
   /// answers the page's intrinsic-height pass, which `QrImageView` (built on
