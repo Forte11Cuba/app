@@ -119,7 +119,8 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   setupFirebaseCoreMocks();
 
-  test('startup asks for no permission whose prompt needs a gesture', () async {
+  test('a prompt that needs a gesture is asked only from the tap, and a grant '
+      'starts push', () async {
     // Arrange — a browser: the prompt shows only from a user gesture.
     debugDefaultTargetPlatformOverride = TargetPlatform.android;
     addTearDown(() => debugDefaultTargetPlatformOverride = null);
@@ -142,9 +143,34 @@ void main() {
     // Act — startup.
     await service.initialize();
 
-    // Assert — no prompt from startup, so no token either.
+    // Assert — no prompt from startup, so no token either; Settings is told
+    // to offer the tap.
     expect(messaging.prompts, 0);
     expect(messaging.tokenRequests, 0);
     expect(api.tokens, 0);
+    expect(await service.awaitsPermissionFromGesture(), isTrue);
+
+    // Act — the user dismisses the prompt without answering.
+    messaging.answer = AuthorizationStatus.notDetermined;
+    await service.requestPermissionFromGesture();
+
+    // Assert — still nothing, and the tap is still offered.
+    expect(messaging.tokenRequests, 0);
+    expect(await service.awaitsPermissionFromGesture(), isTrue);
+
+    // Act — a second tap, granted.
+    messaging
+      ..status = AuthorizationStatus.notDetermined
+      ..answer = AuthorizationStatus.authorized;
+    final prompts = messaging.prompts;
+    final asked = service.requestPermissionFromGesture();
+
+    // Assert — the prompt went out before anything was awaited, while the
+    // tap's user activation lasts.
+    expect(messaging.prompts, prompts + 1);
+    await asked;
+    expect(messaging.tokenRequests, 1);
+    expect(api.tokens, 1);
+    expect(await service.awaitsPermissionFromGesture(), isFalse);
   });
 }

@@ -705,6 +705,14 @@ in which conversation. The wake stays the sender's duty, in both chats.
   earlier. A denied check suspends refresh handoffs and clears the Rust token;
   granting permission retries without installing duplicate listeners. Master
   opt-out remains a separate gate and is never undone by a permission grant.
+- **Web permission not asked yet**: a browser shows the permission prompt only
+  from a user gesture (Safari, including an installed PWA, and Firefox ignore one
+  asked for at startup, and the token request after it fails). So on the web
+  `initialize()` never asks: while `Notification.permission` is `default` it stops
+  before the prompt, like a denial, and 10d offers the tap instead
+  (`requestPermissionFromGesture()`). That call reaches `Notification.requestPermission()`
+  before anything is awaited, while the tap's user activation lasts, and a grant runs
+  `retryInitialize()`. Mobile is unchanged: the OS shows its prompt at startup.
 - **Unsupported platform** (desktop; web when the browser lacks `Notification` /
   `PushManager`, or until the server accepts `web`): `set_push_token` is never
   called; the settings screen shows the unsupported state instead of the toggle.
@@ -838,6 +846,10 @@ first row and the contract is rewritten (T1.4).
   `PushServerUnreachable` (*"Push server unreachable — retrying"*), `PushNodeRefused`
   (*"This Mostro node is not accepted by the push server"*), `PushRateLimited`.
 - The **denied banner** (exists) is unchanged.
+- **Web, permission not asked yet** (`notificationPermissionUnaskedProvider`), while
+  push is on and not denied: the same banner shape, *"This browser has not been
+  allowed to show notifications yet."*, with the action *"Allow notifications"*, whose
+  tap shows the browser's prompt (§7.4).
 - **Unsupported platform** (desktop, or a browser without push, from `isSupported`,
   checked first): the master row is replaced by an info row *"Push notifications are
   not available on this platform"*; the event rows stay. On a supported browser the

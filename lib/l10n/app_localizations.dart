@@ -4354,6 +4354,18 @@ abstract class AppLocalizations {
   /// **'Open settings'**
   String get openSystemSettingsAction;
 
+  /// Web only: banner above the push settings while the browser has not been asked for the notification permission
+  ///
+  /// In en, this message translates to:
+  /// **'This browser has not been allowed to show notifications yet.'**
+  String get notificationsPermissionNotAsked;
+
+  /// Web only: link in that banner that shows the browser's permission prompt
+  ///
+  /// In en, this message translates to:
+  /// **'Allow notifications'**
+  String get allowNotificationsAction;
+
   /// Footnote: what a push notification does not carry, and the one true sentence about how it travels. Must not claim the token is encrypted.
   ///
   /// In en, this message translates to:

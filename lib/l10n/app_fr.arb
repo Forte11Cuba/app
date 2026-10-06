@@ -840,6 +840,8 @@
   "nwcBalanceSats": "{sats} sats",
   "notificationsSystemDenied": "Les notifications sont désactivées dans les réglages du système.",
   "openSystemSettingsAction": "Ouvrir les réglages",
+  "notificationsPermissionNotAsked": "Ce navigateur n'est pas encore autorisé à afficher des notifications.",
+  "allowNotificationsAction": "Autoriser les notifications",
   "notificationsPrivacyFootnote": "Les notifications ne contiennent ni montants ni contreparties. Un push passe par les serveurs de Google ou d’Apple et signale seulement qu’il y a quelque chose à voir.",
   "pushMasterToggleTitle": "Notifications push",
   "pushMasterToggleSubtitle": "Réveille l’app quand une mise à jour d’échange ou un message arrive. La notification elle-même ne contient rien.",

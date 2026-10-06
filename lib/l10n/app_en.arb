@@ -3334,6 +3334,14 @@
   "@openSystemSettingsAction": {
     "description": "Action of the denied-permission banner"
   },
+  "notificationsPermissionNotAsked": "This browser has not been allowed to show notifications yet.",
+  "@notificationsPermissionNotAsked": {
+    "description": "Web only: banner above the push settings while the browser has not been asked for the notification permission"
+  },
+  "allowNotificationsAction": "Allow notifications",
+  "@allowNotificationsAction": {
+    "description": "Web only: link in that banner that shows the browser's permission prompt"
+  },
   "notificationsPrivacyFootnote": "Notifications carry no amounts and no counterparties. A push travels through Google's or Apple's servers and says only that there is something to see.",
   "@notificationsPrivacyFootnote": {
     "description": "Footnote: what a push notification does not carry, and the one true sentence about how it travels. Must not claim the token is encrypted."

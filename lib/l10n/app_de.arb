@@ -840,6 +840,8 @@
   "nwcBalanceSats": "{sats} Sats",
   "notificationsSystemDenied": "Benachrichtigungen sind in den Systemeinstellungen deaktiviert.",
   "openSystemSettingsAction": "Einstellungen öffnen",
+  "notificationsPermissionNotAsked": "Dieser Browser darf noch keine Benachrichtigungen anzeigen.",
+  "allowNotificationsAction": "Benachrichtigungen erlauben",
   "notificationsPrivacyFootnote": "Benachrichtigungen enthalten keine Beträge und keine Gegenparteien. Ein Push läuft über die Server von Google oder Apple und sagt nur, dass es etwas zu sehen gibt.",
   "pushMasterToggleTitle": "Push-Benachrichtigungen",
   "pushMasterToggleSubtitle": "Weckt die App, wenn ein Trade-Update oder eine Nachricht eintrifft. Die Benachrichtigung selbst enthält nichts.",

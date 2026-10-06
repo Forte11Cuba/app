@@ -840,6 +840,8 @@
   "nwcBalanceSats": "{sats} sats",
   "notificationsSystemDenied": "Le notifiche sono disattivate nelle impostazioni di sistema.",
   "openSystemSettingsAction": "Apri impostazioni",
+  "notificationsPermissionNotAsked": "Questo browser non è ancora autorizzato a mostrare notifiche.",
+  "allowNotificationsAction": "Consenti le notifiche",
   "notificationsPrivacyFootnote": "Le notifiche non includono importi né controparti. Un push passa dai server di Google o di Apple e dice solo che c’è qualcosa da vedere.",
   "pushMasterToggleTitle": "Notifiche push",
   "pushMasterToggleSubtitle": "Risveglia l’app quando arriva un aggiornamento di scambio o un messaggio. La notifica in sé non contiene nulla.",
