@@ -60,6 +60,26 @@ void main() {
     });
   });
 
+  testWidgets('announces turning urgent once, not every tick', (tester) async {
+    var now = kFakeNow;
+    await withClock(Clock(() => now), () async {
+      await _pump(tester, expiresIn: const Duration(minutes: 5, seconds: 2));
+      tester.takeAnnouncements();
+
+      for (var i = 0; i < 8; i++) {
+        now = now.add(const Duration(seconds: 1));
+        await tester.pump(const Duration(seconds: 1));
+      }
+
+      expect(
+        [for (final a in tester.takeAnnouncements()) a.message],
+        ['04:59 left'],
+      );
+
+      await tester.pumpWidget(const SizedBox.shrink());
+    });
+  });
+
   testWidgets('turns coral under five minutes', (tester) async {
     await withClock(Clock.fixed(kFakeNow), () async {
       await _pump(tester, expiresIn: const Duration(minutes: 3));

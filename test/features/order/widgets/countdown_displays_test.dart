@@ -42,6 +42,20 @@ Color? _bandFill(WidgetTester tester) {
 Color? _figureColor(WidgetTester tester, String text) =>
     tester.widget<Text>(find.text(text)).style?.color;
 
+/// Rebuilds [build] once per second from [from] down to [to] seconds left,
+/// as the screens do, and returns what was announced meanwhile.
+Future<List<String>> _tick(
+  WidgetTester tester,
+  Widget Function(Duration left) build, {
+  required int from,
+  required int to,
+}) async {
+  for (var s = from; s >= to; s--) {
+    await _pump(tester, build(Duration(seconds: s)));
+  }
+  return [for (final a in tester.takeAnnouncements()) a.message];
+}
+
 /// DS-CMP-21 (#723): one formatter, one set of tones, and every countdown
 /// labeled.
 void main() {
@@ -90,11 +104,49 @@ void main() {
       );
 
       expect(_figureColor(tester, '00:30'), _trade.timerUrgent);
+      // The figure changes every second: as a live region, a screen reader
+      // would read each tick. Turning urgent is announced once instead.
       expect(
         tester.getSemantics(find.text('00:30')),
-        isSemantics(isLiveRegion: true),
+        isSemantics(isLiveRegion: false),
       );
       semantics.dispose();
+    });
+
+    testWidgets('announces turning urgent once, not every tick', (
+      tester,
+    ) async {
+      final said = await _tick(
+        tester,
+        (left) => TradeCountdown(
+          remaining: left,
+          total: const Duration(minutes: 15),
+          label: 'You have',
+          isWaiting: false,
+        ),
+        from: 62,
+        to: 50,
+      );
+
+      expect(said, ['You have 00:59']);
+    });
+
+    testWidgets('does not announce a countdown already urgent when shown', (
+      tester,
+    ) async {
+      final said = await _tick(
+        tester,
+        (left) => TradeCountdown(
+          remaining: left,
+          total: const Duration(minutes: 15),
+          label: 'You have',
+          isWaiting: false,
+        ),
+        from: 30,
+        to: 20,
+      );
+
+      expect(said, isEmpty);
     });
   });
 
@@ -130,6 +182,24 @@ void main() {
 
       expect(_bandFill(tester), _invoice.timeFill);
     });
+
+    testWidgets('announces turning urgent once, not every tick', (
+      tester,
+    ) async {
+      final said = await _tick(
+        tester,
+        (left) => InvoiceTimeBand(
+          remaining: left,
+          window: const Duration(minutes: 15),
+          sentence: (t) => 'The invoice expires in $t',
+          hours: _hours,
+        ),
+        from: 62,
+        to: 50,
+      );
+
+      expect(said, ['The invoice expires in 00:59']);
+    });
   });
 
   group('BondAmountRow', () {
@@ -149,6 +219,27 @@ void main() {
 
       expect(find.text('Pay within'), findsOneWidget);
       expect(find.text('10:00'), findsOneWidget);
+    });
+
+    testWidgets('announces turning urgent once, not every tick', (
+      tester,
+    ) async {
+      final said = await _tick(
+        tester,
+        (left) => BondAmountRow(
+          label: 'Refundable bond',
+          sats: 1500,
+          remaining: left,
+          window: const Duration(minutes: 15),
+          timeLabel: 'Pay within',
+          hours: _hours,
+          unit: 'sats',
+        ),
+        from: 62,
+        to: 50,
+      );
+
+      expect(said, ['Pay within 00:59']);
     });
   });
 }

@@ -167,6 +167,30 @@ void main() {
   // DS-CMP-21 (#723): a time left says what runs out and sits in the body,
   // never as a bare clock in the app bar, and hours never read as `23:12`.
   group('TakeOrderScreen countdown', () {
+    testWidgets('announces turning urgent once, not every tick', (
+      tester,
+    ) async {
+      var now = kFakeNow;
+      await withClock(Clock(() => now), () async {
+        // Created 3 minutes ago: a short window, urgent under a minute.
+        await _pump(
+          tester,
+          order: _order(expiresIn: const Duration(minutes: 1, seconds: 2)),
+        );
+        tester.takeAnnouncements();
+
+        for (var i = 0; i < 8; i++) {
+          now = now.add(const Duration(seconds: 1));
+          await tester.pump(const Duration(seconds: 1));
+        }
+
+        expect(
+          [for (final a in tester.takeAnnouncements()) a.message],
+          ['Expires in 00:59'],
+        );
+      });
+    });
+
     testWidgets('is a labeled row of the data card, not an app-bar clock', (
       tester,
     ) async {

@@ -66,6 +66,7 @@ OrderItem _order({
   BigInt? amountSats,
   OrderStatus status = OrderStatus.pending,
   String paymentMethod = 'Mercado Pago',
+  Duration expiresIn = const Duration(hours: 23, minutes: 12),
 }) => fakeOrder(
   id: _id,
   kind: kind,
@@ -77,7 +78,7 @@ OrderItem _order({
   status: status,
   isMine: true,
   minutesAgo: 3,
-  expiresAt: kFakeNow.add(const Duration(hours: 23, minutes: 12)),
+  expiresAt: kFakeNow.add(expiresIn),
 );
 
 Finder _byId(String id) =>
@@ -89,6 +90,30 @@ Color? _colorOf(WidgetTester tester, String text) =>
 void main() {
   // DS-CMP-21 (#723): the waiting order's countdown says what runs out, and
   // hours never read as `23:12`.
+  testWidgets('the waiting countdown announces turning urgent once', (
+    tester,
+  ) async {
+    var now = kFakeNow;
+    await withClock(Clock(() => now), () async {
+      // Created 3 minutes ago: a short window, urgent under a minute.
+      await _pump(
+        tester,
+        order: _order(expiresIn: const Duration(minutes: 1, seconds: 2)),
+      );
+      tester.takeAnnouncements();
+
+      for (var i = 0; i < 8; i++) {
+        now = now.add(const Duration(seconds: 1));
+        await tester.pump(const Duration(seconds: 1));
+      }
+
+      expect(
+        [for (final a in tester.takeAnnouncements()) a.message],
+        ['Expires in 00:59'],
+      );
+    });
+  });
+
   testWidgets('the waiting countdown is labeled and reads hours as h mm', (
     tester,
   ) async {
