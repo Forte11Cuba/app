@@ -110,7 +110,7 @@ void main() {
         expect(find.text('ARS'), findsOneWidget);
         expect(find.text('1,000'), findsOneWidget);
         expect(find.text('Waiting for a taker'), findsOneWidget);
-        expect(find.text('23:12'), findsOneWidget);
+        expect(find.text('Expires in 23 h 12'), findsOneWidget);
         expect(find.textContaining('Published 3m ago.'), findsOneWidget);
         expect(find.text('Mercado Pago'), findsOneWidget);
         expect(find.text('09150348…99b5'), findsOneWidget);
@@ -262,7 +262,7 @@ void main() {
           _dark.statusHoldText,
         );
         // The order expiry is not a trade-stage deadline: no countdown.
-        expect(find.text('23:12'), findsNothing);
+        expect(find.textContaining('Expires in'), findsNothing);
         expect(find.textContaining('Published'), findsNothing);
         // The daemon refuses a maker cancel once a taker is in.
         expect(find.text('Cancel'), findsNothing);

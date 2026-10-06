@@ -61,13 +61,6 @@ void main() {
     });
   });
 
-  group('countdown', () {
-    test('turns urgent under a minute', () {
-      expect(isInvoiceCountdownUrgent(const Duration(seconds: 60)), isFalse);
-      expect(isInvoiceCountdownUrgent(const Duration(seconds: 59)), isTrue);
-    });
-  });
-
   group('invoiceCheckFromVerdict', () {
     test('maps every verdict onto the row model', () {
       expect(

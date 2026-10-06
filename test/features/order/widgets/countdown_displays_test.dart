@@ -136,11 +136,11 @@ void main() {
     testWidgets('labels its time pill', (tester) async {
       await _pump(
         tester,
-        BondAmountRow(
+        const BondAmountRow(
           label: 'Refundable bond',
           sats: 1500,
-          remaining: const Duration(minutes: 10),
-          window: const Duration(minutes: 15),
+          remaining: Duration(minutes: 10),
+          window: Duration(minutes: 15),
           timeLabel: 'Pay within',
           hours: _hours,
           unit: 'sats',

@@ -365,18 +365,7 @@ class _PayBondInvoiceScreenState extends ConsumerState<PayBondInvoiceScreen>
     final trade = tradeAsync.valueOrNull;
     final bond = trade?.bond;
     final maker = bondIsMakers(bond, isMine: trade?.order.isMine ?? false);
-    final orderExpiresAt = trade?.order.expiresAt;
-    trackInvoiceDeadline(
-      bondCountdownEnd(
-        invoiceExpiresAt:
-            bond?.expiresAt == null
-                ? null
-                : platformInt64ToInt(bond!.expiresAt!),
-        orderExpiresAt:
-            orderExpiresAt == null ? null : platformInt64ToInt(orderExpiresAt),
-        maker: maker,
-      ),
-    );
+    trackInvoiceDeadline(_countdownEnd(trade, maker: maker));
     _listen(l10n, trade?.role, maker: maker);
 
     final canPop = Navigator.of(context).canPop();
@@ -430,6 +419,19 @@ class _PayBondInvoiceScreenState extends ConsumerState<PayBondInvoiceScreen>
     );
   }
 
+  /// When the bond's countdown ends (unix seconds), or null when unknown.
+  int? _countdownEnd(TradeInfo? trade, {required bool maker}) {
+    final bond = trade?.bond;
+    final orderExpiresAt = trade?.order.expiresAt;
+    return bondCountdownEnd(
+      invoiceExpiresAt:
+          bond?.expiresAt == null ? null : platformInt64ToInt(bond!.expiresAt!),
+      orderExpiresAt:
+          orderExpiresAt == null ? null : platformInt64ToInt(orderExpiresAt),
+      maker: maker,
+    );
+  }
+
   Widget _payable(
     AppLocalizations l10n, {
     required TradeInfo trade,
@@ -440,6 +442,13 @@ class _PayBondInvoiceScreenState extends ConsumerState<PayBondInvoiceScreen>
     required bool maker,
   }) {
     final open = ref.watch(bondExplainerOpenProvider);
+    // The countdown's whole run, from the bond request to its end: it sets
+    // when the pill and the band turn urgent (DS-CMP-21).
+    final end = _countdownEnd(trade, maker: maker);
+    final window =
+        end == null
+            ? null
+            : Duration(seconds: end - platformInt64ToInt(bond.requestedAt));
     final node = ref.watch(mostroNodeProvider).valueOrNull;
     final rate =
         ref.watch(exchangeRateProvider(trade.order.fiatCode)).valueOrNull;
@@ -479,6 +488,8 @@ class _PayBondInvoiceScreenState extends ConsumerState<PayBondInvoiceScreen>
                         label: l10n.bondRefundableLabel,
                         sats: amountSats,
                         remaining: remaining,
+                        window: window,
+                        timeLabel: l10n.bondPayWithinLabel,
                         hours: l10n.invoiceCountdownHours,
                         unit: l10n.satsUnitLabel,
                       )
@@ -498,6 +509,7 @@ class _PayBondInvoiceScreenState extends ConsumerState<PayBondInvoiceScreen>
                         const SizedBox(height: 12),
                         InvoiceTimeBand(
                           remaining: remaining,
+                          window: window,
                           sentence:
                               maker
                                   ? l10n.bondPublishesIn

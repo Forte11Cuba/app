@@ -1604,11 +1604,6 @@ class AppLocalizationsEs extends AppLocalizations {
   String get daysActiveStatLabel => 'días activo';
 
   @override
-  String timeRemainingLabel(String time) {
-    return 'Tiempo restante: $time';
-  }
-
-  @override
   String orderAmountOutOfRange(int min, int max) {
     return 'El monto debe estar entre $min y $max sats para este nodo Mostro';
   }
@@ -3490,6 +3485,12 @@ class AppLocalizationsEs extends AppLocalizations {
   String invoiceCountdownHours(String hours, String minutes) {
     return '$hours h $minutes';
   }
+
+  @override
+  String get countdownExpiresInLabel => 'Vence en';
+
+  @override
+  String get bondPayWithinLabel => 'Paga en';
 
   @override
   String get tradeCardWaitingBuyerInvoiceTitle =>

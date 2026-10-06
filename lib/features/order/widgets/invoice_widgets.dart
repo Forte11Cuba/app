@@ -181,7 +181,9 @@ class InvoiceHeroCard extends StatelessWidget {
 
 // ── Time band ─────────────────────────────────────────────────────────────────
 
-/// Amber band with the time left; red, with a pulsing figure, under a minute.
+/// Amber band with the time left; red, with a pulsing figure, once
+/// `countdownTone` turns urgent — under a minute in an invoice window of
+/// 15 minutes or less, under five in a longer one (DS-CMP-21).
 ///
 /// [sentence] receives the figure and returns the localized sentence around
 /// it, so the figure can be styled on its own wherever the locale puts it.
@@ -189,11 +191,15 @@ class InvoiceTimeBand extends StatefulWidget {
   const InvoiceTimeBand({
     super.key,
     required this.remaining,
+    required this.window,
     required this.sentence,
     required this.hours,
   });
 
   final Duration remaining;
+
+  /// The whole window the band counts down, or null when unknown.
+  final Duration? window;
   final String Function(String time) sentence;
 
   /// The localized countdown above an hour (`1 h 05`).
@@ -229,9 +235,11 @@ class _InvoiceTimeBandState extends State<InvoiceTimeBand>
     super.dispose();
   }
 
-  bool get _pulsing =>
-      widget.remaining > Duration.zero &&
-      isInvoiceCountdownUrgent(widget.remaining);
+  bool get _urgent =>
+      countdownTone(widget.remaining, window: widget.window) ==
+      CountdownTone.urgent;
+
+  bool get _pulsing => widget.remaining > Duration.zero && _urgent;
 
   void _syncPulse() {
     if (_pulsing) {
@@ -246,7 +254,7 @@ class _InvoiceTimeBandState extends State<InvoiceTimeBand>
   @override
   Widget build(BuildContext context) {
     final pal = InvoicePalette.of(context);
-    final urgent = isInvoiceCountdownUrgent(widget.remaining);
+    final urgent = _urgent;
     final ink = urgent ? pal.errorInk : pal.timeInk;
     final figureColor = urgent ? pal.errorInk : pal.timeFigure;
     final time = formatCountdown(widget.remaining, hours: widget.hours);
@@ -266,6 +274,7 @@ class _InvoiceTimeBandState extends State<InvoiceTimeBand>
           Expanded(
             child: Semantics(
               label: widget.sentence(time),
+              liveRegion: urgent,
               excludeSemantics: true,
               child: AnimatedBuilder(
                 animation: _pulse,

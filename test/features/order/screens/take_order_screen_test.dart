@@ -133,6 +133,7 @@ OrderItem _order({
   int tradeCount = 16,
   int daysActive = 219,
   Duration expiresIn = const Duration(hours: 23, minutes: 12),
+  int minutesAgo = 3,
 }) => fakeOrder(
   id: _id,
   kind: kind,
@@ -147,7 +148,7 @@ OrderItem _order({
   rating: rating,
   tradeCount: tradeCount,
   daysActive: daysActive,
-  minutesAgo: 3,
+  minutesAgo: minutesAgo,
   expiresAt: kFakeNow.add(expiresIn),
 );
 
@@ -220,7 +221,7 @@ void main() {
         await _pump(tester, order: _order());
 
         expect(find.text('Buy BTC'), findsOneWidget);
-        expect(find.text('23:12'), findsOneWidget);
+        expect(find.text('23 h 12'), findsOneWidget);
         expect(find.text('You pay'), findsOneWidget);
         expect(find.text('1,000'), findsOneWidget);
         expect(find.text('You receive'), findsOneWidget);
@@ -394,9 +395,14 @@ void main() {
 
     testWidgets('urges under five minutes', (tester) async {
       await withClock(Clock.fixed(kFakeNow), () async {
+        // A day-long order: under DS-CMP-21 only a window of 15 minutes or
+        // less waits for the last minute.
         await _pump(
           tester,
-          order: _order(expiresIn: const Duration(minutes: 4, seconds: 59)),
+          order: _order(
+            expiresIn: const Duration(minutes: 4, seconds: 59),
+            minutesAgo: 24 * 60 - 5,
+          ),
         );
         expect(_colorOf(tester, '04:59'), _dark.danger);
       });

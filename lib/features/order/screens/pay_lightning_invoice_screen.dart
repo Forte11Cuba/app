@@ -441,6 +441,7 @@ class _PayLightningInvoiceScreenState
                       const SizedBox(height: 12),
                       InvoiceTimeBand(
                         remaining: remaining,
+                        window: ref.watch(invoiceStepWindowProvider),
                         sentence: l10n.invoiceExpiresIn,
                         hours: l10n.invoiceCountdownHours,
                       ),

@@ -45,14 +45,6 @@ int? holdInvoiceFee({required int holdSats, required double? nodeFee}) {
   return null;
 }
 
-// ── Countdown ─────────────────────────────────────────────────────────────────
-
-/// Under this the time band turns red and the figure pulses.
-const kInvoiceUrgentThreshold = Duration(seconds: 60);
-
-bool isInvoiceCountdownUrgent(Duration remaining) =>
-    remaining < kInvoiceUrgentThreshold;
-
 // ── Buyer input ───────────────────────────────────────────────────────────────
 
 const _scheme = 'lightning:';

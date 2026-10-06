@@ -942,6 +942,7 @@ class _AddLightningInvoiceScreenState
                         padding: const EdgeInsets.only(bottom: 12),
                         child: InvoiceTimeBand(
                           remaining: remaining,
+                          window: ref.watch(invoiceStepWindowProvider),
                           sentence: l10n.invoiceTimeToSend,
                           hours: l10n.invoiceCountdownHours,
                         ),

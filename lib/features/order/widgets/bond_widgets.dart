@@ -245,14 +245,16 @@ class BondExplainerBody extends StatelessWidget {
 }
 
 /// 14b's compact amount row: the label and figure on the left, the amber
-/// time pill on the right. The hero shrinks when the reader is reading, not
-/// scanning.
+/// time pill on the right under [timeLabel] (DS-CMP-21). The hero shrinks
+/// when the reader is reading, not scanning.
 class BondAmountRow extends StatelessWidget {
   const BondAmountRow({
     super.key,
     required this.label,
     required this.sats,
     required this.remaining,
+    required this.window,
+    required this.timeLabel,
     required this.hours,
     required this.unit,
   });
@@ -263,6 +265,12 @@ class BondAmountRow extends StatelessWidget {
   /// The localized `sats` unit label.
   final String unit;
   final Duration? remaining;
+
+  /// The whole window the pill counts down, or null when unknown.
+  final Duration? window;
+
+  /// What the pill counts down to (`Pay within`).
+  final String timeLabel;
   final String Function(String hours, String minutes) hours;
 
   @override
@@ -270,7 +278,9 @@ class BondAmountRow extends StatelessWidget {
     final book = OrderBookPalette.of(context);
     final palette = InvoicePalette.of(context);
     final remaining = this.remaining;
-    final urgent = remaining != null && isInvoiceCountdownUrgent(remaining);
+    final urgent =
+        remaining != null &&
+        countdownTone(remaining, window: window) == CountdownTone.urgent;
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
@@ -319,35 +329,52 @@ class BondAmountRow extends StatelessWidget {
             ),
           ),
           if (remaining != null)
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              decoration: BoxDecoration(
-                color: urgent ? palette.errorFill : palette.timeFill,
-                borderRadius: BorderRadius.circular(999),
-                border: Border.all(
-                  color: urgent ? palette.errorBorder : palette.timeBorder,
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Text(
+                  timeLabel,
+                  style: TextStyle(fontSize: 11, color: book.textTertiary),
                 ),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    Icons.schedule,
-                    size: 12,
-                    color: urgent ? palette.errorInk : palette.timeFigure,
+                const SizedBox(height: 4),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 6,
                   ),
-                  const SizedBox(width: 6),
-                  Text(
-                    formatCountdown(remaining, hours: hours),
-                    style: TextStyle(
-                      fontFamily: AppFonts.figures,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w700,
-                      color: urgent ? palette.errorInk : palette.timeFigure,
+                  decoration: BoxDecoration(
+                    color: urgent ? palette.errorFill : palette.timeFill,
+                    borderRadius: BorderRadius.circular(999),
+                    border: Border.all(
+                      color: urgent ? palette.errorBorder : palette.timeBorder,
                     ),
                   ),
-                ],
-              ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.schedule,
+                        size: 12,
+                        color: urgent ? palette.errorInk : palette.timeFigure,
+                      ),
+                      const SizedBox(width: 6),
+                      Semantics(
+                        liveRegion: urgent,
+                        child: Text(
+                          formatCountdown(remaining, hours: hours),
+                          style: TextStyle(
+                            fontFamily: AppFonts.figures,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            color:
+                                urgent ? palette.errorInk : palette.timeFigure,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ),
         ],
       ),

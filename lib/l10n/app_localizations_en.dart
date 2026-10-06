@@ -1588,11 +1588,6 @@ class AppLocalizationsEn extends AppLocalizations {
   String get daysActiveStatLabel => 'days active';
 
   @override
-  String timeRemainingLabel(String time) {
-    return 'Time remaining: $time';
-  }
-
-  @override
   String orderAmountOutOfRange(int min, int max) {
     return 'Amount must be between $min and $max sats for this Mostro node';
   }
@@ -3463,6 +3458,12 @@ class AppLocalizationsEn extends AppLocalizations {
   String invoiceCountdownHours(String hours, String minutes) {
     return '$hours h $minutes';
   }
+
+  @override
+  String get countdownExpiresInLabel => 'Expires in';
+
+  @override
+  String get bondPayWithinLabel => 'Pay within';
 
   @override
   String get tradeCardWaitingBuyerInvoiceTitle =>
