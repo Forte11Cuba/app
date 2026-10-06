@@ -105,8 +105,8 @@ Mostrix does not do it yet ([mostrix#177](https://github.com/MostroP2P/mostrix/i
 `docs/PUSH_NOTIFICATIONS.md` §7.3, §14 item 2): until it does, the requirement
 is unmet and a solver's message reaches a backgrounded disputant only on resume.
 Registering `pub(K_conv)` from this client instead is rejected (§7.3).
-- From the web build too: the server answers CORS on `/api/notify` since
-  mostro-push-server#48. A browser that cannot reach it only logs the
+- From the web build too: the server answers CORS on `/api/notify` once
+  mostro-push-server#48 is deployed. A browser that cannot reach it only logs the
   failure, like any other undelivered wake.
 - No relay, no wake: an envelope every relay rejected (`send_event` is still
   `Ok` with an empty success set) reached no one, so it rings nobody and

@@ -752,8 +752,8 @@ pub(crate) enum NotifyOutcome {
 ///   server, and a failure never fails the send.
 /// - **Peer chat only.** The dispute channel does not call this: its
 ///   counterpart is a solver, not a push client (§7.3).
-/// - **From the web build too**, now that the server answers CORS
-///   (mostro-push-server#48). A browser that cannot reach it only logs the
+/// - **From the web build too**: the server answers CORS once
+///   mostro-push-server#48 is deployed. A browser that cannot reach it logs the
 ///   failure, like any other undelivered wake.
 pub(crate) fn wake_peer(peer_trade_pubkey: &str) {
     #[cfg(not(target_arch = "wasm32"))]
