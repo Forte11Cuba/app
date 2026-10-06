@@ -252,13 +252,17 @@ class OrderDataValue extends StatelessWidget {
       children: [
         Flexible(child: value),
         const SizedBox(width: 8),
-        Text(
-          aside,
-          style: TextStyle(
-            fontFamily: AppFonts.figures,
-            fontSize: 11,
-            fontWeight: FontWeight.w600,
-            color: book.textSecondary,
+        Flexible(
+          child: Text(
+            aside,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontFamily: AppFonts.figures,
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              color: book.textSecondary,
+            ),
           ),
         ),
       ],
