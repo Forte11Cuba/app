@@ -219,11 +219,19 @@ InvoiceCheck invoiceCheckFromVerdict(
 
 /// An msat amount as sats: `2.439`, or `2.439,5` when it carries a remainder,
 /// in [locale]'s separators.
+///
+/// The whole sats and the remainder are formatted apart, in integer
+/// arithmetic: `msat / 1000` as a double would round an amount past 2^53.
 String formatInvoiceMsat(int msat, String locale) {
-  final format = NumberFormat.decimalPattern(locale)
-    ..minimumFractionDigits = 0
-    ..maximumFractionDigits = 3;
-  return format.format(msat / 1000);
+  final format = NumberFormat.decimalPattern(locale);
+  final whole = format.format(msat ~/ 1000);
+  final remainder = (msat % 1000).abs();
+  if (remainder == 0) return whole;
+  final fraction = remainder
+      .toString()
+      .padLeft(3, '0')
+      .replaceFirst(RegExp(r'0+$'), '');
+  return '$whole${format.symbols.DECIMAL_SEP}$fraction';
 }
 
 /// Whether [check] lets the buyer submit.
@@ -246,8 +254,9 @@ bool invoiceCheckAllowsSubmit(InvoiceCheck check) => switch (check) {
 /// Kebab-case like `order.status`, and never the row's sentence, which is
 /// translated.
 String? invoiceCheckWord(InvoiceCheck check) => switch (check) {
-  InvoiceCheckNone() || InvoiceCheckPending() || InvoiceCheckUnverified() =>
-    null,
+  InvoiceCheckNone() ||
+  InvoiceCheckPending() ||
+  InvoiceCheckUnverified() => null,
   InvoiceCheckAddress() => 'address',
   InvoiceCheckValid() => 'valid',
   InvoiceCheckError(:final problem) => switch (problem) {
