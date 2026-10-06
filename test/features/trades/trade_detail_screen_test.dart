@@ -2144,4 +2144,28 @@ void main() {
     );
     expect(card, findsOneWidget);
   });
+
+  // DS-CMP-6 and DS-A11Y-1: the id card is a copy button at least 48 high.
+  testWidgets('the id row is a button of at least 48 dp', (tester) async {
+    const id = '09150348-1a2b-4c3d-8e9f-0a1b2c3d99b5';
+    final semantics = tester.ensureSemantics();
+    await _pumpTradeDetail(
+      tester,
+      orderId: id,
+      isBuyer: true,
+      status: OrderStatus.active,
+    );
+
+    final row = find.ancestor(
+      of: find.text('09150348…99b5', skipOffstage: false),
+      matching: find.byType(InkWell, skipOffstage: false),
+    );
+    expect(row, findsOneWidget);
+    expect(tester.getSize(row).height, greaterThanOrEqualTo(48));
+    expect(
+      tester.getSemantics(row),
+      isSemantics(isButton: true, hasTapAction: true),
+    );
+    semantics.dispose();
+  });
 }

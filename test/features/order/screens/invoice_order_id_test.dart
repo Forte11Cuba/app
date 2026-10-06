@@ -52,7 +52,12 @@ Widget _app(List<Override> overrides, Widget home) => ProviderScope(
 Finder _readout(String id) =>
     find.byWidgetPredicate((w) => w is AutomationId && w.id == id);
 
-void _expectIdRowInCard(WidgetTester tester, String automationId) {
+Future<void> _expectIdRowInCard(
+  WidgetTester tester,
+  String automationId,
+) async {
+  final semantics = tester.ensureSemantics();
+  await tester.pump();
   final readout = _readout(automationId);
   expect(readout, findsOneWidget);
   expect(tester.widget<AutomationId>(readout).label, _orderId);
@@ -72,6 +77,27 @@ void _expectIdRowInCard(WidgetTester tester, String automationId) {
     findsOneWidget,
   );
   expect(find.text('#09150348'), findsNothing);
+
+  // DS-CMP-8: the card sits on the screen's surface, like the hero card.
+  final box = tester.widget<Container>(
+    find.descendant(of: card, matching: find.byType(Container)).first,
+  );
+  expect(
+    (box.decoration! as BoxDecoration).color,
+    OrderBookPalette.of(tester.element(card)).surface,
+  );
+
+  // DS-A11Y-1: the copy row is a button, and the readout keeps its own node.
+  final row = find.ancestor(
+    of: find.text(_shortId),
+    matching: find.byType(InkWell),
+  );
+  expect(
+    tester.getSemantics(row.first),
+    isSemantics(isButton: true, hasTapAction: true),
+  );
+  expect(tester.widget<AutomationId>(readout).label, _orderId);
+  semantics.dispose();
 }
 
 void main() {
@@ -91,7 +117,7 @@ void main() {
     await tester.pump();
     await tester.pump();
 
-    _expectIdRowInCard(tester, AutomationIds.invoiceOrderId);
+    await _expectIdRowInCard(tester, AutomationIds.invoiceOrderId);
   });
 
   testWidgets('pay invoice: the id is a row of the card, even while loading', (
@@ -120,7 +146,7 @@ void main() {
     );
     await tester.pump();
 
-    _expectIdRowInCard(tester, AutomationIds.payOrderId);
+    await _expectIdRowInCard(tester, AutomationIds.payOrderId);
   });
 
   testWidgets('pay invoice: the id is a row of the counterpart card', (
@@ -155,7 +181,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    _expectIdRowInCard(tester, AutomationIds.payOrderId);
+    await _expectIdRowInCard(tester, AutomationIds.payOrderId);
   });
 
   testWidgets('pay bond: the id is a row of the card', (tester) async {
@@ -186,7 +212,7 @@ void main() {
     await tester.pump();
     await tester.pump();
 
-    _expectIdRowInCard(tester, AutomationIds.bondOrderId);
+    await _expectIdRowInCard(tester, AutomationIds.bondOrderId);
   });
 
   testWidgets('bond payout: the id is a row of the card', (tester) async {
@@ -220,7 +246,7 @@ void main() {
         await tester.pump();
         await tester.pump();
 
-        _expectIdRowInCard(tester, AutomationIds.bondClaimOrderId);
+        await _expectIdRowInCard(tester, AutomationIds.bondClaimOrderId);
       },
     );
   });
