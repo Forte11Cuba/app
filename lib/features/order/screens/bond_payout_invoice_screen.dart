@@ -490,7 +490,7 @@ class _BondPayoutInvoiceScreenState
       padding: const EdgeInsets.fromLTRB(16, 4, 4, 14),
       decoration: BoxDecoration(
         color: book.surface,
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(18),
         border: Border.all(
           color: _focus.hasFocus ? pal.fieldFocusBorder : pal.cardBorder,
         ),

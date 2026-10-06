@@ -434,19 +434,19 @@ class _PayLightningInvoiceScreenState
                       child: _qr(l10n, invoice),
                     ),
                     if (remaining != null) ...[
-                      const SizedBox(height: 11),
+                      const SizedBox(height: 12),
                       InvoiceTimeBand(
                         remaining: remaining,
                         sentence: l10n.invoiceExpiresIn,
                         hours: l10n.invoiceCountdownHours,
                       ),
                     ],
-                    const SizedBox(height: 11),
+                    const SizedBox(height: 12),
                     InvoiceHoldNote(
                       sentence: l10n.invoiceHoldNote,
                       boldWord: 'hold',
                     ),
-                    const SizedBox(height: 11),
+                    const SizedBox(height: 12),
                     InvoiceCounterpartCard(
                       rows: [
                         invoiceCounterpartRow(

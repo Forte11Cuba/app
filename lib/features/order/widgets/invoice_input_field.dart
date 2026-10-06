@@ -184,7 +184,7 @@ class _InvoiceInputFieldState extends State<InvoiceInputField>
           padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
             color: _prompting ? pal.promptFill : book.surface,
-            borderRadius: BorderRadius.circular(20),
+            borderRadius: BorderRadius.circular(18),
             border: Border.all(color: border, width: 1.5),
             boxShadow: [
               if (_prompting && !reduceMotion && t > 0)
@@ -201,9 +201,9 @@ class _InvoiceInputFieldState extends State<InvoiceInputField>
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           _header(l10n, book, pal),
-          const SizedBox(height: 9),
+          const SizedBox(height: 10),
           _textarea(l10n, book, pal),
-          const SizedBox(height: 9),
+          const SizedBox(height: 10),
           _actions(l10n, pal),
         ],
       ),
@@ -234,7 +234,7 @@ class _InvoiceInputFieldState extends State<InvoiceInputField>
           ),
         ),
         if (showCheck) ...[
-          Icon(Icons.check, size: 13, color: pal.validIcon),
+          Icon(Icons.check, size: 12, color: pal.validIcon),
           if (sats != null) ...[
             const SizedBox(width: 4),
             Text(
@@ -261,7 +261,7 @@ class _InvoiceInputFieldState extends State<InvoiceInputField>
     final sats = widget.validSats;
     return Container(
       height: _kTextareaHeight,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
       decoration: BoxDecoration(
         color: pal.textareaFill,
         borderRadius: BorderRadius.circular(14),
