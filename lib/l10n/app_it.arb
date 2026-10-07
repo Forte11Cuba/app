@@ -642,6 +642,8 @@
   "@tradeChatEncrypted": {
     "description": "Subtitle of the chat card under the counterpart alias"
   },
+  "tradeChatClosed": "Conversazione chiusa · vedi i messaggi",
+  "tradeChatClosedAnnouncement": "La conversazione è chiusa. Puoi ancora leggere i suoi messaggi",
   "tradeBodyWaitingPaymentBuyer": "Sta pagando la hold invoice. Quando i sats saranno bloccati, toccherà a te pagare il fiat.",
   "@tradeBodyWaitingPaymentBuyer": {
     "description": "Step body for the buyer while the seller pays the hold invoice"

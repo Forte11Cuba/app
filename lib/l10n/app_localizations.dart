@@ -3826,6 +3826,18 @@ abstract class AppLocalizations {
   /// **'End-to-end encrypted chat'**
   String get tradeChatEncrypted;
 
+  /// Subtitle of the trade screen's chat card once the conversation has ended (trade cancelled, or completed more than an hour ago); tapping opens the conversation read-only
+  ///
+  /// In en, this message translates to:
+  /// **'Conversation closed · view messages'**
+  String get tradeChatClosed;
+
+  /// Screen-reader announcement when the trade screen's chat card turns closed while the user is on it (the completed trade's hour ran out); the messages stay readable
+  ///
+  /// In en, this message translates to:
+  /// **'The conversation is closed. You can still read its messages'**
+  String get tradeChatClosedAnnouncement;
+
   /// Step body for the buyer while the seller pays the hold invoice
   ///
   /// In en, this message translates to:

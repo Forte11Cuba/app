@@ -2876,6 +2876,14 @@
   "@tradeChatEncrypted": {
     "description": "Subtitle of the chat card under the counterpart alias"
   },
+  "tradeChatClosed": "Conversation closed · view messages",
+  "@tradeChatClosed": {
+    "description": "Subtitle of the trade screen's chat card once the conversation has ended (trade cancelled, or completed more than an hour ago); tapping opens the conversation read-only"
+  },
+  "tradeChatClosedAnnouncement": "The conversation is closed. You can still read its messages",
+  "@tradeChatClosedAnnouncement": {
+    "description": "Screen-reader announcement when the trade screen's chat card turns closed while the user is on it (the completed trade's hour ran out); the messages stay readable"
+  },
   "tradeBodyWaitingPaymentBuyer": "They're paying the hold invoice. Once the sats are locked, it's your turn to pay the fiat.",
   "@tradeBodyWaitingPaymentBuyer": {
     "description": "Step body for the buyer while the seller pays the hold invoice"

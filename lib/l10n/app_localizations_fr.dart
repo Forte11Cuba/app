@@ -2228,6 +2228,13 @@ class AppLocalizationsFr extends AppLocalizations {
   String get tradeChatEncrypted => 'Chat chiffré de bout en bout';
 
   @override
+  String get tradeChatClosed => 'Conversation fermée · voir les messages';
+
+  @override
+  String get tradeChatClosedAnnouncement =>
+      'La conversation est fermée. Vous pouvez toujours lire ses messages';
+
+  @override
   String get tradeBodyWaitingPaymentBuyer =>
       'Le vendeur paie la facture de dépôt. Une fois les sats bloqués, ce sera à vous de payer le fiat.';
 

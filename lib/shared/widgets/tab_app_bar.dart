@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import 'package:mostro/core/app_theme.dart' show AppFonts;
 import 'package:mostro/core/automation/automation_id.dart';
 import 'package:mostro/core/automation/automation_ids.dart';
 import 'package:mostro/core/order_book_palette.dart';
@@ -134,6 +135,7 @@ class CountBadge extends StatelessWidget {
     required this.background,
     required this.foreground,
     this.size = 18,
+    this.padding = 5,
   });
 
   final int count;
@@ -141,12 +143,16 @@ class CountBadge extends StatelessWidget {
   final Color foreground;
   final double size;
 
+  /// Horizontal padding around the count. A badge small enough that one
+  /// digit plus the default would outgrow [size] passes less, to stay round.
+  final double padding;
+
   @override
   Widget build(BuildContext context) {
     return Container(
       constraints: BoxConstraints(minWidth: size),
       height: size,
-      padding: const EdgeInsets.symmetric(horizontal: 5),
+      padding: EdgeInsets.symmetric(horizontal: padding),
       alignment: Alignment.center,
       decoration: BoxDecoration(
         color: background,
@@ -155,7 +161,7 @@ class CountBadge extends StatelessWidget {
       child: Text(
         count > 99 ? '99+' : '$count',
         style: TextStyle(
-          fontFamily: 'Manrope',
+          fontFamily: AppFonts.figures,
           fontSize: 10,
           fontWeight: FontWeight.w700,
           height: 1,
