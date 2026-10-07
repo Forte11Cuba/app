@@ -1597,7 +1597,7 @@ class AppLocalizationsDe extends AppLocalizations {
   String get enterInvoiceManually => 'Rechnung manuell eingeben';
 
   @override
-  String get submitButton => 'Absenden';
+  String get rangeAmountTakeAction => 'Order annehmen';
 
   @override
   String get buyerReputation => 'Reputation des Käufers';
@@ -1613,11 +1613,6 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get daysActiveStatLabel => 'Tage aktiv';
-
-  @override
-  String timeRemainingLabel(String time) {
-    return 'Verbleibende Zeit: $time';
-  }
 
   @override
   String orderAmountOutOfRange(int min, int max) {
@@ -1678,9 +1673,9 @@ class AppLocalizationsDe extends AppLocalizations {
     String _temp0 = intl.Intl.pluralLogic(
       count,
       locale: localeName,
-      other: '$count gewählt',
-      one: '1 gewählt',
-      zero: 'keine gewählt',
+      other: '$count ausgewählt',
+      one: '1 ausgewählt',
+      zero: 'keine ausgewählt',
     );
     return '$_temp0';
   }
@@ -2469,6 +2464,10 @@ class AppLocalizationsDe extends AppLocalizations {
   String get takeOrderUnavailable => 'Nicht mehr verfügbar';
 
   @override
+  String get takeOrderFailed =>
+      'Die Bestellung konnte nicht angenommen werden. Bitte versuche es erneut.';
+
+  @override
   String get takeOrderClosed => 'Geschlossen';
 
   @override
@@ -2579,6 +2578,13 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get openSystemSettingsAction => 'Einstellungen öffnen';
+
+  @override
+  String get notificationsPermissionNotAsked =>
+      'Dieser Browser darf noch keine Benachrichtigungen anzeigen.';
+
+  @override
+  String get allowNotificationsAction => 'Benachrichtigungen erlauben';
 
   @override
   String get notificationsPrivacyFootnote =>
@@ -2994,7 +3000,7 @@ class AppLocalizationsDe extends AppLocalizations {
   String get bondTitle => 'Sicherheitseinlage';
 
   @override
-  String get bondRefundableLabel => 'RÜCKZAHLBARE EINLAGE';
+  String get bondRefundableLabel => 'Rückzahlbare Einlage';
 
   @override
   String get bondComesBack => 'kommt beim Abschluss zu dir zurück';
@@ -3051,9 +3057,8 @@ class AppLocalizationsDe extends AppLocalizations {
       'Mostro verwahrt keine Gelder und kann daher niemanden bestrafen, der einen Handel abbricht; das übernimmt die Einlage, und sie schützt alle Nutzer vor Betrügern.';
 
   @override
-  String bondWhyHold(String hold) {
-    return 'Es ist eine $hold-Rechnung: deine Wallet reserviert die Sats, ohne sie zu senden; beim Abschluss wird die Reservierung von selbst aufgehoben.';
-  }
+  String get bondWhyHold =>
+      'Deine Wallet hält die Sats zurück, ohne sie zu senden; beim Abschluss des Handels werden sie von selbst freigegeben.';
 
   @override
   String get bondWhyDispute =>
@@ -3131,6 +3136,20 @@ class AppLocalizationsDe extends AppLocalizations {
   String get bondRemoveFromDevice => 'Von diesem Gerät entfernen';
 
   @override
+  String get bondLeaveMakerTitle => 'Diese Order nicht veröffentlichen?';
+
+  @override
+  String get bondLeaveMakerBody =>
+      'Die Order wird nicht veröffentlicht und ihre Einlage-Rechnung wird storniert.';
+
+  @override
+  String get bondLeaveTakerTitle => 'Diese Order nicht annehmen?';
+
+  @override
+  String get bondLeaveTakerBody =>
+      'Die Order bleibt für andere im Orderbuch und die Einlage-Rechnung wird storniert.';
+
+  @override
   String get bondKeepWaiting => 'Weiter warten';
 
   @override
@@ -3146,7 +3165,7 @@ class AppLocalizationsDe extends AppLocalizations {
   String get bondClaimTitle => 'Deinen Anteil einfordern';
 
   @override
-  String get bondClaimShareLabel => 'DEIN ANTEIL';
+  String get bondClaimShareLabel => 'Dein Anteil';
 
   @override
   String bondClaimShareSemantics(String sats) {
@@ -3336,9 +3355,6 @@ class AppLocalizationsDe extends AppLocalizations {
       'Der Node hat die Einlage-Rechnung nicht erneut gesendet';
 
   @override
-  String get invoiceOrderIdCopied => 'Order-ID kopiert';
-
-  @override
   String get invoiceYouReceiveLabel => 'Du erhältst';
 
   @override
@@ -3454,9 +3470,8 @@ class AppLocalizationsDe extends AppLocalizations {
   String get invoiceOpenWallet => 'In meiner Wallet öffnen';
 
   @override
-  String invoiceHoldNote(String hold) {
-    return 'Das ist eine $hold-Rechnung: Die Sats werden zurückgehalten und verlassen deine Wallet erst, wenn du die Zahlung des Käufers bestätigst.';
-  }
+  String get invoiceHoldNote =>
+      'Die Sats werden zurückgehalten: Sie verlassen deine Wallet erst, wenn du die Zahlung des Käufers bestätigst.';
 
   @override
   String invoiceQrSemantics(String invoice) {
@@ -3487,6 +3502,12 @@ class AppLocalizationsDe extends AppLocalizations {
   String invoiceCountdownHours(String hours, String minutes) {
     return '$hours Std. $minutes';
   }
+
+  @override
+  String get countdownExpiresInLabel => 'Läuft ab in';
+
+  @override
+  String get bondPayWithinLabel => 'Zahlen in';
 
   @override
   String get tradeCardWaitingBuyerInvoiceTitle =>
@@ -3669,7 +3690,7 @@ class AppLocalizationsDe extends AppLocalizations {
       locale: localeName,
       other: '$count Methoden ausgewählt',
       one: '1 Methode ausgewählt',
-      zero: 'Wähle mindestens eine Methode',
+      zero: 'Wähle mindestens eine Methode aus',
     );
     return '$_temp0';
   }

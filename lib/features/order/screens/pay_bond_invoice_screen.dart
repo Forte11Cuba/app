@@ -22,6 +22,7 @@ import 'package:mostro/features/order/providers/trade_state_provider.dart';
 import 'package:mostro/features/order/widgets/bond_widgets.dart';
 import 'package:mostro/features/order/widgets/invoice_clock.dart';
 import 'package:mostro/features/order/widgets/invoice_widgets.dart';
+import 'package:mostro/features/order/widgets/order_detail_cards.dart';
 import 'package:mostro/features/settings/providers/nwc_provider.dart';
 import 'package:mostro/features/trades/providers/trades_providers.dart'
     show refreshTrades, tradeInfoProvider;
@@ -78,8 +79,34 @@ class _PayBondInvoiceScreenState extends ConsumerState<PayBondInvoiceScreen>
     setState(() => _waiting = true);
   }
 
-  /// Walk away: nothing is committed yet, so no confirmation. Both sides
-  /// send the daemon a cancel. A taker's releases the bond and the order
+  /// Leaving cancels something that exists, the take or the unpublished
+  /// order, so it asks first (DS-CMP-20).
+  Future<void> _confirmLeave({required bool maker}) async {
+    if (_canceling) return;
+    final l10n = AppLocalizations.of(context);
+    final confirmed = await showMostroDialog<bool>(
+      context: context,
+      builder:
+          (ctx) => MostroDialog(
+            title: maker ? l10n.bondLeaveMakerTitle : l10n.bondLeaveTakerTitle,
+            body: maker ? l10n.bondLeaveMakerBody : l10n.bondLeaveTakerBody,
+            secondary: ModalAction(
+              label: l10n.noButtonLabel,
+              onPressed: () => Navigator.pop(ctx, false),
+            ),
+            primary: ModalAction(
+              label: l10n.yesCancelButtonLabel,
+              onPressed: () => Navigator.pop(ctx, true),
+              tone: ModalTone.destructive,
+              automationId: AutomationIds.bondCancelConfirm,
+            ),
+          ),
+    );
+    if (!mounted || _navigated || confirmed != true) return;
+    await _cancel(maker: maker);
+  }
+
+  /// Walk away, once confirmed. Both sides send the daemon a cancel. A taker's releases the bond and the order
   /// stays in the book. A maker's waits for the answer (mostro#996): the
   /// daemon closes the unpublished order and cancels the bond invoice, or —
   /// on an older daemon that refuses it — the core drops the row locally. A
@@ -338,26 +365,12 @@ class _PayBondInvoiceScreenState extends ConsumerState<PayBondInvoiceScreen>
     final trade = tradeAsync.valueOrNull;
     final bond = trade?.bond;
     final maker = bondIsMakers(bond, isMine: trade?.order.isMine ?? false);
-    final orderExpiresAt = trade?.order.expiresAt;
-    trackInvoiceDeadline(
-      bondCountdownEnd(
-        invoiceExpiresAt:
-            bond?.expiresAt == null
-                ? null
-                : platformInt64ToInt(bond!.expiresAt!),
-        orderExpiresAt:
-            orderExpiresAt == null ? null : platformInt64ToInt(orderExpiresAt),
-        maker: maker,
-      ),
-    );
+    trackInvoiceDeadline(_countdownEnd(trade, maker: maker));
     _listen(l10n, trade?.role, maker: maker);
 
     final canPop = Navigator.of(context).canPop();
     final appBar = InvoiceAppBar(
       title: l10n.bondTitle,
-      orderId: widget.orderId,
-      orderIdAutomationId: AutomationIds.bondOrderId,
-      copiedMessage: l10n.invoiceOrderIdCopied,
       onBack: canPop ? () => Navigator.of(context).maybePop() : null,
     );
 
@@ -365,14 +378,14 @@ class _PayBondInvoiceScreenState extends ConsumerState<PayBondInvoiceScreen>
       return Scaffold(
         backgroundColor: book.bg,
         appBar: appBar,
-        body: const Center(child: CircularProgressIndicator()),
+        body: _withId(const Center(child: CircularProgressIndicator())),
       );
     }
     if (trade == null) {
       return Scaffold(
         backgroundColor: book.bg,
         appBar: appBar,
-        body: Center(child: Text(l10n.tradeLoadError)),
+        body: _withId(Center(child: Text(l10n.tradeLoadError))),
       );
     }
 
@@ -392,7 +405,7 @@ class _PayBondInvoiceScreenState extends ConsumerState<PayBondInvoiceScreen>
         builder:
             (context, remaining, _) =>
                 remaining == Duration.zero && !_waiting
-                    ? _expired(l10n, maker: maker)
+                    ? _withId(_expired(l10n, maker: maker))
                     : _payable(
                       l10n,
                       trade: trade,
@@ -406,6 +419,19 @@ class _PayBondInvoiceScreenState extends ConsumerState<PayBondInvoiceScreen>
     );
   }
 
+  /// When the bond's countdown ends (unix seconds), or null when unknown.
+  int? _countdownEnd(TradeInfo? trade, {required bool maker}) {
+    final bond = trade?.bond;
+    final orderExpiresAt = trade?.order.expiresAt;
+    return bondCountdownEnd(
+      invoiceExpiresAt:
+          bond?.expiresAt == null ? null : platformInt64ToInt(bond!.expiresAt!),
+      orderExpiresAt:
+          orderExpiresAt == null ? null : platformInt64ToInt(orderExpiresAt),
+      maker: maker,
+    );
+  }
+
   Widget _payable(
     AppLocalizations l10n, {
     required TradeInfo trade,
@@ -416,6 +442,13 @@ class _PayBondInvoiceScreenState extends ConsumerState<PayBondInvoiceScreen>
     required bool maker,
   }) {
     final open = ref.watch(bondExplainerOpenProvider);
+    // The countdown's whole run, from the bond request to its end: it sets
+    // when the pill and the band turn urgent (DS-CMP-21).
+    final end = _countdownEnd(trade, maker: maker);
+    final window =
+        end == null
+            ? null
+            : Duration(seconds: end - platformInt64ToInt(bond.requestedAt));
     final node = ref.watch(mostroNodeProvider).valueOrNull;
     final rate =
         ref.watch(exchangeRateProvider(trade.order.fiatCode)).valueOrNull;
@@ -455,6 +488,8 @@ class _PayBondInvoiceScreenState extends ConsumerState<PayBondInvoiceScreen>
                         label: l10n.bondRefundableLabel,
                         sats: amountSats,
                         remaining: remaining,
+                        window: window,
+                        timeLabel: l10n.bondPayWithinLabel,
                         hours: l10n.invoiceCountdownHours,
                         unit: l10n.satsUnitLabel,
                       )
@@ -471,9 +506,10 @@ class _PayBondInvoiceScreenState extends ConsumerState<PayBondInvoiceScreen>
                         child: _qr(l10n, invoice),
                       ),
                       if (remaining != null) ...[
-                        const SizedBox(height: 11),
+                        const SizedBox(height: 12),
                         InvoiceTimeBand(
                           remaining: remaining,
+                          window: window,
                           sentence:
                               maker
                                   ? l10n.bondPublishesIn
@@ -481,12 +517,12 @@ class _PayBondInvoiceScreenState extends ConsumerState<PayBondInvoiceScreen>
                           hours: l10n.invoiceCountdownHours,
                         ),
                       ],
-                      const SizedBox(height: 11),
+                      const SizedBox(height: 12),
                       BondConsequenceCard(
                         rows: _consequences(l10n, slashOnTimeout),
                       ),
                     ],
-                    const SizedBox(height: 11),
+                    const SizedBox(height: 12),
                     BondExplainerToggle(
                       label: l10n.bondWhyTitle,
                       open: open,
@@ -497,22 +533,31 @@ class _PayBondInvoiceScreenState extends ConsumerState<PayBondInvoiceScreen>
                                   .toggle(),
                     ).withAutomationId(AutomationIds.bondExplainer),
                     if (open) ...[
-                      const SizedBox(height: 11),
+                      const SizedBox(height: 12),
                       BondExplainerBody(
                         paragraphs: _explainer(l10n, slashOnTimeout),
                         linkLabel: l10n.bondReadDocs,
                         onLink: _openDocs,
                       ),
-                      const SizedBox(height: 11),
-                      InvoiceCounterpartCard(
-                        rows: _context(
-                          l10n,
-                          trade,
-                          node?.bondAmountPct,
-                          maker: maker,
-                        ),
-                      ),
                     ],
+                    // The trade's context rows join the ID row (DS-CMP-22)
+                    // once the explainer is open.
+                    const SizedBox(height: 12),
+                    OrderDataCard(
+                      rows: [
+                        if (open)
+                          ..._context(
+                            l10n,
+                            trade,
+                            node?.bondAmountPct,
+                            maker: maker,
+                          ),
+                        OrderIdRow(
+                          orderId: widget.orderId,
+                          automationId: AutomationIds.bondOrderId,
+                        ),
+                      ],
+                    ),
                     const Spacer(),
                     const SizedBox(height: 16),
                     if (nwc)
@@ -562,27 +607,16 @@ class _PayBondInvoiceScreenState extends ConsumerState<PayBondInvoiceScreen>
   }
 
   List<InlineSpan> _explainer(AppLocalizations l10n, bool slashOnTimeout) {
-    final bold = TextStyle(
-      fontWeight: FontWeight.w600,
-      color: OrderBookPalette.of(context).textPrimary,
-    );
-    final (before, after) = bondSentenceParts(l10n.bondWhyHold);
     return [
       TextSpan(text: l10n.bondWhyCustody),
-      TextSpan(
-        children: [
-          TextSpan(text: before),
-          TextSpan(text: 'hold', style: bold),
-          if (after.isNotEmpty) TextSpan(text: after),
-        ],
-      ),
+      TextSpan(text: l10n.bondWhyHold),
       TextSpan(
         text: slashOnTimeout ? l10n.bondWhyDisputeTimeout : l10n.bondWhyDispute,
       ),
     ];
   }
 
-  List<InvoiceCardRow> _context(
+  List<Widget> _context(
     AppLocalizations l10n,
     TradeInfo trade,
     double? bondAmountPct, {
@@ -593,27 +627,29 @@ class _PayBondInvoiceScreenState extends ConsumerState<PayBondInvoiceScreen>
     final share = bondSharePercent(bondAmountPct);
     return [
       if (fiat != null)
-        (
+        OrderDataRow(
+          icon: Icons.receipt_long_outlined,
           label: l10n.bondContextOrder,
-          value:
-              buying ? l10n.bondContextBuy(fiat) : l10n.bondContextSell(fiat),
-          trailing: null,
+          value: OrderDataValue(
+            buying ? l10n.bondContextBuy(fiat) : l10n.bondContextSell(fiat),
+          ),
         ),
       if (share != null)
-        (
+        OrderDataRow(
+          icon: Icons.percent_rounded,
           label: l10n.bondContextEquals,
-          value: l10n.bondContextPercent(share),
-          trailing: null,
+          value: OrderDataValue(l10n.bondContextPercent(share), figures: true),
         ),
     ];
   }
 
   Widget _qr(AppLocalizations l10n, String invoice) => Center(
     child: SizedBox.square(
-      dimension: 150 + 2 * 11,
+      dimension: 150 + 2 * 12,
       child: Container(
-        padding: const EdgeInsets.all(11),
+        padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
+          // design-check: ignore DS-COL-1 — a QR code must be pure black on white to scan
           color: Colors.white,
           borderRadius: BorderRadius.circular(14),
         ),
@@ -621,6 +657,7 @@ class _PayBondInvoiceScreenState extends ConsumerState<PayBondInvoiceScreen>
           data: invoice,
           size: 150,
           padding: EdgeInsets.zero,
+          // design-check: ignore DS-COL-1 — a QR code must be pure black on white to scan
           backgroundColor: Colors.white,
           semanticsLabel: l10n.invoiceQrSemantics(invoice),
         ),
@@ -632,9 +669,9 @@ class _PayBondInvoiceScreenState extends ConsumerState<PayBondInvoiceScreen>
   Widget _leaveLink(AppLocalizations l10n, {required bool maker}) =>
       InvoiceCancelLink(
         label: maker ? l10n.bondDontPublish : l10n.bondDontTake,
-        // Nothing is committed yet: not a destructive action.
-        danger: false,
-        onPressed: _canceling ? null : () => _cancel(maker: maker),
+        // It cancels the take or the unpublished order (DS-CMP-20).
+        danger: true,
+        onPressed: _canceling ? null : () => _confirmLeave(maker: maker),
       ).withAutomationId(AutomationIds.bondCancel);
 
   List<Widget> _footer(
@@ -670,7 +707,7 @@ class _PayBondInvoiceScreenState extends ConsumerState<PayBondInvoiceScreen>
                     : () => _copy(invoice),
           ),
         ),
-        const SizedBox(width: 9),
+        const SizedBox(width: 8),
         Expanded(
           child: InvoiceSecondaryButton(
             icon: Icons.share,
@@ -696,7 +733,7 @@ class _PayBondInvoiceScreenState extends ConsumerState<PayBondInvoiceScreen>
           onPressed: () => _openWallet(invoice),
         ),
       // 14b hides copy / share: whoever is reading is not scanning.
-      if (!open) ...[const SizedBox(height: 9), secondaries],
+      if (!open) ...[const SizedBox(height: 8), secondaries],
       const SizedBox(height: 4),
       _leaveLink(l10n, maker: maker),
     ];
@@ -739,32 +776,42 @@ class _PayBondInvoiceScreenState extends ConsumerState<PayBondInvoiceScreen>
     return Scaffold(
       backgroundColor: book.bg,
       appBar: appBar,
-      body: Padding(
-        padding: const EdgeInsets.all(kInvoiceGutter),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text(
-              maker ? l10n.bondInvoiceMissingMaker : l10n.bondInvoiceMissing,
-              textAlign: TextAlign.center,
-              style: TextStyle(color: book.textSecondary),
-            ),
-            const SizedBox(height: 16),
-            if (!maker)
-              InvoicePrimaryButton(
-                icon: Icons.refresh,
-                label: l10n.bondRequestAgain,
-                busy: _requesting,
-                onPressed: _requesting ? null : _requestAgain,
+      body: _withId(
+        Padding(
+          padding: const EdgeInsets.all(kInvoiceGutter),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                maker ? l10n.bondInvoiceMissingMaker : l10n.bondInvoiceMissing,
+                textAlign: TextAlign.center,
+                style: TextStyle(color: book.textSecondary),
               ),
-            const SizedBox(height: 4),
-            _leaveLink(l10n, maker: maker),
-          ],
+              const SizedBox(height: 16),
+              if (!maker)
+                InvoicePrimaryButton(
+                  icon: Icons.refresh,
+                  label: l10n.bondRequestAgain,
+                  busy: _requesting,
+                  onPressed: _requesting ? null : _requestAgain,
+                ),
+              const SizedBox(height: 4),
+              _leaveLink(l10n, maker: maker),
+            ],
+          ),
         ),
       ),
     );
   }
+
+  /// [body] under the order's ID card, for the states without the payable
+  /// screen's card (DS-CMP-22).
+  Widget _withId(Widget body) => InvoiceOrderIdBody(
+    orderId: widget.orderId,
+    automationId: AutomationIds.bondOrderId,
+    child: body,
+  );
 
   Future<void> _closeExpiredWindow() async {
     try {
@@ -788,14 +835,14 @@ class _PayBondInvoiceScreenState extends ConsumerState<PayBondInvoiceScreen>
       unawaited(_closeExpiredWindow());
     }
     return InvoiceTimeUpView(
-        title: l10n.bondExpiredTitle,
-        body: maker ? l10n.bondExpiredBodyMaker : l10n.bondExpiredBody,
-        actionLabel: l10n.invoiceBackToBook,
-        onAction: () {
-          _navigated = true;
-          refreshTrades(ref);
-          context.go(AppRoute.home);
-        },
-      );
+      title: l10n.bondExpiredTitle,
+      body: maker ? l10n.bondExpiredBodyMaker : l10n.bondExpiredBody,
+      actionLabel: l10n.invoiceBackToBook,
+      onAction: () {
+        _navigated = true;
+        refreshTrades(ref);
+        context.go(AppRoute.home);
+      },
+    );
   }
 }

@@ -4,6 +4,19 @@ All notable changes to Mostro are documented here, newest first. This file is
 written by the release workflow (docs/RELEASING.md) — do not edit it by hand.
 Versions follow [Semantic Versioning](https://semver.org/).
 
+## [2.0.13] - 2026-10-06
+
+### ✨ Features
+
+- **cashu:** follow the node's mint list (mostro#1047) in settings, about and orders ([#709](https://github.com/MostroP2P/app/pull/709)) by @grunch
+
+### 🐛 Bug Fixes
+
+- **trades:** offer Cancel to both parties of a disputed trade ([#713](https://github.com/MostroP2P/app/pull/713)) by @grunch
+- **disputes:** let the user send the chat key to the solver again ([#707](https://github.com/MostroP2P/app/pull/707)) by @grunch
+- **chat:** give a short message a 48 dp tap target ([#705](https://github.com/MostroP2P/app/pull/705)) by @grunch
+- **design:** check the whole class a change touches, and v1 tokens ([#702](https://github.com/MostroP2P/app/pull/702)) by @grunch
+
 ## [2.0.12] - 2026-10-05
 
 ### ✨ Features

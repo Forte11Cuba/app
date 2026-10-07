@@ -50,28 +50,27 @@ class CurrencyInlineSelector extends ConsumerWidget {
     final flag = ref.watch(currencyFlagsProvider)[code] ?? '';
     final palette = OrderBookPalette.of(context);
 
-    return InkWell(
+    return _EditableValue(
       onTap: () => showCurrencyPicker(context, ref),
+      hint: AppLocalizations.of(context).selectCurrencyDialogTitle,
       borderRadius: BorderRadius.circular(8),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(flag, style: const TextStyle(fontSize: 14)),
-            const SizedBox(width: 6),
-            Text(
-              code,
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-                color: palette.limeInk,
-              ),
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(flag, style: const TextStyle(fontSize: 14)),
+          const SizedBox(width: 6),
+          Text(
+            code,
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: palette.limeInk,
             ),
-            const SizedBox(width: 4),
-            Icon(Icons.expand_more, size: 13, color: palette.sortLabel),
-          ],
-        ),
+          ),
+          const SizedBox(width: 4),
+          Icon(Icons.expand_more, size: 16, color: palette.sortLabel),
+        ],
       ),
     ).withAutomationId(AutomationIds.orderCreateCurrency);
   }
@@ -91,43 +90,83 @@ class CurrencyRowSelector extends ConsumerWidget {
     return Material(
       color: create.inset,
       borderRadius: BorderRadius.circular(12),
-      child: InkWell(
+      child: _EditableValue(
         onTap: () => showCurrencyPicker(context, ref),
+        hint: AppLocalizations.of(context).selectCurrencyDialogTitle,
         borderRadius: BorderRadius.circular(12),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-          child: Row(
-            children: [
-              Text(currency?.flag ?? '', style: const TextStyle(fontSize: 14)),
-              const SizedBox(width: 8),
-              Text(
-                code,
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  color: palette.limeInk,
-                ),
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        child: Row(
+          children: [
+            Text(currency?.flag ?? '', style: const TextStyle(fontSize: 14)),
+            const SizedBox(width: 8),
+            Text(
+              code,
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: palette.limeInk,
               ),
-              if (currency != null) ...[
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    currency.name,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: palette.textTertiary,
-                    ),
+            ),
+            if (currency != null) ...[
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  currency.name,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: palette.textTertiary,
                   ),
                 ),
-              ] else
-                const Spacer(),
-              Icon(Icons.expand_more, size: 13, color: palette.sortLabel),
-            ],
-          ),
+              ),
+            ] else
+              const Spacer(),
+            Icon(Icons.expand_more, size: 16, color: palette.sortLabel),
+          ],
         ),
       ),
     ).withAutomationId(AutomationIds.orderCreateCurrency);
+  }
+}
+
+/// A value the user can change in place (DS-CMP-27): a button of at least
+/// 48 × 48 dp whose [hint] names the change.
+class _EditableValue extends StatelessWidget {
+  const _EditableValue({
+    required this.onTap,
+    required this.hint,
+    required this.borderRadius,
+    required this.padding,
+    required this.child,
+  });
+
+  final VoidCallback onTap;
+
+  /// Names the change, e.g. "Select currency".
+  final String hint;
+  final BorderRadius borderRadius;
+  final EdgeInsetsGeometry padding;
+  final Widget child;
+
+  static const double _minTarget = 48;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      hint: hint,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: borderRadius,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(
+            minWidth: _minTarget,
+            minHeight: _minTarget,
+          ),
+          child: Padding(padding: padding, child: child),
+        ),
+      ),
+    );
   }
 }
 

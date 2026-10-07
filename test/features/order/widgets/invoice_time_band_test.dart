@@ -19,6 +19,7 @@ Widget _band(Duration remaining) => MaterialApp(
   home: Scaffold(
     body: InvoiceTimeBand(
       remaining: remaining,
+      window: const Duration(minutes: 15),
       sentence: (time) => 'You have $time to send it',
       hours: (hours, minutes) => '$hours h $minutes',
       elapsed: _elapsed,
