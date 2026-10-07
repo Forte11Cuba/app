@@ -599,6 +599,29 @@ void main() {
       expect(container.read(selectedFiatCodeProvider), 'ARS');
     });
 
+    testWidgets('a currency the user picked survives a late list', (
+      tester,
+    ) async {
+      final listArrives = Completer<List<String>>();
+      final container = await _pump(
+        tester,
+        acceptedByNode: {defaultMostroPubkey: listArrives},
+      );
+      await tester.tap(find.byType(CurrencyInlineSelector));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('ARS'));
+      await tester.pumpAndSettle();
+
+      listArrives.complete(const ['USD']);
+      await tester.pumpAndSettle();
+
+      expect(container.read(selectedFiatCodeProvider), 'ARS');
+      expect(
+        find.text('This Mostro node does not accept ARS. Pick another currency'),
+        findsOneWidget,
+      );
+    });
+
     testWidgets('a pick survives the same list arriving again', (
       tester,
     ) async {

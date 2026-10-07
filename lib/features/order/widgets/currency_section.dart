@@ -52,6 +52,10 @@ final acceptedFiatCodesProvider = Provider.autoDispose<List<String>?>((ref) {
   return codes == null || codes.isEmpty ? null : codes;
 });
 
+/// Whether the user picked the form's currency in the picker. A picked
+/// currency counts as input: the node's list never switches it away.
+final fiatPickedByUserProvider = StateProvider<bool>((_) => false);
+
 /// The currencies the picker offers: the catalogue narrowed to
 /// [acceptedFiatCodesProvider], the whole catalogue when that is null.
 final offeredFiatCurrenciesProvider =
@@ -75,6 +79,7 @@ void showCurrencyPicker(BuildContext context, WidgetRef ref) {
       selected: ref.read(selectedFiatCodeProvider),
       onSelect: (code) {
         ref.read(selectedFiatCodeProvider.notifier).state = code;
+        ref.read(fiatPickedByUserProvider.notifier).state = true;
         Navigator.pop(dialogContext);
       },
     ),

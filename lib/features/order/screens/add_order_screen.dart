@@ -128,6 +128,7 @@ class _AddOrderScreenState extends ConsumerState<AddOrderScreen> {
       final defaultFiat =
           ref.read(settingsProvider).defaultFiatCode ?? 'USD';
       ref.read(selectedFiatCodeProvider.notifier).state = defaultFiat;
+      ref.read(fiatPickedByUserProvider.notifier).state = false;
       _keepFiatAccepted(ref.read(acceptedFiatCodesProvider));
       ref.read(isMarketPriceProvider.notifier).state = true;
       ref.read(isRangeOrderProvider.notifier).state = false;
@@ -147,7 +148,8 @@ class _AddOrderScreenState extends ConsumerState<AddOrderScreen> {
   /// Moves the form off a currency the node does not accept ([fiatForNode]),
   /// but only while the form is untouched: once an amount or a payment
   /// method is in, switching would reinterpret the amount and drop the
-  /// methods that belong to the old currency. The build then shows the
+  /// methods that belong to the old currency, and a currency the user picked
+  /// is theirs to change. The build then shows the
   /// currency as refused and keeps Publish disabled instead. Only the form's
   /// currency changes: the default currency in settings is never written.
   void _keepFiatAccepted(List<String>? accepted) {
@@ -157,8 +159,10 @@ class _AddOrderScreenState extends ConsumerState<AddOrderScreen> {
     if (next != selected.state) selected.state = next;
   }
 
-  /// No amount, no fixed sats and no payment method entered yet.
+  /// No currency picked, and no amount, fixed sats or payment method entered
+  /// yet.
   bool get _untouched =>
+      !ref.read(fiatPickedByUserProvider) &&
       _amountController.text.isEmpty &&
       _minController.text.isEmpty &&
       _maxController.text.isEmpty &&

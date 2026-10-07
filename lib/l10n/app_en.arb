@@ -2053,7 +2053,15 @@
     }
   },
   "orderCurrencyNotAccepted": "This Mostro node does not accept {currency}. Pick another currency",
-  "@orderCurrencyNotAccepted": {"description": "Shown in place of the order preview, with Publish disabled, when the active Mostro node does not list the selected currency in fiat_currencies_accepted and the user already entered an amount or payment methods", "placeholders": {"currency": {"type": "String", "example": "USD"}}},
+  "@orderCurrencyNotAccepted": {
+    "description": "Shown in place of the order preview, with Publish disabled, when the active Mostro node does not list the selected currency in fiat_currencies_accepted and the user already picked that currency or entered an amount or payment methods",
+    "placeholders": {
+      "currency": {
+        "type": "String",
+        "example": "USD"
+      }
+    }
+  },
   "orderAmountOutOfRangeFiat": "Amount must be between {min} and {max} {currency} for this Mostro node",
   "@orderAmountOutOfRangeFiat": {
     "description": "Shown when a market-price order amount converts outside the node min/max order amount, with the range expressed in the user's fiat currency",
