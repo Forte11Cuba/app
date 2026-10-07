@@ -469,6 +469,7 @@
   "tradesStatLabel": "trades",
   "daysActiveStatLabel": "dagen actief",
   "orderAmountOutOfRange": "Het bedrag moet tussen {min} en {max} sats liggen voor deze Mostro-node",
+  "orderCurrencyNotAccepted": "Deze Mostro-node accepteert geen {currency}. Kies een andere valuta",
   "orderAmountOutOfRangeFiat": "Het bedrag moet tussen {min} en {max} {currency} liggen voor deze Mostro-node",
   "priceTypeMarket": "Markt",
   "priceTypeFixed": "Vast",
@@ -642,6 +643,8 @@
   "@tradeChatEncrypted": {
     "description": "Subtitle of the chat card under the counterpart alias"
   },
+  "tradeChatClosed": "Gesprek gesloten · berichten bekijken",
+  "tradeChatClosedAnnouncement": "Het gesprek is gesloten. Je kunt de berichten nog steeds lezen",
   "tradeBodyWaitingPaymentBuyer": "Hij betaalt de hold invoice. Zodra de sats vaststaan, is het aan jou om de fiat over te maken.",
   "@tradeBodyWaitingPaymentBuyer": {
     "description": "Step body for the buyer while the seller pays the hold invoice"
@@ -1128,6 +1131,7 @@
   "chatCardMessage": "{count, plural, =1{1 nieuw bericht van je tegenpartij} other{{count} nieuwe berichten van je tegenpartij}}",
   "chatCardSolverMessage": "{count, plural, =1{1 nieuw bericht van de solver} other{{count} nieuwe berichten van de solver}}",
   "invalidTradeIndexError": "Je account loopt niet gelijk met deze Mostro-node, dus de order is geweigerd. Probeer het zo weer",
+  "invalidFiatCurrencyError": "Deze Mostro-node accepteert deze valuta niet, dus de order is geweigerd. Kies een andere valuta",
   "recoveringTradesMessage": "Account geïmporteerd. Je trades worden bij Mostro opgehaald…",
   "recoveredTradesMessage": "{count, plural, =0{Account geïmporteerd. Je had geen lopende trades} =1{Account geïmporteerd. 1 trade hersteld} other{Account geïmporteerd. {count} trades hersteld}}",
   "recoverTradesFailedMessage": "Account geïmporteerd, maar Mostro gaf geen antwoord, dus je lopende trades zijn niet hersteld",

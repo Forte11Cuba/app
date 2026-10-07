@@ -469,6 +469,7 @@
   "tradesStatLabel": "transactions",
   "daysActiveStatLabel": "jours actifs",
   "orderAmountOutOfRange": "Le montant doit être compris entre {min} et {max} sats pour ce nœud Mostro",
+  "orderCurrencyNotAccepted": "Ce nœud Mostro n'accepte pas {currency}. Choisissez une autre devise",
   "orderAmountOutOfRangeFiat": "Le montant doit être compris entre {min} et {max} {currency} pour ce nœud Mostro",
   "priceTypeMarket": "Marché",
   "priceTypeFixed": "Fixe",
@@ -642,6 +643,8 @@
   "@tradeChatEncrypted": {
     "description": "Subtitle of the chat card under the counterpart alias"
   },
+  "tradeChatClosed": "Conversation fermée · voir les messages",
+  "tradeChatClosedAnnouncement": "La conversation est fermée. Vous pouvez toujours lire ses messages",
   "tradeBodyWaitingPaymentBuyer": "Le vendeur paie la facture de dépôt. Une fois les sats bloqués, ce sera à vous de payer le fiat.",
   "@tradeBodyWaitingPaymentBuyer": {
     "description": "Step body for the buyer while the seller pays the hold invoice"
@@ -1128,6 +1131,7 @@
   "chatCardMessage": "{count, plural, =1{1 nouveau message de votre contrepartie} other{{count} nouveaux messages de votre contrepartie}}",
   "chatCardSolverMessage": "{count, plural, =1{1 nouveau message du médiateur du litige} other{{count} nouveaux messages du médiateur du litige}}",
   "invalidTradeIndexError": "Votre compte n'est pas synchronisé avec ce nœud Mostro, qui a donc refusé l'ordre. Réessayez dans un instant",
+  "invalidFiatCurrencyError": "Ce nœud Mostro n'accepte pas cette devise, il a donc refusé l'ordre. Choisissez une autre devise",
   "recoveringTradesMessage": "Compte importé. Récupération de vos échanges depuis Mostro…",
   "recoveredTradesMessage": "{count, plural, =0{Compte importé. Vous n'aviez aucun échange en cours} =1{Compte importé. 1 échange récupéré} other{Compte importé. {count} échanges récupérés}}",
   "recoverTradesFailedMessage": "Compte importé, mais Mostro n'a pas répondu : vos échanges en cours n'ont pas été récupérés",

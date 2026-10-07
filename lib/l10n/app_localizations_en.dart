@@ -1597,6 +1597,11 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
+  String orderCurrencyNotAccepted(String currency) {
+    return 'This Mostro node does not accept $currency. Pick another currency';
+  }
+
+  @override
   String orderAmountOutOfRangeFiat(int min, int max, String currency) {
     return 'Amount must be between $min and $max $currency for this Mostro node';
   }
@@ -2201,6 +2206,13 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get tradeChatEncrypted => 'End-to-end encrypted chat';
+
+  @override
+  String get tradeChatClosed => 'Conversation closed · view messages';
+
+  @override
+  String get tradeChatClosedAnnouncement =>
+      'The conversation is closed. You can still read its messages';
 
   @override
   String get tradeBodyWaitingPaymentBuyer =>
@@ -3613,6 +3625,10 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get invalidTradeIndexError =>
       'Your account is out of sync with this Mostro node, so it refused the order. Try again in a moment';
+
+  @override
+  String get invalidFiatCurrencyError =>
+      'This Mostro node does not accept that currency, so it refused the order. Pick another currency';
 
   @override
   String get recoveringTradesMessage =>

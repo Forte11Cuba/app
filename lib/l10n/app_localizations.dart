@@ -2914,6 +2914,12 @@ abstract class AppLocalizations {
   /// **'Amount must be between {min} and {max} sats for this Mostro node'**
   String orderAmountOutOfRange(int min, int max);
 
+  /// Shown in place of the order preview, with Publish disabled, when the active Mostro node does not list the selected currency in fiat_currencies_accepted and the user already picked that currency or entered an amount or payment methods
+  ///
+  /// In en, this message translates to:
+  /// **'This Mostro node does not accept {currency}. Pick another currency'**
+  String orderCurrencyNotAccepted(String currency);
+
   /// Shown when a market-price order amount converts outside the node min/max order amount, with the range expressed in the user's fiat currency
   ///
   /// In en, this message translates to:
@@ -3825,6 +3831,18 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'End-to-end encrypted chat'**
   String get tradeChatEncrypted;
+
+  /// Subtitle of the trade screen's chat card once the conversation has ended (trade cancelled, or completed more than an hour ago); tapping opens the conversation read-only
+  ///
+  /// In en, this message translates to:
+  /// **'Conversation closed · view messages'**
+  String get tradeChatClosed;
+
+  /// Screen-reader announcement when the trade screen's chat card turns closed while the user is on it (the completed trade's hour ran out); the messages stay readable
+  ///
+  /// In en, this message translates to:
+  /// **'The conversation is closed. You can still read its messages'**
+  String get tradeChatClosedAnnouncement;
 
   /// Step body for the buyer while the seller pays the hold invoice
   ///
@@ -6081,6 +6099,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Your account is out of sync with this Mostro node, so it refused the order. Try again in a moment'**
   String get invalidTradeIndexError;
+
+  /// Error shown when the Mostro node refuses a new order with CantDo(InvalidFiatCurrency): its fiat_currencies_accepted list does not include the order's currency
+  ///
+  /// In en, this message translates to:
+  /// **'This Mostro node does not accept that currency, so it refused the order. Pick another currency'**
+  String get invalidFiatCurrencyError;
 
   /// Snackbar shown on the Account screen right after a mnemonic import, while the app asks Mostro for the identity's trades in progress
   ///
