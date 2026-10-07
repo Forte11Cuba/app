@@ -524,4 +524,30 @@ void main() {
       expect(find.text('Mint URL'), findsOneWidget);
     });
   });
+
+  testWidgets('the mint dialogs fit a narrow screen at German and 2x text',
+      (tester) async {
+    // Arrange — the longest strings, the smallest width, the largest text.
+    tester.view.physicalSize = const Size(320, 800);
+    tester.view.devicePixelRatio = 1.0;
+    tester.platformDispatcher.textScaleFactorTestValue = 2.0;
+    addTearDown(tester.view.reset);
+    addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+    await _pump(
+      tester,
+      status: _status(connected: true, balance: 1234567),
+      locale: const Locale('de'),
+    );
+
+    // Act / Assert — the balance warning, then the mint dialog behind it.
+    await tester.tap(find.text('Mint wechseln'));
+    await tester.pumpAndSettle();
+    expect(find.text('Mint wechseln?'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+
+    await tester.tap(find.text('Weiter'));
+    await tester.pumpAndSettle();
+    expect(find.text('Mint-URL'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
 }

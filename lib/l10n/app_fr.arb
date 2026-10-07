@@ -1248,7 +1248,7 @@
   "cashuErrorNotEnabled": "Ce nœud Mostro ne règle pas les échanges avec Cashu.",
   "cashuErrorNotConnected": "Le portefeuille n'est pas encore connecté à un mint.",
   "cashuErrorMintUnreachable": "Impossible de joindre le mint. Vérifiez votre connexion et réessayez.",
-  "cashuErrorMintUnusable": "Il manque au mint de ce nœud des fonctions nécessaires au séquestre ; il n'est donc pas possible d'échanger ici.",
+  "cashuErrorMintUnusable": "Il manque à ce mint des fonctions nécessaires au portefeuille. Choisissez un autre mint.",
   "cashuErrorUnsupportedOnWeb": "Le portefeuille Cashu n'est pas encore disponible dans la version web.",
   "cashuErrorAmountZero": "Saisissez un montant supérieur à zéro.",
   "cashuErrorAmountTooLarge": "Vous n'avez que {sats} sats.",

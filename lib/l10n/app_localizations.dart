@@ -6805,7 +6805,7 @@ abstract class AppLocalizations {
   /// Cashu error — the mint answered but lacks a required NUT or keyset
   ///
   /// In en, this message translates to:
-  /// **'This node\'s mint is missing features the escrow needs, so trading is not possible here.'**
+  /// **'This mint is missing features the wallet needs. Choose another mint.'**
   String get cashuErrorMintUnusable;
 
   /// Cashu error — the web build has no proof storage

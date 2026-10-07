@@ -4091,7 +4091,7 @@ class AppLocalizationsEs extends AppLocalizations {
 
   @override
   String get cashuErrorMintUnusable =>
-      'Al mint de este nodo le faltan funciones que la custodia necesita, así que no se puede operar acá.';
+      'A este mint le faltan funciones que la billetera necesita. Elegí otro mint.';
 
   @override
   String get cashuErrorUnsupportedOnWeb =>

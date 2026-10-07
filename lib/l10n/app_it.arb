@@ -1248,7 +1248,7 @@
   "cashuErrorNotEnabled": "Questo nodo Mostro non liquida gli scambi con Cashu.",
   "cashuErrorNotConnected": "Il portafoglio non è ancora connesso a una mint.",
   "cashuErrorMintUnreachable": "Impossibile raggiungere la mint. Controlla la connessione e riprova.",
-  "cashuErrorMintUnusable": "Alla mint di questo nodo mancano funzioni necessarie al deposito, quindi qui non si può scambiare.",
+  "cashuErrorMintUnusable": "A questa mint mancano funzioni necessarie al portafoglio. Scegli un'altra mint.",
   "cashuErrorUnsupportedOnWeb": "Il portafoglio Cashu non è ancora disponibile nella versione web.",
   "cashuErrorAmountZero": "Inserisci un importo maggiore di zero.",
   "cashuErrorAmountTooLarge": "Hai solo {sats} sats.",

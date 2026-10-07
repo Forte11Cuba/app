@@ -4063,7 +4063,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get cashuErrorMintUnusable =>
-      'This node\'s mint is missing features the escrow needs, so trading is not possible here.';
+      'This mint is missing features the wallet needs. Choose another mint.';
 
   @override
   String get cashuErrorUnsupportedOnWeb =>

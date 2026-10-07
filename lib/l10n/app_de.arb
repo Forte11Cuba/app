@@ -1248,7 +1248,7 @@
   "cashuErrorNotEnabled": "Dieser Mostro-Node wickelt Trades nicht über Cashu ab.",
   "cashuErrorNotConnected": "Die Wallet ist noch mit keiner Mint verbunden.",
   "cashuErrorMintUnreachable": "Die Mint war nicht erreichbar. Prüfe deine Verbindung und versuche es erneut.",
-  "cashuErrorMintUnusable": "Der Mint dieses Nodes fehlen Funktionen, die die Treuhand braucht – hier kann nicht gehandelt werden.",
+  "cashuErrorMintUnusable": "Dieser Mint fehlen Funktionen, die die Wallet braucht. Wähle eine andere Mint.",
   "cashuErrorUnsupportedOnWeb": "Die Cashu-Wallet ist in der Web-Version noch nicht verfügbar.",
   "cashuErrorAmountZero": "Gib einen Betrag größer als null ein.",
   "cashuErrorAmountTooLarge": "Du hast nur {sats} Sats.",

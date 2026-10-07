@@ -1248,7 +1248,7 @@
   "cashuErrorNotEnabled": "Deze Mostro-node rekent trades niet af met Cashu.",
   "cashuErrorNotConnected": "De portemonnee is nog niet verbonden met een mint.",
   "cashuErrorMintUnreachable": "De mint is niet bereikbaar. Controleer je verbinding en probeer het opnieuw.",
-  "cashuErrorMintUnusable": "De mint van deze node mist functies die de escrow nodig heeft, dus handelen is hier niet mogelijk.",
+  "cashuErrorMintUnusable": "Deze mint mist functies die de portemonnee nodig heeft. Kies een andere mint.",
   "cashuErrorUnsupportedOnWeb": "De Cashu-portemonnee is nog niet beschikbaar in de webversie.",
   "cashuErrorAmountZero": "Voer een bedrag groter dan nul in.",
   "cashuErrorAmountTooLarge": "Je hebt maar {sats} sats.",

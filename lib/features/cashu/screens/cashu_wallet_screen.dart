@@ -61,6 +61,8 @@ class _CashuWalletScreenState extends ConsumerState<CashuWalletScreen> {
 
   /// Holds the busy flag, so "Set mint" cannot race the open-time connect.
   Future<void> _connect() async {
+    // Runs from a post-frame callback, which can land after a quick pop.
+    if (!mounted) return;
     setState(() => _busy = true);
     try {
       await ref.read(cashuWalletControllerProvider).connect();

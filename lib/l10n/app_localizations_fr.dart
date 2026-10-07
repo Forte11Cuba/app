@@ -4126,7 +4126,7 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get cashuErrorMintUnusable =>
-      'Il manque au mint de ce nœud des fonctions nécessaires au séquestre ; il n\'est donc pas possible d\'échanger ici.';
+      'Il manque à ce mint des fonctions nécessaires au portefeuille. Choisissez un autre mint.';
 
   @override
   String get cashuErrorUnsupportedOnWeb =>

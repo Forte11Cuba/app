@@ -4098,7 +4098,7 @@ class AppLocalizationsNl extends AppLocalizations {
 
   @override
   String get cashuErrorMintUnusable =>
-      'De mint van deze node mist functies die de escrow nodig heeft, dus handelen is hier niet mogelijk.';
+      'Deze mint mist functies die de portemonnee nodig heeft. Kies een andere mint.';
 
   @override
   String get cashuErrorUnsupportedOnWeb =>

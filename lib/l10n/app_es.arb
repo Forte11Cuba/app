@@ -1248,7 +1248,7 @@
   "cashuErrorNotEnabled": "Este nodo Mostro no liquida operaciones con Cashu.",
   "cashuErrorNotConnected": "La billetera todavía no está conectada a un mint.",
   "cashuErrorMintUnreachable": "No se pudo contactar al mint. Revisá tu conexión e intentá de nuevo.",
-  "cashuErrorMintUnusable": "Al mint de este nodo le faltan funciones que la custodia necesita, así que no se puede operar acá.",
+  "cashuErrorMintUnusable": "A este mint le faltan funciones que la billetera necesita. Elegí otro mint.",
   "cashuErrorUnsupportedOnWeb": "La billetera Cashu todavía no está disponible en la versión web.",
   "cashuErrorAmountZero": "Ingresá un monto mayor que cero.",
   "cashuErrorAmountTooLarge": "Solo tenés {sats} sats.",

@@ -4104,7 +4104,7 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get cashuErrorMintUnusable =>
-      'Alla mint di questo nodo mancano funzioni necessarie al deposito, quindi qui non si può scambiare.';
+      'A questa mint mancano funzioni necessarie al portafoglio. Scegli un\'altra mint.';
 
   @override
   String get cashuErrorUnsupportedOnWeb =>

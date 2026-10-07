@@ -226,14 +226,19 @@ fn validate_wallet_mint_url(url: &str) -> Result<()> {
 }
 
 /// The mint a Cashu node that pins exactly one offers as the wallet's default.
+///
+/// Held to the same rule as a mint the user types: a node that names a remote
+/// `http://` mint offers no default, and the user is asked for a mint instead.
 fn node_default_mint() -> Option<String> {
     if !escrow_mode::is_cashu_mode() {
         return None;
     }
-    escrow_mode::get_resolved()
+    let mint_url = escrow_mode::get_resolved()
         .config
         .single_mint()
-        .map(str::to_string)
+        .map(str::to_string)?;
+    validate_wallet_mint_url(&mint_url).ok()?;
+    Some(mint_url)
 }
 
 /// The wallet's mint as the user last set it, or `None` on a fresh install.
@@ -1209,6 +1214,29 @@ mod tests {
                 .to_string()
                 .contains("InvalidMintUrl")
         );
+    }
+
+    #[test]
+    // The globals lock must span the calls it guards.
+    #[allow(clippy::await_holding_lock)]
+    fn a_node_offers_no_cleartext_remote_mint_as_the_default() {
+        let _g = escrow_lock();
+        let node_on = |mint: &str| {
+            escrow_mode::set_from_tags(
+                escrow_mode::EscrowMode::Cashu,
+                escrow_mode::CashuNodeConfig {
+                    mint_urls: vec![mint.to_string()],
+                    ..Default::default()
+                },
+            );
+            node_default_mint()
+        };
+
+        assert_eq!(
+            node_on("https://mint.a.com"),
+            Some("https://mint.a.com".to_string())
+        );
+        assert_eq!(node_on("http://mint.a.com"), None);
     }
 
     #[tokio::test]

@@ -4119,7 +4119,7 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get cashuErrorMintUnusable =>
-      'Der Mint dieses Nodes fehlen Funktionen, die die Treuhand braucht – hier kann nicht gehandelt werden.';
+      'Dieser Mint fehlen Funktionen, die die Wallet braucht. Wähle eine andere Mint.';
 
   @override
   String get cashuErrorUnsupportedOnWeb =>
