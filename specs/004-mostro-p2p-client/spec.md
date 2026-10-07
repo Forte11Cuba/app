@@ -275,7 +275,7 @@ The app always has all three payment methods: Lightning, NWC and the Cashu walle
 
 **Acceptance Scenarios**:
 
-1. **Given** the user opens Settings, **When** they view the screen, **Then** 8 configuration cards are shown: Language, Default Fiat Currency, Lightning Address, NWC Wallet, Relays, Push Notifications, Log Report, and Mostro Node.
+1. **Given** the user opens Settings, **When** they view the screen, **Then** these configuration entries are shown: Language, Default Fiat Currency, Lightning Address, NWC Wallet, Cashu Wallet, Relays, Push Notifications, Log Report, and Mostro Node.
 2. **Given** the user taps Default Fiat Currency, **When** the currency dialog opens, **Then** they can search by name or code, and selecting one saves it as the default.
 3. **Given** the user has a Lightning address saved, **When** they start a buy trade, **Then** the invoice input is pre-filled with the saved address.
 4. **Given** the user manages relays, **When** they toggle a relay off, **Then** the app stops connecting to that relay.

@@ -71,7 +71,8 @@ hiding the wallet (§4.1).
   escrows; anything beyond that is out of scope. It is always reachable (§1.2).
   This bounds the wallet's **feature set**, not its quality bar — within that scope it
   handles real money and is held to it.
-- No mint of the client's own choosing beyond what the node accepts. Since
+- No escrow mint of the client's own choosing beyond what the node accepts (the wallet's
+  own mint is the user's choice, C2; an escrow is locked only on the order's mint). Since
   [MostroP2P/mostro#1047](https://github.com/MostroP2P/mostro/pull/1047) the **maker**
   picks each order's mint, among the node's `[cashu] mint_urls` (or any public mint when
   the list is empty), and the taker accepts it by taking. This client reads the list and
@@ -468,11 +469,25 @@ hard prerequisite, not a nice-to-have.
 - `rust/src/api/cashu.rs` — FRB: `cashu_connect`, `cashu_status`,
   `cashu_disconnect`, `cashu_get_balance`, `cashu_receive_token`,
   `cashu_create_token`, `cashu_sweep_spent_proofs`, `on_cashu_wallet_changed`
-  stream. Plain wallet operations (balance, receive, send) work on any node (§1.2);
-  the wallet's mint is the one the user connected it to. Escrow operations check that
-  this mint is the order's (`CashuMintNotSupported`). *As first merged, every operating
-  call checked that the wallet was still bound to the mint the active node resolves to
-  (`CashuMintChanged`); that ties the wallet to the node and has to change for §1.2.*
+  stream. Plain wallet operations (balance, receive, send) work on any node (§1.2).
+  Escrow operations check that the wallet's mint is the order's
+  (`CashuMintNotSupported`).
+- **The wallet's mint belongs to the user, not to the node.** It is persisted in the
+  Rust settings k/v store and survives node switches and restarts. `cashu_connect`
+  takes the mint URL to connect to, and runs the same checks as today (reachability,
+  NUTs 07/11/12, `sat` keyset). The mint is chosen in one of three ways:
+  - on a Cashu node that pins exactly one mint, that mint is offered as the default;
+  - otherwise — a Lightning node, a silent node, or a Cashu node that accepts several
+    or any — the user enters a mint URL (paste or QR scan) in the wallet screen;
+  - receiving a token while no mint is set connects the wallet to the token's mint.
+
+  Changing the mint later is an explicit user action. It never deletes the proofs of
+  the previous mint, which come back when the user connects to that mint again.
+  *As first merged, `cashu_connect()` took no argument and derived the mint from the
+  active node (`single_mint()`), `ensure_enabled` refused every call off a Cashu node
+  (`CashuNotEnabled`), and every operating call checked that the wallet was still
+  bound to the active node's mint (`CashuMintChanged`). All three tie the wallet to the
+  node and have to change for §1.2.*
 - Wallet initializes **lazily**, on first use, on any node — never at app start, and
   never conditioned on the active node's escrow mode (§1.2).
 - Unit tests against a mocked/local mint where feasible; integration test target
@@ -493,11 +508,13 @@ hard prerequisite, not a nice-to-have.
 - `lib/features/cashu/`: wallet screen (balance, receive-token via paste/QR-scan —
   reuse `mobile_scanner` + `qr_flutter` already in `pubspec.yaml` — send/export token),
   route in `lib/core/app_routes.dart`, entry point **always visible** in Settings next
-  to the existing NWC wallet entry, on every node (§1.2).
+  to the existing NWC wallet entry, on every node (§1.2). The screen shows the wallet's
+  mint and lets the user set or change it (the mint-selection rules are in C2).
 - Riverpod providers over the C2 FRB surface; l10n for the 5 locales.
 - Explicitly out of scope: Lightning↔ecash melt/mint, multi-mint, backup UX (C10).
 - **Done when:** a tester can fund the wallet from any Cashu wallet (e.g. a nutshell
-  faucet token) and see/export balance, on a Cashu node and on a Lightning node alike.
+  faucet token) and see/export balance, on a Cashu node and on a Lightning node alike —
+  on a Lightning node after entering a mint URL or by receiving a token.
   *As first merged, the entry point showed only with Cashu detected (or the override
   on); that contradicts §1.2 and has to change.*
 - Est. size: S–M (~500–800 lines).
