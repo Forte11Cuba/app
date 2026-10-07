@@ -323,9 +323,14 @@ impl CashuWallet {
     /// no manual step. Without it the integration tests below assert
     /// "fund the wallet first" and can never pass, which makes them
     /// documentation rather than verification.
+    ///
+    /// "Settles itself" is not "settles at once": nutshell marks the quote paid
+    /// before it answers, but a `cdk-mintd` fake backend (testnut) pays it
+    /// about two seconds later, and minting before that fails. So this waits
+    /// for the quote to read `Paid` before minting.
     #[cfg(test)]
     pub(crate) async fn mint_for_test(&self, amount_sats: u64) -> Result<u64> {
-        use cdk::nuts::PaymentMethod;
+        use cdk::nuts::{MintQuoteState, PaymentMethod};
 
         let quote = self
             .inner
@@ -337,6 +342,25 @@ impl CashuWallet {
             )
             .await
             .map_err(|e| anyhow!("CashuMintQuoteFailed: {e}"))?;
+
+        let mut attempts = 0;
+        while self
+            .inner
+            .check_mint_quote_status(&quote.id)
+            .await
+            .map_err(|e| anyhow!("CashuMintQuoteFailed: {e}"))?
+            .state
+            != MintQuoteState::Paid
+        {
+            attempts += 1;
+            if attempts == 20 {
+                bail!(
+                    "CashuMintFailed: quote {} still unpaid after 10 s (is the mint in FakeWallet mode?)",
+                    quote.id
+                );
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        }
 
         let proofs = self
             .inner
@@ -406,6 +430,9 @@ mod tests {
     /// docker run -p 3338:3338 cashubtc/nutshell:latest poetry run mint
     /// MOSTRO_TEST_MINT_URL=http://localhost:3338 cargo test -- --ignored
     /// ```
+    ///
+    /// or, without Docker, at the public test mint, whose Lightning backend is
+    /// fake too: `MOSTRO_TEST_MINT_URL=https://testnut.cashu.space`.
     ///
     /// They are `#[ignore]` so CI stays green without one. A mock is not an
     /// option here: it would have to fake blind signatures and DLEQ proofs, and
