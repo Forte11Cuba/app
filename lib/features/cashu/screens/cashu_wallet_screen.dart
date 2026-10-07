@@ -7,11 +7,14 @@ import 'package:qr_flutter/qr_flutter.dart';
 
 import 'package:mostro/core/app_routes.dart';
 import 'package:mostro/core/app_theme.dart';
+import 'package:mostro/core/settings_palette.dart';
 import 'package:mostro/features/cashu/cashu_error_messages.dart';
 import 'package:mostro/features/cashu/providers/cashu_wallet_provider.dart';
+import 'package:mostro/features/settings/widgets/settings_section.dart';
 import 'package:mostro/l10n/app_localizations.dart';
 import 'package:mostro/shared/widgets/mostro_modal.dart';
 import 'package:mostro/shared/widgets/platform_aware_qr_scanner.dart';
+import 'package:mostro/shared/widgets/redesign_app_bar.dart';
 import 'package:mostro/src/rust/api/types.dart';
 
 /// The embedded Cashu wallet — phase C3 of `docs/cashu/README.md`.
@@ -239,30 +242,34 @@ class _CashuWalletScreenState extends ConsumerState<CashuWalletScreen> {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    final colors = Theme.of(context).extension<AppColors>()!;
+    final book = OrderBookPalette.of(context);
+    final pal = SettingsPalette.of(context);
     final status = ref.watch(cashuWalletProvider).valueOrNull;
     // `null` here means "not read yet or unreadable", which is not the same as
     // an empty wallet — see CashuWalletStatus.balance_sats.
     final balance = status?.balanceSats;
 
     return Scaffold(
-      appBar: AppBar(
-        title: Text(l10n.cashuWalletTitle),
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
-          onPressed:
-              () =>
-                  context.canPop()
-                      ? context.pop()
-                      : context.go(AppRoute.settings),
-        ),
+      backgroundColor: book.bg,
+      appBar: redesignAppBar(
+        context,
+        title: l10n.cashuWalletTitle,
+        onBack:
+            () =>
+                context.canPop()
+                    ? context.pop()
+                    : context.go(AppRoute.settings),
       ),
       body: ListView(
-        padding: const EdgeInsets.all(AppSpacing.lg),
+        padding: const EdgeInsets.fromLTRB(
+          redesignSidePadding,
+          6,
+          redesignSidePadding,
+          14,
+        ),
         children: [
           _BalanceCard(
             status: status,
-            colors: colors,
             noMint: _noMint,
             // Not while a connected wallet's balance is unknown: the warning
             // that the balance stays at the old mint could not be shown.
@@ -272,17 +279,18 @@ class _CashuWalletScreenState extends ConsumerState<CashuWalletScreen> {
                     ? null
                     : () => _setMint(status),
           ),
-          const SizedBox(height: AppSpacing.lg),
+          const SizedBox(height: settingsGroupGap),
           Row(
             children: [
               Expanded(
                 child: FilledButton.icon(
                   onPressed: _busy ? null : _receive,
-                  icon: const Icon(Icons.qr_code_scanner),
+                  style: _primaryStyle(book, pal),
+                  icon: const Icon(Icons.qr_code_scanner, size: 18),
                   label: Text(l10n.cashuReceiveButton),
                 ),
               ),
-              const SizedBox(width: AppSpacing.md),
+              const SizedBox(width: 10),
               Expanded(
                 child: OutlinedButton.icon(
                   // Nothing to send from an empty wallet; disabling says so
@@ -294,36 +302,34 @@ class _CashuWalletScreenState extends ConsumerState<CashuWalletScreen> {
                       _busy || balance == null || balance == BigInt.zero
                           ? null
                           : () => _send(balance.toInt()),
-                  icon: const Icon(Icons.upload_outlined),
+                  style: _secondaryStyle(book, pal),
+                  icon: const Icon(Icons.upload_outlined, size: 18),
                   label: Text(l10n.cashuSendButton),
                 ),
               ),
             ],
           ),
           if (_lastToken != null) ...[
-            const SizedBox(height: AppSpacing.lg),
-            Container(
-              padding: const EdgeInsets.all(AppSpacing.md),
-              decoration: BoxDecoration(
-                color: colors.backgroundCard,
-                borderRadius: BorderRadius.circular(AppRadius.card),
-              ),
+            const SizedBox(height: settingsGroupGap),
+            _Card(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
                     l10n.cashuLastTokenPending,
-                    style: TextStyle(color: colors.textSubtle, fontSize: 13),
+                    style: TextStyle(fontSize: 13, color: book.textBody),
                   ),
-                  const SizedBox(height: AppSpacing.sm),
+                  const SizedBox(height: 6),
                   Row(
                     children: [
                       TextButton(
                         onPressed: () => _showToken(_lastToken!),
+                        style: _linkStyle(book),
                         child: Text(l10n.cashuShowLastToken),
                       ),
                       TextButton(
                         onPressed: () => setState(() => _lastToken = null),
+                        style: _linkStyle(book),
                         child: Text(l10n.cashuLastTokenDone),
                       ),
                     ],
@@ -332,19 +338,117 @@ class _CashuWalletScreenState extends ConsumerState<CashuWalletScreen> {
               ),
             ),
           ],
-          const SizedBox(height: AppSpacing.lg),
-          TextButton.icon(
-            onPressed: _busy ? null : _sync,
-            icon: const Icon(Icons.refresh),
-            label: Text(l10n.cashuSyncButton),
+          const SizedBox(height: settingsGroupGap),
+          Align(
+            alignment: AlignmentDirectional.centerStart,
+            child: TextButton.icon(
+              onPressed: _busy ? null : _sync,
+              style: _linkStyle(book),
+              icon: const Icon(Icons.refresh, size: 16),
+              label: Text(l10n.cashuSyncButton),
+            ),
           ),
-          const SizedBox(height: AppSpacing.md),
-          Text(
-            l10n.cashuWalletExplanation,
-            style: TextStyle(color: colors.textSubtle, fontSize: 13),
+          const SizedBox(height: 6),
+          SettingsFootnote(
+            icon: Icons.info_outline,
+            text: l10n.cashuWalletExplanation,
           ),
         ],
       ),
+    );
+  }
+}
+
+// ── Styles ────────────────────────────────────────────────────────────────────
+//
+// From the palette, never the v1 theme (DS-CMP-3, DS-CMP-4, DS-CMP-17): the
+// same shapes and inks as the NWC wallet screen beside this one in Settings.
+
+ButtonStyle _primaryStyle(OrderBookPalette book, SettingsPalette pal) =>
+    FilledButton.styleFrom(
+      backgroundColor: book.lime,
+      foregroundColor: book.onLime,
+      disabledBackgroundColor: pal.ctaDisabledBg,
+      disabledForegroundColor: pal.ctaDisabledInk,
+      minimumSize: const Size.fromHeight(50),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.all(Radius.circular(16)),
+      ),
+      textStyle: const TextStyle(
+        fontFamily: AppFonts.ui,
+        fontSize: 15,
+        fontWeight: FontWeight.w600,
+      ),
+    );
+
+ButtonStyle _secondaryStyle(OrderBookPalette book, SettingsPalette pal) =>
+    OutlinedButton.styleFrom(
+      foregroundColor: book.textBody,
+      backgroundColor: pal.buttonFill,
+      disabledForegroundColor: pal.ctaDisabledInk,
+      side: BorderSide(color: pal.buttonBorder),
+      minimumSize: const Size.fromHeight(50),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.all(Radius.circular(16)),
+      ),
+      textStyle: const TextStyle(
+        fontFamily: AppFonts.ui,
+        fontSize: 15,
+        fontWeight: FontWeight.w500,
+      ),
+    );
+
+ButtonStyle _linkStyle(OrderBookPalette book) => TextButton.styleFrom(
+  foregroundColor: book.limeInk,
+  disabledForegroundColor: book.textFaint,
+  textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
+);
+
+/// An underlined field that sets every state itself, as `InvoiceInputField`
+/// does (DS-CMP-19): left to the theme, it would paint v1's filled underline.
+InputDecoration _fieldDecoration(
+  OrderBookPalette book,
+  SettingsPalette pal, {
+  required String label,
+  String? hint,
+  String? error,
+}) => InputDecoration(
+  labelText: label,
+  labelStyle: TextStyle(fontSize: 13, color: pal.fieldLabel),
+  floatingLabelStyle: TextStyle(fontSize: 13, color: pal.fieldLabelFocus),
+  hintText: hint,
+  hintStyle: TextStyle(fontSize: 14, color: pal.placeholder),
+  errorText: error,
+  errorStyle: TextStyle(fontSize: 12, color: pal.danger),
+  filled: false,
+  enabledBorder: UnderlineInputBorder(
+    borderSide: BorderSide(color: pal.fieldUnderline),
+  ),
+  focusedBorder: UnderlineInputBorder(
+    borderSide: BorderSide(color: pal.fieldUnderlineFocus, width: 1.5),
+  ),
+  errorBorder: UnderlineInputBorder(borderSide: BorderSide(color: pal.danger)),
+  focusedErrorBorder: UnderlineInputBorder(
+    borderSide: BorderSide(color: pal.danger, width: 1.5),
+  ),
+);
+
+/// A redesign card: surface, radius 18, palette border (DS-CMP-8).
+class _Card extends StatelessWidget {
+  const _Card({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final book = OrderBookPalette.of(context);
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: book.surface,
+        borderRadius: const BorderRadius.all(Radius.circular(18)),
+        border: Border.all(color: book.border),
+      ),
+      child: Padding(padding: const EdgeInsets.all(14), child: child),
     );
   }
 }
@@ -376,13 +480,11 @@ String _fmtSats(BigInt sats, String locale) {
 class _BalanceCard extends StatelessWidget {
   const _BalanceCard({
     required this.status,
-    required this.colors,
     required this.noMint,
     required this.onSetMint,
   });
 
   final CashuWalletStatus? status;
-  final AppColors colors;
 
   /// No mint was ever set: say how to get one rather than "not connected".
   final bool noMint;
@@ -393,22 +495,19 @@ class _BalanceCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
+    final book = OrderBookPalette.of(context);
+    final pal = SettingsPalette.of(context);
     final connected = status?.connected ?? false;
 
-    return Container(
-      padding: const EdgeInsets.all(AppSpacing.lg),
-      decoration: BoxDecoration(
-        color: colors.backgroundCard,
-        borderRadius: BorderRadius.circular(AppRadius.card),
-      ),
+    return _Card(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
             l10n.cashuBalanceLabel,
-            style: TextStyle(color: colors.textSecondary, fontSize: 14),
+            style: TextStyle(fontSize: 13, color: book.textMuted),
           ),
-          const SizedBox(height: AppSpacing.xs),
+          const SizedBox(height: 4),
           Text(
             // An unreadable balance renders as "—", never as a number. Showing
             // "0 Satoshis" for a failed read is the one thing a bearer-money
@@ -416,32 +515,37 @@ class _BalanceCard extends StatelessWidget {
             status?.balanceSats == null
                 ? '—'
                 : '${_fmtSats(status!.balanceSats!, Localizations.localeOf(context).toString())} ${l10n.aboutSatoshisSuffix}',
-            style: Theme.of(
-              context,
-            ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w600),
+            // The amount is the screen's subject: a hero figure (§3.2).
+            style: TextStyle(
+              fontFamily: AppFonts.figures,
+              fontSize: 26,
+              fontWeight: FontWeight.w700,
+              color: book.textPrimary,
+            ),
           ),
-          const SizedBox(height: AppSpacing.md),
+          const SizedBox(height: 10),
           if (!connected && noMint)
             Text(
               l10n.cashuNoMintSet,
-              style: TextStyle(color: colors.textSubtle, fontSize: 13),
+              style: TextStyle(fontSize: 13, color: book.textBody),
             )
           else if (!connected)
             Text(
               l10n.cashuNotConnected,
-              style: TextStyle(color: colors.destructiveRed, fontSize: 13),
+              style: TextStyle(fontSize: 13, color: pal.danger),
             )
           // Rust always names the mint when connected; guarded anyway so a
           // future status without one renders nothing rather than "Mint: ".
           else if (status?.mintUrl case final mintUrl?)
             Text(
               l10n.cashuMintLabel(mintUrl),
-              style: TextStyle(color: colors.textSubtle, fontSize: 13),
+              style: TextStyle(fontSize: 13, color: book.textBody),
             ),
           Align(
             alignment: AlignmentDirectional.centerStart,
             child: TextButton(
               onPressed: onSetMint,
+              style: _linkStyle(book),
               child: Text(
                 connected
                     ? l10n.cashuChangeMintButton
@@ -522,42 +626,30 @@ class _MintDialogState extends State<_MintDialog> {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
+    final book = OrderBookPalette.of(context);
+    final pal = SettingsPalette.of(context);
     return MostroDialog(
       title: l10n.cashuMintDialogTitle,
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          TextField(
-            controller: _controller,
-            autofocus: true,
-            keyboardType: TextInputType.url,
-            autocorrect: false,
-            decoration: InputDecoration(
-              labelText: l10n.cashuMintFieldLabel,
-              hintText: l10n.cashuMintFieldHint,
-              errorText: _error,
-            ),
-            onSubmitted: (_) => _submit(),
-          ),
-          const SizedBox(height: AppSpacing.sm),
-          Wrap(
-            spacing: AppSpacing.sm,
-            children: [
-              TextButton.icon(
-                onPressed: _paste,
-                icon: const Icon(Icons.content_paste),
-                label: Text(l10n.pasteButtonLabel),
-              ),
-              TextButton.icon(
-                onPressed: _scan,
-                icon: const Icon(Icons.qr_code_scanner),
-                label: Text(l10n.scanQrButtonLabel),
-              ),
-            ],
-          ),
-        ],
+      content: TextField(
+        controller: _controller,
+        autofocus: true,
+        keyboardType: TextInputType.url,
+        autocorrect: false,
+        style: TextStyle(fontSize: 14, color: book.textPrimary),
+        decoration: _fieldDecoration(
+          book,
+          pal,
+          label: l10n.cashuMintFieldLabel,
+          hint: l10n.cashuMintFieldHint,
+          error: _error,
+        ),
+        onSubmitted: (_) => _submit(),
       ),
+      // Ways to fill the field, not answers to the dialog: links, not buttons.
+      links: [
+        ModalLink(label: l10n.pasteButtonLabel, onPressed: _paste),
+        ModalLink(label: l10n.scanQrButtonLabel, onPressed: _scan),
+      ],
       secondary: ModalAction(
         label: l10n.cancel,
         onPressed: () => Navigator.of(context).pop(),
@@ -610,6 +702,8 @@ class _AmountDialogState extends State<_AmountDialog> {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
+    final book = OrderBookPalette.of(context);
+    final pal = SettingsPalette.of(context);
     return MostroDialog(
       title: l10n.cashuSendButton,
       content: TextField(
@@ -617,9 +711,16 @@ class _AmountDialogState extends State<_AmountDialog> {
         autofocus: true,
         keyboardType: TextInputType.number,
         inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-        decoration: InputDecoration(
-          labelText: l10n.cashuAmountLabel,
-          errorText: _error,
+        style: TextStyle(
+          fontFamily: AppFonts.figures,
+          fontSize: 14,
+          color: book.textPrimary,
+        ),
+        decoration: _fieldDecoration(
+          book,
+          pal,
+          label: l10n.cashuAmountLabel,
+          error: _error,
         ),
         onSubmitted: (_) => _submit(),
       ),
@@ -666,6 +767,7 @@ class _TokenDialog extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
+    final book = OrderBookPalette.of(context);
     return MostroDialog(
       title: l10n.cashuTokenTitle,
       // MostroDialog scrolls its content and never asks it for intrinsic
@@ -684,11 +786,17 @@ class _TokenDialog extends StatelessWidget {
           // is showing the user their money.
           if (_fitsInQr(token))
             Container(
-              padding: const EdgeInsets.all(AppSpacing.sm),
-              color: Colors.white,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                // design-check: ignore DS-COL-1 — a QR code must be pure black on white to scan
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(14),
+              ),
               child: QrImageView(
                 data: token,
                 size: 200,
+                padding: EdgeInsets.zero,
+                // design-check: ignore DS-COL-1 — a QR code must be pure black on white to scan
                 backgroundColor: Colors.white,
               ),
             )
@@ -696,12 +804,18 @@ class _TokenDialog extends StatelessWidget {
             Text(
               l10n.cashuTokenTooLargeForQr,
               textAlign: TextAlign.center,
-              style: const TextStyle(fontSize: 13),
+              style: TextStyle(fontSize: 13, color: book.textBody),
             ),
-          const SizedBox(height: AppSpacing.md),
-          SelectableText(token, style: const TextStyle(fontSize: 11)),
-          const SizedBox(height: AppSpacing.md),
-          Text(l10n.cashuTokenWarning, style: const TextStyle(fontSize: 12)),
+          const SizedBox(height: 12),
+          SelectableText(
+            token,
+            style: TextStyle(fontSize: 11, color: book.textMuted),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            l10n.cashuTokenWarning,
+            style: TextStyle(fontSize: 12, color: book.textBody),
+          ),
         ],
       ),
       secondary: ModalAction(

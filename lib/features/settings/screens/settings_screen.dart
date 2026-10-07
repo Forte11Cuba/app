@@ -418,14 +418,34 @@ class _LightningAddressDialogState
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
+    final book = OrderBookPalette.of(context);
+    final pal = SettingsPalette.of(context);
     return MostroDialog(
       title: l10n.lightningAddressDialogTitle,
       content: TextField(
         controller: _controller,
         keyboardType: TextInputType.emailAddress,
+        style: TextStyle(fontSize: 14, color: book.textPrimary),
+        // Every state set here, as `InvoiceInputField` does (DS-CMP-19): left
+        // to the theme, the field would paint v1's filled underline.
         decoration: InputDecoration(
           hintText: l10n.lightningAddressHintText,
+          hintStyle: TextStyle(fontSize: 14, color: pal.placeholder),
           errorText: _errorText,
+          errorStyle: TextStyle(fontSize: 12, color: pal.danger),
+          filled: false,
+          enabledBorder: UnderlineInputBorder(
+            borderSide: BorderSide(color: pal.fieldUnderline),
+          ),
+          focusedBorder: UnderlineInputBorder(
+            borderSide: BorderSide(color: pal.fieldUnderlineFocus, width: 1.5),
+          ),
+          errorBorder: UnderlineInputBorder(
+            borderSide: BorderSide(color: pal.danger),
+          ),
+          focusedErrorBorder: UnderlineInputBorder(
+            borderSide: BorderSide(color: pal.danger, width: 1.5),
+          ),
         ),
         onChanged: (_) {
           if (_errorText != null) setState(() => _errorText = null);

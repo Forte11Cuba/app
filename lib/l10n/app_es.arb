@@ -1231,7 +1231,7 @@
   "cashuChangeMintTitle": "¿Cambiar de mint?",
   "cashuChangeMintWarning": "Tus {sats} sats quedan en {mint}. Vuelven cuando te conectes de nuevo a ese mint.",
   "cashuErrorNoMint": "Primero configurá un mint en la Billetera Cashu.",
-  "cashuErrorInvalidMintUrl": "Eso no es una URL de mint. Tiene que empezar con https:// o http://.",
+  "cashuErrorInvalidMintUrl": "Esa no es una URL de mint que puedas usar. Tiene que empezar con https://.",
   "cashuErrorWalletOnOtherMint": "Tu billetera Cashu usa otro mint. Cambiala al mint de este nodo en Configuración → Billetera Cashu y volvé a intentar.",
   "cashuReceiveButton": "Recibir",
   "cashuSendButton": "Enviar",

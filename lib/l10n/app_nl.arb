@@ -1231,7 +1231,7 @@
   "cashuChangeMintTitle": "Mint wijzigen?",
   "cashuChangeMintWarning": "Je {sats} sats blijven bij {mint}. Ze komen terug zodra je weer met die mint verbindt.",
   "cashuErrorNoMint": "Stel eerst een mint in de Cashu-portemonnee in.",
-  "cashuErrorInvalidMintUrl": "Dat is geen mint-URL. Hij moet beginnen met https:// of http://.",
+  "cashuErrorInvalidMintUrl": "Dat is geen bruikbare mint-URL. Hij moet beginnen met https://.",
   "cashuErrorWalletOnOtherMint": "Je Cashu-portemonnee gebruikt een andere mint. Schakel in Instellingen → Cashu-portemonnee over naar de mint van deze node en probeer het opnieuw.",
   "cashuReceiveButton": "Ontvangen",
   "cashuSendButton": "Versturen",

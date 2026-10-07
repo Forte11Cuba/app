@@ -1231,7 +1231,7 @@
   "cashuChangeMintTitle": "Changer de mint ?",
   "cashuChangeMintWarning": "Vos {sats} sats restent sur {mint}. Ils reviennent quand vous vous reconnectez à ce mint.",
   "cashuErrorNoMint": "Choisissez d'abord un mint dans le Portefeuille Cashu.",
-  "cashuErrorInvalidMintUrl": "Ce n'est pas une URL de mint. Elle doit commencer par https:// ou http://.",
+  "cashuErrorInvalidMintUrl": "Ce n'est pas une URL de mint utilisable. Elle doit commencer par https://.",
   "cashuErrorWalletOnOtherMint": "Votre portefeuille Cashu utilise un autre mint. Passez au mint de ce nœud dans Paramètres → Portefeuille Cashu, puis réessayez.",
   "cashuReceiveButton": "Recevoir",
   "cashuSendButton": "Envoyer",

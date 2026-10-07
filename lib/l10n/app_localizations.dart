@@ -6700,10 +6700,10 @@ abstract class AppLocalizations {
   /// **'Set a mint in the Cashu wallet first.'**
   String get cashuErrorNoMint;
 
-  /// Cashu wallet — the entered mint URL is not an http(s) URL with a host
+  /// Cashu wallet — the mint URL is not an https URL with a host (http only for a mint on this device)
   ///
   /// In en, this message translates to:
-  /// **'That is not a mint URL. It must start with https:// or http://.'**
+  /// **'That is not a mint URL you can use. It must start with https://.'**
   String get cashuErrorInvalidMintUrl;
 
   /// Lock escrow — the wallet is bound to another mint than the node's

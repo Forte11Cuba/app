@@ -195,13 +195,34 @@ fn wallet_mint_target(
         value.map(str::trim).filter(|v| !v.is_empty())
     }
     if let Some(url) = given(requested) {
-        crate::api::escrow::validate_mint_url(url)?;
+        validate_wallet_mint_url(url)?;
         return Ok(url.to_string());
     }
     given(stored)
         .or(given(node_default))
         .map(str::to_string)
         .ok_or_else(|| anyhow::anyhow!(NO_MINT))
+}
+
+/// A mint the wallet may bind to on the user's say-so: an `http(s)` URL with a
+/// host, over HTTPS unless it is this device. Proofs are bearer money, and
+/// cleartext HTTP to a remote mint hands them to anyone on the path; a local
+/// test mint (`http://localhost:3338`) is the one exception.
+///
+/// **Errors**: `InvalidMintUrl`.
+fn validate_wallet_mint_url(url: &str) -> Result<()> {
+    crate::api::escrow::validate_mint_url(url)?;
+    let parsed = nostr_sdk::prelude::Url::parse(url)?;
+    let loopback = match parsed.host() {
+        Some(nostr_sdk::prelude::url::Host::Domain(host)) => host.eq_ignore_ascii_case("localhost"),
+        Some(nostr_sdk::prelude::url::Host::Ipv4(ip)) => ip.is_loopback(),
+        Some(nostr_sdk::prelude::url::Host::Ipv6(ip)) => ip.is_loopback(),
+        None => false,
+    };
+    if parsed.scheme() == "http" && !loopback {
+        bail!("InvalidMintUrl: '{url}' must use https");
+    }
+    Ok(())
 }
 
 /// The mint a Cashu node that pins exactly one offers as the wallet's default.
@@ -384,10 +405,15 @@ async fn receive_unbound(encoded: &str) -> Result<u64> {
     let _lifecycle = lifecycle_lock().lock().await;
 
     let stored = stored_wallet_mint().await?;
-    let target = match wallet_mint_target(None, stored.as_deref(), node_default_mint().as_deref())
-    {
+    let target = match wallet_mint_target(None, stored.as_deref(), node_default_mint().as_deref()) {
         Ok(target) => target,
-        Err(e) if e.to_string() == NO_MINT => crate::cashu::token_mint_url(encoded)?,
+        Err(e) if e.to_string() == NO_MINT => {
+            // The token names its mint; it is held to the same rule as one the
+            // user types, before anything contacts it.
+            let mint_url = crate::cashu::token_mint_url(encoded)?;
+            validate_wallet_mint_url(&mint_url)?;
+            mint_url
+        }
         Err(e) => return Err(e),
     };
 
@@ -501,6 +527,39 @@ pub async fn cashu_escrow_quote(order_id: String) -> Result<crate::api::types::C
         }
     }
 
+    let locktime_days = resolved
+        .config
+        .escrow_locktime_days
+        .unwrap_or(PROTOCOL_DEFAULT_LOCKTIME_DAYS);
+    let quote = |balance_sats: u64, mint_url: String, pending_submission: bool| {
+        crate::api::types::CashuEscrowQuote {
+            order_id: order_id.clone(),
+            amount_sats,
+            fee_sats,
+            total_sats: amount_sats.saturating_add(fee_sats),
+            balance_sats,
+            mint_url,
+            locktime_days,
+            pending_submission,
+        }
+    };
+
+    // An escrow already swapped — on the row, or held because the row could
+    // not be written — is re-sent as is by `lock_escrow`, at the mint it was
+    // locked at, without the wallet. So the wallet's mint must not stand in
+    // the way of that retry: a user who changed it since still gets a quote.
+    let recorded = trade
+        .cashu_escrow_token
+        .as_deref()
+        .map(|token| (trade.cashu_mint_url.as_deref().unwrap_or(&mint_url), token));
+    if let Some((locked_at, _)) = recorded_or_held_escrow(&order_id, recorded) {
+        let balance = match live_wallet().await {
+            Some(wallet) => wallet.balance().await.unwrap_or(0),
+            None => 0,
+        };
+        return Ok(quote(balance, locked_at, true));
+    }
+
     // Connect before reading the balance. An unconnected wallet reports zero,
     // and a quote that reports zero turns into "insufficient funds" on a wallet
     // that is fully funded — the screen connects first, but a retry from
@@ -516,19 +575,7 @@ pub async fn cashu_escrow_quote(order_id: String) -> Result<crate::api::types::C
         .await
         .map_err(|e| anyhow::anyhow!("CashuBalanceUnknown: {e}"))?;
 
-    Ok(crate::api::types::CashuEscrowQuote {
-        order_id,
-        amount_sats,
-        fee_sats,
-        total_sats: amount_sats.saturating_add(fee_sats),
-        balance_sats: balance,
-        mint_url,
-        locktime_days: resolved
-            .config
-            .escrow_locktime_days
-            .unwrap_or(PROTOCOL_DEFAULT_LOCKTIME_DAYS),
-        pending_submission: trade.cashu_escrow_token.is_some(),
-    })
+    Ok(quote(balance, mint_url, false))
 }
 
 /// Refuse an escrow from a wallet bound to another mint than `mint_url`, before
@@ -1132,6 +1179,67 @@ mod tests {
         // Assert — refused, and not remembered as the wallet's mint.
         assert!(err.to_string().contains("InvalidMintUrl"), "got {err}");
         assert_eq!(stored_wallet_mint().await.unwrap(), None);
+    }
+
+    #[test]
+    fn a_remote_mint_must_use_https() {
+        // Bearer proofs over cleartext HTTP are anyone's on the path.
+        assert!(validate_wallet_mint_url("https://mint.example.com").is_ok());
+        for remote in ["http://mint.example.com", "http://203.0.113.7:3338"] {
+            assert!(
+                validate_wallet_mint_url(remote)
+                    .unwrap_err()
+                    .to_string()
+                    .contains("InvalidMintUrl"),
+                "{remote} must be refused"
+            );
+        }
+        // A test mint on this device is the exception.
+        for local in [
+            "http://localhost:3338",
+            "http://127.0.0.1:3338",
+            "http://[::1]:3338",
+        ] {
+            assert!(validate_wallet_mint_url(local).is_ok(), "{local} is local");
+        }
+        // And a user's request goes through the same rule.
+        assert!(
+            wallet_mint_target(Some("http://mint.example.com"), None, None)
+                .unwrap_err()
+                .to_string()
+                .contains("InvalidMintUrl")
+        );
+    }
+
+    #[tokio::test]
+    // The globals lock must span the calls it guards.
+    #[allow(clippy::await_holding_lock)]
+    async fn a_recorded_escrow_is_quoted_without_the_wallet() {
+        // Arrange — a single-mint node and a seller row whose escrow was
+        // swapped at that mint; no wallet is bound (the user may have moved
+        // it to another mint since).
+        let _g = escrow_lock();
+        forget_wallet_mint().await;
+        escrow_mode::set_from_tags(
+            escrow_mode::EscrowMode::Cashu,
+            escrow_mode::CashuNodeConfig {
+                mint_urls: vec!["https://mint.a.com".to_string()],
+                ..Default::default()
+            },
+        );
+        let order_id = uuid::Uuid::new_v4().to_string();
+        let db = store().await;
+        let mut trade = seller_trade(&order_id, Some("02"), "");
+        trade.cashu_escrow_token = Some(format!("cashuB-{order_id}"));
+        trade.cashu_mint_url = Some("https://mint.a.com".to_string());
+        db.save_trade(&trade).await.unwrap();
+
+        // Act
+        let quote = cashu_escrow_quote(order_id).await.unwrap();
+
+        // Assert — the retry stays possible, at the mint the token lives at.
+        assert!(quote.pending_submission);
+        assert_eq!(quote.mint_url, "https://mint.a.com");
     }
 
     #[test]

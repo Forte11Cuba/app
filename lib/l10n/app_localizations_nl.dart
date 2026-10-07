@@ -4038,7 +4038,7 @@ class AppLocalizationsNl extends AppLocalizations {
 
   @override
   String get cashuErrorInvalidMintUrl =>
-      'Dat is geen mint-URL. Hij moet beginnen met https:// of http://.';
+      'Dat is geen bruikbare mint-URL. Hij moet beginnen met https://.';
 
   @override
   String get cashuErrorWalletOnOtherMint =>
