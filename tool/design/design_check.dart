@@ -60,8 +60,14 @@ bool isChecked(String path) {
   return !path.endsWith('.g.dart') && !path.endsWith('.freezed.dart');
 }
 
+/// Whether [path] is a screen, which a pull request that touches it answers
+/// for whole (guide §0): a route is what the user sees, and a break left in
+/// any part of it is still on that screen.
+bool isScreen(String path) => path.contains('/screens/');
+
 /// The new-side line numbers each file gains in [diff], the output of
-/// `git diff --unified=0`. Deleted files are left out.
+/// `git diff --unified=0`. A file that only loses lines maps to none;
+/// deleted files are left out.
 Map<String, Set<int>> addedLines(String diff) {
   final result = <String, Set<int>>{};
   final hunk = RegExp(r'^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@');
@@ -83,7 +89,6 @@ Map<String, Set<int>> addedLines(String diff) {
       current.add(start + i);
     }
   }
-  result.removeWhere((_, lines) => lines.isEmpty);
   return result;
 }
 

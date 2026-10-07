@@ -87,6 +87,25 @@ index 1..2 100644
     });
   });
 
+  group('which files it reads whole', () {
+    test('a screen', () {
+      expect(
+        isScreen('lib/features/cashu/screens/cashu_wallet_screen.dart'),
+        isTrue,
+      );
+      expect(
+        isScreen('lib/features/order/screens/take/take_screen.dart'),
+        isTrue,
+      );
+    });
+
+    test('not a widget or anything else', () {
+      expect(isScreen('lib/features/order/widgets/amount_field.dart'), isFalse);
+      expect(isScreen('lib/shared/widgets/mostro_modal.dart'), isFalse);
+      expect(isScreen('lib/features/x/screens_helper.dart'), isFalse);
+    });
+  });
+
   /// The CI job's own run, against a throwaway repository whose `main`
   /// already holds a break outside the declaration a change touches: a
   /// pull request that touches a screen answers for all of it, one that
