@@ -3,17 +3,15 @@
 //! The real ones touch process-wide state — relay subscriptions, push
 //! registrations, the in-memory stores — so the wiring test in
 //! `api::identity` injects doubles instead of reaching them from the
-//! parallel suite. Lives outside `crate::api` on purpose: flutter_rust_bridge
-//! scans only that module, and a trait there ends up half-parsed in the
-//! generated headers (same reason `db::Storage` lives where it does).
+//! parallel suite. Outside `crate::api`, flutter_rust_bridge never scans it;
+//! inside, it would need `#[frb(ignore)]` like `api::push::PushServer`.
 
-/// What [`crate::api::identity::delete_identity`] must do besides the
-/// database writes. Same `async fn` discipline as [`crate::db::Storage`]:
-/// both implementors return `Send` futures.
-#[allow(async_fn_in_trait)]
+/// What [`crate::api::identity::delete_identity`] must do besides wiping the
+/// identity's rows from the store it is handed. `unregister_push` writes
+/// too: the push registrations, in the application database.
 pub(crate) trait DeleteEffects {
     /// Give back the identity's relay subscriptions — first, while the
-    /// identity still exists, so nothing of the old user's keeps arriving.
+    /// identity still exists (the lifecycle test pins that).
     async fn release_identity_subscriptions(&self);
     /// Stop the push server waking this device for keys no longer held.
     async fn unregister_push(&self);

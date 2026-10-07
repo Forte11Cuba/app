@@ -1186,16 +1186,18 @@ mod tests {
         }
     }
 
-    /// Ordered record of the deletion's non-store effects, so the lifecycle
-    /// test can assert the wiring of `delete_identity_inner` (#553).
+    /// Ordered record of the deletion's non-store effects, each with whether
+    /// an identity was still loaded when it ran, so the lifecycle test can
+    /// assert the wiring of `delete_identity_inner` (#553).
     #[derive(Default)]
-    struct CallLog(std::sync::Mutex<Vec<&'static str>>);
+    struct CallLog(std::sync::Mutex<Vec<(&'static str, bool)>>);
 
     impl CallLog {
-        fn push(&self, call: &'static str) {
-            self.0.lock().unwrap().push(call);
+        async fn push(&self, call: &'static str) {
+            let loaded = identity_generation().await.is_some();
+            self.0.lock().unwrap().push((call, loaded));
         }
-        fn calls(&self) -> Vec<&'static str> {
+        fn calls(&self) -> Vec<(&'static str, bool)> {
             self.0.lock().unwrap().clone()
         }
     }
@@ -1206,15 +1208,26 @@ mod tests {
 
     impl DeleteEffects for SpyEffects<'_> {
         async fn release_identity_subscriptions(&self) {
-            self.0.push("release_identity_subscriptions");
+            self.0.push("release_identity_subscriptions").await;
         }
         async fn unregister_push(&self) {
-            self.0.push("unregister_push");
+            self.0.push("unregister_push").await;
         }
         async fn forget_identity_state(&self) {
-            self.0.push("forget_identity_state");
+            self.0.push("forget_identity_state").await;
         }
     }
+
+    /// What every deletion must run, and whether the identity is still
+    /// loaded at each step: the subscriptions are released while it exists,
+    /// everything else after it is retired. The order among the last two is
+    /// today's, pinned because a wiring test reads cheapest as a literal
+    /// transcript — not because it is semantic.
+    const DELETION_TRANSCRIPT: [(&str, bool); 3] = [
+        ("release_identity_subscriptions", true),
+        ("unregister_push", false),
+        ("forget_identity_state", false),
+    ];
 
     #[test]
     fn deriving_without_durable_storage_is_refused() {
@@ -1404,23 +1417,16 @@ mod tests {
         // with doubles for the effects, so the process-wide subscriptions,
         // push registrations and in-memory stores stay untouched — see
         // `delete_identity_inner`. Every wipe effect runs (#533's acceptance
-        // criteria). Contract in this sequence:
-        // `release_identity_subscriptions` comes first, while the identity
-        // still exists. The rest is today's order, pinned because a wiring
-        // test reads cheapest as a literal transcript — not because it is
-        // semantic.
+        // criteria), in `DELETION_TRANSCRIPT`'s order.
         let effects = CallLog::default();
         delete_identity_inner(Some(&db), &SpyEffects(&effects))
             .await
             .unwrap();
         assert_eq!(
             effects.calls(),
-            [
-                "release_identity_subscriptions",
-                "unregister_push",
-                "forget_identity_state",
-            ],
-            "a deletion must run every wipe effect",
+            DELETION_TRANSCRIPT,
+            "a deletion must run every wipe effect, releasing the \
+             subscriptions before the identity is retired",
         );
         assert!(db.get_identity().await.unwrap().is_none());
         assert_eq!(db.get_trade_key("order-a").await.unwrap(), None);
@@ -1467,7 +1473,11 @@ mod tests {
         delete_identity_inner(Some(&db), &SpyEffects(&again))
             .await
             .unwrap();
-        assert_eq!(again.calls().len(), 3, "every deletion runs every effect");
+        assert_eq!(
+            again.calls(),
+            DELETION_TRANSCRIPT,
+            "every deletion runs every effect",
+        );
         assert!(get_identity().await.unwrap().is_none());
     }
 }
