@@ -20,13 +20,15 @@ information architecture. It does not keep v1's look.
     marks the line. It reads the code the pull request touches under `lib/` (outside
     `lib/core/`, where tokens are defined): every top-level declaration (a class, mixin, enum,
     extension, function or variable) with an added or changed line, **read whole**, so a
-    button whose `icon:` changed is checked for its `style:`. It judges literal values and
+    button whose `icon:` changed is checked for its `style:`. A **screen** (a file under a
+    `screens/` directory) is read whole instead: any added, changed or removed line in it
+    checks the entire file. It judges literal values and
     named v1 tokens only: a value derived from a token is left to review. Run it locally with
     `dart tool/design_check.dart`.
   - *test*: an existing test fails.
   - *review*: a reviewer reads the diff and the screenshots.
 - **Scope.** The rules apply to every line a pull request adds or changes under `lib/`, and the
-  *auto* rules to every class it touches (above). Code that predates them is listed in §14 as
+  *auto* rules to every class it touches and every screen file it touches (above). Code that predates them is listed in §14 as
   known gaps. A gap is debt to pay down, never a precedent: "the next screen already does it"
   does not answer a break.
 - **Redesigned and legacy areas.** Most screens are built on the redesign palettes (§2.2). A few
@@ -34,10 +36,11 @@ information architecture. It does not keep v1's look.
   bubbles, disputes, notifications, the walkthrough, rating and the Cashu wallet. That code is
   §14 debt, not a style to match. **New code is v2 everywhere**, a legacy screen included: it
   reads a redesign palette (DS-COL-11) and never leans on the theme's v1 defaults (§1,
-  principle 7). A change that touches a class of a legacy screen **MUST** leave that class
-  free of *auto* breaks, which CI enforces (#657 changed one icon of the Cashu wallet and
-  shipped its v1 scaffold, app bar and buttons with a green check), and SHOULD migrate the
-  rest of the screen.
+  principle 7). A change that touches a screen file **MUST** leave the whole file free of
+  *auto* breaks, and one that touches a class elsewhere (a widget) MUST leave that class
+  free of them; CI enforces both (#657 changed one icon of the Cashu wallet and shipped its
+  v1 scaffold, app bar and buttons with a green check, then its dialogs' breaks once the
+  check read only the classes it touched).
 
 ---
 
@@ -384,9 +387,9 @@ around a rule the change could keep.
 ## 14. Known gaps (code that predates this guide)
 
 Each gap below is debt. A change in the same code SHOULD close it, and MUST NOT copy it. The
-CI check reports a gap once a pull request touches its class (or, outside a class, the
-top-level function or variable it sits in), and a change in that class MUST close every *auto*
-gap in it (§0). `dart tool/design_check.dart --all`
+CI check reports a gap once a pull request touches its screen file, or elsewhere its class (or,
+outside a class, the top-level function or variable it sits in), and that change MUST close
+every *auto* gap there (§0). `dart tool/design_check.dart --all`
 lists every one the check can see (595 when the theme-default rules were added, 640 once
 DS-SHP-4 and the `textTheme` roles of DS-TYP-4 joined them).
 
