@@ -188,53 +188,125 @@
   "@disputeLostFundsToSeller": {
     "description": "Resolution text shown to the buyer when admin returned funds to the seller"
   },
-  "walkthroughSlideOneTitle": "Trade Bitcoin freely — no KYC",
-  "@walkthroughSlideOneTitle": {
-    "description": "Title for walkthrough slide 1"
+  "walkthroughWelcomeTitle": "P2P Bitcoin, no KYC",
+  "@walkthroughWelcomeTitle": {
+    "description": "Walkthrough slide 1: title"
   },
-  "walkthroughSlideOneBody": "Mostro is a peer-to-peer exchange that lets you trade Bitcoin for any currency and payment method — no KYC, and no need to give your data to anyone. It's built on Nostr, which makes it censorship-resistant. No one can stop you from trading.",
-  "@walkthroughSlideOneBody": {
-    "description": "Body text for walkthrough slide 1"
+  "walkthroughWelcomeBody1": "Mostro is a peer-to-peer exchange that lets you trade Bitcoin for any currency and payment method, with no KYC and no need to give your data to anyone.",
+  "@walkthroughWelcomeBody1": {
+    "description": "Walkthrough slide 1: first paragraph"
   },
-  "walkthroughSlideTwoTitle": "Privacy by default",
-  "@walkthroughSlideTwoTitle": {
-    "description": "Title for walkthrough slide 2"
+  "walkthroughWelcomeBody2": "It's built on Nostr, which makes it censorship-resistant. No one can stop you from trading.",
+  "@walkthroughWelcomeBody2": {
+    "description": "Walkthrough slide 1: second paragraph"
   },
-  "walkthroughSlideTwoBody": "Mostro generates a new identity for every exchange, so your trades can't be linked. You can also decide how private you want to be:\n• Reputation mode – Lets others see your successful trades and trust level.\n• Full privacy mode – No reputation is built, but your activity is completely anonymous.\nSwitch modes anytime from the Account screen, where you should also save your secret words — they're the only way to recover your account.",
-  "@walkthroughSlideTwoBody": {
-    "description": "Body text for walkthrough slide 2"
+  "walkthroughPrivacyTitle": "Privacy by default",
+  "@walkthroughPrivacyTitle": {
+    "description": "Walkthrough slide 2: title"
   },
-  "walkthroughSlideThreeTitle": "Security at every step",
-  "@walkthroughSlideThreeTitle": {
-    "description": "Title for walkthrough slide 3"
+  "walkthroughPrivacyBody1": "Mostro generates a new identity for every trade, so your trades can't be linked.",
+  "@walkthroughPrivacyBody1": {
+    "description": "Walkthrough slide 2: first paragraph"
   },
-  "walkthroughSlideThreeBody": "Mostro uses Hold Invoices: sats stay in the seller's wallet until the end of the trade. This protects both sides. The app is also designed to be intuitive and easy for all kinds of users.",
-  "@walkthroughSlideThreeBody": {
-    "description": "Body text for walkthrough slide 3"
+  "walkthroughPrivacyBody2": "You can also decide how private you want to be:",
+  "@walkthroughPrivacyBody2": {
+    "description": "Walkthrough slide 2: second paragraph"
   },
-  "walkthroughSlideFourTitle": "Fully encrypted chat",
-  "@walkthroughSlideFourTitle": {
-    "description": "Title for walkthrough slide 4"
+  "walkthroughReputationModeName": "Reputation mode",
+  "@walkthroughReputationModeName": {
+    "description": "Walkthrough slide 2: mode card name"
   },
-  "walkthroughSlideFourBody": "Each trade has its own private chat, end-to-end encrypted. Only the two users involved can read it. In case of a dispute, you can give the shared key to a dispute resolver to help resolve the issue.",
-  "@walkthroughSlideFourBody": {
-    "description": "Body text for walkthrough slide 4"
+  "walkthroughReputationModeBody": "Lets others see your successful trades and trust level.",
+  "@walkthroughReputationModeBody": {
+    "description": "Walkthrough slide 2: mode card description"
   },
-  "walkthroughSlideFiveTitle": "Take an offer",
-  "@walkthroughSlideFiveTitle": {
-    "description": "Title for walkthrough slide 5"
+  "walkthroughFullPrivacyModeName": "Full privacy mode",
+  "@walkthroughFullPrivacyModeName": {
+    "description": "Walkthrough slide 2: mode card name"
   },
-  "walkthroughSlideFiveBody": "Browse the order book, choose an offer that works for you, and follow the trade flow step by step. You'll be able to check the other user's profile, chat securely, and complete the trade with ease.",
-  "@walkthroughSlideFiveBody": {
-    "description": "Body text for walkthrough slide 5"
+  "walkthroughFullPrivacyModeBody": "No reputation is built, but your activity is completely anonymous.",
+  "@walkthroughFullPrivacyModeBody": {
+    "description": "Walkthrough slide 2: mode card description"
   },
-  "walkthroughSlideSixTitle": "Can't find what you need?",
-  "@walkthroughSlideSixTitle": {
-    "description": "Title for walkthrough slide 6"
+  "walkthroughPrivacyFooter": "Switch modes anytime from the Account screen. That's also where you should save your secret words. They're the only way to recover your account.",
+  "@walkthroughPrivacyFooter": {
+    "description": "Walkthrough slide 2: paragraph after the mode cards"
   },
-  "walkthroughSlideSixBody": "You can also create your own offer and wait for someone to take it. Set the amount and preferred payment method — Mostro handles the rest.",
-  "@walkthroughSlideSixBody": {
-    "description": "Body text for walkthrough slide 6"
+  "walkthroughHeldTitle": "Security at every step",
+  "@walkthroughHeldTitle": {
+    "description": "Walkthrough slide 3: title"
+  },
+  "walkthroughHeldBody1": "The seller's sats stay held in their own wallet until the trade ends. This protects both sides.",
+  "@walkthroughHeldBody1": {
+    "description": "Walkthrough slide 3: first paragraph"
+  },
+  "walkthroughHeldBody2": "The app is also designed to be intuitive and easy for all kinds of users.",
+  "@walkthroughHeldBody2": {
+    "description": "Walkthrough slide 3: second paragraph"
+  },
+  "walkthroughChatTitle": "Fully encrypted chat",
+  "@walkthroughChatTitle": {
+    "description": "Walkthrough slide 4: title"
+  },
+  "walkthroughChatBody1": "Each trade has its own private chat, end-to-end encrypted. Only the two users involved can read it.",
+  "@walkthroughChatBody1": {
+    "description": "Walkthrough slide 4: first paragraph"
+  },
+  "walkthroughChatBody2": "In case of a dispute, you can share the key with a dispute resolver so they can help settle it.",
+  "@walkthroughChatBody2": {
+    "description": "Walkthrough slide 4: second paragraph"
+  },
+  "walkthroughTakeTitle": "Take an order",
+  "@walkthroughTakeTitle": {
+    "description": "Walkthrough slide 5: title"
+  },
+  "walkthroughTakeBody1": "Browse the order book, choose an order that works for you, and follow the trade step by step.",
+  "@walkthroughTakeBody1": {
+    "description": "Walkthrough slide 5: first paragraph"
+  },
+  "walkthroughTakeBody2": "You'll be able to check your counterpart's profile, chat securely, and complete the trade with ease.",
+  "@walkthroughTakeBody2": {
+    "description": "Walkthrough slide 5: second paragraph"
+  },
+  "walkthroughMakeTitle": "Can't find what you need?",
+  "@walkthroughMakeTitle": {
+    "description": "Walkthrough slide 6: title"
+  },
+  "walkthroughMakeBody1": "You can also create your own order and wait for someone to take it.",
+  "@walkthroughMakeBody1": {
+    "description": "Walkthrough slide 6: first paragraph"
+  },
+  "walkthroughMakeBody2": "Set the amount and your preferred payment method. Mostro handles the rest.",
+  "@walkthroughMakeBody2": {
+    "description": "Walkthrough slide 6: second paragraph"
+  },
+  "walkthroughNext": "Next",
+  "@walkthroughNext": {
+    "description": "Walkthrough: primary button that moves to the next slide"
+  },
+  "walkthroughStepCounter": "{current} / {total}",
+  "@walkthroughStepCounter": {
+    "description": "Walkthrough: visible slide counter, current slide of total",
+    "placeholders": {
+      "current": {
+        "type": "int"
+      },
+      "total": {
+        "type": "int"
+      }
+    }
+  },
+  "walkthroughStepSemantics": "Step {current} of {total}",
+  "@walkthroughStepSemantics": {
+    "description": "Walkthrough: screen-reader form of the slide counter",
+    "placeholders": {
+      "current": {
+        "type": "int"
+      },
+      "total": {
+        "type": "int"
+      }
+    }
   },
   "tabBuyBtc": "Buy BTC",
   "@tabBuyBtc": {

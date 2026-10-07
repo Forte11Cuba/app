@@ -352,77 +352,161 @@ abstract class AppLocalizations {
   /// **'The dispute resolver canceled the order and returned the sats to the seller. You did not receive the sats.'**
   String get disputeLostFundsToSeller;
 
-  /// Title for walkthrough slide 1
+  /// Walkthrough slide 1: title
   ///
   /// In en, this message translates to:
-  /// **'Trade Bitcoin freely — no KYC'**
-  String get walkthroughSlideOneTitle;
+  /// **'P2P Bitcoin, no KYC'**
+  String get walkthroughWelcomeTitle;
 
-  /// Body text for walkthrough slide 1
+  /// Walkthrough slide 1: first paragraph
   ///
   /// In en, this message translates to:
-  /// **'Mostro is a peer-to-peer exchange that lets you trade Bitcoin for any currency and payment method — no KYC, and no need to give your data to anyone. It\'s built on Nostr, which makes it censorship-resistant. No one can stop you from trading.'**
-  String get walkthroughSlideOneBody;
+  /// **'Mostro is a peer-to-peer exchange that lets you trade Bitcoin for any currency and payment method, with no KYC and no need to give your data to anyone.'**
+  String get walkthroughWelcomeBody1;
 
-  /// Title for walkthrough slide 2
+  /// Walkthrough slide 1: second paragraph
+  ///
+  /// In en, this message translates to:
+  /// **'It\'s built on Nostr, which makes it censorship-resistant. No one can stop you from trading.'**
+  String get walkthroughWelcomeBody2;
+
+  /// Walkthrough slide 2: title
   ///
   /// In en, this message translates to:
   /// **'Privacy by default'**
-  String get walkthroughSlideTwoTitle;
+  String get walkthroughPrivacyTitle;
 
-  /// Body text for walkthrough slide 2
+  /// Walkthrough slide 2: first paragraph
   ///
   /// In en, this message translates to:
-  /// **'Mostro generates a new identity for every exchange, so your trades can\'t be linked. You can also decide how private you want to be:\n• Reputation mode – Lets others see your successful trades and trust level.\n• Full privacy mode – No reputation is built, but your activity is completely anonymous.\nSwitch modes anytime from the Account screen, where you should also save your secret words — they\'re the only way to recover your account.'**
-  String get walkthroughSlideTwoBody;
+  /// **'Mostro generates a new identity for every trade, so your trades can\'t be linked.'**
+  String get walkthroughPrivacyBody1;
 
-  /// Title for walkthrough slide 3
+  /// Walkthrough slide 2: second paragraph
+  ///
+  /// In en, this message translates to:
+  /// **'You can also decide how private you want to be:'**
+  String get walkthroughPrivacyBody2;
+
+  /// Walkthrough slide 2: mode card name
+  ///
+  /// In en, this message translates to:
+  /// **'Reputation mode'**
+  String get walkthroughReputationModeName;
+
+  /// Walkthrough slide 2: mode card description
+  ///
+  /// In en, this message translates to:
+  /// **'Lets others see your successful trades and trust level.'**
+  String get walkthroughReputationModeBody;
+
+  /// Walkthrough slide 2: mode card name
+  ///
+  /// In en, this message translates to:
+  /// **'Full privacy mode'**
+  String get walkthroughFullPrivacyModeName;
+
+  /// Walkthrough slide 2: mode card description
+  ///
+  /// In en, this message translates to:
+  /// **'No reputation is built, but your activity is completely anonymous.'**
+  String get walkthroughFullPrivacyModeBody;
+
+  /// Walkthrough slide 2: paragraph after the mode cards
+  ///
+  /// In en, this message translates to:
+  /// **'Switch modes anytime from the Account screen. That\'s also where you should save your secret words. They\'re the only way to recover your account.'**
+  String get walkthroughPrivacyFooter;
+
+  /// Walkthrough slide 3: title
   ///
   /// In en, this message translates to:
   /// **'Security at every step'**
-  String get walkthroughSlideThreeTitle;
+  String get walkthroughHeldTitle;
 
-  /// Body text for walkthrough slide 3
+  /// Walkthrough slide 3: first paragraph
   ///
   /// In en, this message translates to:
-  /// **'Mostro uses Hold Invoices: sats stay in the seller\'s wallet until the end of the trade. This protects both sides. The app is also designed to be intuitive and easy for all kinds of users.'**
-  String get walkthroughSlideThreeBody;
+  /// **'The seller\'s sats stay held in their own wallet until the trade ends. This protects both sides.'**
+  String get walkthroughHeldBody1;
 
-  /// Title for walkthrough slide 4
+  /// Walkthrough slide 3: second paragraph
+  ///
+  /// In en, this message translates to:
+  /// **'The app is also designed to be intuitive and easy for all kinds of users.'**
+  String get walkthroughHeldBody2;
+
+  /// Walkthrough slide 4: title
   ///
   /// In en, this message translates to:
   /// **'Fully encrypted chat'**
-  String get walkthroughSlideFourTitle;
+  String get walkthroughChatTitle;
 
-  /// Body text for walkthrough slide 4
+  /// Walkthrough slide 4: first paragraph
   ///
   /// In en, this message translates to:
-  /// **'Each trade has its own private chat, end-to-end encrypted. Only the two users involved can read it. In case of a dispute, you can give the shared key to a dispute resolver to help resolve the issue.'**
-  String get walkthroughSlideFourBody;
+  /// **'Each trade has its own private chat, end-to-end encrypted. Only the two users involved can read it.'**
+  String get walkthroughChatBody1;
 
-  /// Title for walkthrough slide 5
+  /// Walkthrough slide 4: second paragraph
   ///
   /// In en, this message translates to:
-  /// **'Take an offer'**
-  String get walkthroughSlideFiveTitle;
+  /// **'In case of a dispute, you can share the key with a dispute resolver so they can help settle it.'**
+  String get walkthroughChatBody2;
 
-  /// Body text for walkthrough slide 5
+  /// Walkthrough slide 5: title
   ///
   /// In en, this message translates to:
-  /// **'Browse the order book, choose an offer that works for you, and follow the trade flow step by step. You\'ll be able to check the other user\'s profile, chat securely, and complete the trade with ease.'**
-  String get walkthroughSlideFiveBody;
+  /// **'Take an order'**
+  String get walkthroughTakeTitle;
 
-  /// Title for walkthrough slide 6
+  /// Walkthrough slide 5: first paragraph
+  ///
+  /// In en, this message translates to:
+  /// **'Browse the order book, choose an order that works for you, and follow the trade step by step.'**
+  String get walkthroughTakeBody1;
+
+  /// Walkthrough slide 5: second paragraph
+  ///
+  /// In en, this message translates to:
+  /// **'You\'ll be able to check your counterpart\'s profile, chat securely, and complete the trade with ease.'**
+  String get walkthroughTakeBody2;
+
+  /// Walkthrough slide 6: title
   ///
   /// In en, this message translates to:
   /// **'Can\'t find what you need?'**
-  String get walkthroughSlideSixTitle;
+  String get walkthroughMakeTitle;
 
-  /// Body text for walkthrough slide 6
+  /// Walkthrough slide 6: first paragraph
   ///
   /// In en, this message translates to:
-  /// **'You can also create your own offer and wait for someone to take it. Set the amount and preferred payment method — Mostro handles the rest.'**
-  String get walkthroughSlideSixBody;
+  /// **'You can also create your own order and wait for someone to take it.'**
+  String get walkthroughMakeBody1;
+
+  /// Walkthrough slide 6: second paragraph
+  ///
+  /// In en, this message translates to:
+  /// **'Set the amount and your preferred payment method. Mostro handles the rest.'**
+  String get walkthroughMakeBody2;
+
+  /// Walkthrough: primary button that moves to the next slide
+  ///
+  /// In en, this message translates to:
+  /// **'Next'**
+  String get walkthroughNext;
+
+  /// Walkthrough: visible slide counter, current slide of total
+  ///
+  /// In en, this message translates to:
+  /// **'{current} / {total}'**
+  String walkthroughStepCounter(int current, int total);
+
+  /// Walkthrough: screen-reader form of the slide counter
+  ///
+  /// In en, this message translates to:
+  /// **'Step {current} of {total}'**
+  String walkthroughStepSemantics(int current, int total);
 
   /// Tab label for the buy Bitcoin order book
   ///

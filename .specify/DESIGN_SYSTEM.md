@@ -33,7 +33,7 @@ information architecture. It does not keep v1's look.
   does not answer a break.
 - **Redesigned and legacy areas.** Most screens are built on the redesign palettes (§2.2). A few
   still run on the v1 layer, `AppColors` and the theme's defaults: the chat room and its message
-  bubbles, disputes, notifications, the walkthrough, rating and the Cashu wallet. That code is
+  bubbles, disputes, notifications, rating and the Cashu wallet. That code is
   §14 debt, not a style to match. **New code is v2 everywhere**, a legacy screen included: it
   reads a redesign palette (DS-COL-11) and never leans on the theme's v1 defaults (§1,
   principle 7). A change that touches a screen file **MUST** leave the whole file free of
@@ -395,7 +395,7 @@ DS-SHP-4 and the `textTheme` roles of DS-TYP-4 joined them).
 
 | Gap | Where | Rule |
 |---|---|---|
-| About 50 `Color(0x…)` literals in 21 files and about 86 `Colors.<name>` in 30 files. Many are v1 fallbacks (`#8CC63F`), mostly in notifications, chat attachments and the walkthrough. | §2.1 | DS-COL-1 |
+| About 50 `Color(0x…)` literals in 21 files and about 86 `Colors.<name>` in 30 files. Many are v1 fallbacks (`#8CC63F`), mostly in notifications and chat attachments. | §2.1 | DS-COL-1 |
 | `ThemeData` defines no button, chip, snackbar or switch theme; every button styles itself. | §6.2 | DS-CMP-3 |
 | `textTheme` (32/24/20/18/16/14/12) does not match the redesign scale. 13 half-point sizes and three 9-sp labels exist. | §3.2 | DS-TYP-4 |
 | `'Manrope'` is written as a literal in `tab_app_bar.dart`. | §3.1 | DS-TYP-1 |

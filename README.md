@@ -615,9 +615,8 @@ To add a new language:
    - `lib/features/settings/widgets/language_selector.dart`: the English and native name in `languageNames` (the picker already lists every `.arb` file; without a name it shows the bare code)
    - `rust/src/api/settings.rs`: the code in `SUPPORTED_LOCALES`, then `./scripts/frb-generate.sh`
    - `web/push_worker_logic.js`: the locale's `pushNewMessageBody` in `CHAT_WAKE_BODIES` (a service worker cannot read `.arb` files)
-   - `lib/features/walkthrough/utils/highlight_config.dart`: the locale's wording of each highlighted onboarding phrase
    - `specs/006-announcement-channel/spec.md`: the locales every announcement must carry, in the rule and in the JSON example
-5. Run `flutter test` and `cargo test`: `test/l10n/locale_lists_test.dart` checks the picker names, the Rust list, the push worker and spec 006 against the `.arb` files, and `highlight_config_test.dart` checks the walkthrough phrases per locale, so a place missed in step 4 fails there
+5. Run `flutter test` and `cargo test`: `test/l10n/locale_lists_test.dart` checks the picker names, the Rust list, the push worker and spec 006 against the `.arb` files, so a place missed in step 4 fails there
 6. Open a PR — translation contributions are always welcome
 
 ---
