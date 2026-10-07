@@ -267,6 +267,8 @@ The user receives in-app notifications for all trade lifecycle events: order tak
 
 Users configure app preferences from the Settings screen: language, default fiat currency, default Lightning address (pre-filled in invoice inputs), NWC wallet connection, relay list with on/off toggles, push notification preferences, Mostro node selection, and access to debug logs.
 
+The app always has all three payment methods: Lightning, NWC and the Cashu wallet. Lightning (invoices and Lightning address) works as it always has, and the NWC wallet and the Cashu wallet stay reachable from Settings whatever Mostro node is active and whichever escrow backend it runs. The active node's escrow mode decides only how a trade on that node settles; it never hides, disables or removes a payment method from the app.
+
 **Why this priority**: Default currency and language settings directly affect usability in each user's local market.
 
 **Independent Test**: Fully testable by changing the default fiat currency to MXN and verifying it is pre-selected on the next Create Order.
@@ -277,6 +279,7 @@ Users configure app preferences from the Settings screen: language, default fiat
 2. **Given** the user taps Default Fiat Currency, **When** the currency dialog opens, **Then** they can search by name or code, and selecting one saves it as the default.
 3. **Given** the user has a Lightning address saved, **When** they start a buy trade, **Then** the invoice input is pre-filled with the saved address.
 4. **Given** the user manages relays, **When** they toggle a relay off, **Then** the app stops connecting to that relay.
+5. **Given** any active Mostro node, Lightning or Cashu, **When** the user opens Settings, **Then** the Lightning address, the NWC wallet and the Cashu wallet are all shown and all open. Switching to a node with the other escrow backend shows the same three.
 
 ---
 
@@ -419,6 +422,7 @@ Users manage their cryptographic identity from the Account screen: view their 12
 **Settings & Preferences**
 
 - **FR-058**: Users MUST be able to configure: app language (6 languages: EN, ES, IT, FR, DE, NL), default fiat currency, default Lightning address, relay list (add/toggle), push notification preferences, and Mostro node.
+- **FR-058a**: Lightning, NWC and the Cashu wallet MUST always be active in the app. Settings MUST always show the default Lightning address, the NWC wallet and the Cashu wallet, whatever the active node's `escrow_mode` (`lightning`, `cashu` or not advertised). Lightning flows MUST keep working as they always have. The active node's escrow mode selects only the settlement flow of a trade on that node (hold invoice or Cashu escrow); it MUST NOT hide or disable any payment method.
 
 ### Key Entities
 
