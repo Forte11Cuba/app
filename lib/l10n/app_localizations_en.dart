@@ -1570,7 +1570,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get enterInvoiceManually => 'Enter invoice manually';
 
   @override
-  String get submitButton => 'Submit';
+  String get rangeAmountTakeAction => 'Take order';
 
   @override
   String get buyerReputation => 'Buyer reputation';
@@ -1586,11 +1586,6 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get daysActiveStatLabel => 'days active';
-
-  @override
-  String timeRemainingLabel(String time) {
-    return 'Time remaining: $time';
-  }
 
   @override
   String orderAmountOutOfRange(int min, int max) {
@@ -1656,9 +1651,9 @@ class AppLocalizationsEn extends AppLocalizations {
     String _temp0 = intl.Intl.pluralLogic(
       count,
       locale: localeName,
-      other: '$count chosen',
-      one: '1 chosen',
-      zero: 'none chosen',
+      other: '$count selected',
+      one: '1 selected',
+      zero: 'none selected',
     );
     return '$_temp0';
   }
@@ -2552,6 +2547,13 @@ class AppLocalizationsEn extends AppLocalizations {
   String get openSystemSettingsAction => 'Open settings';
 
   @override
+  String get notificationsPermissionNotAsked =>
+      'This browser has not been allowed to show notifications yet.';
+
+  @override
+  String get allowNotificationsAction => 'Allow notifications';
+
+  @override
   String get notificationsPrivacyFootnote =>
       'Notifications carry no amounts and no counterparties. A push travels through Google\'s or Apple\'s servers and says only that there is something to see.';
 
@@ -2961,7 +2963,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get bondTitle => 'Anti-abuse deposit';
 
   @override
-  String get bondRefundableLabel => 'REFUNDABLE DEPOSIT';
+  String get bondRefundableLabel => 'Refundable deposit';
 
   @override
   String get bondComesBack => 'comes back to you when the trade completes';
@@ -3018,9 +3020,8 @@ class AppLocalizationsEn extends AppLocalizations {
       'Mostro does not hold funds, so it cannot penalise whoever abandons a trade; the deposit does that job, and protects every user against scammers.';
 
   @override
-  String bondWhyHold(String hold) {
-    return 'It is a $hold invoice: your wallet reserves the sats without sending them; when the trade completes, the reservation is cancelled on its own.';
-  }
+  String get bondWhyHold =>
+      'Your wallet holds the sats without sending them; when the trade completes, they are released on their own.';
 
   @override
   String get bondWhyDispute =>
@@ -3097,6 +3098,20 @@ class AppLocalizationsEn extends AppLocalizations {
   String get bondRemoveFromDevice => 'Remove from this device';
 
   @override
+  String get bondLeaveMakerTitle => 'Don\'t publish this order?';
+
+  @override
+  String get bondLeaveMakerBody =>
+      'The order won\'t be published and its deposit invoice is cancelled.';
+
+  @override
+  String get bondLeaveTakerTitle => 'Don\'t take this order?';
+
+  @override
+  String get bondLeaveTakerBody =>
+      'The order stays in the book for others and the deposit invoice is cancelled.';
+
+  @override
   String get bondKeepWaiting => 'Keep waiting';
 
   @override
@@ -3112,7 +3127,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get bondClaimTitle => 'Claim your share';
 
   @override
-  String get bondClaimShareLabel => 'YOUR SHARE';
+  String get bondClaimShareLabel => 'Your share';
 
   @override
   String bondClaimShareSemantics(String sats) {
@@ -3301,9 +3316,6 @@ class AppLocalizationsEn extends AppLocalizations {
   String get bondRequestFailed => 'The node did not resend the deposit invoice';
 
   @override
-  String get invoiceOrderIdCopied => 'Order ID copied';
-
-  @override
   String get invoiceYouReceiveLabel => 'You will receive';
 
   @override
@@ -3417,9 +3429,8 @@ class AppLocalizationsEn extends AppLocalizations {
   String get invoiceOpenWallet => 'Open in my wallet';
 
   @override
-  String invoiceHoldNote(String hold) {
-    return 'This is a $hold invoice: the sats are held, they don\'t leave your wallet until you confirm the buyer\'s payment.';
-  }
+  String get invoiceHoldNote =>
+      'The sats are held: they don\'t leave your wallet until you confirm the buyer\'s payment.';
 
   @override
   String invoiceQrSemantics(String invoice) {
@@ -3452,6 +3463,12 @@ class AppLocalizationsEn extends AppLocalizations {
   String invoiceCountdownHours(String hours, String minutes) {
     return '$hours h $minutes';
   }
+
+  @override
+  String get countdownExpiresInLabel => 'Expires in';
+
+  @override
+  String get bondPayWithinLabel => 'Pay within';
 
   @override
   String get tradeCardWaitingBuyerInvoiceTitle =>
@@ -3625,7 +3642,7 @@ class AppLocalizationsEn extends AppLocalizations {
       'Account imported, but Mostro did not answer, so your trades in progress were not recovered';
 
   @override
-  String get paymentMethodsChosenLabel => 'Chosen';
+  String get paymentMethodsChosenLabel => 'Selected';
 
   @override
   String paymentMethodsSelectedCount(int count) {
@@ -3634,7 +3651,7 @@ class AppLocalizationsEn extends AppLocalizations {
       locale: localeName,
       other: '$count methods selected',
       one: '1 method selected',
-      zero: 'Choose at least one method',
+      zero: 'Select at least one method',
     );
     return '$_temp0';
   }

@@ -1590,7 +1590,7 @@ class AppLocalizationsFr extends AppLocalizations {
   String get enterInvoiceManually => 'Saisir la facture manuellement';
 
   @override
-  String get submitButton => 'Envoyer';
+  String get rangeAmountTakeAction => 'Prendre l\'ordre';
 
   @override
   String get buyerReputation => 'Réputation de l\'acheteur';
@@ -1606,11 +1606,6 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get daysActiveStatLabel => 'jours actifs';
-
-  @override
-  String timeRemainingLabel(String time) {
-    return 'Temps restant : $time';
-  }
 
   @override
   String orderAmountOutOfRange(int min, int max) {
@@ -1676,9 +1671,9 @@ class AppLocalizationsFr extends AppLocalizations {
     String _temp0 = intl.Intl.pluralLogic(
       count,
       locale: localeName,
-      other: '$count choisis',
-      one: '1 choisi',
-      zero: 'aucun choisi',
+      other: '$count sélectionnés',
+      one: '1 sélectionné',
+      zero: 'aucun sélectionné',
     );
     return '$_temp0';
   }
@@ -2580,6 +2575,13 @@ class AppLocalizationsFr extends AppLocalizations {
   String get openSystemSettingsAction => 'Ouvrir les réglages';
 
   @override
+  String get notificationsPermissionNotAsked =>
+      'Ce navigateur n\'est pas encore autorisé à afficher des notifications.';
+
+  @override
+  String get allowNotificationsAction => 'Autoriser les notifications';
+
+  @override
   String get notificationsPrivacyFootnote =>
       'Les notifications ne contiennent ni montants ni contreparties. Un push passe par les serveurs de Google ou d’Apple et signale seulement qu’il y a quelque chose à voir.';
 
@@ -2993,7 +2995,7 @@ class AppLocalizationsFr extends AppLocalizations {
   String get bondTitle => 'Dépôt de garantie';
 
   @override
-  String get bondRefundableLabel => 'DÉPÔT REMBOURSABLE';
+  String get bondRefundableLabel => 'Dépôt remboursable';
 
   @override
   String get bondComesBack => 'te revient une fois l\'échange terminé';
@@ -3050,9 +3052,8 @@ class AppLocalizationsFr extends AppLocalizations {
       'Mostro ne garde pas de fonds, il ne peut donc pas sanctionner qui abandonne un échange ; le dépôt fait ce travail et protège tous les utilisateurs contre les escrocs.';
 
   @override
-  String bondWhyHold(String hold) {
-    return 'C\'est une facture $hold : ton portefeuille réserve les sats sans les envoyer ; à la fin de l\'échange, la réservation est annulée toute seule.';
-  }
+  String get bondWhyHold =>
+      'Ton portefeuille retient les sats sans les envoyer ; à la fin de l\'échange, ils sont libérés tout seuls.';
 
   @override
   String get bondWhyDispute =>
@@ -3129,6 +3130,20 @@ class AppLocalizationsFr extends AppLocalizations {
   String get bondRemoveFromDevice => 'Retirer de cet appareil';
 
   @override
+  String get bondLeaveMakerTitle => 'Ne pas publier cet ordre ?';
+
+  @override
+  String get bondLeaveMakerBody =>
+      'L\'ordre ne sera pas publié et sa facture de dépôt est annulée.';
+
+  @override
+  String get bondLeaveTakerTitle => 'Ne pas prendre cet ordre ?';
+
+  @override
+  String get bondLeaveTakerBody =>
+      'L\'ordre reste dans le carnet pour les autres et la facture de dépôt est annulée.';
+
+  @override
   String get bondKeepWaiting => 'Continuer d\'attendre';
 
   @override
@@ -3144,7 +3159,7 @@ class AppLocalizationsFr extends AppLocalizations {
   String get bondClaimTitle => 'Réclamer votre part';
 
   @override
-  String get bondClaimShareLabel => 'VOTRE PART';
+  String get bondClaimShareLabel => 'Votre part';
 
   @override
   String bondClaimShareSemantics(String sats) {
@@ -3334,9 +3349,6 @@ class AppLocalizationsFr extends AppLocalizations {
       'Le nœud n\'a pas renvoyé la facture du dépôt';
 
   @override
-  String get invoiceOrderIdCopied => 'ID de l\'ordre copié';
-
-  @override
   String get invoiceYouReceiveLabel => 'Tu vas recevoir';
 
   @override
@@ -3452,9 +3464,8 @@ class AppLocalizationsFr extends AppLocalizations {
   String get invoiceOpenWallet => 'Ouvrir dans mon portefeuille';
 
   @override
-  String invoiceHoldNote(String hold) {
-    return 'C\'est une facture $hold : les sats sont retenus, ils ne quittent pas ton portefeuille tant que tu n\'as pas confirmé le paiement de l\'acheteur.';
-  }
+  String get invoiceHoldNote =>
+      'Les sats sont retenus : ils ne quittent pas ton portefeuille tant que tu n\'as pas confirmé le paiement de l\'acheteur.';
 
   @override
   String invoiceQrSemantics(String invoice) {
@@ -3487,6 +3498,12 @@ class AppLocalizationsFr extends AppLocalizations {
   String invoiceCountdownHours(String hours, String minutes) {
     return '$hours h $minutes';
   }
+
+  @override
+  String get countdownExpiresInLabel => 'Expire dans';
+
+  @override
+  String get bondPayWithinLabel => 'Payer sous';
 
   @override
   String get tradeCardWaitingBuyerInvoiceTitle =>
@@ -3663,7 +3680,7 @@ class AppLocalizationsFr extends AppLocalizations {
       'Compte importé, mais Mostro n\'a pas répondu : vos échanges en cours n\'ont pas été récupérés';
 
   @override
-  String get paymentMethodsChosenLabel => 'Choisis';
+  String get paymentMethodsChosenLabel => 'Sélectionnés';
 
   @override
   String paymentMethodsSelectedCount(int count) {
@@ -3672,7 +3689,7 @@ class AppLocalizationsFr extends AppLocalizations {
       locale: localeName,
       other: '$count méthodes sélectionnées',
       one: '1 méthode sélectionnée',
-      zero: 'Choisis au moins une méthode',
+      zero: 'Sélectionne au moins une méthode',
     );
     return '$_temp0';
   }

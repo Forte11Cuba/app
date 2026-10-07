@@ -270,6 +270,26 @@ void main() {
     );
   });
 
+  // DS-CMP-23: the same hero as the take-order screen.
+  testWidgets('the share is a left-aligned hero under a sentence-case label', (
+    tester,
+  ) async {
+    await withClock(clockAt, () async {
+      await _pump(tester, claim: _claim());
+      expect(find.text('YOUR SHARE'), findsNothing);
+      final label = tester.widget<Text>(find.text('Your share'));
+      expect(label.style?.fontSize, 12);
+      expect(
+        tester.getTopLeft(find.text('Your share')).dx,
+        tester.getTopLeft(find.text('1,500')).dx,
+      );
+      expect(
+        tester.getTopLeft(find.text('sats')).dx,
+        greaterThan(tester.getTopRight(find.text('1,500')).dx),
+      );
+    });
+  });
+
   testWidgets('no claim for the order says so', (tester) async {
     await _pump(tester, claim: null);
     expect(find.text('No claim found for this order.'), findsOneWidget);

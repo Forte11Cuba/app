@@ -4,16 +4,6 @@ import 'package:mostro/src/rust/api/types.dart' as rust_types;
 import 'package:mostro/src/rust/api/types.dart' show InvoiceVerdict;
 
 void main() {
-  group('invoiceOrderTag', () {
-    test('keeps the first eight characters behind a hash', () {
-      expect(invoiceOrderTag('09150348-1a2b-4c3d'), '#09150348');
-    });
-
-    test('keeps a short id whole', () {
-      expect(invoiceOrderTag('order-1'), '#order-1');
-    });
-  });
-
   // Issue #720: the invoice screens grouped sats by hand (none up to five
   // digits, a thin space above) while every other screen used the locale's
   // separator, so `2439 sats` sat next to `≈ 1.449 sats`.
@@ -68,52 +58,6 @@ void main() {
       expect(holdInvoiceFee(holdSats: 250, nodeFee: null), isNull);
       expect(holdInvoiceFee(holdSats: 250, nodeFee: double.nan), isNull);
       expect(holdInvoiceFee(holdSats: 0, nodeFee: 0.006), isNull);
-    });
-  });
-
-  group('countdown', () {
-    test('reads mm:ss under an hour and the localized h mm above', () {
-      String hours(String h, String m) => '$h Std. $m';
-      expect(
-        formatInvoiceCountdown(
-          const Duration(minutes: 14, seconds: 38),
-          hours: hours,
-        ),
-        '14:38',
-      );
-      expect(
-        formatInvoiceCountdown(
-          const Duration(hours: 1, minutes: 5),
-          hours: hours,
-        ),
-        '1 Std. 05',
-      );
-      expect(
-        formatInvoiceCountdown(const Duration(seconds: -3), hours: hours),
-        '00:00',
-      );
-    });
-
-    test('turns urgent under a minute', () {
-      expect(isInvoiceCountdownUrgent(const Duration(seconds: 60)), isFalse);
-      expect(isInvoiceCountdownUrgent(const Duration(seconds: 59)), isTrue);
-    });
-
-    test('ticks every second under an hour, on the minute above', () {
-      expect(
-        invoiceCountdownTick(const Duration(minutes: 10)),
-        const Duration(seconds: 1),
-      );
-      // 2:00:15 still reads 2 h 00 at +15 s; it turns 1 h 59 at +16 s.
-      expect(
-        invoiceCountdownTick(const Duration(hours: 2, seconds: 15)),
-        const Duration(seconds: 16),
-      );
-      // 2:00:00 turns 1 h 59 one second later, not a minute later.
-      expect(
-        invoiceCountdownTick(const Duration(hours: 2)),
-        const Duration(seconds: 1),
-      );
     });
   });
 

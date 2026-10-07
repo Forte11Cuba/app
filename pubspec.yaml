@@ -121,6 +121,7 @@ flutter:
     - assets/fonts/outfit/OFL.txt
     - assets/fonts/manrope/OFL.txt
     - assets/fonts/nym_animals/LICENSE.txt
+    - assets/fonts/noto_flags/LICENSE.txt
 
   # Brand typography (drawer and order-book handoffs), bundled so the app never
   # fetches fonts at runtime. Outfit is the UI face; Manrope sets the figures
@@ -151,6 +152,12 @@ flutter:
     - family: NymAnimals
       fonts:
         - asset: assets/fonts/nym_animals/NymAnimals.ttf
+    # The flags of Noto Color Emoji (OFL), a fallback in both themes: Linux
+    # and Windows ship no flag glyphs (DS-TYP-8). Built by
+    # tool/flags_font/build_font.py.
+    - family: NotoFlags
+      fonts:
+        - asset: assets/fonts/noto_flags/NotoFlags.ttf
 
 # Launcher icons. Mirrors the v1 app's configuration (MostroP2P/mobile) and its
 # mascot, plus a gold ring inside the disc so the two apps can be told apart

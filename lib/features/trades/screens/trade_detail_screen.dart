@@ -20,6 +20,8 @@ import 'package:mostro/features/notifications/providers/notifications_provider.d
 import 'package:mostro/features/order/providers/invoice_providers.dart';
 import 'package:mostro/features/order/providers/trade_state_provider.dart';
 import 'package:mostro/features/order/widgets/invoice_clock.dart';
+import 'package:mostro/features/order/widgets/order_detail_cards.dart'
+    show OrderIdValue, copyOrderId;
 import 'package:mostro/features/rate/providers/rating_providers.dart';
 import 'package:mostro/features/trades/providers/release_pending_provider.dart';
 import 'package:mostro/features/trades/models/trade_status.dart';
@@ -39,6 +41,7 @@ import 'package:mostro/features/trades/widgets/bond_claim_banner.dart';
 import 'package:mostro/features/trades/widgets/bond_slashed_notice.dart';
 import 'package:mostro/features/trades/widgets/cancel_request_notice.dart';
 import 'package:mostro/l10n/app_localizations.dart';
+import 'package:mostro/shared/utils/countdown.dart';
 import 'package:mostro/shared/utils/reputation_age.dart';
 import 'package:mostro/shared/widgets/mostro_modal.dart';
 import 'package:mostro/shared/utils/platform_int64.dart';
@@ -174,13 +177,14 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen>
     }
   }
 
-  /// Repaints every second under an hour and once a minute above it: the
-  /// clock shows no seconds at that scale, so ticking faster decides nothing.
+  /// Repaints when the displayed value changes (`countdownTick`): every
+  /// second under an hour, on the minute above it, where the clock shows no
+  /// seconds and ticking faster decides nothing.
   void _scheduleTick() {
     _tick?.cancel();
     final remaining = _remaining.value;
     if (remaining <= Duration.zero) return;
-    final step = nextCountdownTick(remaining);
+    final step = countdownTick(remaining);
     _tick = Timer(step, () {
       if (!mounted) return;
       final next = _remaining.value - step;
@@ -506,16 +510,6 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen>
   }
 
   void _close() => context.canPop() ? context.pop() : context.go(AppRoute.home);
-
-  void _copyId() {
-    Clipboard.setData(ClipboardData(text: widget.orderId));
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(AppLocalizations.of(context).orderIdCopied),
-        duration: const Duration(seconds: 1),
-      ),
-    );
-  }
 
   // ── Status resolution ────────────────────────────────────────────────────
 
@@ -1119,66 +1113,66 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen>
 
   // ── ID and date ──────────────────────────────────────────────────────────
 
-  /// Last row of the scroll; tapping anywhere on it copies the id.
+  /// Last card of the scroll, the trade's ID row (DS-CMP-22); tapping
+  /// anywhere on it copies the id.
   Widget _idRow(
     AppLocalizations l10n,
     OrderBookPalette book,
     OrderItem? order,
   ) {
     final faint = TextStyle(fontSize: 11, color: book.textFaint);
-    return InkWell(
-      onTap: _copyId,
-      borderRadius: BorderRadius.circular(8),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 6),
-        // Id on the left, date on the right; the date takes a line of its
-        // own when both do not fit, and the id ellipsizes when even it alone
-        // does not (German at 2x text, 320dp: DS-A11Y-4).
-        child: Wrap(
-          alignment: WrapAlignment.spaceBetween,
-          crossAxisAlignment: WrapCrossAlignment.center,
-          spacing: 8,
-          runSpacing: 4,
-          children: [
-            Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(l10n.tradeIdLabel, style: faint),
-                const SizedBox(width: 8),
-                // The visible id is shortened; the readout carries the whole
-                // id.
-                Flexible(
-                  child: Text(
-                    _shortId(widget.orderId),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontFamily: AppFonts.figures,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w500,
-                      color: book.textTertiary,
-                    ),
-                  ).withAutomationId(
-                    AutomationIds.orderId,
-                    label: widget.orderId,
+    return Container(
+      decoration: BoxDecoration(
+        color: book.surface,
+        border: Border.all(color: book.border),
+        borderRadius: BorderRadius.circular(18),
+      ),
+      child: Semantics(
+        button: true,
+        label: l10n.copyOrderIdTooltip,
+        child: Material(
+          type: MaterialType.transparency,
+          child: InkWell(
+            onTap: () => copyOrderId(context, widget.orderId),
+            borderRadius: BorderRadius.circular(18),
+            child: Container(
+              constraints: const BoxConstraints(minHeight: 48),
+              alignment: AlignmentDirectional.centerStart,
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              // Id on the left, date on the right; the date takes a line of its
+              // own when both do not fit, and the id ellipsizes when even it alone
+              // does not (German at 2x text, 320dp: DS-A11Y-4).
+              child: Wrap(
+                alignment: WrapAlignment.spaceBetween,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                spacing: 8,
+                runSpacing: 4,
+                children: [
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(l10n.tradeIdLabel, style: faint),
+                      const SizedBox(width: 8),
+                      // DS-CMP-22: the short id and the copy icon; the readout
+                      // carries the whole id.
+                      Flexible(
+                        child: OrderIdValue(
+                          orderId: widget.orderId,
+                          color: book.textTertiary,
+                        ),
+                      ),
+                    ],
                   ),
-                ),
-                const SizedBox(width: 8),
-                Icon(Icons.copy_outlined, size: 12, color: book.textTertiary),
-              ],
+                  if (order != null)
+                    Text(_createdLabel(l10n, order.createdAt), style: faint),
+                ],
+              ),
             ),
-            if (order != null)
-              Text(_createdLabel(l10n, order.createdAt), style: faint),
-          ],
+          ),
         ),
       ),
     );
   }
-
-  static String _shortId(String id) =>
-      id.length <= 12
-          ? id
-          : '${id.substring(0, 5)}…${id.substring(id.length - 4)}';
 
   /// `created today 17:41`, or `created 11 Sep 2026, 17:41` in the locale's
   /// own order — the same format as the own-order screen.
