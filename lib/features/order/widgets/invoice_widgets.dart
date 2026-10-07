@@ -30,9 +30,9 @@ String? formatInvoiceFiat(AppLocalizations l10n, TradeInfo trade) {
   return '$formatted ${trade.order.fiatCode}';
 }
 
-/// The counterpart's pseudonym, with their reputation beside it once the
-/// daemon's snapshot has arrived.
-InvoiceCardRow invoiceCounterpartRow(
+/// The counterpart's pseudonym as a data row (DS-CMP-24), with their
+/// reputation trailing it once the daemon's snapshot has arrived.
+Widget invoiceCounterpartRow(
   WidgetRef ref,
   AppLocalizations l10n,
   TradeInfo trade,
@@ -44,14 +44,30 @@ InvoiceCardRow invoiceCounterpartRow(
           ? null
           : ref.watch(peerNymProvider(pubkey)).valueOrNull?.pseudonym;
   final hasSnapshot = trade.peerRating != null;
-  return (
+  return OrderDataRow(
+    icon: Icons.person_outline_rounded,
     label: label,
-    value: handle ?? l10n.unknownPeerHandle,
-    trailing:
-        hasSnapshot
-            ? counterpartStars(trade.peerRating, trade.peerReviews) ??
-                l10n.invoiceNoTrades
-            : null,
+    value: OrderDataValue(
+      handle ?? l10n.unknownPeerHandle,
+      trailing:
+          hasSnapshot
+              ? counterpartStars(trade.peerRating, trade.peerReviews) ??
+                  l10n.invoiceNoTrades
+              : null,
+    ),
+  );
+}
+
+/// The fiat side of the trade as a data row: `312 ARS · Mercado Pago`.
+Widget invoiceFiatRow(String label, String fiat, String paymentMethod) {
+  final method = paymentMethod.trim();
+  return OrderDataRow(
+    icon: Icons.payments_outlined,
+    label: label,
+    value: OrderDataValue(
+      method.isEmpty ? fiat : '$fiat · $method',
+      figures: true,
+    ),
   );
 }
 
@@ -474,146 +490,10 @@ class InvoiceIconAction extends StatelessWidget {
 
 // ── Cards ─────────────────────────────────────────────────────────────────────
 
-/// One label → value row of [InvoiceCounterpartCard]; [trailing] is the
-/// reputation beside the counterpart's name.
-typedef InvoiceCardRow = ({String label, String value, String? trailing});
-
-/// Counterpart and fiat side of the trade, as label → value rows. The first
-/// row is a name; the rest are figures and use the figures face. With an
-/// [orderId], the last row is the order's ID row (DS-CMP-22); with no
-/// [rows], that row is the whole card.
-class InvoiceCounterpartCard extends StatelessWidget {
-  const InvoiceCounterpartCard({
-    super.key,
-    this.rows = const [],
-    this.orderId,
-    this.orderIdAutomationId = AutomationIds.orderId,
-  });
-
-  final List<InvoiceCardRow> rows;
-  final String? orderId;
-
-  /// The readout carrying the full id, which each screen names its own.
-  final String orderIdAutomationId;
-
-  @override
-  Widget build(BuildContext context) {
-    final book = OrderBookPalette.of(context);
-    final pal = InvoicePalette.of(context);
-    final orderId = this.orderId;
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: book.surface,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: pal.cardBorder),
-      ),
-      child: Column(
-        children: [
-          for (var i = 0; i < rows.length; i++) ...[
-            if (i > 0) const SizedBox(height: 8),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.baseline,
-              textBaseline: TextBaseline.alphabetic,
-              children: [
-                Text(
-                  rows[i].label,
-                  style: TextStyle(fontSize: 12, color: book.textSecondary),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    rows[i].value,
-                    textAlign: TextAlign.right,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontFamily: i == 0 ? null : AppFonts.figures,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: book.textStrong,
-                    ),
-                  ),
-                ),
-                if (rows[i].trailing != null) ...[
-                  const SizedBox(width: 8),
-                  Text(
-                    rows[i].trailing!,
-                    style: TextStyle(
-                      fontFamily: AppFonts.figures,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                      color: book.textSecondary,
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          ],
-          if (orderId != null) ...[
-            if (rows.isNotEmpty) const SizedBox(height: 4),
-            _InvoiceOrderIdRow(
-              orderId: orderId,
-              automationId: orderIdAutomationId,
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-/// The ID row of [InvoiceCounterpartCard]: label, the short id and the copy
-/// icon; the whole row copies the full id (DS-CMP-22). 48 high, the minimum
-/// target (DS-CMP-6).
-class _InvoiceOrderIdRow extends StatelessWidget {
-  const _InvoiceOrderIdRow({required this.orderId, required this.automationId});
-
-  final String orderId;
-  final String automationId;
-
-  @override
-  Widget build(BuildContext context) {
-    final book = OrderBookPalette.of(context);
-    return Semantics(
-      button: true,
-      label: AppLocalizations.of(context).copyOrderIdTooltip,
-      child: Material(
-        type: MaterialType.transparency,
-        child: InkWell(
-          onTap: () => copyOrderId(context, orderId),
-          borderRadius: BorderRadius.circular(12),
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(minHeight: 48),
-            child: Row(
-              children: [
-                Text(
-                  AppLocalizations.of(context).orderDetailIdLabel,
-                  style: TextStyle(fontSize: 12, color: book.textSecondary),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Align(
-                    alignment: AlignmentDirectional.centerEnd,
-                    child: OrderIdValue(
-                      orderId: orderId,
-                      color: book.textStrong,
-                      automationId: automationId,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
 /// A state of an invoice screen with no card of its own (loading, waiting,
-/// paying through the wallet, closed): the order's ID card on top, [child]
-/// below, so the id reads the same in every state (DS-CMP-22).
+/// paying through the wallet, closed): a data card holding only the order's
+/// ID row on top, [child] below, so the id reads the same in every state
+/// (DS-CMP-22, DS-CMP-24).
 class InvoiceOrderIdBody extends StatelessWidget {
   const InvoiceOrderIdBody({
     super.key,
@@ -638,9 +518,8 @@ class InvoiceOrderIdBody extends StatelessWidget {
             kInvoiceGutter,
             0,
           ),
-          child: InvoiceCounterpartCard(
-            orderId: orderId,
-            orderIdAutomationId: automationId,
+          child: OrderDataCard(
+            rows: [OrderIdRow(orderId: orderId, automationId: automationId)],
           ),
         ),
         Expanded(child: child),

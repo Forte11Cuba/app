@@ -22,6 +22,7 @@ import 'package:mostro/features/order/providers/trade_state_provider.dart';
 import 'package:mostro/features/order/widgets/bond_widgets.dart';
 import 'package:mostro/features/order/widgets/invoice_clock.dart';
 import 'package:mostro/features/order/widgets/invoice_widgets.dart';
+import 'package:mostro/features/order/widgets/order_detail_cards.dart';
 import 'package:mostro/features/settings/providers/nwc_provider.dart';
 import 'package:mostro/features/trades/providers/trades_providers.dart'
     show refreshTrades, tradeInfoProvider;
@@ -530,18 +531,20 @@ class _PayBondInvoiceScreenState extends ConsumerState<PayBondInvoiceScreen>
                     // The trade's context rows join the ID row (DS-CMP-22)
                     // once the explainer is open.
                     const SizedBox(height: 12),
-                    InvoiceCounterpartCard(
-                      rows:
-                          open
-                              ? _context(
-                                l10n,
-                                trade,
-                                node?.bondAmountPct,
-                                maker: maker,
-                              )
-                              : const [],
-                      orderId: widget.orderId,
-                      orderIdAutomationId: AutomationIds.bondOrderId,
+                    OrderDataCard(
+                      rows: [
+                        if (open)
+                          ..._context(
+                            l10n,
+                            trade,
+                            node?.bondAmountPct,
+                            maker: maker,
+                          ),
+                        OrderIdRow(
+                          orderId: widget.orderId,
+                          automationId: AutomationIds.bondOrderId,
+                        ),
+                      ],
                     ),
                     const Spacer(),
                     const SizedBox(height: 16),
@@ -612,7 +615,7 @@ class _PayBondInvoiceScreenState extends ConsumerState<PayBondInvoiceScreen>
     ];
   }
 
-  List<InvoiceCardRow> _context(
+  List<Widget> _context(
     AppLocalizations l10n,
     TradeInfo trade,
     double? bondAmountPct, {
@@ -623,17 +626,18 @@ class _PayBondInvoiceScreenState extends ConsumerState<PayBondInvoiceScreen>
     final share = bondSharePercent(bondAmountPct);
     return [
       if (fiat != null)
-        (
+        OrderDataRow(
+          icon: Icons.receipt_long_outlined,
           label: l10n.bondContextOrder,
-          value:
-              buying ? l10n.bondContextBuy(fiat) : l10n.bondContextSell(fiat),
-          trailing: null,
+          value: OrderDataValue(
+            buying ? l10n.bondContextBuy(fiat) : l10n.bondContextSell(fiat),
+          ),
         ),
       if (share != null)
-        (
+        OrderDataRow(
+          icon: Icons.percent_rounded,
           label: l10n.bondContextEquals,
-          value: l10n.bondContextPercent(share),
-          trailing: null,
+          value: OrderDataValue(l10n.bondContextPercent(share), figures: true),
         ),
     ];
   }
