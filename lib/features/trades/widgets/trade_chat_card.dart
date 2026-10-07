@@ -13,8 +13,10 @@ import 'package:mostro/shared/widgets/tab_app_bar.dart' show CountBadge;
 /// badge from the message stream, and a tap into the room. The alias is the
 /// datum — never a "your counterpart" placeholder once the trade is active.
 ///
-/// [closed] once the conversation has ended: muted, no badge, and a line
-/// that the messages can still be read. The tap opens the room, read-only.
+/// [closed] once the conversation has ended: muted, with a line that the
+/// messages can still be read. The tap opens the room, read-only. The unread
+/// badge stays: the messages are unread until the room is opened, and the
+/// chat list and the Chat tab count them too.
 class TradeChatCard extends ConsumerWidget {
   const TradeChatCard({super.key, required this.orderId, this.closed = false});
 
@@ -33,7 +35,7 @@ class TradeChatCard extends ConsumerWidget {
             .where((r) => r.orderId == orderId)
             .firstOrNull;
     final alias = room?.displayHandle(l10n) ?? l10n.unknownPeerHandle;
-    final unread = closed ? 0 : room?.unreadCount ?? 0;
+    final unread = room?.unreadCount ?? 0;
 
     return Material(
       color: book.surface,
@@ -44,9 +46,7 @@ class TradeChatCard extends ConsumerWidget {
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
           decoration: BoxDecoration(
-            border: Border.all(
-              color: closed ? book.border : trade.chatBorder,
-            ),
+            border: Border.all(color: closed ? book.border : trade.chatBorder),
             borderRadius: BorderRadius.circular(18),
           ),
           child: Row(
@@ -129,7 +129,8 @@ class _Avatar extends StatelessWidget {
               top: -3,
               // The shared badge (99+ past 99), ringed in the card's surface
               // to stand off the icon. A Container insets its child by the
-              // border, so 13 + 2 × 1.5 keeps it 16 high.
+              // border, so 13 + 2 × 1.5 keeps it 16 high, and a padding of 3
+              // keeps one digit inside 13: a 16 dp circle, a pill past it.
               child: Container(
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(999),
@@ -140,6 +141,7 @@ class _Avatar extends StatelessWidget {
                   background: book.lime,
                   foreground: book.onLime,
                   size: 13,
+                  padding: 3,
                 ),
               ),
             ),

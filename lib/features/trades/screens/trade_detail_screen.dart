@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -718,8 +719,26 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen>
     final chatClosed =
         ref.watch(chatRowStateProvider(widget.orderId)).group ==
         ChatGroup.closed;
+    // Said once when it closes on screen (DS-A11Y-2): the completed trade's
+    // hour ran out while the user watched. Already closed on arrival, the
+    // card's subtitle is read on focus instead.
+    ref.listen<bool>(
+      chatRowStateProvider(
+        widget.orderId,
+      ).select((state) => state.group == ChatGroup.closed),
+      (wasClosed, closed) {
+        if (closed && wasClosed == false) {
+          SemanticsService.sendAnnouncement(
+            View.of(context),
+            l10n.tradeChatClosedAnnouncement,
+            Directionality.of(context),
+          );
+        }
+      },
+    );
     final finished = view.isCompleted || status == TradeStatus.cancelled;
     final pinsChat = view.showsChat || (finished && room != null);
+    final locksChat = !pinsChat && !view.isCompleted && view.step >= 0;
 
     // No trade row and not the maker: this is no longer a trade of this
     // user's. A take lost before going active (its own cancel, a waiting
@@ -769,23 +788,20 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen>
         children: [
           _pinnedChat(pinsChat, book, closed: chatClosed),
           Expanded(
-            child: NotificationListener<ScrollUpdateNotification>(
-              onNotification: (notification) {
-                if (notification.depth == 0) {
-                  _scrolledUnderChat.value = notification.metrics.pixels > 0;
-                }
-                return false;
-              },
+            child: NotificationListener<Notification>(
+              onNotification: _trackScrollUnderChat,
               child: ListView(
                 // Under a pinned card, its 8 dp and these 4 dp make the
                 // 12 dp gap it had inside the scroll.
                 padding: const EdgeInsets.fromLTRB(18, 4, 18, 16),
+                // The first two children are always there, so the ones below
+                // keep their slots, and their state, when the card takes the
+                // top: the step block's crossfade included.
                 children: [
-                  if (!pinsChat) ...[
-                    _lockedChatNote(view),
-                    const SizedBox(height: 12),
-                  ],
+                  _lockedChatNote(shown: locksChat),
+                  SizedBox(height: pinsChat || locksChat ? 0 : 12),
                   AnimatedSwitcher(
+                    key: const ValueKey('step-block'),
                     duration: const Duration(milliseconds: 200),
                     child: KeyedSubtree(
                       key: ValueKey(status),
@@ -859,8 +875,8 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen>
 
   /// The chat card, pinned above the scrolling content once the trade has a
   /// chat, [closed] when the conversation has ended: it slides in (fade +
-  /// 8dp, 220 ms) and draws a line under itself once content scrolls beneath
-  /// it. Nothing otherwise.
+  /// 8dp, 220 ms; at once with animations off) and draws a line under itself
+  /// while content sits beneath it. Nothing otherwise.
   Widget _pinnedChat(
     bool pinned,
     OrderBookPalette book, {
@@ -890,28 +906,50 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen>
               ),
             )
             : const SizedBox.shrink(key: ValueKey('none'));
+    return _chatSwitcher(child);
+  }
+
+  /// What stands in for the chat before the trade is active: a note that
+  /// scrolls with the content, never pinned. It fades out (150 ms) when the
+  /// trade turns active and the card takes the top, its gap with it, so the
+  /// 8 dp it slides on the way out stay inside that gap. Always in the list,
+  /// empty unless [shown], so the children below it keep their slots.
+  Widget _lockedChatNote({required bool shown}) => _chatSwitcher(
+    shown
+        ? const Padding(
+          key: ValueKey('locked'),
+          padding: EdgeInsets.only(bottom: 12),
+          child: TradeChatLockedLine(),
+        )
+        : const SizedBox.shrink(key: ValueKey('none')),
+  );
+
+  /// The card's and the note's swap: fade + slide, or none at all when the
+  /// platform asks for no animations.
+  Widget _chatSwitcher(Widget child) {
+    final animate = !MediaQuery.disableAnimationsOf(context);
     return AnimatedSwitcher(
-      duration: const Duration(milliseconds: 220),
-      reverseDuration: const Duration(milliseconds: 150),
+      duration: animate ? const Duration(milliseconds: 220) : Duration.zero,
+      reverseDuration:
+          animate ? const Duration(milliseconds: 150) : Duration.zero,
       switchInCurve: Curves.easeOut,
       transitionBuilder: _chatTransition,
       child: child,
     );
   }
 
-  /// What stands in for the chat before the trade is active: a note that
-  /// scrolls with the content, never pinned. It fades out (150 ms) when the
-  /// trade turns active and the card takes the top.
-  Widget _lockedChatNote(TradeView view) => AnimatedSwitcher(
-    duration: const Duration(milliseconds: 220),
-    reverseDuration: const Duration(milliseconds: 150),
-    switchInCurve: Curves.easeOut,
-    transitionBuilder: _chatTransition,
-    child:
-        !view.isCompleted && view.step >= 0
-            ? const TradeChatLockedLine(key: ValueKey('locked'))
-            : const SizedBox.shrink(key: ValueKey('none')),
-  );
+  /// Draws the line under the pinned card while content sits beneath it. A
+  /// status change that shrinks the content moves the position without a
+  /// scroll update, only a metrics notification, so both are read.
+  bool _trackScrollUnderChat(Notification notification) {
+    final metrics = switch (notification) {
+      ScrollNotification(depth: 0, :final metrics) => metrics,
+      ScrollMetricsNotification(depth: 0, :final metrics) => metrics,
+      _ => null,
+    };
+    if (metrics != null) _scrolledUnderChat.value = metrics.extentBefore > 0;
+    return false;
+  }
 
   static Widget _chatTransition(Widget child, Animation<double> animation) =>
       FadeTransition(

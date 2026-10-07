@@ -9,6 +9,8 @@ import 'package:mostro/features/trades/widgets/trade_chat_card.dart';
 import 'package:mostro/l10n/app_localizations.dart';
 import 'package:mostro/shared/widgets/tab_app_bar.dart' show CountBadge;
 
+import '../../../support/load_app_fonts.dart';
+
 const _orderId = 'order-chat';
 
 /// The card alone, under a router whose chat route says which room opened.
@@ -65,6 +67,9 @@ Future<void> _pump(
 }
 
 void main() {
+  // The badge's width is the digit's: measured in the app's own figures.
+  setUpAll(loadAppFonts);
+
   for (final closed in [false, true]) {
     testWidgets('a tap opens the room (closed: $closed)', (tester) async {
       await _pump(tester, closed: closed);
@@ -77,12 +82,19 @@ void main() {
   testWidgets('the unread count reads as it is up to 99', (tester) async {
     await _pump(tester, closed: false, unread: 7);
     expect(find.text('7'), findsOneWidget);
-    // The ringed badge keeps the 16 dp the hand-drawn one had.
+    // One digit keeps the round 16 dp badge the hand-drawn one was.
     final badge = find.ancestor(
       of: find.byType(CountBadge),
       matching: find.byType(Container),
     );
-    expect(tester.getSize(badge.first).height, 16);
+    expect(tester.getSize(badge.first), const Size(16, 16));
+  });
+
+  // The chat list and the Chat tab still count a closed room's unread
+  // messages: the card says the same.
+  testWidgets('a closed card keeps the unread count', (tester) async {
+    await _pump(tester, closed: true, unread: 3);
+    expect(find.text('3'), findsOneWidget);
   });
 
   testWidgets('past 99 unread messages the count reads 99+', (tester) async {

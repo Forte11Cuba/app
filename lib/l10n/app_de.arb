@@ -638,10 +638,11 @@
     "description": "Line shown in place of the chat card until the trade is active"
   },
   "tradeChatEncrypted": "Ende-zu-Ende-verschlüsselter Chat",
-  "tradeChatClosed": "Unterhaltung beendet · Nachrichten ansehen",
   "@tradeChatEncrypted": {
     "description": "Subtitle of the chat card under the counterpart alias"
   },
+  "tradeChatClosed": "Unterhaltung beendet · Nachrichten ansehen",
+  "tradeChatClosedAnnouncement": "Die Unterhaltung ist beendet. Du kannst ihre Nachrichten weiterhin lesen",
   "tradeBodyWaitingPaymentBuyer": "Der Verkäufer bezahlt die Hold-Rechnung. Sobald die Sats gesperrt sind, bist du mit der Fiat-Zahlung dran.",
   "@tradeBodyWaitingPaymentBuyer": {
     "description": "Step body for the buyer while the seller pays the hold invoice"

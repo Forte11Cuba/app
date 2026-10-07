@@ -2231,6 +2231,10 @@ class AppLocalizationsDe extends AppLocalizations {
   String get tradeChatClosed => 'Unterhaltung beendet · Nachrichten ansehen';
 
   @override
+  String get tradeChatClosedAnnouncement =>
+      'Die Unterhaltung ist beendet. Du kannst ihre Nachrichten weiterhin lesen';
+
+  @override
   String get tradeBodyWaitingPaymentBuyer =>
       'Der Verkäufer bezahlt die Hold-Rechnung. Sobald die Sats gesperrt sind, bist du mit der Fiat-Zahlung dran.';
 

@@ -3826,6 +3826,12 @@ abstract class AppLocalizations {
   /// **'Conversation closed · view messages'**
   String get tradeChatClosed;
 
+  /// Screen-reader announcement when the trade screen's chat card turns closed while the user is on it (the completed trade's hour ran out); the messages stay readable
+  ///
+  /// In en, this message translates to:
+  /// **'The conversation is closed. You can still read its messages'**
+  String get tradeChatClosedAnnouncement;
+
   /// Step body for the buyer while the seller pays the hold invoice
   ///
   /// In en, this message translates to:

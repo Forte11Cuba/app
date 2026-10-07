@@ -2217,6 +2217,10 @@ class AppLocalizationsNl extends AppLocalizations {
   String get tradeChatClosed => 'Gesprek gesloten · berichten bekijken';
 
   @override
+  String get tradeChatClosedAnnouncement =>
+      'Het gesprek is gesloten. Je kunt de berichten nog steeds lezen';
+
+  @override
   String get tradeBodyWaitingPaymentBuyer =>
       'Hij betaalt de hold invoice. Zodra de sats vaststaan, is het aan jou om de fiat over te maken.';
 

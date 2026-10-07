@@ -2221,6 +2221,10 @@ class AppLocalizationsEs extends AppLocalizations {
   String get tradeChatClosed => 'Conversación cerrada · ver mensajes';
 
   @override
+  String get tradeChatClosedAnnouncement =>
+      'La conversación se cerró. Aún puedes leer sus mensajes';
+
+  @override
   String get tradeBodyWaitingPaymentBuyer =>
       'Está pagando la factura hold. Cuando los sats estén bloqueados, te toca pagar el fiat.';
 
