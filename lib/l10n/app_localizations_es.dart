@@ -1667,9 +1667,9 @@ class AppLocalizationsEs extends AppLocalizations {
     String _temp0 = intl.Intl.pluralLogic(
       count,
       locale: localeName,
-      other: '$count elegidos',
-      one: '1 elegido',
-      zero: 'ninguno elegido',
+      other: '$count seleccionados',
+      one: '1 seleccionado',
+      zero: 'ninguno seleccionado',
     );
     return '$_temp0';
   }
@@ -3045,9 +3045,8 @@ class AppLocalizationsEs extends AppLocalizations {
       'Mostro no custodia fondos, así que no puede castigar a quien abandona una operación; el depósito hace ese trabajo, y protege a todos los usuarios contra estafadores.';
 
   @override
-  String bondWhyHold(String hold) {
-    return 'Es una factura $hold: la billetera reserva los sats sin enviarlos; al completar, la reserva se cancela sola.';
-  }
+  String get bondWhyHold =>
+      'Tu billetera retiene los sats sin enviarlos; al completar la operación, se liberan solos.';
 
   @override
   String get bondWhyDispute =>
@@ -3457,9 +3456,8 @@ class AppLocalizationsEs extends AppLocalizations {
   String get invoiceOpenWallet => 'Abrir en mi billetera';
 
   @override
-  String invoiceHoldNote(String hold) {
-    return 'Es una factura $hold: los sats quedan retenidos, no salen de tu billetera hasta que confirmes el pago del comprador.';
-  }
+  String get invoiceHoldNote =>
+      'Los sats quedan retenidos: no salen de tu billetera hasta que confirmes el pago del comprador.';
 
   @override
   String invoiceQrSemantics(String invoice) {
@@ -3661,7 +3659,7 @@ class AppLocalizationsEs extends AppLocalizations {
       'Cuenta importada, pero Mostro no respondió, así que no se recuperaron tus operaciones en curso';
 
   @override
-  String get paymentMethodsChosenLabel => 'Elegidos';
+  String get paymentMethodsChosenLabel => 'Seleccionados';
 
   @override
   String paymentMethodsSelectedCount(int count) {
@@ -3670,7 +3668,7 @@ class AppLocalizationsEs extends AppLocalizations {
       locale: localeName,
       other: '$count métodos seleccionados',
       one: '1 método seleccionado',
-      zero: 'Elige al menos un método',
+      zero: 'Selecciona al menos un método',
     );
     return '$_temp0';
   }

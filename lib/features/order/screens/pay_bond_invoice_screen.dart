@@ -595,20 +595,9 @@ class _PayBondInvoiceScreenState extends ConsumerState<PayBondInvoiceScreen>
   }
 
   List<InlineSpan> _explainer(AppLocalizations l10n, bool slashOnTimeout) {
-    final bold = TextStyle(
-      fontWeight: FontWeight.w600,
-      color: OrderBookPalette.of(context).textPrimary,
-    );
-    final (before, after) = bondSentenceParts(l10n.bondWhyHold);
     return [
       TextSpan(text: l10n.bondWhyCustody),
-      TextSpan(
-        children: [
-          TextSpan(text: before),
-          TextSpan(text: 'hold', style: bold),
-          if (after.isNotEmpty) TextSpan(text: after),
-        ],
-      ),
+      TextSpan(text: l10n.bondWhyHold),
       TextSpan(
         text: slashOnTimeout ? l10n.bondWhyDisputeTimeout : l10n.bondWhyDispute,
       ),
