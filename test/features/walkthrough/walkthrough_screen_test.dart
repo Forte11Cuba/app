@@ -230,6 +230,37 @@ void main() {
     }
   });
 
+  testWidgets('every slide shows its art at the handoff size', (tester) async {
+    // The handoff's phone: a 340 x 720 screen with a 184 px illustration.
+    tester.view.physicalSize = const Size(360, 740);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await _pumpWalkthrough(tester);
+    final l10n = _en();
+    const expected = 740 * 184 / 720;
+
+    for (var i = 0; i < 6; i++) {
+      expect(
+        tester.getSize(find.byType(WalkthroughArt)).width,
+        moreOrLessEquals(expected, epsilon: 0.5),
+        reason: 'slide ${i + 1}',
+      );
+      if (i < 5) {
+        await tester.tap(find.text(l10n.walkthroughNext));
+        await tester.pumpAndSettle();
+      }
+    }
+  });
+
+  testWidgets('only the welcome slide carries the flow between the peers', (
+    tester,
+  ) async {
+    final slides = walkthroughSlides(_en());
+
+    expect(slides.first.flow, isNotNull);
+    expect(slides.skip(1).map((s) => s.flow), everyElement(isNull));
+  });
+
   testWidgets('the counter reads as a step to a screen reader', (tester) async {
     final handle = tester.ensureSemantics();
     await _pumpWalkthrough(tester);

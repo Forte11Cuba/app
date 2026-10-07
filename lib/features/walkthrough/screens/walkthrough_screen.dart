@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -30,14 +32,11 @@ class WalkthroughScreen extends ConsumerStatefulWidget {
 /// A horizontal drag at least this long turns the slide, as in the handoff.
 const _swipeDistance = 40.0;
 
-/// The art's disc takes this share of the screen height, within
-/// [_artMin]..[_artMax] (184 in the handoff).
-const _artHeightShare = 0.24;
-const _artMin = 120.0;
-const _artMax = 184.0;
-
-/// The mode-card slide's art, relative to the others (120 to 184).
-const _denseArtScale = 0.65;
+/// The handoff draws a 184 px illustration on a 340 x 720 screen. Every slide
+/// keeps that proportion, on whichever side of the screen binds first, and a
+/// slide with more text scrolls rather than shrinking its art.
+const _artWidthShare = 184 / 340;
+const _artHeightShare = 184 / 720;
 
 /// Thickness of a progress segment.
 const _progressHeight = 4.0;
@@ -224,23 +223,27 @@ class _SlideBody extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final book = OrderBookPalette.of(context);
-    final height = MediaQuery.sizeOf(context).height;
-    final full = (height * _artHeightShare).clamp(_artMin, _artMax);
-    final artSize = slide.isDense ? full * _denseArtScale : full;
+    final screen = MediaQuery.sizeOf(context);
+    final artSize = math.min(
+      screen.width * _artWidthShare,
+      screen.height * _artHeightShare,
+    );
     final body = TextStyle(fontSize: 14, height: 1.5, color: book.textBody);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const SizedBox(height: 12),
+        // The handoff's margins around the art.
+        const SizedBox(height: 18),
         Center(
           child: WalkthroughArt(
             key: ValueKey(slide.art),
             asset: slide.art,
             size: artSize,
+            flow: slide.flow,
           ),
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: 20),
         // Announced when the slide changes under a screen reader.
         Semantics(
           header: true,

@@ -1,3 +1,5 @@
+import 'dart:ui' show Offset;
+
 import 'package:mostro/l10n/app_localizations.dart';
 
 /// Where the walkthrough's SVG illustrations live.
@@ -5,6 +7,23 @@ const walkthroughArtDir = 'assets/images/walkthrough';
 
 /// One of the privacy modes the second slide presents as a card.
 typedef WalkthroughMode = ({String name, String description});
+
+/// A dashed line whose dashes run from [from] to [to], over the slide's art
+/// and under [front]: the traffic between the two peers of the first slide.
+/// Points are in the art's 240 x 240 view box.
+class WalkthroughFlow {
+  const WalkthroughFlow({
+    required this.from,
+    required this.to,
+    required this.front,
+  });
+
+  final Offset from;
+  final Offset to;
+
+  /// Asset drawn over the line, where it runs into the hub.
+  final String front;
+}
 
 /// One slide of the first-run walkthrough: an illustration, a title and its
 /// paragraphs, optionally mode cards with a closing paragraph after them.
@@ -15,6 +34,7 @@ class WalkthroughSlide {
     required this.paragraphs,
     this.modes = const [],
     this.footer,
+    this.flow,
   });
 
   /// Asset path of the slide's illustration.
@@ -26,8 +46,8 @@ class WalkthroughSlide {
   /// The paragraph after [modes].
   final String? footer;
 
-  /// A slide with mode cards carries the most text, so its art shrinks.
-  bool get isDense => modes.isNotEmpty;
+  /// The animated line drawn into the art, if the slide has one.
+  final WalkthroughFlow? flow;
 }
 
 /// The six slides, in order.
@@ -36,6 +56,13 @@ List<WalkthroughSlide> walkthroughSlides(AppLocalizations l10n) => [
     art: '$walkthroughArtDir/welcome.svg',
     title: l10n.walkthroughWelcomeTitle,
     paragraphs: [l10n.walkthroughWelcomeBody1, l10n.walkthroughWelcomeBody2],
+    // The handoff's M94 120H146, inside the drawing's 1.3x scale about the
+    // centre.
+    flow: const WalkthroughFlow(
+      from: Offset(86.2, 120),
+      to: Offset(153.8, 120),
+      front: '$walkthroughArtDir/welcome_hub.svg',
+    ),
   ),
   WalkthroughSlide(
     art: '$walkthroughArtDir/privacy.svg',
