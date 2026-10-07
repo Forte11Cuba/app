@@ -538,6 +538,7 @@ class _ReputationStrip extends StatelessWidget {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     final isNew = order.tradeCount == 0;
+    final days = order.makerDaysOnMostro;
     final separator = Text('|', style: TextStyle(color: palette.divider));
 
     return Container(
@@ -586,8 +587,8 @@ class _ReputationStrip extends StatelessWidget {
               ),
             separator,
             _Stat(
-              value: formats.decimal.format(order.daysActive),
-              label: l10n.reputationDaysLabel(order.daysActive),
+              value: formats.decimal.format(days),
+              label: l10n.reputationDaysLabel(days),
               palette: palette,
             ),
           ],

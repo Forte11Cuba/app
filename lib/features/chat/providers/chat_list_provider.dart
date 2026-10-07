@@ -1,3 +1,6 @@
+import 'dart:async';
+
+import 'package:clock/clock.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -29,22 +32,66 @@ Map<String, TradeRow> _tradesById(Ref ref) => {
     t.orderId: t,
 };
 
+int _nowSeconds() => clock.now().millisecondsSinceEpoch ~/ 1000;
+
+/// The state of the conversation about [trade] at [now] (Unix seconds).
+///
+/// Whether it is still open is decided on the persisted row
+/// ([TradeRow.rowStatus] and its [TradeRow.completedAt]), not on the status
+/// the trades list shows: Rust keeps the chat live, and takes a send, for as
+/// long as the row is (`chat_still_relevant_at`), and the book's status can
+/// run ahead of it. Decided on the shown status, a `success` in the book
+/// ahead of the row's own — and of the completion time the row gets with it
+/// — would close the room until the row caught up, and the draft would go
+/// with the composer. The avatar's tone still follows the shown status
+/// ([TradeRow.state]).
+ChatRowState _stateOf(TradeRow? trade, int now) => ChatRowState.of(
+  status: trade?.rowStatus,
+  trade: trade?.state,
+  completedAt: trade?.completedAt,
+  now: now,
+);
+
+/// Rebuild the provider when the first of [trades]' grace windows still
+/// running at [now] ends (#642): nothing else rings when a conversation
+/// closes by the clock alone. Dated from the persisted row, as [_stateOf]
+/// decides.
+void _rebuildWhenAGraceWindowEnds(
+  Ref ref,
+  Iterable<TradeRow?> trades,
+  int now,
+) {
+  final ends = [
+    for (final trade in trades)
+      if (trade != null)
+        if (chatGraceEndsAt(
+              status: trade.rowStatus,
+              completedAt: trade.completedAt,
+            )
+            case final end? when end > now)
+          end,
+  ];
+  if (ends.isEmpty) return;
+  final first = ends.reduce((a, b) => a < b ? a : b);
+  final timer = Timer(Duration(seconds: first - now), ref.invalidateSelf);
+  ref.onDispose(timer.cancel);
+}
+
 /// The conversations as grouped for the Messages segment.
 final groupedChatRowsProvider = Provider<List<ChatRowGroup<ChatListRow>>>((
   ref,
 ) {
   final trades = _tradesById(ref);
+  final now = _nowSeconds();
   final rows = [
     for (final room in ref.watch(chatRoomsNotifierProvider))
       ChatListRow(
         room: room,
         trade: trades[room.orderId],
-        state: ChatRowState.of(
-          status: trades[room.orderId]?.status,
-          trade: trades[room.orderId]?.state,
-        ),
+        state: _stateOf(trades[room.orderId], now),
       ),
   ];
+  _rebuildWhenAGraceWindowEnds(ref, rows.map((r) => r.trade), now);
   return groupChatRows(
     rows,
     groupOf: (r) => r.state.group,
@@ -53,8 +100,9 @@ final groupedChatRowsProvider = Provider<List<ChatRowGroup<ChatListRow>>>((
 });
 
 /// The state of one conversation, for the chat room: whether it may compose
-/// yet, and whether it is read-only. A failed trades load reads as open — a
-/// read error must not take the composer away from a live trade.
+/// yet, and whether it is read-only — both from the persisted trade row, as
+/// Rust decides ([_stateOf]). A failed trades load reads as open — a read
+/// error must not take the composer away from a live trade.
 final chatRowStateProvider = Provider.family<ChatRowState, String>((
   ref,
   orderId,
@@ -62,5 +110,8 @@ final chatRowStateProvider = Provider.family<ChatRowState, String>((
   final trades = ref.watch(tradeRowsProvider);
   if (trades.isLoading && !trades.hasValue) return ChatRowState.resolving;
   final trade = _tradesById(ref)[orderId];
-  return ChatRowState.of(status: trade?.status, trade: trade?.state);
+  final now = _nowSeconds();
+  // The room turns read-only on its own when a completed trade's window ends.
+  _rebuildWhenAGraceWindowEnds(ref, [trade], now);
+  return _stateOf(trade, now);
 });

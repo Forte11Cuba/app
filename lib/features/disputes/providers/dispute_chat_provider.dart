@@ -21,6 +21,7 @@ DisputeMessage disputeMessageFromRust(rust_types.ChatMessage message) =>
       createdAt: platformInt64ToInt(message.createdAt),
       nostrEventId: message.id,
       attachment: message.attachment,
+      senderPubkey: message.senderPubkey,
     );
 
 /// The conversation with the solver of one trade's dispute (#143).
@@ -70,8 +71,9 @@ final disputeChatProvider = StateNotifierProvider.autoDispose
       return notifier;
     });
 
-/// The Rust calls behind the dispute chat's text and refresh, in one place a
-/// test can replace (the files go through `AttachmentGateway.sendToSolver`).
+/// The Rust calls behind the dispute chat's text, chat key share and refresh,
+/// in one place a test can replace (the files go through
+/// `AttachmentGateway.sendToSolver`).
 class DisputeChatGateway {
   const DisputeChatGateway();
 
@@ -82,13 +84,39 @@ class DisputeChatGateway {
     required String text,
   }) => disputes_api.submitEvidence(tradeId: tradeId, text: text);
 
+  /// Sends the solver the peer chat key (#415): built and sent in Rust, so
+  /// the key reaches Dart only inside the returned message.
+  Future<rust_types.ChatMessage> shareChatKey(String tradeId) =>
+      disputes_api.shareChatKeyWithSolver(tradeId: tradeId);
+
   Future<rust_types.Dispute?> getDispute(String tradeId) =>
       disputes_api.getDispute(tradeId: tradeId);
+
+  /// Whether [solverPubkey] is the Serbero of [tradeId]'s node or a person
+  /// (#637).
+  Future<rust_types.SolverRole> solverRole(
+    String tradeId,
+    String solverPubkey,
+  ) => disputes_api.solverRole(tradeId: tradeId, solverPubkey: solverPubkey);
 }
 
 final disputeChatGatewayProvider = Provider<DisputeChatGateway>(
   (ref) => const DisputeChatGateway(),
 );
+
+/// One solver of one trade's dispute: only that dispute's node can vouch
+/// that the solver is its Serbero.
+typedef SolverOfDispute = ({String tradeId, String solverPubkey});
+
+/// Who one solver is, as Rust decides it (#637). Read each time a dispute
+/// chat opens: the node's announcement can arrive after the history did.
+/// A person until answered — never "Serbero" on a guess.
+final solverRoleProvider = FutureProvider.autoDispose
+    .family<rust_types.SolverRole, SolverOfDispute>(
+      (ref, solver) => ref
+          .watch(disputeChatGatewayProvider)
+          .solverRole(solver.tradeId, solver.solverPubkey),
+    );
 
 /// How many times [disputeUpdatesProvider] subscribes again after the
 /// bridge stream fails, before it gives up.

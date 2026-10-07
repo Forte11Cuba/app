@@ -64,6 +64,13 @@ final pushSupportedProvider = Provider<bool>(
   (ref) => PushNotificationService.instance.isSupported,
 );
 
+/// Whether the push registration lapses once the app stops running: on the
+/// web nothing refreshes it after the tab closes, and the push server forgets
+/// it 48 h after the last refresh (docs/PUSH_NOTIFICATIONS.md §2.6). A
+/// provider rather than `kIsWeb` at the use site, so screens can be tested
+/// both ways.
+final pushExpiresWithTabProvider = Provider<bool>((ref) => kIsWeb);
+
 /// One reader for the process lifetime. A pending Rust `next()` cannot be
 /// cancelled from Dart, so screen disposal or a toggle must not recreate it.
 /// Rust emits the resulting status before each mutation returns.

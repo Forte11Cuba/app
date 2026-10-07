@@ -11,18 +11,6 @@ import 'package:mostro/shared/utils/fiat_currencies.dart';
 /// comes from the fiatCurrenciesProvider (assets/data/fiat.json).
 const _topCurrencies = ['ARS', 'USD', 'EUR', 'BRL', 'MXN', 'COP', 'CLP', 'VES'];
 
-/// Available payment methods for the filter chip selector.
-const _paymentMethods = [
-  'Mercado Pago',
-  'Bank Transfer',
-  'Pix',
-  'Zelle',
-  'Wise',
-  'SEPA',
-  'Revolut',
-  'Cash',
-];
-
 /// Shows the order filter dialog. Reads/writes the individual filter providers.
 Future<void> showOrderFilterDialog(BuildContext context) {
   return showMostroDialog<void>(
@@ -52,7 +40,10 @@ class _OrderFilterDialog extends ConsumerWidget {
       allCurrencies.isNotEmpty ? allCurrencies : _topCurrencies,
       selectedCurrencies,
     );
-    final methods = _withSelected(_paymentMethods, selectedMethods);
+    final methods = _withSelectedMethods(
+      ref.watch(bookPaymentMethodsProvider),
+      selectedMethods,
+    );
     final ratingRange = filters.rating;
     final premiumRange = filters.premium;
     final l10n = AppLocalizations.of(context);
@@ -207,4 +198,16 @@ class _OrderFilterDialog extends ConsumerWidget {
 List<String> _withSelected(List<String> catalogue, List<String> selected) {
   final listed = catalogue.toSet();
   return [...catalogue, ...selected.where((v) => !listed.contains(v))];
+}
+
+/// [_withSelected] for payment methods, which the filter matches ignoring
+/// case: a picked method shows in place of the book's spelling of it rather
+/// than as a second chip, so it stays the one the user can deselect.
+List<String> _withSelectedMethods(List<String> book, List<String> selected) {
+  final picked = {for (final m in selected) m.toLowerCase(): m};
+  final listed = {for (final m in book) m.toLowerCase()};
+  return [
+    for (final m in book) picked[m.toLowerCase()] ?? m,
+    ...selected.where((m) => !listed.contains(m.toLowerCase())),
+  ];
 }

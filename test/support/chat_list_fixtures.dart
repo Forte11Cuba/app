@@ -13,8 +13,8 @@ int _ago(Duration d) => kTradesNow.subtract(d).millisecondsSinceEpoch ~/ 1000;
 final kHandoffRooms = [
   ChatRoomState(
     orderId: 'release',
-    peerPubkey: 'peer-jaguar',
-    peerHandle: 'used-jaguar',
+    peerPubkey: 'peer-elephant',
+    peerHandle: 'used-elephant',
     peerIconIndex: 3,
     peerColorHue: 200,
     isSelling: true,
@@ -35,8 +35,8 @@ final kHandoffRooms = [
   ),
   ChatRoomState(
     orderId: 'done',
-    peerPubkey: 'peer-heron',
-    peerHandle: 'quiet-heron',
+    peerPubkey: 'peer-swan',
+    peerHandle: 'quiet-swan',
     peerIconIndex: 7,
     peerColorHue: 40,
     isSelling: false,

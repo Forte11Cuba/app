@@ -31,7 +31,8 @@ the active node), and the kind-14 filter's `authors` include the issuing node
 of every live trade row, so a registered key is always one the filter hears.
 
 A key that leaves the set starts a 24 h grace (`unwanted_since` on the
-registration, since `TradeInfo.completed_at` is never written), then is
+registration: `TradeInfo.completed_at` is recorded for a `success` alone,
+#642, so it cannot date a canceled, expired or admin-resolved key), then is
 unregistered. A registration older than 12 h, filed with another token or
 under another node, or dated in the future (a clock rollback) is re-sent. A
 failed request backs off (1 min → 5 → 30 → 2 h; `429` honours `Retry-After`).
@@ -71,7 +72,10 @@ last_success_at, last_error, node_refused_until }`. `last_error` is a marker:
 `PushServerUnreachable`, `PushRateLimited`, `PushNodeRefused`,
 `PushBadRequest`. Capability (can this platform push) and the OS permission
 are Dart's to know and are read separately (`PushNotificationService.isSupported`,
-`notificationPermissionDeniedProvider`). **Errors**: `StorageUnavailable`.
+`notificationPermissionDeniedProvider`, and on the web
+`notificationPermissionUnaskedProvider`: a permission not asked yet, whose prompt
+the browser shows only from a tap, so startup never asks there and Settings offers
+the tap, `requestPermissionFromGesture()`). **Errors**: `StorageUnavailable`.
 
 ### reconcile_push() → ()
 Explicit trigger. Never fails: every outcome is logged and reflected in the
@@ -104,8 +108,9 @@ Mostrix does not do it yet ([mostrix#177](https://github.com/MostroP2P/mostrix/i
 `docs/PUSH_NOTIFICATIONS.md` §7.3, §14 item 2): until it does, the requirement
 is unmet and a solver's message reaches a backgrounded disputant only on resume.
 Registering `pub(K_conv)` from this client instead is rejected (§7.3).
-- Not from the web build until the server answers CORS
-  (mostro-push-server#44).
+- From the web build too: the server answers CORS on `/api/notify` once
+  mostro-push-server#48 is deployed. A browser that cannot reach it only logs the
+  failure, like any other undelivered wake.
 - No relay, no wake: an envelope every relay rejected (`send_event` is still
   `Ok` with an empty success set) reached no one, so it rings nobody and
   cannot debounce the wake of a retry that does land.

@@ -84,6 +84,13 @@ Open | InReview | Resolved
 FundsToMe | FundsToCounterparty | CooperativeCancel
 ```
 
+### SolverRole
+```text
+Assistant | Human
+```
+`Assistant` = the Serbero the dispute's own node announces; `Human` = anyone
+else. See `disputes.md` → `solver_role`.
+
 ### RelayStatus
 ```text
 Connected | Disconnected | Connecting | Error
@@ -147,7 +154,19 @@ creator_pubkey: String
 created_at: i64 (unix timestamp)
 expires_at: i64?
 is_mine: bool
+rating: f64
+total_reviews: u32
+days_active: u32
+maker_since: i64?
 ```
+
+`rating`, `total_reviews`, `days_active` and `maker_since` are the maker's
+reputation from the Kind 38383 `rating` tag; `0`/`None` without one (no
+reputation yet, or full privacy). `maker_since` is the maker's first trade
+(the tag's `since`, Unix seconds truncated to the UTC day start), `None` from
+daemons that predate it and for a value Dart's `DateTime` cannot hold
+(above 8_640_000_000_000 s). The UI computes the age from it at display time
+and falls back to `days_active`, a count frozen when the daemon published.
 
 ### TradeInfo
 ```text
@@ -167,9 +186,17 @@ outcome: TradeOutcome?
 peer_rating: f64?
 peer_reviews: u32?
 peer_days: u32?
+peer_since: i64?
 rated_at: i64?
 bond: BondInfo?
 ```
+
+`peer_since` is the counterparty's first trade (`UserInfo.since` in the Peer
+DM, Unix seconds truncated to the UTC day start), `None` from daemons that
+predate it and for a value Dart's `DateTime` cannot hold. Like
+`order.maker_since` for the maker, the UI computes the age
+from it at display time and falls back to `peer_days`, a count frozen when
+the daemon sent it.
 
 `bond` is set when the node required an anti-abuse bond for this trade, and
 `None` otherwise (and on rows written before the field existed).
@@ -259,6 +286,15 @@ is_read: bool
 has_attachment: bool
 attachment: AttachmentInfo?
 created_at: i64
+reactions: Vec<ChatReaction>   # serde default: empty for messages stored before reactions
+```
+
+### ChatReaction
+```text
+sender_pubkey: String    # trade key of the party who reacted (verified inner signature)
+emoji: String            # empty: withdrawn, kept so an older re-wrapped reaction changes nothing
+created_at: i64          # inner created_at; per party, the newest holds
+event_id: String         # inner id; breaks a tie within one second (lowest wins)
 ```
 
 ### AttachmentInfo
@@ -320,8 +356,8 @@ created_at: i64
 
 ### NymIdentity
 ```text
-pseudonym: String         # Deterministic pseudonym (adjective-noun format)
-icon_index: u8            # Icon selector (0–36)
+pseudonym: String         # Deterministic pseudonym (adjective-animal format)
+icon_index: u8            # Fallback icon selector (0–36)
 color_hue: u16            # HSV hue (0–359) for avatar background
 ```
 
@@ -332,6 +368,14 @@ color_hue: u16            # HSV hue (0–359) for avatar background
 > (`Colors.white`) over the HSV-colored background circle. The v1 implementation
 > had a bug where the icon color matched the background, making it invisible.
 > v2 MUST always use white icon color regardless of `color_hue` (FR-011c).
+>
+> **The avatar draws the animal of the pseudonym**: its last word is one of
+> the 64 animals of `NOUNS` (`rust/src/crypto/nym.rs`), drawn as glyph
+> U+E000 + its index of the bundled NymAnimals font (Fluent Emoji High
+> Contrast, MIT; built by `tool/nym_animals/build_font.py`). `icon_index`
+> only draws a pseudonym that names no animal. Every noun must be an animal
+> with its own recognisable drawing; replacing one renames every pseudonym on
+> that index.
 
 ### LogEntry
 ```text

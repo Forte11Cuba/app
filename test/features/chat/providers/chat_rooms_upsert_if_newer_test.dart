@@ -9,7 +9,7 @@ ChatRoomState _room({
 }) => ChatRoomState(
   orderId: id,
   peerPubkey: 'peer',
-  peerHandle: 'used-jaguar',
+  peerHandle: 'used-elephant',
   peerIconIndex: 0,
   peerColorHue: 0,
   isSelling: true,

@@ -29,16 +29,19 @@ const ADJECTIVES: [&str; 64] = [
     "grave",  "heavy",  "ideal",  "jolly",  "knit",   "lean",   "magic",  "noble",
 ];
 
-/// Noun pool (64 entries, index 0–63).
+/// Noun pool (64 entries, index 0–63): animals simple enough to draw, since
+/// the avatar shows the animal of the pseudonym (glyph `i` of the NymAnimals
+/// font, built by `tool/nym_animals/build_font.py`). Replacing an entry renames
+/// every pseudonym that lands on its index.
 const NOUNS: [&str; 64] = [
-    "ant",    "bird",   "cat",    "deer",   "elk",    "fox",    "goat",   "hawk",
-    "ibis",   "jay",    "kite",   "lynx",   "moth",   "newt",   "owl",    "pike",
-    "quail",  "raven",  "seal",   "tiger",  "urial",  "vole",   "wolf",   "yak",
-    "bear",   "crab",   "duck",   "eagle",  "frog",   "gnu",    "heron",  "impala",
-    "jackal", "koala",  "lion",   "mink",   "orca",   "puma",   "quokka", "robin",
-    "sloth",  "tapir",  "viper",  "walrus", "xerus",  "zorilla","bison",  "crane",
-    "dingo",  "emu",    "ferret", "gecko",  "hippo",  "iguana", "jaguar", "koi",
-    "lemur",  "marmot", "narwhal","ocelot", "panda",  "rabbit", "stoat",  "zebu",
+    "ant",       "bird",      "cat",       "deer",      "elk",       "fox",       "goat",      "parrot",
+    "flamingo",  "peacock",   "dove",      "leopard",   "butterfly", "turtle",    "owl",       "shark",
+    "chicken",   "bat",       "seal",      "tiger",     "ram",       "mouse",     "wolf",      "ox",
+    "bear",      "crab",      "duck",      "eagle",     "frog",      "zebra",     "swan",      "giraffe",
+    "dog",       "koala",     "lion",      "otter",     "whale",     "horse",     "kangaroo",  "penguin",
+    "sloth",     "pig",       "viper",     "octopus",   "chipmunk",  "skunk",     "bison",     "goose",
+    "camel",     "turkey",    "hedgehog",  "gecko",     "hippo",     "crocodile", "elephant",  "fish",
+    "monkey",    "beaver",    "dolphin",   "llama",     "panda",     "rabbit",    "badger",    "cow",
 ];
 
 /// Derive a deterministic `NymIdentity` from a hex-encoded Nostr public key.
@@ -107,7 +110,7 @@ mod tests {
         let pubkey_hex =
             "79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798";
         let nym = get_nym_identity(pubkey_hex).unwrap();
-        assert_eq!(nym.pseudonym, "tall-crane");
+        assert_eq!(nym.pseudonym, "tall-goose");
         assert_eq!(nym.icon_index, 35);
         assert_eq!(nym.color_hue, 249);
     }

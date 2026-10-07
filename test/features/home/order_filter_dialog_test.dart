@@ -2,18 +2,21 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mostro/core/app_theme.dart';
-import 'package:mostro/features/home/providers/order_filters_provider.dart';
+import 'package:mostro/features/home/providers/home_order_providers.dart';
 import 'package:mostro/l10n/app_localizations.dart';
 import 'package:mostro/shared/utils/fiat_currencies.dart';
 import 'package:mostro/shared/widgets/order_filter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// Opens the Filters dialog over a stored selection and returns the scope's
-/// container.
+import '../../support/fake_orders.dart';
+
+/// Opens the Filters dialog over a stored selection, with [book] as the
+/// order book, and returns the scope's container.
 Future<ProviderContainer> _open(
   WidgetTester tester,
-  OrderFilters stored,
-) async {
+  OrderFilters stored, {
+  List<OrderItem> book = const [],
+}) async {
   tester.view.physicalSize = const Size(420, 1400);
   tester.view.devicePixelRatio = 1.0;
   addTearDown(tester.view.reset);
@@ -23,6 +26,7 @@ Future<ProviderContainer> _open(
     ProviderScope(
       overrides: [
         availableCurrencyCodesProvider.overrideWithValue(const ['USD', 'EUR']),
+        orderBookProvider.overrideWith((ref) => Stream.value(book)),
       ],
       child: MaterialApp(
         theme: buildDarkTheme(),
@@ -83,6 +87,49 @@ void main() {
     expect(container.read(orderFiltersProvider).currencies, ['USD']);
     // Once deselected it is no longer anything the catalogue offers.
     expect(find.text('XYZ'), findsNothing);
+  });
+
+  testWidgets('the payment methods are the ones the book carries', (
+    tester,
+  ) async {
+    final container = await _open(
+      tester,
+      const OrderFilters(),
+      book: [
+        fakeOrder(id: 'sepa', kind: 'sell', paymentMethod: 'SEPA instant'),
+        fakeOrder(id: 'bizum', kind: 'sell', paymentMethod: 'Bizum'),
+      ],
+    );
+
+    expect(_chip(tester, 'Bizum').selected, isFalse);
+    // The fixed list is gone: no chip for a method no order offers.
+    expect(find.text('Zelle'), findsNothing);
+
+    await tester.tap(find.text('SEPA instant'));
+    await tester.pumpAndSettle();
+
+    expect(container.read(orderFiltersProvider).paymentMethods, [
+      'SEPA instant',
+    ]);
+  });
+
+  testWidgets('a stored method shows once, whatever its case', (tester) async {
+    final container = await _open(
+      tester,
+      const OrderFilters(paymentMethods: ['sepa Instant']),
+      book: [
+        fakeOrder(id: 'sepa', kind: 'sell', paymentMethod: 'SEPA instant'),
+      ],
+    );
+
+    expect(_chip(tester, 'sepa Instant').selected, isTrue);
+    expect(find.text('SEPA instant'), findsNothing);
+
+    await tester.tap(find.text('sepa Instant'));
+    await tester.pumpAndSettle();
+
+    expect(container.read(orderFiltersProvider).paymentMethods, isEmpty);
+    expect(_chip(tester, 'SEPA instant').selected, isFalse);
   });
 
   testWidgets('a pick in the dialog is written to disk', (tester) async {

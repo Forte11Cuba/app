@@ -2,7 +2,7 @@ name: mostro
 description: "Mostro Mobile v2 — P2P Bitcoin Lightning exchange"
 publish_to: 'none'
 
-version: 2.0.9+20009
+version: 2.0.14+20014
 
 environment:
   sdk: ">=3.7.0 <4.0.0"
@@ -88,6 +88,8 @@ dependencies:
   flutter_staggered_grid_view: ^0.7.0
   workmanager: ^0.10.10
   open_filex: ^4.7.0
+  # 4.5 needs Dart 3.11; this app still supports Dart 3.7 (environment above).
+  emoji_picker_flutter: ">=4.4.0 <4.5.0"
 
 dependency_overrides:
   # permission_handler_html 0.1.4+0 (published 2026-07-31) fails to compile
@@ -105,6 +107,8 @@ dev_dependencies:
   build_runner: ^2.4.13
   # Generates the iOS/Android launcher icons from assets/images/launcher-icon.png
   flutter_launcher_icons: ^0.14.2
+  # Parses lib/ in the automation contract test, so only code counts as a use
+  analyzer: ^7.7.1
 
 flutter:
   uses-material-design: true
@@ -116,6 +120,8 @@ flutter:
     - assets/images/
     - assets/fonts/outfit/OFL.txt
     - assets/fonts/manrope/OFL.txt
+    - assets/fonts/nym_animals/LICENSE.txt
+    - assets/fonts/noto_flags/LICENSE.txt
 
   # Brand typography (drawer and order-book handoffs), bundled so the app never
   # fetches fonts at runtime. Outfit is the UI face; Manrope sets the figures
@@ -140,10 +146,31 @@ flutter:
           weight: 600
         - asset: assets/fonts/manrope/Manrope-Bold.ttf
           weight: 700
+    # The animal of each pseudonym, drawn on the chat avatars: one glyph per
+    # entry of NOUNS in rust/src/crypto/nym.rs, built from Fluent Emoji High
+    # Contrast (MIT) by tool/nym_animals/build_font.py.
+    - family: NymAnimals
+      fonts:
+        - asset: assets/fonts/nym_animals/NymAnimals.ttf
+    # The flags of Noto Color Emoji (OFL), a fallback in both themes: Linux
+    # and Windows ship no flag glyphs (DS-TYP-8). Built by
+    # tool/flags_font/build_font.py.
+    - family: NotoFlags
+      fonts:
+        - asset: assets/fonts/noto_flags/NotoFlags.ttf
 
-# Launcher icons. Mirrors the v1 app's configuration (MostroP2P/mobile) so both
-# apps ship the same artwork. Regenerate with:
+# Launcher icons. Mirrors the v1 app's configuration (MostroP2P/mobile) and its
+# mascot, plus a gold ring inside the disc so the two apps can be told apart
+# when both are installed. The three sources below, and the launch screen
+# logos, are built from the ringless art by:
+#   python3 tool/launcher_icon/build_sources.py
+# Regenerate the icons from them with:
 #   dart run flutter_launcher_icons
+# then revert its edit to ios/Runner.xcodeproj/project.pbxproj (0.14.4 rewrites
+# ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS to `AppIcon`) and
+# keep web/manifest.json as committed: it only refreshes the two colours there,
+# which already match the `web` block below. Keep web/favicon.png too: at
+# 16 px the ring blurs into a brown halo, so the tab icon stays ringless.
 flutter_launcher_icons:
   android: "launcher_icon"
   ios: true
@@ -160,3 +187,14 @@ flutter_launcher_icons:
   # Same brand background as the iOS source, so the disc merges into the
   # adaptive icon instead of floating on a slightly different grey.
   adaptive_icon_background: "#1D212C"
+  # Web (PWA): one source for the plain and the maskable icons, so it is the
+  # opaque iOS art scaled to 80 % on the same background. Android masks
+  # maskable icons to the central 80 % circle; at full size the bolt's tip
+  # would be cut off. background_color is the splash behind the icon while the
+  # installed app starts (the dark scaffold, AppTheme); theme_color tints the
+  # title bar.
+  web:
+    generate: true
+    image_path: "assets/images/launcher-icon-web.png"
+    background_color: "#1B1E28"
+    theme_color: "#1B1E28"

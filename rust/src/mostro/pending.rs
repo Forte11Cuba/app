@@ -233,6 +233,8 @@ pub(crate) fn test_take_kind() -> PendingRequestKind {
             rating: 0.0,
             total_reviews: 0,
             days_active: 0,
+            maker_since: None,
+            cashu_mint_url: None,
         }),
         role: crate::api::types::TradeRole::Seller,
         fiat_amount: None,

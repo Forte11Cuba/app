@@ -7,7 +7,7 @@ import '../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'types.dart';
 
-// These functions are ignored because they are not marked as `pub`: `new`, `notify`, `read`, `store`, `validate_fiat_code`, `validate_lightning_address`, `validate_locale`, `write_with`
+// These functions are ignored because they are not marked as `pub`: `new`, `normalize_node_pubkey`, `notify`, `read`, `store`, `validate_fiat_code`, `validate_lightning_address`, `validate_locale`, `write_with`
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `SettingsStore`
 
 /// Return current settings with `privacy_mode` mirrored from the Identity layer.

@@ -42,6 +42,105 @@ Changes that affect Nostr event kinds, tags, or the transport layer are **protoc
 - **Wire compatibility** — wire status strings are kebab-case (e.g. `waiting-buyer-invoice`, `fiat-sent`). Any change to event formats must state its impact on external consumers (the Mostro daemon, other clients, relays).
 - **Keep the spec in sync** — specs under `specs/` and `.specify/` are a living artifact. Update the matching spec/contract as part of any behavior or contract change.
 
+## Contribution quality bar
+
+A pull request has to prove two things before a reviewer reads the diff: that the problem it addresses exists, and that the change does not break anything else. The rules below are about the evidence a pull request carries, not about how it was written.
+
+1. **AI tools are allowed.** You are responsible for every line and must be able to explain any of it when a reviewer asks. "The tool wrote it" is not an answer.
+2. A pull request that does not follow the [template](#pull-request-template), does not link an [accepted issue](#issue-before-pull-request) when one is required, or does not meet the [Manual testing](#manual-testing), [Screenshots](#screenshots) and [Red test](#red-test) rules below, **is closed without technical review**, with the [standard message](.github/quality/close-message.md). You can reopen it once it meets the bar.
+3. A pull request whose description does not match its diff, whose Manual testing steps do not work when a reviewer follows them, or whose screenshots do not match what the branch shows, is closed the same way.
+4. An account that repeatedly opens pull requests closed under this policy may be blocked from the organisation.
+
+**Exempt** from the accepted issue, the template, Manual testing, Screenshots and the Red test: pull requests that only change Markdown files, pull requests from maintainers and bots, and pull requests a maintainer labels `quality:exempt`. Signed commits and, for first-time contributors, the size limits apply to everyone but bots.
+
+For now maintainers apply these rules by hand. Automated checks will first only add labels and comments; nothing is closed automatically without a separate, announced decision. The design is in [docs/CONTRIBUTION_QUALITY_SPEC.md](docs/CONTRIBUTION_QUALITY_SPEC.md).
+
+### Issue before pull request
+
+Every pull request that is not [exempt](#contribution-quality-bar) links an issue that a maintainer has labelled `status: accepted`. Discuss the bug or the feature in the issue first: there, "this is not a bug" or "this is not the design we want" costs one comment instead of a review of a whole diff.
+
+- Link it with a closing keyword in the description (`Closes #123`, `Fixes #123`). A plain mention does not count.
+- Only maintainers apply `status: accepted`, when they agree the problem is real and in scope. An issue opened minutes before the pull request is not accepted until a maintainer says so.
+- A UI or design change needs the issue to show the intended result: a mockup, the v1 screen it matches, or a reference to `docs/design/`. The result must keep the [design guide](.specify/DESIGN_SYSTEM.md): a proposal that breaks one of its MUST rules is declined, or it changes the guide first.
+- If there is no accepted issue yet, comment on the issue instead of opening the pull request.
+
+### Pull request template
+
+Fill in every section of [`.github/pull_request_template.md`](.github/pull_request_template.md). A section that is missing, empty or left with only its placeholder comment counts as not filled in.
+
+**Affected flow** names the screens or routes, the user actions (take an order, pay the hold invoice, release, open a dispute, restore…) and the order or dispute statuses the change touches, and the layer and files where that behaviour lives: Rust core, bridge (`rust/src/api/`), or Dart providers and widgets. **Blast radius** names what else reads or writes the state you changed (persisted data and existing installs upgrading, generated bindings, the other platforms, background work and push notifications, localization keys, [automation identifiers](docs/automation-contract.md), what the daemon and the v1 app see on the wire) and says why it is not broken. **Platforms tested** says where you ran the Manual testing. A generic or wrong answer in any of them is a reason to close.
+
+### Manual testing
+
+The **Manual testing** section is a step-by-step procedure that tests this specific pull request end to end, in the app built from your branch, against a running Mostro node. **A person runs it by hand** and writes down what they saw; a reviewer must be able to follow the same steps and see the same results.
+
+Mostro's developers also run end-to-end suites with an internal tool (Mortsom). It is not available to external contributors and nothing here requires it: you test with the same app a user runs.
+
+- **Setup** says how you built the app (`flutter run` from the branch, which platform and device, debug or release; `./scripts/build-web.sh` for web), which Mostro node and relays when they differ from the defaults, how each actor pays and gets paid (Lightning wallet, NWC or manual invoices), which client each other actor uses (a second copy of this app, the v1 app or mostro-cli), and the state the steps start from (fresh install, existing identity, privacy mode…).
+- **Steps** are numbered. Each step names one actor (maker, taker, buyer, seller, solver), one action in the UI, and an `Expected:` line with an observable result: the screen shown, a status or chip, a notification, a chat message, a button enabled or hidden, a payment received in the wallet, or, when the UI does not show it, the order status on the public event (kind 38383).
+- **For a fix**, one step is marked **(fails on `main`)** and also says what `main` does instead. If no step fails on `main`, the pull request has not shown that the bug exists.
+- **Restart and upgrade**: a change to anything persisted includes a step that quits and relaunches the app, and says whether it was tested as an upgrade of an install made by `main`.
+- **Regression**: at least one step exercises a neighbouring flow named in **Blast radius** and shows it behaves as before. It is a step of its own, apart from the steps that show the change, so every procedure has at least two steps.
+- **Not covered** lists what the steps do not test and why (for example, "iOS: no Mac available").
+- A step that cannot be observed ("the provider is now more robust") is not a step.
+
+A change that does not touch a trade (settings, account, a static screen) only needs the steps that reach the changed screen; it does not need a node and two wallets. The rules above still apply: it has a **Regression** step and, for a fix, a step marked **(fails on `main`)**.
+
+A change with no app flow (a CI workflow, a build or release script, tooling, or tests only) has no screen to reach. Its steps run what the change touches: the command, the script, or the workflow on the branch. Each `Expected:` line names what that run shows: its output, the workflow run and its conclusion, the file it produces. **Setup** says where it ran (OS, tool versions), and a step names who runs it instead of a trade actor. The same rules apply: a **Regression** step on a neighbouring command or job, and, for a fix, a step marked **(fails on `main`)**.
+
+Example, for a fix where privacy mode was lost on restart (#624):
+
+```markdown
+### Setup
+
+App built from this branch with `flutter run -d linux` (debug), and on an
+Android 15 emulator. Default node and relays. Existing identity, in
+Reputation Mode.
+
+### Steps
+
+1. Open Account and select Full Privacy Mode.
+   Expected: Full Privacy Mode is selected.
+2. Quit the app completely and launch it again; open Account.
+   **(fails on `main`)**
+   Expected: Full Privacy Mode is still selected.
+   On `main`: Reputation Mode is selected again.
+3. Regression: select Reputation Mode, quit and relaunch; open Account.
+   Expected: Reputation Mode is selected, as on `main`.
+
+### Not covered
+
+That the next trade goes out without the identity key is covered by
+`test/core/services/identity_privacy_mode_test.dart`: the app does not
+show which key signed a message. Web and iOS not run; no platform code.
+```
+
+If you could not build or run the app, say so in the pull request instead of claiming results.
+
+### Screenshots
+
+- Any visible change carries **before** (`main`) and **after** (your branch) screenshots of the same screen with the same data.
+- A change of colour, contrast or layout adds both themes, and a phone width when the layout reflows.
+- A change of layout adds one screenshot at 2× text scale (the [design guide](.specify/DESIGN_SYSTEM.md) §12).
+- A change of copy shows English and at least one other locale.
+- A change inside a flow (several screens, an animation, a timing) is a short screen recording instead.
+- With no visible change, write `No visible change`. Writing it for a change that is visible is a description that does not match its diff.
+- A visible change also names the [design guide](.specify/DESIGN_SYSTEM.md) rules it touches (`DS-CMP-3`, `DS-COL-6`…), any SHOULD it departs from and why, and every new colour token with its contrast test (guide §12).
+
+[Golden tests](docs/golden-tests.md) do not replace screenshots: they catch unintended changes, not whether the new look is the intended one.
+
+### Red test
+
+The regression test of a fix must **fail without the fix and pass with it**. It can be a Rust test (next to the code, in `#[cfg(test)] mod tests`) or a Dart test (under `test/`). The test is separated from the fix by commit:
+
+- In a fix pull request, **the first commit that is not a `refactor:` commit has a subject beginning with `test:`** and only adds the regression test (inside `#[cfg(test)]` modules or under `test/`, no production code, no generated files). Without a seam (next point), it is the pull request's first commit.
+- If the test needs a seam the code does not have yet (an injectable function, a `@visibleForTesting` entry point), add it in `refactor:` commits **before** the `test:` commit. Those commits must not change behaviour: with them and the `test:` commit on `main`, the test still fails.
+- The fix follows in one or more later commits.
+- The `test:` commit is a meaningful commit, not a fixup: do not squash it into the fix. It stays separate until merge; the maintainer may squash when merging.
+- Golden tests do not count as the red test: their reference images are generated only in CI. A visual fix adds a widget test that asserts the property (a colour, a visibility, a text) when one can be written.
+- When no Rust or Dart test can fail on `main` (a purely visual bug no widget test can observe, or one that only exists on iOS, Android or web), say why under **Automated tests**. A maintainer who agrees labels the pull request `quality:no-red-test`, which waives the `test:` commit and its check. The step marked **(fails on `main`)**, with its screenshots, is then the evidence that the bug exists.
+- Check it yourself before opening the pull request: with only the `refactor:` and `test:` commits applied on the current `main`, the new test fails; with the whole pull request, it passes.
+
 ## Reviewing Pull Requests
 
 Anyone may participate in peer review, expressed through comments on the pull request. Reviewers typically check the code for obvious errors, test the patch, and opine on its technical merits. Maintainers take peer review into account when determining whether there is consensus to merge. The following language is used within pull-request comments (adapted from the [Bitcoin Core contributor documentation](https://github.com/bitcoin/bitcoin/blob/master/CONTRIBUTING.md#peer-review)):

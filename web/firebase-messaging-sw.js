@@ -8,18 +8,21 @@
 // The SDK version is the one firebase_core_web loads on the page, and the
 // config is the web block of lib/firebase_options.dart;
 // test/web/pages_bundle_test.dart holds both equal.
-importScripts('https://www.gstatic.com/firebasejs/11.9.1/firebase-app-compat.js');
-importScripts('https://www.gstatic.com/firebasejs/11.9.1/firebase-messaging-compat.js');
-importScripts('push_worker_logic.js');
 
 // A tap: tell an open tab to show Notifications and focus it, or open one
 // there (pushWorkerLogic.openNotifications, tested under node). Added before
-// the SDK's own listener, which stops propagation for the notifications it
-// rendered.
+// the imports, as Firebase documents: the SDK's own listener stops propagation
+// for every notification it rendered, so this one has to be first in line
+// whenever the SDK adds its own. pushWorkerLogic is only read when a tap
+// arrives, by which point the imports have run.
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
   event.waitUntil(pushWorkerLogic.openNotifications(clients, self.location.href));
 });
+
+importScripts('https://www.gstatic.com/firebasejs/11.9.1/firebase-app-compat.js');
+importScripts('https://www.gstatic.com/firebasejs/11.9.1/firebase-messaging-compat.js');
+importScripts('push_worker_logic.js');
 
 firebase.initializeApp({
   apiKey: 'AIzaSyCcKUG4IkZ51YfTjZSCqNdZmT5dVH_ebnA',
@@ -33,9 +36,6 @@ firebase.initializeApp({
 firebase.messaging().onBackgroundMessage((payload) => {
   const notice = pushWorkerLogic.noticeFor(payload, self.navigator.languages);
   if (!notice) return undefined;
-  return self.registration.showNotification(notice.title, {
-    body: notice.body,
-    tag: 'mostro-chat',
-    icon: 'icons/Icon-192.png',
-  });
+  const { title, ...options } = notice;
+  return self.registration.showNotification(title, options);
 });

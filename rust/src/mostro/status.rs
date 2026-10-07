@@ -143,9 +143,22 @@ fn is_terminal_status(s: &OrderStatus) -> bool {
     )
 }
 
+/// Whether a public Kind 38383 status may overwrite the local one: it fills
+/// an unknown or still-pending status, or announces a terminal one (#203).
+///
+/// Never over an admin verdict, the mirror of [`admin_verdict_refines`]: the
+/// book shows an admin settle as `success` and an admin cancel as `canceled`,
+/// and a replay of that event must not erase the verdict — the dispute's
+/// history and a slashed bond's cause read from it, and a plain `success`
+/// would give the trade a completed trade's chat window (#642).
 pub(crate) fn wire_status_applies(local: Option<&OrderStatus>, wire: &OrderStatus) -> bool {
     match local {
         None | Some(OrderStatus::Pending) => true,
+        Some(
+            OrderStatus::SettledByAdmin
+            | OrderStatus::CanceledByAdmin
+            | OrderStatus::CompletedByAdmin,
+        ) => false,
         Some(_) => is_terminal_status(wire),
     }
 }
@@ -209,14 +222,21 @@ pub(crate) fn add_invoice_sync(
 /// Counterparty (taker) reputation from the daemon's follow-up `Peer` DM
 /// (issue #305). The daemon rides it on the same `PayInvoice` / `AddInvoice`
 /// action as the flow message, with an empty `pubkey` and the reputation
-/// snapshot. Returns `(rating, reviews, operating_days)` when present.
+/// snapshot. Returns `(rating, reviews, operating_days, since)` when present.
 ///
 /// `reputation` is `None` for a full-privacy taker; a brand-new user arrives
 /// as all-zeros — the two are indistinguishable on the wire, so this only
 /// reports whether a snapshot was carried, leaving the display to the UI.
+///
+/// `since` (Unix seconds of the first trade, truncated to its UTC day start)
+/// supersedes the deprecated `operating_days`; it is `None` from daemons that
+/// predate it, for users without a date, and for a value that is not a
+/// positive number of seconds Dart's `DateTime` can hold
+/// (`reputation::since_from_wire`), and the UI then falls back to
+/// `operating_days`.
 pub(crate) fn peer_reputation(
     payload: &Option<mostro_core::message::Payload>,
-) -> Option<(f64, u32, u32)> {
+) -> Option<(f64, u32, u32, Option<i64>)> {
     match payload {
         Some(mostro_core::message::Payload::Peer(peer)) => peer.reputation.as_ref().map(|u| {
             // Saturate rather than wrap or zero out: reviews is an unconstrained
@@ -227,6 +247,7 @@ pub(crate) fn peer_reputation(
                 u.rating,
                 u.reviews.clamp(0, u32::MAX as i64) as u32,
                 u.operating_days.min(u32::MAX as u64) as u32,
+                u.since.and_then(crate::mostro::reputation::since_from_wire),
             )
         }),
         _ => None,
@@ -398,6 +419,23 @@ mod tests {
         }
     }
 
+    /// The book shows an admin settle as `success` and an admin cancel as
+    /// `canceled`: replayed after the verdict, it must not erase it (#642 —
+    /// a plain `success` would open a completed trade's chat window).
+    #[test]
+    fn a_plain_public_terminal_never_replaces_an_admin_verdict() {
+        use OrderStatus as S;
+
+        for local in [S::SettledByAdmin, S::CanceledByAdmin, S::CompletedByAdmin] {
+            for wire in [S::Success, S::Canceled, S::Expired, S::InProgress, S::Pending] {
+                assert!(
+                    !wire_status_applies(Some(&local), &wire),
+                    "{wire:?} must not overwrite {local:?}"
+                );
+            }
+        }
+    }
+
     /// Inbound add-invoice (maker-buyer path): the Order payload carries the
     /// status and calculated sats to persist; anything else — notably the
     /// daemon's follow-up Peer payload with the counterparty's reputation —
@@ -453,7 +491,7 @@ mod tests {
                 since: None,
             }),
         });
-        assert_eq!(peer_reputation(&Some(peer)), Some((4.375, 4, 64)));
+        assert_eq!(peer_reputation(&Some(peer)), Some((4.375, 4, 64, None)));
 
         // A full-privacy taker carries no snapshot.
         let private = Payload::Peer(Peer {
@@ -472,7 +510,7 @@ mod tests {
                 since: None,
             }),
         });
-        assert_eq!(peer_reputation(&Some(fresh)), Some((0.0, 0, 0)));
+        assert_eq!(peer_reputation(&Some(fresh)), Some((0.0, 0, 0, None)));
 
         // Non-Peer payloads and the empty case carry no reputation.
         let so = small_order_with(mostro_core::order::Status::WaitingBuyerInvoice, 484);
@@ -503,19 +541,73 @@ mod tests {
         // Above u32::MAX saturates to u32::MAX, not 0 / wraparound.
         assert_eq!(
             peer_reputation(&Some(peer(i64::MAX, u64::MAX))),
-            Some((5.0, u32::MAX, u32::MAX))
+            Some((5.0, u32::MAX, u32::MAX, None))
         );
         // Exact boundary is preserved; one past it saturates.
         assert_eq!(
             peer_reputation(&Some(peer(u32::MAX as i64, u32::MAX as u64))),
-            Some((5.0, u32::MAX, u32::MAX))
+            Some((5.0, u32::MAX, u32::MAX, None))
         );
         assert_eq!(
             peer_reputation(&Some(peer(u32::MAX as i64 + 1, u32::MAX as u64 + 1))),
-            Some((5.0, u32::MAX, u32::MAX))
+            Some((5.0, u32::MAX, u32::MAX, None))
         );
         // A negative review count clamps to 0.
-        assert_eq!(peer_reputation(&Some(peer(-7, 0))), Some((5.0, 0, 0)));
+        assert_eq!(peer_reputation(&Some(peer(-7, 0))), Some((5.0, 0, 0, None)));
+    }
+
+    /// `since` supersedes the deprecated `operating_days`: it is carried
+    /// through as seconds when the daemon sends it, and absent otherwise so
+    /// the UI falls back to the day count.
+    #[test]
+    fn peer_reputation_carries_since_when_the_daemon_sends_it() {
+        use mostro_core::message::{Payload, Peer};
+        use mostro_core::user::UserInfo;
+
+        let peer = |since: Option<u64>| {
+            Payload::Peer(Peer {
+                pubkey: String::new(),
+                reputation: Some(UserInfo {
+                    rating: 4.5,
+                    reviews: 12,
+                    operating_days: 10,
+                    since,
+                }),
+            })
+        };
+
+        assert_eq!(
+            peer_reputation(&Some(peer(Some(1_699_920_000)))),
+            Some((4.5, 12, 10, Some(1_699_920_000)))
+        );
+        // An older daemon (or a user without a date) keeps the day count.
+        assert_eq!(
+            peer_reputation(&Some(peer(None))),
+            Some((4.5, 12, 10, None))
+        );
+        // Zero is no date, and a value past i64::MAX is not one either.
+        assert_eq!(
+            peer_reputation(&Some(peer(Some(0)))),
+            Some((4.5, 12, 10, None))
+        );
+        assert_eq!(
+            peer_reputation(&Some(peer(Some(u64::MAX)))),
+            Some((4.5, 12, 10, None))
+        );
+        // Past what Dart's `DateTime` can hold, building the date would throw
+        // instead of falling back; the last representable second still counts.
+        assert_eq!(
+            peer_reputation(&Some(peer(Some(i64::MAX as u64)))),
+            Some((4.5, 12, 10, None))
+        );
+        assert_eq!(
+            peer_reputation(&Some(peer(Some(8_640_000_000_001)))),
+            Some((4.5, 12, 10, None))
+        );
+        assert_eq!(
+            peer_reputation(&Some(peer(Some(8_640_000_000_000)))),
+            Some((4.5, 12, 10, Some(8_640_000_000_000)))
+        );
     }
 
     /// The hard-terminal set must match protocol finality: statuses mostrod

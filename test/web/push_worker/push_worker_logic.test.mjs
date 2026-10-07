@@ -107,7 +107,19 @@ test('a chat wake renders a content-free notice of its own', () => {
   assert.deepEqual(noticeFor(payload, ['en-US']), {
     title: 'Mostro',
     body: 'You have a new message',
+    tag: 'mostro-chat',
+    renotify: true,
+    icon: 'icons/Icon-192.png',
   });
+});
+
+test('a second chat wake alerts again instead of replacing the first silently', () => {
+  // The shared tag collapses wakes into one notice. Without renotify the
+  // browser swaps it with no sound or vibration, so a user who left the first
+  // one unopened never hears about the next message.
+  const notice = noticeFor({ data: { type: 'chat_wake' } }, ['en']);
+  assert.equal(notice.tag, 'mostro-chat');
+  assert.equal(notice.renotify, true);
 });
 
 test('the chat-wake notice follows the browser language', () => {

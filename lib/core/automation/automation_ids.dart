@@ -220,10 +220,14 @@ class AutomationIds {
   static const String tradeCancelConfirm = 'trade.cancel.confirm';
   static const String tradeDispute = 'trade.dispute';
   static const String tradeDisputeConfirm = 'trade.dispute.confirm';
-  static const String tradeRate = 'trade.rate';
   static const String tradeRateSubmit = 'trade.rate.submit';
   static const String tradeRateClose = 'trade.rate.close';
   static const String tradeViewDispute = 'trade.dispute.view';
+
+  /// Dispute chat: sends the solver the peer chat key, behind a confirmation.
+  static const String disputeShareKey = 'dispute.shareKey';
+  static const String disputeShareKeyConfirm = 'dispute.shareKey.confirm';
+  static const String disputeShareKeyCancel = 'dispute.shareKey.cancel';
   static const String tradeClose = 'trade.close';
 
   /// Star [score] (1-5) on the rating screen.
@@ -272,6 +276,9 @@ class AutomationIds {
   static const String bondOrderId = 'bond.order_id';
   static const String bondExplainer = 'bond.explainer';
   static const String bondCancel = 'bond.cancel';
+
+  /// The destructive answer of the dialog `bond.cancel` opens (DS-CMP-20).
+  static const String bondCancelConfirm = 'bond.cancel.confirm';
   static const String bondRemoveFromDevice = 'bond.remove_from_device';
 
   // Payout claim on a slashed bond (docs/ANTI_ABUSE_BOND.md §6.4)

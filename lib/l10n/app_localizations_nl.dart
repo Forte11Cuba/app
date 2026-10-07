@@ -51,8 +51,8 @@ class AppLocalizationsNl extends AppLocalizations {
   String get orderDispute => 'Dispuut over de order';
 
   @override
-  String get disputeAdminAssigned =>
-      'Er is een beheerder aan je dispuut toegewezen. Hij neemt hier binnenkort contact met je op.';
+  String get disputeSolverAssigned =>
+      'Een solver heeft je dispuut opgepakt. Hij neemt hier binnenkort contact met je op.';
 
   @override
   String get disputeChatClosed =>
@@ -87,36 +87,69 @@ class AppLocalizationsNl extends AppLocalizations {
       'De order is in overleg geannuleerd. Er is geen geld overgemaakt.';
 
   @override
-  String disputeWithBuyer(String handle) {
-    return 'Dispuut met koper: $handle';
-  }
-
-  @override
-  String disputeWithSeller(String handle) {
-    return 'Dispuut met verkoper: $handle';
-  }
-
-  @override
   String orderLabel(String orderId) {
     return 'Order $orderId';
   }
 
   @override
-  String get disputeInitiated => 'Geopend';
-
-  @override
-  String get disputeInProgress => 'In behandeling';
-
-  @override
   String get disputeStatusClosed => 'Gesloten';
 
   @override
+  String disputeWith(String role, String counterparty) {
+    return 'Dispuut met $role: $counterparty';
+  }
+
+  @override
+  String get seller => 'Verkoper';
+
+  @override
+  String get buyer => 'Koper';
+
+  @override
+  String get disputeStatusInitiated => 'Geopend';
+
+  @override
+  String get disputeStatusInProgress => 'In behandeling';
+
+  @override
+  String get disputeStatusResolved => 'Opgelost';
+
+  @override
+  String get disputeInProgress =>
+      'Dit dispuut is in behandeling. Een solver bekijkt je zaak.';
+
+  @override
+  String get disputeInstruction1 =>
+      'Wacht tot een solver je dispuut oppakt. Deel daarna al het bewijs dat helpt om de situatie duidelijk te maken.';
+
+  @override
+  String get disputeInstruction2 =>
+      'De uiteindelijke beslissing wordt genomen op grond van het aangedragen bewijs.';
+
+  @override
+  String get disputeInstruction3 =>
+      'Reageer je niet, dan gaat het systeem ervan uit dat je niet wilt meewerken en kun je het dispuut verliezen.';
+
+  @override
+  String disputeOpenedByYouAgainstSeller(String counterparty) {
+    return 'Jij hebt dit dispuut geopend tegen verkoper $counterparty; lees hieronder aandachtig verder:';
+  }
+
+  @override
+  String disputeOpenedByYouAgainstBuyer(String counterparty) {
+    return 'Jij hebt dit dispuut geopend tegen koper $counterparty; lees hieronder aandachtig verder:';
+  }
+
+  @override
+  String get disputeWaitingForAdmin => 'Wacht op toewijzing van een beheerder';
+
+  @override
   String get disputeLostFundsToBuyer =>
-      'De beheerder heeft het dispuut in het voordeel van de koper beslist. De sats zijn aan de koper vrijgegeven.';
+      'De solver heeft het dispuut in het voordeel van de koper beslist. De sats zijn aan de koper vrijgegeven.';
 
   @override
   String get disputeLostFundsToSeller =>
-      'De beheerder heeft de order geannuleerd en de sats aan de verkoper teruggegeven. Jij hebt de sats niet ontvangen.';
+      'De solver heeft de order geannuleerd en de sats aan de verkoper teruggegeven. Jij hebt de sats niet ontvangen.';
 
   @override
   String get walkthroughSlideOneTitle => 'Handel vrij in bitcoin, zonder KYC';
@@ -144,7 +177,7 @@ class AppLocalizationsNl extends AppLocalizations {
 
   @override
   String get walkthroughSlideFourBody =>
-      'Elke trade heeft een eigen privéchat, end-to-end versleuteld. Alleen de twee betrokken gebruikers kunnen hem lezen. Bij een dispuut kun je de gedeelde sleutel aan een beheerder geven om de zaak op te lossen.';
+      'Elke trade heeft een eigen privéchat, end-to-end versleuteld. Alleen de twee betrokken gebruikers kunnen hem lezen. Bij een dispuut kun je de gedeelde sleutel aan een solver geven om de zaak op te lossen.';
 
   @override
   String get walkthroughSlideFiveTitle => 'Een aanbod accepteren';
@@ -239,9 +272,6 @@ class AppLocalizationsNl extends AppLocalizations {
 
   @override
   String get comingSoonMessage => 'Komt binnenkort';
-
-  @override
-  String get tradeStatusActive => 'Actief';
 
   @override
   String get tradeStatusCompleted => 'Afgerond';
@@ -984,7 +1014,7 @@ class AppLocalizationsNl extends AppLocalizations {
 
   @override
   String get openDisputeConfirmation =>
-      'Weet je zeker dat je een dispuut wilt openen? Daarmee gaat de trade naar een beheerder en dat kan niet ongedaan worden gemaakt.';
+      'Weet je zeker dat je een dispuut wilt openen? Daarmee gaat de trade naar een solver en dat kan niet ongedaan worden gemaakt.';
 
   @override
   String get disputeAlreadyOpen => 'Voor deze trade loopt al een dispuut.';
@@ -1227,7 +1257,7 @@ class AppLocalizationsNl extends AppLocalizations {
 
   @override
   String get notifDisputeUpdatesSubtitle =>
-      'Acties van de beheerder en uitkomsten van disputen';
+      'Acties van de solver en uitkomsten van disputen';
 
   @override
   String get searchCurrenciesHint => 'Valuta zoeken…';
@@ -1480,6 +1510,10 @@ class AppLocalizationsNl extends AppLocalizations {
   String get satsAmountLabel => 'Aantal sats';
 
   @override
+  String get peerReputationUnavailable =>
+      'De reputatie van deze gebruiker is niet beschikbaar';
+
+  @override
   String get statusLabel => 'Status';
 
   @override
@@ -1489,25 +1523,7 @@ class AppLocalizationsNl extends AppLocalizations {
   String get createdLabel => 'Aangemaakt';
 
   @override
-  String get tradeDetailsPlaceholder =>
-      'Details worden aangesloten zodra de trade-provider er is (fase 10+)';
-
-  @override
   String get userInformationTitle => 'Gebruikersgegevens';
-
-  @override
-  String get peerPublicKeyLabel => 'Publieke sleutel van de ander';
-
-  @override
-  String get yourSharedKeyLabel => 'Je gedeelde sleutel';
-
-  @override
-  String get sharedKeyPlaceholder =>
-      'Beschikbaar na de bridge-integratie (fase 10+)';
-
-  @override
-  String get sharedKeySafetyNote =>
-      'Bewaar je gedeelde sleutel goed: die is nodig om een dispuut op te lossen';
 
   @override
   String get fileTypeVideo => 'Video';
@@ -1566,7 +1582,7 @@ class AppLocalizationsNl extends AppLocalizations {
   String get enterInvoiceManually => 'Invoice handmatig invullen';
 
   @override
-  String get submitButton => 'Versturen';
+  String get rangeAmountTakeAction => 'Order accepteren';
 
   @override
   String get buyerReputation => 'Reputatie van de koper';
@@ -1584,13 +1600,13 @@ class AppLocalizationsNl extends AppLocalizations {
   String get daysActiveStatLabel => 'dagen actief';
 
   @override
-  String timeRemainingLabel(String time) {
-    return 'Resterende tijd: $time';
+  String orderAmountOutOfRange(int min, int max) {
+    return 'Het bedrag moet tussen $min en $max sats liggen voor deze Mostro-node';
   }
 
   @override
-  String orderAmountOutOfRange(int min, int max) {
-    return 'Het bedrag moet tussen $min en $max sats liggen voor deze Mostro-node';
+  String orderCurrencyNotAccepted(String currency) {
+    return 'Deze Mostro-node accepteert geen $currency. Kies een andere valuta';
   }
 
   @override
@@ -1647,9 +1663,9 @@ class AppLocalizationsNl extends AppLocalizations {
     String _temp0 = intl.Intl.pluralLogic(
       count,
       locale: localeName,
-      other: '$count gekozen',
-      one: '1 gekozen',
-      zero: 'niets gekozen',
+      other: '$count geselecteerd',
+      one: '1 geselecteerd',
+      zero: 'niets geselecteerd',
     );
     return '$_temp0';
   }
@@ -1801,7 +1817,18 @@ class AppLocalizationsNl extends AppLocalizations {
   }
 
   @override
-  String get adminLabel => 'Beheerder';
+  String get solverLabel => 'Solver';
+
+  @override
+  String get serberoLabel => 'Serbero';
+
+  @override
+  String get disputeSerberoAssigned =>
+      'Serbero, een automatische assistent, helpt bij je dispuut. Hij stelt je hier een paar vragen en geeft de zaak zo nodig door aan een persoon.';
+
+  @override
+  String get disputeSolverTookOver =>
+      'Een solver heeft je dispuut overgenomen.';
 
   @override
   String get disputeScreenTitle => 'Dispuut';
@@ -2110,9 +2137,6 @@ class AppLocalizationsNl extends AppLocalizations {
   String get aboutCashuMintUrlLabel => 'Mint';
 
   @override
-  String get aboutCashuMintNotAdvertised => 'Niet opgegeven';
-
-  @override
   String get aboutCashuLocktimeLabel => 'Locktime van de escrow';
 
   @override
@@ -2193,6 +2217,13 @@ class AppLocalizationsNl extends AppLocalizations {
 
   @override
   String get tradeChatEncrypted => 'End-to-end versleutelde chat';
+
+  @override
+  String get tradeChatClosed => 'Gesprek gesloten · berichten bekijken';
+
+  @override
+  String get tradeChatClosedAnnouncement =>
+      'Het gesprek is gesloten. Je kunt de berichten nog steeds lezen';
 
   @override
   String get tradeBodyWaitingPaymentBuyer =>
@@ -2428,6 +2459,10 @@ class AppLocalizationsNl extends AppLocalizations {
   String get takeOrderUnavailable => 'Niet meer beschikbaar';
 
   @override
+  String get takeOrderFailed =>
+      'De order kon niet worden aangenomen. Probeer het opnieuw.';
+
+  @override
   String get takeOrderClosed => 'Gesloten';
 
   @override
@@ -2539,6 +2574,13 @@ class AppLocalizationsNl extends AppLocalizations {
   String get openSystemSettingsAction => 'Instellingen openen';
 
   @override
+  String get notificationsPermissionNotAsked =>
+      'Deze browser mag nog geen meldingen tonen.';
+
+  @override
+  String get allowNotificationsAction => 'Meldingen toestaan';
+
+  @override
   String get notificationsPrivacyFootnote =>
       'Meldingen bevatten geen bedragen en geen tegenpartijen. Een push loopt via de servers van Google of Apple en zegt alleen dát er iets te zien is.';
 
@@ -2548,6 +2590,10 @@ class AppLocalizationsNl extends AppLocalizations {
   @override
   String get pushMasterToggleSubtitle =>
       'Wekt de app zodra er een trade-gebeurtenis of chatbericht binnenkomt. De melding zelf bevat niets.';
+
+  @override
+  String get pushWebStopsWithTab =>
+      'Stopt 30 tot 48 uur nadat dit tabblad Mostro voor het laatst draaide';
 
   @override
   String get pushStatusOff =>
@@ -2948,7 +2994,7 @@ class AppLocalizationsNl extends AppLocalizations {
   String get bondTitle => 'Borg tegen misbruik';
 
   @override
-  String get bondRefundableLabel => 'TERUGBETAALBARE BORG';
+  String get bondRefundableLabel => 'Terugbetaalbare borg';
 
   @override
   String get bondComesBack => 'komt terug zodra de trade is afgerond';
@@ -3005,9 +3051,8 @@ class AppLocalizationsNl extends AppLocalizations {
       'Mostro houdt geen geld vast en kan dus niemand straffen die een trade laat lopen; dat doet de borg, en die beschermt iedereen tegen oplichters.';
 
   @override
-  String bondWhyHold(String hold) {
-    return 'Het is een $hold invoice: je wallet reserveert de sats zonder ze te versturen, en zodra de trade klaar is vervalt die reservering vanzelf.';
-  }
+  String get bondWhyHold =>
+      'Je wallet zet de sats vast zonder ze te versturen; zodra de trade klaar is, komen ze vanzelf weer vrij.';
 
   @override
   String get bondWhyDispute =>
@@ -3084,6 +3129,20 @@ class AppLocalizationsNl extends AppLocalizations {
   String get bondRemoveFromDevice => 'Verwijderen van dit apparaat';
 
   @override
+  String get bondLeaveMakerTitle => 'Deze order niet publiceren?';
+
+  @override
+  String get bondLeaveMakerBody =>
+      'De order wordt niet gepubliceerd en de borgfactuur wordt geannuleerd.';
+
+  @override
+  String get bondLeaveTakerTitle => 'Deze order niet accepteren?';
+
+  @override
+  String get bondLeaveTakerBody =>
+      'De order blijft voor anderen in het orderboek en de borgfactuur wordt geannuleerd.';
+
+  @override
   String get bondKeepWaiting => 'Blijven wachten';
 
   @override
@@ -3099,7 +3158,7 @@ class AppLocalizationsNl extends AppLocalizations {
   String get bondClaimTitle => 'Haal je deel op';
 
   @override
-  String get bondClaimShareLabel => 'JOUW DEEL';
+  String get bondClaimShareLabel => 'Jouw deel';
 
   @override
   String bondClaimShareSemantics(String sats) {
@@ -3289,9 +3348,6 @@ class AppLocalizationsNl extends AppLocalizations {
       'De node heeft de borg-invoice niet opnieuw gestuurd';
 
   @override
-  String get invoiceOrderIdCopied => 'Order-ID gekopieerd';
-
-  @override
   String get invoiceYouReceiveLabel => 'Je ontvangt';
 
   @override
@@ -3406,9 +3462,8 @@ class AppLocalizationsNl extends AppLocalizations {
   String get invoiceOpenWallet => 'Openen in mijn wallet';
 
   @override
-  String invoiceHoldNote(String hold) {
-    return 'Dit is een $hold invoice: de sats staan vast en gaan pas uit je wallet als jij de betaling van de koper bevestigt.';
-  }
+  String get invoiceHoldNote =>
+      'De sats blijven vastgezet: ze gaan pas uit je wallet als jij de betaling van de koper bevestigt.';
 
   @override
   String invoiceQrSemantics(String invoice) {
@@ -3441,6 +3496,12 @@ class AppLocalizationsNl extends AppLocalizations {
   String invoiceCountdownHours(String hours, String minutes) {
     return '$hours u $minutes';
   }
+
+  @override
+  String get countdownExpiresInLabel => 'Verloopt over';
+
+  @override
+  String get bondPayWithinLabel => 'Betaal binnen';
 
   @override
   String get tradeCardWaitingBuyerInvoiceTitle =>
@@ -3593,6 +3654,10 @@ class AppLocalizationsNl extends AppLocalizations {
       'Je account loopt niet gelijk met deze Mostro-node, dus de order is geweigerd. Probeer het zo weer';
 
   @override
+  String get invalidFiatCurrencyError =>
+      'Deze Mostro-node accepteert deze valuta niet, dus de order is geweigerd. Kies een andere valuta';
+
+  @override
   String get recoveringTradesMessage =>
       'Account geïmporteerd. Je trades worden bij Mostro opgehaald…';
 
@@ -3613,16 +3678,16 @@ class AppLocalizationsNl extends AppLocalizations {
       'Account geïmporteerd, maar Mostro gaf geen antwoord, dus je lopende trades zijn niet hersteld';
 
   @override
-  String get paymentMethodsChosenLabel => 'Gekozen';
+  String get paymentMethodsChosenLabel => 'Geselecteerd';
 
   @override
   String paymentMethodsSelectedCount(int count) {
     String _temp0 = intl.Intl.pluralLogic(
       count,
       locale: localeName,
-      other: '$count methodes gekozen',
-      one: '1 methode gekozen',
-      zero: 'Kies minstens één methode',
+      other: '$count methodes geselecteerd',
+      one: '1 methode geselecteerd',
+      zero: 'Selecteer minstens één methode',
     );
     return '$_temp0';
   }
@@ -4075,8 +4140,8 @@ class AppLocalizationsNl extends AppLocalizations {
       'Je escrow is vergrendeld, maar de node heeft het nog niet bevestigd. Opnieuw proberen is veilig — hij wordt niet een tweede keer vergrendeld.';
 
   @override
-  String get lockEscrowMintUnknown =>
-      'Deze node heeft zijn mint niet gepubliceerd, dus er is geen plek om de escrow te vergrendelen.';
+  String get lockEscrowMintNotSupported =>
+      'Deze node laat elke order zijn eigen mint kiezen, en deze versie van de app kan de escrow alleen vergrendelen op een node met één mint.';
 
   @override
   String get lockEscrowNotRecorded =>
@@ -4117,4 +4182,48 @@ class AppLocalizationsNl extends AppLocalizations {
   @override
   String get tradeBodyWaitingPaymentBuyerCashu =>
       'Ze vergrendelen de sats in de escrow. Zodra die vergrendeld is, ben jij aan de beurt om de fiat te betalen.';
+
+  @override
+  String get shareChatKeyAction => 'Chatsleutel delen met de solver';
+
+  @override
+  String get shareChatKeyTitle => 'Chatsleutel delen met de solver?';
+
+  @override
+  String get shareChatKeyBody =>
+      'Als je bevestigt, kan de solver van dit dispuut de hele chat tussen jou en je tegenpartij in deze order lezen, en alleen die chat: niet de chats van je eerdere of latere trades. Dit kan niet ongedaan worden gemaakt. Delen is optioneel, maar het helpt de solver het dispuut sneller op te lossen.';
+
+  @override
+  String get shareChatKeyConfirm => 'Delen';
+
+  @override
+  String get chatKeySharedIndicator => 'Chatsleutel gedeeld met de solver';
+
+  @override
+  String get shareChatKeyUnavailable =>
+      'De chatsleutel van deze trade is niet beschikbaar op dit apparaat.';
+
+  @override
+  String get moreReactions => 'Meer reacties';
+
+  @override
+  String messageReactionLabel(String emoji) {
+    return 'Reactie: $emoji';
+  }
+
+  @override
+  String get reactionSendFailed =>
+      'De reactie kon niet worden verstuurd. Probeer het opnieuw.';
+
+  @override
+  String get messageMenuHint => 'Berichtmenu openen';
+
+  @override
+  String get cashuAnyMint => 'Elke mint';
+
+  @override
+  String get settingsMintLabel => 'Mint';
+
+  @override
+  String get settingsMintCopied => 'Mint-URL gekopieerd';
 }

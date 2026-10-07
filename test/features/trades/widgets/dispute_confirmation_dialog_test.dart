@@ -64,7 +64,7 @@ void main() {
 
     expect(find.text('Open dispute'), findsOneWidget);
     expect(
-      find.textContaining('escalates the trade to an admin'),
+      find.textContaining('escalates the trade to a dispute resolver'),
       findsOneWidget,
     );
     expect(find.text('Yes'), findsOneWidget);

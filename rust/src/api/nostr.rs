@@ -67,9 +67,26 @@ fn pool() -> Result<&'static Arc<RelayPool>> {
 /// user's removals of announced relays restored as the blacklist — and,
 /// when nothing is persisted yet, the compiled-in defaults (which are then
 /// seeded so later runs read them back).
+///
+/// A second call in the same process re-attaches to the pool it already has
+/// and returns `Ok`; `relays` is then ignored. That second call is not a
+/// mistake: Android can destroy the activity — and its Flutter engine — while
+/// the process lives on, and the next launch runs `main()` again against the
+/// same Rust statics. Failing here aborted startup before `runApp`, leaving
+/// the app on its splash screen until the user killed the process.
 pub async fn initialize(relays: Option<Vec<String>>) -> Result<()> {
-    if POOL.get().is_some() {
-        return Err(anyhow::anyhow!("AlreadyInitialized"));
+    initialize_in(&POOL, relays).await
+}
+
+/// [`initialize`] against `cell` instead of the process-wide pool, so a
+/// test can exercise the re-attach path without creating the global one.
+async fn initialize_in(
+    cell: &'static OnceCell<Arc<RelayPool>>,
+    relays: Option<Vec<String>>,
+) -> Result<()> {
+    if cell.get().is_some() {
+        reattach_existing_pool();
+        return Ok(());
     }
 
     let urls: Vec<String> = relays
@@ -97,7 +114,7 @@ pub async fn initialize(relays: Option<Vec<String>>) -> Result<()> {
 
     // get_or_try_init is atomic — only one caller creates the pool even if
     // two race past the is_some() guard above.
-    let pool_ref = POOL
+    let pool_ref = cell
         .get_or_try_init(|| async { RelayPool::new(urls).await })
         .await?;
 
@@ -110,7 +127,7 @@ pub async fn initialize(relays: Option<Vec<String>>) -> Result<()> {
 
     // A REQ issued while a relay is down never exists on it, reconnect or
     // not (nostr-sdk 0.45): re-issue what each relay misses as it connects.
-    crate::nostr::live_subs::spawn_repair(POOL.get().unwrap());
+    crate::nostr::live_subs::spawn_repair(pool_ref);
 
     // Runs the Online sequence whenever the relay pool transitions to Online.
     // Subscribed *before* the state is read, and both before the task is
@@ -122,7 +139,6 @@ pub async fn initialize(relays: Option<Vec<String>>) -> Result<()> {
     // `Online` had no receiver — and with the state unchanged afterwards the
     // monitor never sends another, so the book, the capabilities and the
     // outbox waited for a relay to drop and come back.
-    let pool_ref = POOL.get().unwrap();
     let rx = pool_ref.subscribe_connection_state();
     let current = pool_ref.connection_state().await;
     crate::rt::spawn(watch_connection_state(rx, current, || {
@@ -135,6 +151,23 @@ pub async fn initialize(relays: Option<Vec<String>>) -> Result<()> {
     }));
 
     Ok(())
+}
+
+/// A new Flutter engine found the pool of an earlier one still running.
+///
+/// Everything the pool spawned (the status monitor, the subscription repair,
+/// the Online watcher) is still alive, so nothing is re-created. What the
+/// engine missed is the resume: the process sat idle, possibly for hours,
+/// and the Dart lifecycle latch only fires `resync()` after a `paused` this
+/// engine never saw. So it runs here, in the background — startup must not
+/// wait on relays.
+fn reattach_existing_pool() {
+    log::info!("[nostr] relay pool already running — re-attaching and resyncing");
+    crate::rt::spawn(async {
+        if let Err(e) = resync().await {
+            log::warn!("[nostr] resync after re-attach failed: {e}");
+        }
+    });
 }
 
 /// Call `on_online` for every `Online` on `rx` — and once up front when the
@@ -211,6 +244,9 @@ async fn on_pool_online() {
     // listener startup, which can fail while keys or connectivity are
     // missing — coming online is the retry point (PR #254 review).
     crate::api::disputes::resubscribe_active_dispute_chats().await;
+    // Project announcements (specs/006 §5.1), last: nothing above waits for
+    // them. With an empty allowlist this does nothing at all.
+    crate::nostr::announcement_reader::subscribe_announcements().await;
 }
 
 /// Add a new relay and connect to it.
@@ -531,6 +567,8 @@ async fn run_resync() -> ResyncOutcome {
     crate::api::orders::subscribe_orders().await;
     crate::api::messages::resubscribe_active_chats().await;
     crate::api::disputes::resubscribe_active_dispute_chats().await;
+    // Also the foreground re-check of the announcement cache (specs/006 §5.4).
+    crate::nostr::announcement_reader::subscribe_announcements().await;
     // Whatever a relay that is up right now still lacks. The ones still
     // reconnecting get theirs from the repair task as they connect, so a pass
     // that ran offline no longer leaves the session deaf.
@@ -655,6 +693,10 @@ pub async fn fetch_mostro_instance_tags(
         crate::nostr::first_answer::replaceable_rank,
     )
     .await;
+    // Before returning: Dart rereads the cache as soon as this fetch lands.
+    if let Some(event) = &event {
+        crate::api::node_stats::remember_info_event(event).await;
+    }
 
     Ok(event.map(|event| {
         event
@@ -861,6 +903,10 @@ fn apply_node_capabilities(node: &str, fetched: Result<Option<Vec<Vec<String>>>>
                 &mostro_pubkey_hex,
                 crate::mostro::bond_policy::parse_tags(&tags),
             );
+            // Its dispute assistant, so the dispute chat can tell Serbero from
+            // the person who takes a case over (#637). A fetch without the tag
+            // retracts an older announcement. See mostro::serbero.
+            crate::mostro::serbero::set_from_tags(&mostro_pubkey_hex, &tags);
             // The service fee. Only Cashu mode needs it client-side — there the
             // seller funds the whole fee as its own token — but it rides in the
             // same event, so reading it here costs nothing.
@@ -880,6 +926,8 @@ fn apply_node_capabilities(node: &str, fetched: Result<Option<Vec<Vec<String>>>>
             // Lightning, and leave Cashu closed.
             escrow_mode::clear();
             crate::mostro::bond_policy::clear();
+            // Nor a Serbero: retract an older announcement of this node.
+            crate::mostro::serbero::set_from_tags(&mostro_pubkey_hex, &[]);
         }
         Err(e) => {
             log::warn!("[nostr] failed to fetch Kind 38385 for node capabilities: {e}");
@@ -1026,6 +1074,25 @@ mod tests {
             .iter()
             .map(|(k, v)| vec![k.to_string(), v.to_string()])
             .collect()
+    }
+
+    #[tokio::test]
+    async fn a_second_initialize_in_the_same_process_reattaches_instead_of_failing() {
+        // Arrange: an earlier Flutter engine already built the pool; its
+        // activity was destroyed but the process, and this cell, lived on.
+        let cell: &'static OnceCell<Arc<RelayPool>> = Box::leak(Box::new(OnceCell::new()));
+        let running = RelayPool::new(Vec::new()).await.expect("empty pool");
+        assert!(cell.set(running.clone()).is_ok(), "cell was empty");
+
+        // Act: the new engine's `main()` initializes again.
+        let result = initialize_in(cell, Some(vec!["ws://127.0.0.1:1".to_string()])).await;
+
+        // Assert: startup goes on, against the pool that was already running —
+        // an error here left the app on its splash screen.
+        assert!(result.is_ok(), "re-initializing must not fail: {result:?}");
+        let current = cell.get().expect("pool still set");
+        assert!(Arc::ptr_eq(current, &running), "the running pool is kept");
+        assert!(current.get_relays().await.is_empty(), "the new relay list is ignored");
     }
 
     #[test]

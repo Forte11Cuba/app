@@ -63,6 +63,32 @@ Rust is a **library** — there is no `cargo run`; the app is launched through F
 - Keep branches rebased and free of merge commits. PRs are reviewed with CodeRabbit.
 - See [CONTRIBUTING.md](CONTRIBUTING.md) for the full contributor workflow and review conventions.
 
+## Before opening a pull request
+
+If you are an AI agent preparing a pull request, follow
+`CONTRIBUTING.md § Contribution quality bar`. In short:
+
+- Link an issue labelled `status: accepted` (`Closes #N`). If there is no
+  accepted issue, do not open the pull request; comment on the issue instead.
+- Fill in every section of `.github/pull_request_template.md`, including
+  Manual testing: steps a person ran by hand in the app built from the
+  branch, against a Mostro node, or, for a change with no app flow (CI,
+  scripts, tooling, tests only), on the command or workflow it changes.
+  Do not present steps nobody ran as results.
+  Mortsom is an internal tool of the Mostro developers; do not use or cite it.
+- Any visible change carries before and after screenshots; write
+  `No visible change` only when that is true.
+- For a fix, the commits are, in order: `refactor:` commits only if the test
+  needs a seam (no behaviour change), then a `test:` commit that adds a
+  regression test (Rust or Dart) that fails on `main`, then the fix. If no
+  test can fail on `main` (a purely visual or platform-only bug), say why
+  under Automated tests; a maintainer decides whether to waive it.
+- If you could not build or run the app, say so in the pull request instead
+  of claiming results.
+
+A pull request that only changes Markdown files is exempt from the first
+four points (see the exemptions in that section); commits are still signed.
+
 ## Documentation & Markdown
 
 - Add a language specifier to every fenced code block (markdownlint MD040 flags blocks without one). Example:

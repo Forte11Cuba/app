@@ -4,7 +4,7 @@ Auto-generated from all feature plans. Last updated: 2026-09-17
 
 ## Active Technologies
 - Rust stable 1.94+ (core); Dart 3.x / Flutter 3.x (UI shell) (004-mostro-p2p-client)
-- nostr-sdk 0.45+, mostro-core 0.16.0, flutter_rust_bridge 2.11.1, Riverpod (state),
+- nostr-sdk 0.45+, mostro-core 0.17.1, flutter_rust_bridge 2.11.1, Riverpod (state),
   go_router (navigation), sqlx (SQLite, native) / indexed_db_futures (IndexedDB, web),
   sembast (Dart UI-layer state), bip32/bip39 (keys), chacha20poly1305 (file encryption)
 - Sembast (Dart, all platforms) for UI-layer state; SQLite via `sqlx` (Rust, native) /
@@ -49,6 +49,13 @@ flutter gen-l10n                            # after editing lib/l10n/*.arb
   (`--base-href` for the sub-path, `--pwa-strategy=none` so Flutter's service worker does not
   take the isolation shim's scope). Every one of these, when wrong, yields a **blank page** —
   `test/web/pages_bundle_test.dart` guards them statically.
+- **No Rust runs on a web worker.** FRB's default handler would run every non-async API function
+  on a worker pool and every async one on the main thread (`spawn_local`); a `std::sync` lock
+  contended across the two traps the page with "Atomics.wait cannot be called in this context"
+  (#294), and the lock behind every opaque object is one of them. `rust/src/api/bridge_handler.rs`
+  defines `FLUTTER_RUST_BRIDGE_HANDLER`, which on web runs both kinds on the main thread, and
+  `bridge_does_not_use_the_default_handler` fails if codegen ever goes back to the default.
+  Don't hand work to `FLUTTER_RUST_BRIDGE_HANDLER.thread_pool()` either.
 - `cargo check --target wasm32-unknown-unknown` is **not** a substitute for `build-web.sh`: two
   wasm-only requirements fail later than type-checking. `getrandom` (0.2 via bip32/k256, 0.4 via
   nostr's `rand`) needs its JS backend feature enabled in `rust/Cargo.toml`, and nostr 0.45's
@@ -76,6 +83,13 @@ flutter gen-l10n                            # after editing lib/l10n/*.arb
   `pages_bundle_test.dart` holds equal to `firebase_options.dart` and `firebase_core_web`; CI
   sets `SMOKE_PUSH_WORKER=1` to assert it activates without costing isolation. Web push stays
   off until the build passes `PUSH_WEB_ENABLED` (docs/PUSH_NOTIFICATIONS.md T4.5).
+- **The bundle is an installable app** (#658): `web/manifest.json` (relative `start_url` and
+  `scope`, so it follows the base path, and deliberately no `id`: an `id` resolves against the
+  origin, so "./" would be "/"; without one it is the resolved `start_url`) plus the icons
+  `flutter_launcher_icons` generates.
+  `SMOKE_INSTALLABLE=1` asks Chrome itself (`Page.getInstallabilityErrors`); that needs the
+  full Chromium build and a persistent profile, because the default headless shell calls
+  every page installable and an incognito profile none.
 
 ## Code Style
 
@@ -162,6 +176,13 @@ bridged by flutter_rust_bridge.
   `specs/004` + `.specify/*` = **prescriptive for v2** (what/how to build). Specs are a
   **living artifact** — update the matching spec/contract as part of any behavior/contract change.
 - For **curated reference docs** (`.specify/v1-reference/`, `.specify/*`): **propose edits first**.
+- **UI changes are judged against `.specify/DESIGN_SYSTEM.md`**, whose rules have IDs (`DS-COL-1`…).
+  New UI code keeps every MUST; its §14 lists the older code that does not, as debt, never as
+  a precedent to copy. A change that needs a different value changes the guide first.
+  The **Design guide** CI job runs its *auto* rules on every class (or top-level function)
+  a change touches under `lib/`, read whole — and on a **screen** (`screens/`) the whole
+  file: one changed line in a legacy screen means migrating all of it
+  (`dart tool/design_check.dart` locally; `--all` lists the whole debt).
 - Update this `CLAUDE.md` when guidelines, tooling, or core tech change.
 
 ## Reference checkouts (when in doubt)
@@ -175,6 +196,12 @@ bridged by flutter_rust_bridge.
   `fix(phaseX): review round N`). Not big-bang.
 - Conventional commits (`feat/fix/docs/refactor/chore(scope)`), branches `type/kebab-desc`,
   everything via **PR to `main`** (gh CLI) + CodeRabbit review.
+- **Before opening a PR, read and follow `CONTRIBUTING.md § Contribution quality bar`**
+  (summarised in `AGENTS.md § Before opening a pull request`): accepted issue, every section
+  of `.github/pull_request_template.md`, Manual testing a person actually ran, screenshots for
+  visible changes, and for a fix a `test:` commit that fails on `main`, first after any
+  `refactor:` seam commits. Exemptions (Markdown-only, maintainers, bots, `quality:exempt`) and the
+  `quality:no-red-test` waiver are in that section.
 
 ## Releases (`docs/RELEASING.md`)
 - **A pushed tag `vX.Y.Z` is the release.** `.github/workflows/release.yml` builds two signed
@@ -191,6 +218,10 @@ bridged by flutter_rust_bridge.
   `tool/release/downloads.dart`. None of these builds is vendor-signed or notarized.
 - **The macOS app is sandboxed**: without `com.apple.security.network.client` in
   `macos/Runner/*.entitlements` it builds, launches and reaches no relay.
+- **Desktop icons come from `tool/launcher_icon/build_sources.py`**, not `flutter_launcher_icons`
+  (no Linux target, single-size `.ico`). On Wayland, Linux shows the icon of the desktop entry
+  `install.sh` adds, found by the app ID — `linux/packaging/` files are named after
+  `APPLICATION_ID` and must stay so (`test/ci/desktop_icons_test.dart`).
 - **Release notes and `CHANGELOG.md` are generated** by `tool/release_notes.dart`, one entry
   per merged PR grouped by the conventional-commit type of its **title**. Don't hand-edit
   `CHANGELOG.md`; fix the PR title.
@@ -248,6 +279,16 @@ bridged by flutter_rust_bridge.
   means "taken, real state unknown", and a trade's status comes from daemon messages only
   (`wire_status_applies` guards both ingest paths). Treating it as `Active` offers actions the
   daemon rejects with `CantDo` (#203).
+- **A `success` keeps its peer chat for one hour, dated by the completion itself (#642).**
+  `completed_at` is written for `success` alone, before that status reaches the trade row, from
+  the `created_at` of what carried it — the buyer's `purchase-completed`, the
+  seller's Kind 38383 `success` revision (the seller never gets `purchase-completed`) — capped
+  at now, first write wins. Never date it from a now-dated emit or the local clock: a replayed
+  or restored history would reopen old chats. A `success` row without it is closed. A dispute
+  gets no window: the book's plain terminal never replaces an admin verdict
+  (`wire_status_applies`), and a verdict refines a replayed `success` in either order
+  (`status_write_blocked`). Dart decides the room on the persisted row (`TradeRow.rowStatus` +
+  `completedAt`), like `chat_still_relevant_at`, not on the live book status.
 - **Bond statuses never reach the wire book.** `WaitingTakerBond` publishes as `pending` (the
   order stays takeable by others until a bond locks) and `WaitingMakerBond` publishes nothing
   (the order is invisible until the maker's bond locks). Both exist only on the local trade row,

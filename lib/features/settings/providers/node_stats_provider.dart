@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:mostro/features/about/providers/mostro_node_provider.dart';
 import 'package:mostro/features/settings/providers/mostro_nodes_provider.dart';
 import 'package:mostro/src/rust/api/node_stats.dart' as node_stats_api;
 
@@ -22,6 +23,10 @@ final nodeStatsProvider =
       final pubkeys = entries.map((e) => e.pubkey).toList();
       if (pubkeys.isEmpty) return const {};
       final rows = await node_stats_api.fetchMostroNodeStats(pubkeys: pubkeys);
+      // The fetch rewrote the kind 38385 cache: reread the active node's list.
+      // Through the container, which only touches a provider already alive:
+      // `ref.invalidate` would create it in debug builds just to check it.
+      ref.container.invalidate(activeNodeCurrenciesProvider);
       return {for (final r in rows) r.pubkey: r};
     });
 
@@ -45,3 +50,17 @@ final cachedNodeStatsProvider =
           if (r.infoSeenAt != null) r.pubkey: r,
       };
     });
+
+/// The active node's `fiat_currencies_accepted`, as Rust parsed it from the
+/// node's cached kind 38385 event ([node_stats_api.cachedMostroNodeStats]):
+/// a local read, with no relay round trip. Empty for a node never seen, or
+/// one that sets no limit. Reread whenever the cache is written: by the
+/// startup warm-up (`app_bootstrap.dart`), by [nodeStatsProvider], and by the
+/// live fetch behind `mostroNodeProvider` (`acceptedFiatCodesProvider`).
+final activeNodeCurrenciesProvider = FutureProvider.autoDispose<List<String>>((
+  ref,
+) async {
+  final pubkey = ref.watch(activeMostroPubkeyProvider);
+  final rows = await node_stats_api.cachedMostroNodeStats(pubkeys: [pubkey]);
+  return rows.isEmpty ? const [] : rows.first.acceptedCurrencies;
+});

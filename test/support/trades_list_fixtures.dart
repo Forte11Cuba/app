@@ -62,7 +62,7 @@ final kHandoffTrades = [
     status: OrderStatus.fiatSent,
     paymentMethod: 'Mercado Pago, Transferencia, Efectivo',
     amountSats: 6900,
-    counterparty: 'peer-jaguar',
+    counterparty: 'peer-elephant',
   ),
   listTrade(
     id: 'pay',
@@ -92,7 +92,7 @@ final kHandoffTrades = [
     fiatCode: 'ARS',
     ago: const Duration(days: 1, hours: 4),
     amountSats: 7120,
-    counterparty: 'peer-heron',
+    counterparty: 'peer-swan',
     ratedAt: 1,
   ),
   listTrade(
@@ -106,9 +106,9 @@ final kHandoffTrades = [
 ];
 
 const _nyms = {
-  'peer-jaguar': 'used-jaguar',
+  'peer-elephant': 'used-elephant',
   'peer-otter': 'brave-otter',
-  'peer-heron': 'quiet-heron',
+  'peer-swan': 'quiet-swan',
 };
 
 /// Everything the trades tab reads, with no Rust behind it. [load] replaces

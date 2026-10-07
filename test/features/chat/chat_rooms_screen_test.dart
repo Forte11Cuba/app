@@ -81,8 +81,8 @@ void main() {
     expect(find.text('OPERACIONES ACTIVAS'), findsOneWidget);
     expect(find.text('CERRADAS'), findsOneWidget);
     expect(
-      tester.getTopLeft(find.text('used-jaguar')).dy <
-          tester.getTopLeft(find.text('quiet-heron')).dy,
+      tester.getTopLeft(find.text('used-elephant')).dy <
+          tester.getTopLeft(find.text('quiet-swan')).dy,
       isTrue,
     );
   });
@@ -113,7 +113,7 @@ void main() {
   ) async {
     final container = await _pump(tester);
 
-    await tester.tap(find.text('used-jaguar'));
+    await tester.tap(find.text('used-elephant'));
     await tester.pumpAndSettle();
 
     expect(find.text('route /chat_room/release'), findsOneWidget);
@@ -165,6 +165,7 @@ void main() {
         isRead: false,
         hasAttachment: false,
         createdAt: kTradesNow.millisecondsSinceEpoch ~/ 1000,
+        reactions: const [],
       ),
     );
     await withClock(Clock.fixed(kTradesNow), () => tester.pumpAndSettle());
@@ -177,7 +178,7 @@ void main() {
     // Newest message first within the group.
     expect(
       tester.getTopLeft(find.text('brave-otter')).dy <
-          tester.getTopLeft(find.text('used-jaguar')).dy,
+          tester.getTopLeft(find.text('used-elephant')).dy,
       isTrue,
     );
   });

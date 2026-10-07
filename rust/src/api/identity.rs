@@ -883,9 +883,6 @@ mod tests {
         async fn save_trade(&self, _trade: &crate::api::types::TradeInfo) -> Result<()> {
             unimplemented!()
         }
-        async fn get_trade(&self, _id: &str) -> Result<Option<crate::api::types::TradeInfo>> {
-            unimplemented!()
-        }
         async fn list_trades(&self) -> Result<Vec<crate::api::types::TradeInfo>> {
             unimplemented!()
         }
@@ -928,6 +925,7 @@ mod tests {
             _rating: f64,
             _reviews: u32,
             _days: u32,
+            _since: Option<i64>,
         ) -> Result<()> {
             unimplemented!()
         }
@@ -940,6 +938,9 @@ mod tests {
         }
 
         async fn mark_trade_rated(&self, _order_id: &str, _rated_at: i64) -> Result<()> {
+            unimplemented!()
+        }
+        async fn mark_trade_completed(&self, _order_id: &str, _completed_at: i64) -> Result<()> {
             unimplemented!()
         }
         async fn set_cooperative_cancel_state(

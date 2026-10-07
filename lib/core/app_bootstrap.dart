@@ -20,6 +20,7 @@ import 'package:mostro/core/web/attachment_probe.dart';
 import 'package:mostro/core/web/bridge_probe.dart';
 import 'package:mostro/core/web/store_probe.dart';
 import 'package:mostro/features/chat/attachments/attachment_launcher.dart';
+import 'package:mostro/features/settings/providers/node_stats_provider.dart';
 import 'package:mostro/features/settings/providers/settings_provider.dart';
 import 'package:mostro/features/settings/widgets/mostro_node_selector.dart';
 import 'package:mostro/features/walkthrough/providers/first_run_provider.dart';
@@ -207,19 +208,28 @@ Future<void> bootstrapAndRun({List<String> seedRelays = const []}) async {
   // Initialize the Nostr relay pool. `null` means the compiled-in defaults
   // (config.rs); a non-empty seed list replaces them entirely.
   // This must happen before any Nostr/order API calls.
-  await nostr_api.initialize(relays: seedRelays.isEmpty ? null : seedRelays);
+  //
+  // Guarded like the steps above: this runs before `runApp`, and an escaping
+  // error here left the app on its splash screen for good. A launch that
+  // reuses a live process (Android destroyed the activity, not the process)
+  // finds the pool already running; Rust re-attaches to it rather than fail.
+  try {
+    await nostr_api.initialize(relays: seedRelays.isEmpty ? null : seedRelays);
 
-  // Log initial relay state for diagnostics.
-  final relays = await nostr_api.getRelays();
-  final connState = await nostr_api.getConnectionState();
-  debugPrint(
-    '[main] relay pool initialized — state=$connState relays=${relays.map((r) => '${r.url}:${r.status}').join(', ')}',
-  );
+    // Log initial relay state for diagnostics.
+    final relays = await nostr_api.getRelays();
+    final connState = await nostr_api.getConnectionState();
+    debugPrint(
+      '[main] relay pool initialized — state=$connState relays=${relays.map((r) => '${r.url}:${r.status}').join(', ')}',
+    );
+  } catch (e, st) {
+    debugPrint('[main] relay pool init failed: $e\n$st');
+  }
 
   // Watch for connection state changes in background (logs appear in flutter output).
   _watchConnectionState();
 
-  _warmNodeInfoCache();
+  final nodeInfoWarmed = _warmNodeInfoCache();
 
   final container = ProviderContainer(
     overrides: [
@@ -235,6 +245,13 @@ Future<void> bootstrapAndRun({List<String> seedRelays = const []}) async {
       nwcProvider.overrideWith((ref) => NwcNotifier(prefs: prefs)),
       mostroPubkeyProvider.overrideWith((ref) => activeMostroPubkey),
     ],
+  );
+
+  // A form opened before the warm-up landed read an empty cache: reread it.
+  unawaited(
+    nodeInfoWarmed.then(
+      (_) => container.invalidate(activeNodeCurrenciesProvider),
+    ),
   );
 
   // Restore NWC wallet connection if a URI was saved from a previous session.
@@ -331,13 +348,10 @@ void _mirrorTradeKeyIndex(identity_api.TradeKeyIndexStream stream) {
 /// node selector opens on local data instead of waiting for the relays. Never
 /// awaited: startup does not depend on it, and a failure only means the
 /// selector fills in from its own fetch, as it did before the cache existed.
-void _warmNodeInfoCache() {
-  unawaited(
+Future<void> _warmNodeInfoCache() =>
     node_stats_api.refreshMostroNodeInfoCache().catchError((Object e) {
       debugPrint('[main] node info warm-up failed: $e');
-    }),
-  );
-}
+    });
 
 /// Reconnect a previously saved NWC wallet in the background.
 void _restoreNwcConnection(String nwcUri, ProviderContainer container) {

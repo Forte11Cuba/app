@@ -5,8 +5,8 @@ import 'package:mostro/src/rust/api/types.dart' show NymIdentity;
 import '../../support/provider_harness.dart';
 
 void main() {
-  const jaguar = NymIdentity(
-    pseudonym: 'used-jaguar',
+  const elephant = NymIdentity(
+    pseudonym: 'used-elephant',
     iconIndex: 3,
     colorHue: 200,
   );
@@ -17,7 +17,7 @@ void main() {
       overrides: [
         nymLookupProvider.overrideWithValue((_) async {
           asked = true;
-          return jaguar;
+          return elephant;
         }),
       ],
     );
@@ -28,10 +28,10 @@ void main() {
 
   test('a key resolves to its pseudonym', () async {
     final c = createContainer(
-      overrides: [nymLookupProvider.overrideWithValue((_) async => jaguar)],
+      overrides: [nymLookupProvider.overrideWithValue((_) async => elephant)],
     );
 
-    expect(await c.read(peerNymProvider('abc').future), jaguar);
+    expect(await c.read(peerNymProvider('abc').future), elephant);
   });
 
   test('a failed lookup reads as unknown rather than an error', () async {

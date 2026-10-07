@@ -11,6 +11,7 @@ import 'package:mostro/features/disputes/providers/dispute_chat_provider.dart';
 import 'package:mostro/features/disputes/providers/disputes_providers.dart';
 import 'package:mostro/features/disputes/screens/dispute_chat_screen.dart';
 import 'package:mostro/features/disputes/widgets/dispute_message_input.dart';
+import 'package:mostro/features/disputes/widgets/share_chat_key_action.dart';
 import 'package:mostro/features/notifications/providers/notifications_provider.dart';
 import 'package:mostro/l10n/app_localizations.dart';
 import 'package:mostro/l10n/app_localizations_en.dart';
@@ -23,6 +24,7 @@ import '../../support/provider_harness.dart';
 const _trade = 'order-dispute';
 const _disputeId = 'dispute-1';
 const _solver = 'solver-pubkey';
+const _serbero = 'serbero-pubkey';
 
 rust_types.ChatMessage _message({
   required String id,
@@ -31,10 +33,11 @@ rust_types.ChatMessage _message({
   String content = 'hello',
   rust_types.AttachmentInfo? attachment,
   int createdAt = 1000,
+  String sender = _solver,
 }) => rust_types.ChatMessage(
   id: id,
   tradeId: _trade,
-  senderPubkey: isMine ? 'me' : _solver,
+  senderPubkey: isMine ? 'me' : sender,
   content: attachment?.fileName ?? content,
   messageType: type,
   isMine: isMine,
@@ -42,11 +45,13 @@ rust_types.ChatMessage _message({
   hasAttachment: attachment != null,
   attachment: attachment,
   createdAt: intToPlatformInt64(createdAt),
+  reactions: const [],
 );
 
 DisputeItem _dispute({
   DisputeStatus status = DisputeStatus.inReview,
   String? adminPubkey = _solver,
+  bool chatKeyShared = false,
 }) => DisputeItem(
   id: _disputeId,
   tradeId: _trade,
@@ -54,13 +59,31 @@ DisputeItem _dispute({
   initiatedByMe: true,
   openedAt: 100,
   adminPubkey: adminPubkey,
+  chatKeyShared: chatKeyShared,
 );
 
 /// Answers the dispute chat's text sends with what the test set.
 class _FakeDisputeGateway extends DisputeChatGateway {
-  _FakeDisputeGateway(this.onSend, {this.refresh});
+  _FakeDisputeGateway(
+    this.onSend, {
+    this.refresh,
+    this.assistants = const {},
+    this.onShareKey,
+  });
 
   final Future<rust_types.ChatMessage> Function(String text) onSend;
+
+  /// What sharing the chat key answers; never answers when absent.
+  final Future<rust_types.ChatMessage> Function()? onShareKey;
+
+  /// The trades whose chat key was sent.
+  final keyShares = <String>[];
+
+  /// The solver pubkeys a node announces as its Serbero.
+  final Set<String> assistants;
+
+  /// The trades whose solvers were asked about.
+  final roleTrades = <String>{};
 
   /// What `getDispute` answers; null when absent.
   final Future<rust_types.Dispute?> Function()? refresh;
@@ -76,13 +99,31 @@ class _FakeDisputeGateway extends DisputeChatGateway {
   }
 
   @override
+  Future<rust_types.ChatMessage> shareChatKey(String tradeId) {
+    keyShares.add(tradeId);
+    return onShareKey?.call() ?? Completer<rust_types.ChatMessage>().future;
+  }
+
+  @override
   Future<rust_types.Dispute?> getDispute(String tradeId) =>
       refresh?.call() ?? Future.value();
+
+  @override
+  Future<rust_types.SolverRole> solverRole(
+    String tradeId,
+    String solverPubkey,
+  ) async {
+    roleTrades.add(tradeId);
+    return assistants.contains(solverPubkey)
+        ? rust_types.SolverRole.assistant
+        : rust_types.SolverRole.human;
+  }
 }
 
 rust_types.Dispute _bridgeDispute({
   rust_types.DisputeStatus status = rust_types.DisputeStatus.inReview,
   rust_types.DisputeResolution? resolution,
+  bool chatKeyShared = false,
 }) => rust_types.Dispute(
   id: _disputeId,
   tradeId: _trade,
@@ -93,6 +134,7 @@ rust_types.Dispute _bridgeDispute({
   openedAt: intToPlatformInt64(100),
   resolvedAt: resolution == null ? null : intToPlatformInt64(200),
   isRead: true,
+  chatKeyShared: chatKeyShared,
 );
 
 Future<void> _pumpScreen(
@@ -103,8 +145,11 @@ Future<void> _pumpScreen(
   FakeAttachmentGateway? attachments,
   FakeAttachmentPicker? picker,
   Stream<rust_types.Dispute>? updates,
+  Size size = const Size(400, 800),
+  Locale? locale,
+  double textScale = 1,
 }) async {
-  tester.view.physicalSize = const Size(400, 800);
+  tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.reset);
 
@@ -137,8 +182,16 @@ Future<void> _pumpScreen(
       container: container,
       child: MaterialApp(
         theme: buildDarkTheme(),
+        locale: locale,
         localizationsDelegates: AppLocalizations.localizationsDelegates,
         supportedLocales: AppLocalizations.supportedLocales,
+        builder:
+            (context, child) => MediaQuery(
+              data: MediaQuery.of(
+                context,
+              ).copyWith(textScaler: TextScaler.linear(textScale)),
+              child: child!,
+            ),
         home: const DisputeChatScreen(disputeId: _disputeId),
       ),
     ),
@@ -232,6 +285,15 @@ void main() {
         _dispute(status: DisputeStatus.open, adminPubkey: null),
       );
       expect(notifier.state.single.adminPubkey, isNull);
+    });
+
+    test('takes whether the solver has the chat key', () {
+      final notifier = DisputeNotifier()..upsert(_dispute());
+      addTearDown(notifier.dispose);
+      notifier.applyBridgeUpdate(_dispute(chatKeyShared: true));
+      expect(notifier.state.single.chatKeyShared, isTrue);
+      notifier.applyBridgeUpdate(_dispute());
+      expect(notifier.state.single.chatKeyShared, isFalse);
     });
 
     test('inserts a dispute the UI did not know', () {
@@ -426,5 +488,330 @@ void main() {
       await tester.pump();
       expect(find.byType(EncryptedFileMessage), findsOneWidget);
     });
+  });
+
+  group('solver roles (#637)', () {
+    final l10n = AppLocalizationsEn();
+    _FakeDisputeGateway serberoNode() => _FakeDisputeGateway(
+      (_) => Completer<Never>().future,
+      assistants: {_serbero},
+    );
+
+    testWidgets('labels Serbero and the resolver who took the case over', (
+      tester,
+    ) async {
+      // Arrange: Serbero talked first, then a person took the dispute.
+      final gateway = serberoNode();
+      await _pumpScreen(
+        tester,
+        dispute: _dispute(),
+        disputeGateway: gateway,
+        history: [
+          _message(id: 's1', sender: _serbero, content: 'Hi, I am Serbero'),
+          _message(id: 'm1', isMine: true, content: 'Hi', createdAt: 1100),
+          _message(id: 'h1', content: 'Resolver here', createdAt: 1200),
+        ],
+      );
+      await tester.pump();
+
+      // Assert
+      expect(find.text(l10n.serberoLabel), findsOneWidget);
+      expect(find.text(l10n.solverLabel), findsOneWidget);
+      final line = find.text(l10n.disputeSolverTookOver);
+      expect(line, findsOneWidget);
+      expect(
+        tester.getTopLeft(line).dy,
+        greaterThan(tester.getTopLeft(find.text('Hi')).dy),
+        reason: 'the takeover line follows the conversation with Serbero',
+      );
+      expect(
+        tester.getTopLeft(line).dy,
+        lessThan(tester.getTopLeft(find.text('Resolver here')).dy),
+        reason: 'and comes before the resolver speaks',
+      );
+      expect(
+        gateway.roleTrades,
+        {_trade},
+        reason: "only the dispute's own node can vouch for its Serbero",
+      );
+    });
+
+    testWidgets('marks a takeover the resolver has not spoken in yet', (
+      tester,
+    ) async {
+      await _pumpScreen(
+        tester,
+        dispute: _dispute(),
+        disputeGateway: serberoNode(),
+        history: [
+          _message(id: 's1', sender: _serbero, content: 'Hi, I am Serbero'),
+        ],
+      );
+      await tester.pump();
+
+      expect(find.text(l10n.disputeSolverTookOver), findsOneWidget);
+    });
+
+    testWidgets('while Serbero holds the dispute, it is named and no takeover '
+        'is shown', (tester) async {
+      await _pumpScreen(
+        tester,
+        dispute: _dispute(adminPubkey: _serbero),
+        disputeGateway: serberoNode(),
+      );
+      await tester.pump();
+
+      expect(find.text(l10n.disputeSerberoAssigned), findsOneWidget);
+      expect(find.text(l10n.disputeSolverTookOver), findsNothing);
+    });
+
+    testWidgets('a dispute update reads the solver roles again', (
+      tester,
+    ) async {
+      // Arrange: the history lands before the node's announcement.
+      final assistants = <String>{};
+      final updates = StreamController<rust_types.Dispute>();
+      addTearDown(updates.close);
+      await _pumpScreen(
+        tester,
+        dispute: _dispute(adminPubkey: _serbero),
+        disputeGateway: _FakeDisputeGateway(
+          (_) => Completer<Never>().future,
+          assistants: assistants,
+        ),
+        updates: updates.stream,
+        history: [_message(id: 's1', sender: _serbero, content: 'Hi')],
+      );
+      await tester.pump();
+      expect(find.text(l10n.solverLabel), findsOneWidget);
+
+      // Act: the announcement arrives, then an update of the dispute.
+      assistants.add(_serbero);
+      updates.add(_bridgeDispute());
+      for (var i = 0; i < 5; i++) {
+        await tester.pump();
+      }
+
+      // Assert
+      expect(find.text(l10n.serberoLabel), findsOneWidget);
+    });
+
+    testWidgets('a node without Serbero shows every solver as a resolver', (
+      tester,
+    ) async {
+      await _pumpScreen(
+        tester,
+        dispute: _dispute(),
+        history: [_message(id: 'h1', content: 'Resolver here')],
+      );
+      await tester.pump();
+
+      expect(find.text(l10n.solverLabel), findsOneWidget);
+      expect(find.text(l10n.serberoLabel), findsNothing);
+      expect(find.text(l10n.disputeSolverTookOver), findsNothing);
+    });
+  });
+
+  group('chat key share (#415)', () {
+    final l10n = AppLocalizationsEn();
+    const keyText = 'Shared key: 0123abcd';
+
+    testWidgets('is not offered until a solver takes the dispute', (
+      tester,
+    ) async {
+      await _pumpScreen(
+        tester,
+        dispute: _dispute(status: DisputeStatus.open, adminPubkey: null),
+      );
+      expect(find.byTooltip(l10n.shareChatKeyAction), findsNothing);
+      expect(find.byTooltip(l10n.chatKeySharedIndicator), findsNothing);
+    });
+
+    testWidgets('is not offered on a resolved dispute', (tester) async {
+      await _pumpScreen(
+        tester,
+        dispute: _dispute(status: DisputeStatus.resolved),
+      );
+      expect(find.byTooltip(l10n.shareChatKeyAction), findsNothing);
+    });
+
+    testWidgets('once the solver has the key, says so and still offers it', (
+      tester,
+    ) async {
+      // Arrange: shared already, perhaps with Serbero before a human took
+      // over, or the user just wants to send it again.
+      final gateway = _FakeDisputeGateway(
+        (_) => Completer<Never>().future,
+        onShareKey:
+            () async => _message(id: 'key', isMine: true, content: keyText),
+      );
+      await _pumpScreen(
+        tester,
+        dispute: _dispute(chatKeyShared: true),
+        disputeGateway: gateway,
+      );
+      expect(find.byTooltip(l10n.shareChatKeyAction), findsNothing);
+
+      // Act
+      await tester.tap(find.byTooltip(l10n.chatKeySharedIndicator));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(l10n.shareChatKeyConfirm));
+      await tester.pumpAndSettle();
+
+      // Assert
+      expect(gateway.keyShares, [_trade]);
+      expect(find.text(keyText), findsOneWidget);
+    });
+
+    testWidgets('cancelling sends nothing', (tester) async {
+      final gateway = _FakeDisputeGateway((_) => Completer<Never>().future);
+      await _pumpScreen(tester, dispute: _dispute(), disputeGateway: gateway);
+
+      await tester.tap(find.byTooltip(l10n.shareChatKeyAction));
+      await tester.pumpAndSettle();
+      expect(find.text(l10n.shareChatKeyTitle), findsOneWidget);
+      await tester.tap(find.text(l10n.cancel));
+      await tester.pumpAndSettle();
+
+      expect(gateway.keyShares, isEmpty);
+      expect(find.text(l10n.shareChatKeyTitle), findsNothing);
+    });
+
+    testWidgets('confirming sends it, marks it shared and can send it again', (
+      tester,
+    ) async {
+      // Arrange: the record reads shared once the key went.
+      var sent = false;
+      final gateway = _FakeDisputeGateway(
+        (_) => Completer<Never>().future,
+        onShareKey: () async {
+          sent = true;
+          return _message(id: 'key', isMine: true, content: keyText);
+        },
+        refresh: () async => _bridgeDispute(chatKeyShared: sent),
+      );
+      await _pumpScreen(tester, dispute: _dispute(), disputeGateway: gateway);
+
+      // Act
+      await tester.tap(find.byTooltip(l10n.shareChatKeyAction));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(l10n.shareChatKeyConfirm));
+      await tester.pumpAndSettle();
+
+      // Assert
+      expect(gateway.keyShares, [_trade]);
+      expect(find.text(l10n.shareChatKeyTitle), findsNothing);
+      expect(find.text(keyText), findsOneWidget);
+      expect(find.byTooltip(l10n.shareChatKeyAction), findsNothing);
+      expect(find.byTooltip(l10n.chatKeySharedIndicator), findsOneWidget);
+
+      await tester.tap(find.byTooltip(l10n.chatKeySharedIndicator));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(l10n.shareChatKeyConfirm));
+      await tester.pumpAndSettle();
+
+      expect(gateway.keyShares, [_trade, _trade]);
+    });
+
+    testWidgets('a failure stays in the dialog, which can try again', (
+      tester,
+    ) async {
+      var attempts = 0;
+      final gateway = _FakeDisputeGateway(
+        (_) => Completer<Never>().future,
+        onShareKey: () async {
+          attempts++;
+          if (attempts == 1) throw Exception('NoSharedKey: peer unknown');
+          return _message(id: 'key', isMine: true, content: keyText);
+        },
+      );
+      await _pumpScreen(tester, dispute: _dispute(), disputeGateway: gateway);
+
+      await tester.tap(find.byTooltip(l10n.shareChatKeyAction));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(l10n.shareChatKeyConfirm));
+      await tester.pumpAndSettle();
+
+      expect(find.text(l10n.shareChatKeyTitle), findsOneWidget);
+      expect(find.text(l10n.shareChatKeyUnavailable), findsOneWidget);
+
+      await tester.tap(find.text(l10n.shareChatKeyConfirm));
+      await tester.pumpAndSettle();
+
+      expect(gateway.keyShares, [_trade, _trade]);
+      expect(find.text(l10n.shareChatKeyTitle), findsNothing);
+      expect(find.text(keyText), findsOneWidget);
+    });
+
+    test('share errors map to their message', () {
+      expect(
+        shareChatKeyErrorMessage(l10n, Exception('AdminNotAssigned: none')),
+        l10n.disputeSolverNotAssigned,
+      );
+      expect(
+        shareChatKeyErrorMessage(l10n, Exception('NoOpenDispute: resolved')),
+        l10n.disputeChatClosed,
+      );
+      expect(
+        shareChatKeyErrorMessage(l10n, Exception('TradeNotFound: no key')),
+        l10n.shareChatKeyUnavailable,
+      );
+      expect(
+        shareChatKeyErrorMessage(l10n, Exception('SendFailed: no relay')),
+        l10n.messageSendFailed,
+      );
+    });
+
+    // DS-A11Y-4: the longest copy, at twice the text size, on a narrow phone.
+    for (final shared in [false, true]) {
+      testWidgets('the app bar fits in German at 2x text, 320 dp '
+          '(shared: $shared)', (tester) async {
+        await _pumpScreen(
+          tester,
+          dispute: _dispute(chatKeyShared: shared),
+          size: const Size(320, 640),
+          locale: const Locale('de'),
+          textScale: 2,
+        );
+        expect(tester.takeException(), isNull);
+      });
+    }
+
+    for (final brightness in Brightness.values) {
+      testWidgets('the dialog fits in German at 2x text, 320 dp '
+          '(${brightness.name})', (tester) async {
+        tester.view.physicalSize = const Size(320, 640);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.reset);
+
+        await tester.pumpWidget(
+          MaterialApp(
+            theme:
+                brightness == Brightness.dark
+                    ? buildDarkTheme()
+                    : buildLightTheme(),
+            locale: const Locale('de'),
+            localizationsDelegates: AppLocalizations.localizationsDelegates,
+            supportedLocales: AppLocalizations.supportedLocales,
+            builder:
+                (context, child) => MediaQuery(
+                  data: MediaQuery.of(
+                    context,
+                  ).copyWith(textScaler: const TextScaler.linear(2)),
+                  child: child!,
+                ),
+            home: Scaffold(
+              body: ShareChatKeyDialog(
+                share: () async => throw Exception('NoSharedKey: unknown'),
+              ),
+            ),
+          ),
+        );
+        await tester.tap(find.text('Teilen'));
+        await tester.pumpAndSettle();
+
+        expect(tester.takeException(), isNull);
+      });
+    }
   });
 }

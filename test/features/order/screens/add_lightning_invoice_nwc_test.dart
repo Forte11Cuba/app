@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:clock/clock.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -17,56 +18,85 @@ import 'package:mostro/src/rust/api/types.dart';
 
 import '../../../support/fake_trades.dart';
 
+Future<void> _pumpNwcScreen(WidgetTester tester, TradeInfo trade) async {
+  await tester.pumpWidget(
+    ProviderScope(
+      overrides: [
+        isWalletConnectedProvider.overrideWithValue(true),
+        tradeAmountProvider.overrideWith(
+          (ref, orderId) => Stream.value(BigInt.from(1000)),
+        ),
+        tradeUpdatesProvider.overrideWith(
+          (ref) => const Stream<TradeUpdate>.empty(),
+        ),
+        tradeInfoProvider.overrideWith((ref, orderId) async => trade),
+      ],
+      child: MaterialApp(
+        theme: buildDarkTheme(),
+        localizationsDelegates: const [
+          AppLocalizations.delegate,
+          GlobalMaterialLocalizations.delegate,
+          GlobalWidgetsLocalizations.delegate,
+        ],
+        supportedLocales: AppLocalizations.supportedLocales,
+        home: AddLightningInvoiceScreen(
+          orderId: 'order-1',
+          amountSats: 1000,
+          // Never completes: keeps the NWC widget in its loading state so the
+          // test does not fall through to onInvoiceConfirmed → sendInvoice.
+          generateInvoice: (_) => Completer<String>().future,
+        ),
+      ),
+    ),
+  );
+  // The NWC widget sits on a spinner while its (never-completing) invoice
+  // generation is in flight, so pumpAndSettle would time out — pump enough
+  // for the amount stream and the trade future to resolve into the branch.
+  await tester.pump();
+  await tester.pump(const Duration(milliseconds: 50));
+}
+
 /// With NWC connected the maker never touches the manual form and the invoice
 /// can be generated and submitted automatically — so the auto-invoice branch is
 /// exactly where the taker reputation (#305) matters most. It must render the
 /// same card the manual branch does; this guards it from regressing.
 void main() {
-  testWidgets('renders the taker reputation card in NWC auto-invoice mode',
-      (tester) async {
-    await tester.pumpWidget(
-      ProviderScope(
-        overrides: [
-          isWalletConnectedProvider.overrideWithValue(true),
-          tradeAmountProvider.overrideWith(
-              (ref, orderId) => Stream.value(BigInt.from(1000))),
-          tradeUpdatesProvider
-              .overrideWith((ref) => const Stream<TradeUpdate>.empty()),
-          tradeInfoProvider.overrideWith((ref, orderId) async => fakeTrade(
-                id: orderId,
-                peerRating: 4.4,
-                peerReviews: 4,
-                peerDays: 64,
-              )),
-        ],
-        child: MaterialApp(
-          theme: buildDarkTheme(),
-          localizationsDelegates: const [
-            AppLocalizations.delegate,
-            GlobalMaterialLocalizations.delegate,
-            GlobalWidgetsLocalizations.delegate,
-          ],
-          supportedLocales: AppLocalizations.supportedLocales,
-          home: AddLightningInvoiceScreen(
-            orderId: 'order-1',
-            amountSats: 1000,
-            // Never completes: keeps the NWC widget in its loading state so the
-            // test does not fall through to onInvoiceConfirmed → sendInvoice.
-            generateInvoice: (_) => Completer<String>().future,
-          ),
-        ),
-      ),
+  testWidgets('renders the taker reputation card in NWC auto-invoice mode', (
+    tester,
+  ) async {
+    await _pumpNwcScreen(
+      tester,
+      fakeTrade(id: 'order-1', peerRating: 4.4, peerReviews: 4, peerDays: 64),
     );
-    // The NWC widget sits on a spinner while its (never-completing) invoice
-    // generation is in flight, so pumpAndSettle would time out — pump enough
-    // for the amount stream and the trade future to resolve into the branch.
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 50));
 
     expect(find.byType(NwcInvoiceWidget), findsOneWidget);
     expect(find.byType(PeerReputationCard), findsOneWidget);
     // The maker is the buyer here (adding an invoice), so the taker is the
     // seller.
     expect(find.text('Seller reputation'), findsOneWidget);
+  });
+
+  testWidgets('shows the taker age from peerSince, not the stale peerDays', (
+    tester,
+  ) async {
+    // 2023-11-14 00:00 UTC; the daemon's count (10) went stale since.
+    await withClock(Clock.fixed(DateTime.utc(2024, 1, 17, 12)), () async {
+      await _pumpNwcScreen(
+        tester,
+        fakeTrade(
+          id: 'order-1',
+          peerRating: 4.4,
+          peerReviews: 4,
+          peerDays: 10,
+          peerSince: 1699920000,
+        ),
+      );
+    });
+
+    final card = tester.widget<PeerReputationCard>(
+      find.byType(PeerReputationCard),
+    );
+    expect(card.days, 64);
+    expect(find.text('64'), findsOneWidget);
   });
 }

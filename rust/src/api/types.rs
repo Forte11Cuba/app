@@ -107,6 +107,18 @@ pub enum DisputeStatus {
     Resolved,
 }
 
+/// Who a dispute solver is, for the label the dispute chat shows (#637).
+/// Rust decides it; Dart only localizes it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SolverRole {
+    /// The dispute assistant (Serbero) a known node announces in its info
+    /// event: it helps the parties and hands the case to a person.
+    Assistant,
+    /// Anyone else: a person who can settle or cancel. Every solver of a node
+    /// that announces no assistant is one.
+    Human,
+}
+
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum DisputeResolution {
     /// Admin settled the dispute — sats released to the buyer.
@@ -297,8 +309,22 @@ pub struct OrderInfo {
     #[serde(default)]
     pub total_reviews: u32,
     /// Days the maker has been active on this Mostro node (`days`).
+    /// Deprecated on the wire in favour of [`Self::maker_since`]; kept as the
+    /// fallback for daemons that do not publish `since`.
     #[serde(default)]
     pub days_active: u32,
+    /// Unix timestamp (seconds) of the maker's first trade, truncated to its
+    /// UTC day start (the `rating` tag's `since`). `None` from daemons that
+    /// predate it and for users without a date. The UI computes the age at
+    /// display time (now − since) and falls back to [`Self::days_active`].
+    #[serde(default)]
+    pub maker_since: Option<i64>,
+    /// Mint the order's escrow is locked at, from the Kind 38383
+    /// `cashu_mint_url` tag (MostroP2P/mostro#1047): the maker picks it among
+    /// the node's mints. `None` on a Lightning order, on a Cashu order from an
+    /// older daemon, and on our own new order until its book event says.
+    #[serde(default)]
+    pub cashu_mint_url: Option<String>,
 }
 
 /// Parameters for creating a new order via the Mostro protocol.
@@ -323,6 +349,23 @@ pub struct NewOrderParams {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TradeInfo {
+    /// This row's own id — **not** the order's, and not reliably either the
+    /// same or different.
+    ///
+    /// A take made on this device mints a fresh UUID here (`take_order`)
+    /// while `order.id` holds the id the daemon knows, so the two diverge. A
+    /// row rebuilt instead of taken — from a replayed daemon message on a
+    /// fresh device (`trade_row_from_small_order`), or from a restored bond
+    /// (`restored_bond_row`) — reuses the order id for both. So neither
+    /// equality nor inequality says whose row it is, and no code should ask:
+    /// `order.is_mine` and `role` are what carry that.
+    ///
+    /// Nothing looks a trade up by this, whether or not it happens to match.
+    /// Every accessor on [`crate::db::Storage`] keys on `order.id`, and so
+    /// does the chat (`messages.trade_id`); its one job is to be the row's
+    /// primary key, so `save_trade` replaces a row instead of inserting a
+    /// second one. Carry it forward when rebuilding a row, and reach for
+    /// `order.id` when looking one up (issue #395).
     pub id: String,
     pub order: OrderInfo,
     pub role: TradeRole,
@@ -347,6 +390,13 @@ pub struct TradeInfo {
     pub peer_reviews: Option<u32>,
     #[serde(default)]
     pub peer_days: Option<u32>,
+    /// Unix timestamp (seconds) of the counterparty's first trade, truncated
+    /// to its UTC day start (`UserInfo.since` in the Peer DM). `None` from
+    /// daemons that predate it and for users without a date. The UI computes
+    /// the age at display time (now − since) and falls back to
+    /// [`Self::peer_days`].
+    #[serde(default)]
+    pub peer_since: Option<i64>,
     /// Durable "the local user rated this trade" marker (unix seconds), set
     /// after `submit_rating` publishes (issue #339).
     ///
@@ -532,6 +582,9 @@ pub struct TradeUpdate {
 /// below it is already inside the snapshot; applying it could resurrect an
 /// order that was removed since. On [`OrderDelta::Resync`], read a fresh
 /// snapshot and carry on with the same rule.
+// Nearly every delta is an `Upserted`, so boxing the order would add an
+// allocation per delta without making the typical value any smaller.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone)]
 pub enum OrderDelta {
     /// `order` was added or changed.
@@ -660,6 +713,27 @@ pub struct ChatMessage {
     pub has_attachment: bool,
     pub attachment: Option<AttachmentInfo>,
     pub created_at: i64,
+    /// Reactions to this message (protocol chat.md, "Reactions"), at most one
+    /// per party: the newest that party sent. One with an empty `emoji` was
+    /// withdrawn; it is kept so a re-wrapped older reaction changes nothing.
+    /// Older stored messages have none, hence the default.
+    #[serde(default)]
+    pub reactions: Vec<ChatReaction>,
+}
+
+/// A party's reaction to a chat message: an inner kind 7 event naming the
+/// message by its inner id.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ChatReaction {
+    /// Trade pubkey of the party who reacted, from the verified inner event.
+    pub sender_pubkey: String,
+    /// The emoji, or empty when the reaction was withdrawn.
+    pub emoji: String,
+    /// Inner `created_at`: of a party's reactions to one message, the newest
+    /// holds.
+    pub created_at: i64,
+    /// Inner event id: breaks a tie between two reactions of the same second.
+    pub event_id: String,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -1118,6 +1192,9 @@ pub struct Dispute {
     pub resolved_at: Option<i64>,
     /// Whether the local user has seen the latest dispute update.
     pub is_read: bool,
+    /// Whether this side already sent the current solver the chat key
+    /// (#415). A takeover clears it: the new solver never got the key.
+    pub chat_key_shared: bool,
 }
 
 /// State of the embedded Cashu wallet — phase C2 of `docs/cashu/README.md`.
@@ -1183,9 +1260,15 @@ pub struct EscrowModeInfo {
     /// Stable marker — `"unknown"`, `"lightning"` or `"cashu"`. Rust does not
     /// translate; Dart maps this to a localized string.
     pub mode: String,
-    /// Mint the node pins for every escrow, override applied. `None` on a
-    /// Lightning node, or on a Cashu node that published none.
+    /// The one mint every escrow on the node is locked at, override applied:
+    /// set only when the node accepts exactly one (the wallet binds to it).
+    /// `None` on a Lightning node, and on a Cashu node that accepts several
+    /// mints or any.
     pub mint_url: Option<String>,
+    /// Every mint the node accepts (MostroP2P/mostro#1047), override applied.
+    /// Meaningful only when [`Self::mode`] is `"cashu"`, where empty means the
+    /// node accepts any mint.
+    pub mint_urls: Vec<String>,
     /// NUT-11 locktime the seller must set, in days.
     pub escrow_locktime_days: Option<u32>,
     /// How close to expiry the daemon stops accepting `fiat-sent`, in days.
@@ -1193,9 +1276,9 @@ pub struct EscrowModeInfo {
     /// True when [`Self::mode`] came from the developer override rather than
     /// the node's own tags.
     pub is_overridden: bool,
-    /// **The gate.** True only when the mode is Cashu *and* there is a usable
-    /// mint to connect to. `mode == "cashu"` alone is not enough — a node can
-    /// advertise Cashu and publish no mint.
+    /// **The gate.** True only when the mode is Cashu *and* the node pins one
+    /// mint for the wallet to bind to. `mode == "cashu"` alone is not enough —
+    /// a node can accept several mints, or any.
     pub is_cashu_available: bool,
     /// Developer override state, mirrored so the dev-only settings surface can
     /// render its own controls without a second call.

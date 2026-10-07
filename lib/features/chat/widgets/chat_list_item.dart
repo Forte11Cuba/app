@@ -13,10 +13,11 @@ import 'package:mostro/features/trades/models/trades_list_rules.dart';
 import 'package:mostro/features/trades/providers/trade_rows_provider.dart';
 import 'package:mostro/features/trades/widgets/trade_list_chip.dart';
 import 'package:mostro/l10n/app_localizations.dart';
+import 'package:mostro/shared/widgets/nym_avatar.dart';
 import 'package:mostro/shared/widgets/tab_app_bar.dart' show CountBadge;
 
-/// One conversation of the chat list (handoff 11b): an avatar tinted by the
-/// trade's state, the alias, which trade this is and where it stands, and
+/// One conversation of the chat list (handoff 11b): the counterpart's animal
+/// avatar, the alias, which trade this is and where it stands, and
 /// the last message — bold with a badge while unread.
 class ChatListItem extends StatelessWidget {
   const ChatListItem({
@@ -58,11 +59,7 @@ class ChatListItem extends StatelessWidget {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              ChatAvatar(
-                initial: handle,
-                tone: row.state.tone,
-                showsActiveDot: row.state.showsActiveDot,
-              ),
+              _RoomAvatar(room: room, showsActiveDot: row.state.showsActiveDot),
               const SizedBox(width: 11),
               Expanded(
                 child: Column(
@@ -226,7 +223,6 @@ class ChatAvatar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final book = OrderBookPalette.of(context);
     final pal = ActivityPalette.of(context);
     final (bg, ink) =
         dispute
@@ -264,21 +260,60 @@ class ChatAvatar extends StatelessWidget {
               ),
             ),
           ),
-          if (showsActiveDot)
-            Positioned(
-              right: -1,
-              bottom: -1,
-              child: Container(
-                width: 11,
-                height: 11,
-                decoration: BoxDecoration(
-                  color: book.lime,
-                  shape: BoxShape.circle,
-                  border: Border.all(color: book.surface, width: 2),
-                ),
-              ),
-            ),
+          if (showsActiveDot) const _ActiveDot(),
         ],
+      ),
+    );
+  }
+}
+
+/// The counterpart's animal on the color of their alias, as in the room, with
+/// the lime dot of an open trade at its lower right.
+class _RoomAvatar extends StatelessWidget {
+  const _RoomAvatar({required this.room, required this.showsActiveDot});
+
+  final ChatRoomState room;
+  final bool showsActiveDot;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 38,
+      height: 38,
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          NymAvatar(
+            pseudonym: room.peerHandle,
+            iconIndex: room.peerIconIndex,
+            colorHue: room.peerColorHue,
+            size: 38,
+          ),
+          if (showsActiveDot) const _ActiveDot(),
+        ],
+      ),
+    );
+  }
+}
+
+/// The lime dot of an open trade, on the lower right of a 38 px avatar.
+class _ActiveDot extends StatelessWidget {
+  const _ActiveDot();
+
+  @override
+  Widget build(BuildContext context) {
+    final book = OrderBookPalette.of(context);
+    return Positioned(
+      right: -1,
+      bottom: -1,
+      child: Container(
+        width: 11,
+        height: 11,
+        decoration: BoxDecoration(
+          color: book.lime,
+          shape: BoxShape.circle,
+          border: Border.all(color: book.surface, width: 2),
+        ),
       ),
     );
   }

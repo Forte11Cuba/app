@@ -1,0 +1,63 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+#
+# Repository additions to the organization's CodeRabbit settings. Everything
+# not set here is inherited from them.
+inheritance: true
+
+knowledge_base:
+  code_guidelines:
+    filePatterns:
+      - "**/CLAUDE.md"
+      - "**/AGENTS.md"
+      - files: ".specify/DESIGN_SYSTEM.md"
+        applyTo: "lib/**/*.dart"
+
+reviews:
+  path_instructions:
+    # UI changes are judged against the design guide. The "Design guide" CI
+    # job already enforces its rules marked *auto* (literal colors, fonts,
+    # sizes, radii, spacing, breakpoints, icon sizes, AppColors, and buttons,
+    # app bars, scaffolds and text fields left to the v1 theme defaults) on
+    # the changed lines,
+    # so the review spends its attention on the rules marked *review*.
+    - path: "lib/features/**/*.dart"
+      instructions: &design_review |
+        Review this UI change against `.specify/DESIGN_SYSTEM.md`. For each
+        break, name the rule ID (for example "DS-CMP-3") and quote the line.
+        A MUST rule is a blocking finding; a SHOULD rule is a suggestion,
+        unless the pull request description already gives a reason. Code
+        listed in the guide's §14 is known debt: flag it only on lines this
+        pull request adds or changes, and never as a pattern to follow.
+
+        Focus on the rules no script can check:
+        - DS-COL-2: colors come from the palette of the screen's area (§2.2).
+          New code is v2 even inside a legacy screen (Cashu, chat,
+          disputes, notifications): it looks like the redesigned screens,
+          never like the v1 code around it.
+        - DS-COL-4, DS-COL-5: an accent fill carries its dark ink (`onLime`,
+          `onSell`), never white; lime as text on light uses `limeText`.
+        - DS-COL-6: every new palette text token has a 4.5:1 assertion in
+          that palette's contrast test, in dark and light.
+        - DS-COL-9, DS-COL-10: lime = your turn or success, amber = waiting,
+          red = sell, error or danger, grey = closed; color never alone.
+        - DS-TYP-2, DS-TYP-3: amounts, sats, premiums, ratings and counters
+          use `AppFonts.figures` with an explicit 500/600/700 weight.
+        - DS-CMP-1 to DS-CMP-5: modals through `mostro_modal.dart` with one
+          answer; at most one primary call to action per screen state;
+          secondaries outlined; no filled red button on a page.
+        - DS-CMP-6, DS-CMP-7, DS-A11Y-1: 48 dp targets, labelled icon
+          buttons, `Semantics(button: true)` on custom tappables.
+        - DS-CMP-8 to DS-CMP-14: reuse `redesignAppBar`, `TabAppBar`,
+          `TradeListChip`, `OrderPrimaryButton`, `UnderlineAmountField`,
+          `OrderListSkeleton`, `OrderListEmpty` instead of a new variant.
+        - DS-MOT-3: looping or decorative animations stop when
+          `MediaQuery.disableAnimationsOf(context)` is true.
+        - DS-A11Y-4, DS-L10N-2: a new screen or changed action bar or modal
+          has a test at 2x text scale, 320 dp wide, in German.
+        - §12: the description lists the rules it touches and has dark and
+          light screenshots for a visible change.
+
+        A `// design-check: ignore <rule> — <reason>` comment silences the
+        CI check on that line: judge whether the reason holds.
+    - path: "lib/shared/**/*.dart"
+      instructions: *design_review

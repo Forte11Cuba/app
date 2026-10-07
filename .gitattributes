@@ -4,3 +4,13 @@
 lib/src/rust/** linguist-generated=true
 rust/src/frb_generated.rs linguist-generated=true
 lib/l10n/app_localizations*.dart linguist-generated=true
+
+# Line endings: LF in every working tree, whatever core.autocrlf says. Tests read
+# tracked files back and match "\n"-delimited text (include_str! of rust/src sources,
+# the workflow YAML in test/ci); a CRLF checkout, Git for Windows' default, fails them.
+* text=auto eol=lf
+# Windows-native files keep CRLF: cmd.exe and PowerShell expect it.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+*.rc  text eol=crlf

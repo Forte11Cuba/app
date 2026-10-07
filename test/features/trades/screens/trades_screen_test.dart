@@ -120,7 +120,7 @@ void main() {
   ) async {
     await _pump(tester);
 
-    expect(find.text('Vendes a used-jaguar', findRichText: true), findsOne);
+    expect(find.text('Vendes a used-elephant', findRichText: true), findsOne);
     expect(find.text('Mercado Pago +2'), findsOneWidget);
     // Fixed by the daemon: no `≈`.
     expect(find.text('6.900 sats'), findsOneWidget);

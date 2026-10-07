@@ -190,11 +190,11 @@ abstract class AppLocalizations {
   /// **'Order dispute'**
   String get orderDispute;
 
-  /// Banner shown when an admin is assigned but no messages exist yet
+  /// Banner shown when a person took the dispute but no messages exist yet
   ///
   /// In en, this message translates to:
-  /// **'An administrator has been assigned to your dispute. They will contact you here shortly.'**
-  String get disputeAdminAssigned;
+  /// **'A dispute resolver has taken your dispute. They will contact you here shortly.'**
+  String get disputeSolverAssigned;
 
   /// Lock banner shown when the dispute is resolved
   ///
@@ -250,52 +250,106 @@ abstract class AppLocalizations {
   /// **'The order was cooperatively cancelled. No funds were transferred.'**
   String get disputeCoopCancelMessage;
 
-  /// Dispute chat screen title when trading as seller (peer is the buyer)
-  ///
-  /// In en, this message translates to:
-  /// **'Dispute with Buyer: {handle}'**
-  String disputeWithBuyer(String handle);
-
-  /// Dispute chat screen title when trading as buyer (peer is the seller)
-  ///
-  /// In en, this message translates to:
-  /// **'Dispute with Seller: {handle}'**
-  String disputeWithSeller(String handle);
-
   /// Sub-title showing the truncated order/trade ID
   ///
   /// In en, this message translates to:
   /// **'Order {orderId}'**
   String orderLabel(String orderId);
 
-  /// Status chip label for a newly opened dispute
-  ///
-  /// In en, this message translates to:
-  /// **'Initiated'**
-  String get disputeInitiated;
-
-  /// Status chip label for a dispute under admin review
-  ///
-  /// In en, this message translates to:
-  /// **'In progress'**
-  String get disputeInProgress;
-
-  /// Status chip label for a resolved/closed dispute
+  /// Dispute info card chip: the dispute ended without a verdict (e.g. a cooperative cancel)
   ///
   /// In en, this message translates to:
   /// **'Closed'**
   String get disputeStatusClosed;
 
+  /// Dispute info card title: the counterparty's role (seller or buyer) and pseudonym
+  ///
+  /// In en, this message translates to:
+  /// **'Dispute with {role}: {counterparty}'**
+  String disputeWith(String role, String counterparty);
+
+  /// Role name for the seller, used inside disputeWith
+  ///
+  /// In en, this message translates to:
+  /// **'Seller'**
+  String get seller;
+
+  /// Role name for the buyer, used inside disputeWith
+  ///
+  /// In en, this message translates to:
+  /// **'Buyer'**
+  String get buyer;
+
+  /// Dispute info card chip: opened, no solver yet
+  ///
+  /// In en, this message translates to:
+  /// **'Initiated'**
+  String get disputeStatusInitiated;
+
+  /// Dispute info card chip: a solver has the dispute
+  ///
+  /// In en, this message translates to:
+  /// **'In-progress'**
+  String get disputeStatusInProgress;
+
+  /// Dispute info card chip: a solver's verdict ended the dispute
+  ///
+  /// In en, this message translates to:
+  /// **'Resolved'**
+  String get disputeStatusResolved;
+
+  /// Dispute info card: status sentence while a solver reviews the dispute (or one has taken it)
+  ///
+  /// In en, this message translates to:
+  /// **'This dispute is currently in progress. A solver is reviewing your case.'**
+  String get disputeInProgress;
+
+  /// Dispute info card: first instruction bullet
+  ///
+  /// In en, this message translates to:
+  /// **'Wait for a solver to take your dispute. Once they arrive, share any relevant evidence to help clarify the situation.'**
+  String get disputeInstruction1;
+
+  /// Dispute info card: second instruction bullet
+  ///
+  /// In en, this message translates to:
+  /// **'The final decision will be made based on the evidence presented.'**
+  String get disputeInstruction2;
+
+  /// Dispute info card: third instruction bullet
+  ///
+  /// In en, this message translates to:
+  /// **'If you don\'t respond, the system will assume you don\'t want to cooperate and you might lose the dispute.'**
+  String get disputeInstruction3;
+
+  /// Dispute info card: status sentence when the user (buyer) opened the dispute and no solver took it yet
+  ///
+  /// In en, this message translates to:
+  /// **'You opened this dispute against the seller {counterparty}, please read carefully below:'**
+  String disputeOpenedByYouAgainstSeller(String counterparty);
+
+  /// Dispute info card: status sentence when the user (seller) opened the dispute and no solver took it yet
+  ///
+  /// In en, this message translates to:
+  /// **'You opened this dispute against the buyer {counterparty}, please read carefully below:'**
+  String disputeOpenedByYouAgainstBuyer(String counterparty);
+
+  /// Dispute info card: status sentence when the peer opened the dispute and no solver took it yet
+  ///
+  /// In en, this message translates to:
+  /// **'Waiting for admin assignment'**
+  String get disputeWaitingForAdmin;
+
   /// Resolution text shown to the seller when admin released funds to the buyer
   ///
   /// In en, this message translates to:
-  /// **'The administrator settled the dispute in the buyer\'s favour. The sats were released to the buyer.'**
+  /// **'The dispute resolver settled the dispute in the buyer\'s favour. The sats were released to the buyer.'**
   String get disputeLostFundsToBuyer;
 
   /// Resolution text shown to the buyer when admin returned funds to the seller
   ///
   /// In en, this message translates to:
-  /// **'The administrator canceled the order and returned the sats to the seller. You did not receive the sats.'**
+  /// **'The dispute resolver canceled the order and returned the sats to the seller. You did not receive the sats.'**
   String get disputeLostFundsToSeller;
 
   /// Title for walkthrough slide 1
@@ -343,7 +397,7 @@ abstract class AppLocalizations {
   /// Body text for walkthrough slide 4
   ///
   /// In en, this message translates to:
-  /// **'Each trade has its own private chat, end-to-end encrypted. Only the two users involved can read it. In case of a dispute, you can give the shared key to an admin to help resolve the issue.'**
+  /// **'Each trade has its own private chat, end-to-end encrypted. Only the two users involved can read it. In case of a dispute, you can give the shared key to a dispute resolver to help resolve the issue.'**
   String get walkthroughSlideFourBody;
 
   /// Title for walkthrough slide 5
@@ -489,12 +543,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Coming soon'**
   String get comingSoonMessage;
-
-  /// Trade status chip label: active
-  ///
-  /// In en, this message translates to:
-  /// **'Active'**
-  String get tradeStatusActive;
 
   /// Trade status chip label: completed
   ///
@@ -1837,7 +1885,7 @@ abstract class AppLocalizations {
   /// Body of the open-dispute confirmation dialog
   ///
   /// In en, this message translates to:
-  /// **'Are you sure you want to open a dispute? This escalates the trade to an admin and cannot be undone.'**
+  /// **'Are you sure you want to open a dispute? This escalates the trade to a dispute resolver and cannot be undone.'**
   String get openDisputeConfirmation;
 
   /// Snackbar shown when a dispute is opened for a trade that already has one, or while a previous attempt is still in flight
@@ -2257,7 +2305,7 @@ abstract class AppLocalizations {
   /// Subtitle of the dispute updates notification toggle
   ///
   /// In en, this message translates to:
-  /// **'Admin actions and dispute resolutions'**
+  /// **'Resolver actions and dispute resolutions'**
   String get notifDisputeUpdatesSubtitle;
 
   /// Hint text of the currency search field
@@ -2680,7 +2728,7 @@ abstract class AppLocalizations {
   /// **'Trade Information'**
   String get tradeInformationTitle;
 
-  /// Label for the order ID field
+  /// Dispute info card: label over the order ID
   ///
   /// In en, this message translates to:
   /// **'Order ID'**
@@ -2697,6 +2745,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Sats Amount'**
   String get satsAmountLabel;
+
+  /// User information panel: the counterparty shared no reputation for this order (full privacy) or it has not arrived yet
+  ///
+  /// In en, this message translates to:
+  /// **'This user\'s reputation is not available'**
+  String get peerReputationUnavailable;
 
   /// Label for the status field
   ///
@@ -2716,41 +2770,11 @@ abstract class AppLocalizations {
   /// **'Created'**
   String get createdLabel;
 
-  /// Placeholder note in the trade information panel
-  ///
-  /// In en, this message translates to:
-  /// **'Details wired when trade provider available (Phase 10+)'**
-  String get tradeDetailsPlaceholder;
-
   /// Title of the user information panel
   ///
   /// In en, this message translates to:
   /// **'User Information'**
   String get userInformationTitle;
-
-  /// Label for the peer public key
-  ///
-  /// In en, this message translates to:
-  /// **'Peer\'s Public Key'**
-  String get peerPublicKeyLabel;
-
-  /// Label for the shared key
-  ///
-  /// In en, this message translates to:
-  /// **'Your Shared Key'**
-  String get yourSharedKeyLabel;
-
-  /// Placeholder note for the shared key
-  ///
-  /// In en, this message translates to:
-  /// **'Available after bridge integration (Phase 10+)'**
-  String get sharedKeyPlaceholder;
-
-  /// Safety note about the shared key
-  ///
-  /// In en, this message translates to:
-  /// **'Keep your shared key safe — it is needed for dispute resolution'**
-  String get sharedKeySafetyNote;
 
   /// File type chip: video
   ///
@@ -2842,11 +2866,11 @@ abstract class AppLocalizations {
   /// **'Enter invoice manually'**
   String get enterInvoiceManually;
 
-  /// Generic submit button label
+  /// Answer of the range amount dialog, opened from the take-order button. Same wording as takeOrderButton (DS-CMP-26).
   ///
   /// In en, this message translates to:
-  /// **'Submit'**
-  String get submitButton;
+  /// **'Take order'**
+  String get rangeAmountTakeAction;
 
   /// Title of the counterpart reputation card when the taker is the buyer
   ///
@@ -2878,17 +2902,17 @@ abstract class AppLocalizations {
   /// **'days active'**
   String get daysActiveStatLabel;
 
-  /// Countdown label below the take-order timer
-  ///
-  /// In en, this message translates to:
-  /// **'Time remaining: {time}'**
-  String timeRemainingLabel(String time);
-
   /// Shown when a fixed-sats order amount is outside the node min/max order amount
   ///
   /// In en, this message translates to:
   /// **'Amount must be between {min} and {max} sats for this Mostro node'**
   String orderAmountOutOfRange(int min, int max);
+
+  /// Shown in place of the order preview, with Publish disabled, when the active Mostro node does not list the selected currency in fiat_currencies_accepted and the user already picked that currency or entered an amount or payment methods
+  ///
+  /// In en, this message translates to:
+  /// **'This Mostro node does not accept {currency}. Pick another currency'**
+  String orderCurrencyNotAccepted(String currency);
 
   /// Shown when a market-price order amount converts outside the node min/max order amount, with the range expressed in the user's fiat currency
   ///
@@ -2980,10 +3004,10 @@ abstract class AppLocalizations {
   /// **'Maximum'**
   String get amountMaxLabel;
 
-  /// Counter in the payment-methods card header
+  /// Counter in the payment-methods card header. Says "selected" (glossary, DS-L10N-4); the key name predates the glossary
   ///
   /// In en, this message translates to:
-  /// **'{count, plural, =0{none chosen} =1{1 chosen} other{{count} chosen}}'**
+  /// **'{count, plural, =0{none selected} =1{1 selected} other{{count} selected}}'**
   String paymentMethodsChosenCount(int count);
 
   /// Chip that opens the payment-method picker; also the button that turns the custom text into a chip
@@ -3100,7 +3124,7 @@ abstract class AppLocalizations {
   /// **'Publish order'**
   String get publishOrder;
 
-  /// Accessibility label of the × on a chosen payment-method chip
+  /// Accessibility label of the × on a selected payment-method chip
   ///
   /// In en, this message translates to:
   /// **'Remove {method}'**
@@ -3172,13 +3196,13 @@ abstract class AppLocalizations {
   /// **'{count, plural, =1{Select 1 star} other{Select {count} stars}}'**
   String selectStarTooltip(int count);
 
-  /// Title of the dispute info card
+  /// App bar title of the dispute chat screen once the dispute is found (v1's title)
   ///
   /// In en, this message translates to:
   /// **'Dispute Details'**
   String get disputeDetailsTitle;
 
-  /// Label for the dispute ID field
+  /// Dispute info card: label over the dispute ID
   ///
   /// In en, this message translates to:
   /// **'Dispute ID'**
@@ -3190,11 +3214,29 @@ abstract class AppLocalizations {
   /// **'Reason: {reason}'**
   String disputeReasonLabel(String reason);
 
-  /// Sender label for administrator messages in a dispute
+  /// Sender label for a person solving the dispute (not the Serbero assistant)
   ///
   /// In en, this message translates to:
-  /// **'Admin'**
-  String get adminLabel;
+  /// **'Resolver'**
+  String get solverLabel;
+
+  /// Sender label for Serbero, the node's automated dispute assistant; a product name, not translated
+  ///
+  /// In en, this message translates to:
+  /// **'Serbero'**
+  String get serberoLabel;
+
+  /// Banner shown when Serbero, the automated assistant, took the dispute but no messages exist yet
+  ///
+  /// In en, this message translates to:
+  /// **'Serbero, an automated assistant, is helping with your dispute. It will ask you a few questions here and hand the case to a person if needed.'**
+  String get disputeSerberoAssigned;
+
+  /// System line in the dispute chat where a person took the dispute over from Serbero
+  ///
+  /// In en, this message translates to:
+  /// **'A dispute resolver has taken over your dispute.'**
+  String get disputeSolverTookOver;
 
   /// App bar title of the dispute chat screen
   ///
@@ -3640,12 +3682,6 @@ abstract class AppLocalizations {
   /// **'Mint'**
   String get aboutCashuMintUrlLabel;
 
-  /// About screen — shown when a node says it runs Cashu but publishes no mint, which means trades cannot run
-  ///
-  /// In en, this message translates to:
-  /// **'Not advertised'**
-  String get aboutCashuMintNotAdvertised;
-
   /// About screen — Cashu escrow locktime row label
   ///
   /// In en, this message translates to:
@@ -3789,6 +3825,18 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'End-to-end encrypted chat'**
   String get tradeChatEncrypted;
+
+  /// Subtitle of the trade screen's chat card once the conversation has ended (trade cancelled, or completed more than an hour ago); tapping opens the conversation read-only
+  ///
+  /// In en, this message translates to:
+  /// **'Conversation closed · view messages'**
+  String get tradeChatClosed;
+
+  /// Screen-reader announcement when the trade screen's chat card turns closed while the user is on it (the completed trade's hour ran out); the messages stay readable
+  ///
+  /// In en, this message translates to:
+  /// **'The conversation is closed. You can still read its messages'**
+  String get tradeChatClosedAnnouncement;
 
   /// Step body for the buyer while the seller pays the hold invoice
   ///
@@ -4126,7 +4174,13 @@ abstract class AppLocalizations {
   /// **'No longer available'**
   String get takeOrderUnavailable;
 
-  /// Replaces the countdown in the app bar once the order is gone
+  /// Snackbar when a take fails for a reason the app has no specific message for
+  ///
+  /// In en, this message translates to:
+  /// **'Could not take the order. Please try again.'**
+  String get takeOrderFailed;
+
+  /// Value of the take order's countdown row once the order is gone
   ///
   /// In en, this message translates to:
   /// **'Closed'**
@@ -4318,6 +4372,18 @@ abstract class AppLocalizations {
   /// **'Open settings'**
   String get openSystemSettingsAction;
 
+  /// Web only: banner above the push settings while the browser has not been asked for the notification permission
+  ///
+  /// In en, this message translates to:
+  /// **'This browser has not been allowed to show notifications yet.'**
+  String get notificationsPermissionNotAsked;
+
+  /// Web only: link in that banner that shows the browser's permission prompt
+  ///
+  /// In en, this message translates to:
+  /// **'Allow notifications'**
+  String get allowNotificationsAction;
+
   /// Footnote: what a push notification does not carry, and the one true sentence about how it travels. Must not claim the token is encrypted.
   ///
   /// In en, this message translates to:
@@ -4335,6 +4401,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Wakes the app when a trade or chat message arrives. The notification itself carries nothing.'**
   String get pushMasterToggleSubtitle;
+
+  /// Extra line under the master push toggle on the web only: with the tab closed nothing renews the registration, and the push server forgets it 48 hours after the last renewal. A running tab renews a registration once it is 12 to 18 hours old, so push stops 30 to 48 hours after the tab last ran
+  ///
+  /// In en, this message translates to:
+  /// **'Stops 30 to 48 h after this tab last ran Mostro'**
+  String get pushWebStopsWithTab;
 
   /// Status line under the master push toggle when push is turned off
   ///
@@ -4993,7 +5065,7 @@ abstract class AppLocalizations {
   /// 14a hero label above the bond amount
   ///
   /// In en, this message translates to:
-  /// **'REFUNDABLE DEPOSIT'**
+  /// **'Refundable deposit'**
   String get bondRefundableLabel;
 
   /// 14a hero context line without a fiat rate
@@ -5074,11 +5146,11 @@ abstract class AppLocalizations {
   /// **'Mostro does not hold funds, so it cannot penalise whoever abandons a trade; the deposit does that job, and protects every user against scammers.'**
   String get bondWhyCustody;
 
-  /// 14b explainer paragraph 2; hold is the protocol term, rendered bold and left untranslated
+  /// 14b explainer paragraph 2: the wallet holds the deposit's sats without sending them. Plain words, no "hold" term (DS-L10N-4)
   ///
   /// In en, this message translates to:
-  /// **'It is a {hold} invoice: your wallet reserves the sats without sending them; when the trade completes, the reservation is cancelled on its own.'**
-  String bondWhyHold(String hold);
+  /// **'Your wallet holds the sats without sending them; when the trade completes, they are released on their own.'**
+  String get bondWhyHold;
 
   /// 14b explainer paragraph 3 on a node that does not slash on timeout
   ///
@@ -5194,6 +5266,30 @@ abstract class AppLocalizations {
   /// **'Remove from this device'**
   String get bondRemoveFromDevice;
 
+  /// Confirm dialog title before a maker drops an order still waiting for its deposit (DS-CMP-20)
+  ///
+  /// In en, this message translates to:
+  /// **'Don\'t publish this order?'**
+  String get bondLeaveMakerTitle;
+
+  /// Body of that dialog: what dropping the unpublished order does
+  ///
+  /// In en, this message translates to:
+  /// **'The order won\'t be published and its deposit invoice is cancelled.'**
+  String get bondLeaveMakerBody;
+
+  /// Confirm dialog title before a taker leaves an order whose deposit is not paid yet (DS-CMP-20)
+  ///
+  /// In en, this message translates to:
+  /// **'Don\'t take this order?'**
+  String get bondLeaveTakerTitle;
+
+  /// Body of that dialog: the order stays available to others
+  ///
+  /// In en, this message translates to:
+  /// **'The order stays in the book for others and the deposit invoice is cancelled.'**
+  String get bondLeaveTakerBody;
+
   /// Dialog action: keep the order and stay on the deposit screen
   ///
   /// In en, this message translates to:
@@ -5221,7 +5317,7 @@ abstract class AppLocalizations {
   /// Claim screen hero label, upper case
   ///
   /// In en, this message translates to:
-  /// **'YOUR SHARE'**
+  /// **'Your share'**
   String get bondClaimShareLabel;
 
   /// Semantics of the claim hero
@@ -5524,12 +5620,6 @@ abstract class AppLocalizations {
   /// **'The node did not resend the deposit invoice'**
   String get bondRequestFailed;
 
-  /// Snackbar after tapping the order id in the invoice app bar
-  ///
-  /// In en, this message translates to:
-  /// **'Order ID copied'**
-  String get invoiceOrderIdCopied;
-
   /// 13a hero card label above the amount (rendered uppercase)
   ///
   /// In en, this message translates to:
@@ -5716,11 +5806,11 @@ abstract class AppLocalizations {
   /// **'Open in my wallet'**
   String get invoiceOpenWallet;
 
-  /// 13b note explaining the hold invoice; hold is the protocol term 'hold', rendered bold and deliberately left untranslated in every locale (as in 'factura hold') — move the placeholder, do not replace it
+  /// 13b note: paying the invoice keeps the sats held in the seller's wallet until they confirm the buyer's payment. Plain words, no "hold" term (DS-L10N-4)
   ///
   /// In en, this message translates to:
-  /// **'This is a {hold} invoice: the sats are held, they don\'t leave your wallet until you confirm the buyer\'s payment.'**
-  String invoiceHoldNote(String hold);
+  /// **'The sats are held: they don\'t leave your wallet until you confirm the buyer\'s payment.'**
+  String get invoiceHoldNote;
 
   /// 13b screen reader label of the QR: the whole invoice
   ///
@@ -5764,11 +5854,23 @@ abstract class AppLocalizations {
   /// **'The invoice is for {invoice}, the node uses {node}'**
   String invoiceErrorWrongNetwork(String invoice, String node);
 
-  /// Invoice time band countdown above one hour; hours is a whole number, minutes is always two digits (e.g. 1 h 05). Keep it short: it sits inside a sentence
+  /// Every countdown above one hour (DS-CMP-21: invoice band, trade step, take order, my order, chat); hours is a whole number, minutes is always two digits (e.g. 1 h 05). Keep it short: it sits inside a sentence or a row
   ///
   /// In en, this message translates to:
   /// **'{hours} h {minutes}'**
   String invoiceCountdownHours(String hours, String minutes);
+
+  /// Label of an order's countdown (take order data row, own order status); the figure follows it, e.g. Expires in 23 h 12
+  ///
+  /// In en, this message translates to:
+  /// **'Expires in'**
+  String get countdownExpiresInLabel;
+
+  /// Label above the bond time pill in the compact amount row: the time left to pay the bond invoice
+  ///
+  /// In en, this message translates to:
+  /// **'Pay within'**
+  String get bondPayWithinLabel;
 
   /// Notifications card title for a trade status change (issue #474); role-neutral, both sides see it
   ///
@@ -5998,6 +6100,12 @@ abstract class AppLocalizations {
   /// **'Your account is out of sync with this Mostro node, so it refused the order. Try again in a moment'**
   String get invalidTradeIndexError;
 
+  /// Error shown when the Mostro node refuses a new order with CantDo(InvalidFiatCurrency): its fiat_currencies_accepted list does not include the order's currency
+  ///
+  /// In en, this message translates to:
+  /// **'This Mostro node does not accept that currency, so it refused the order. Pick another currency'**
+  String get invalidFiatCurrencyError;
+
   /// Snackbar shown on the Account screen right after a mnemonic import, while the app asks Mostro for the identity's trades in progress
   ///
   /// In en, this message translates to:
@@ -6016,16 +6124,16 @@ abstract class AppLocalizations {
   /// **'Account imported, but Mostro did not answer, so your trades in progress were not recovered'**
   String get recoverTradesFailedMessage;
 
-  /// Label in front of the chips summarising the methods chosen so far on the payment-method picker screen
+  /// Label in front of the chips summarising the methods selected so far on the payment-method picker screen (glossary: selected, DS-L10N-4)
   ///
   /// In en, this message translates to:
-  /// **'Chosen'**
+  /// **'Selected'**
   String get paymentMethodsChosenLabel;
 
   /// Count line above the confirm button of the payment-method picker screen
   ///
   /// In en, this message translates to:
-  /// **'{count, plural, =0{Choose at least one method} =1{1 method selected} other{{count} methods selected}}'**
+  /// **'{count, plural, =0{Select at least one method} =1{1 method selected} other{{count} methods selected}}'**
   String paymentMethodsSelectedCount(int count);
 
   /// Button that saves the payment-method selection and closes the picker screen
@@ -6766,11 +6874,11 @@ abstract class AppLocalizations {
   /// **'Your escrow is locked but the node has not confirmed it. Retrying is safe — it will not lock a second time.'**
   String get lockEscrowPendingSubmission;
 
-  /// Escrow error — the node published no mint (CashuMintUnknown)
+  /// Escrow error — the node accepts several mints, or any, so each order names its own, and this build can only lock on a node with a single mint (CashuMintNotSupported, MostroP2P/mostro#1047)
   ///
   /// In en, this message translates to:
-  /// **'This node has not published its mint, so there is nowhere to lock the escrow.'**
-  String get lockEscrowMintUnknown;
+  /// **'This node lets each order choose its mint, and this version of the app can only lock an escrow on a node with a single mint.'**
+  String get lockEscrowMintNotSupported;
 
   /// Escrow error — submitted, but the device could not save the token (CashuEscrowNotPersisted)
   ///
@@ -6831,6 +6939,84 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'They\'re locking the sats in escrow. Once it\'s locked, it\'s your turn to pay the fiat.'**
   String get tradeBodyWaitingPaymentBuyerCashu;
+
+  /// Dispute chat app bar: tooltip of the action that sends the solver the peer chat key (#415)
+  ///
+  /// In en, this message translates to:
+  /// **'Share the chat key with the resolver'**
+  String get shareChatKeyAction;
+
+  /// Title of the dialog confirming that the peer chat key goes to the dispute solver
+  ///
+  /// In en, this message translates to:
+  /// **'Share the chat key with the resolver?'**
+  String get shareChatKeyTitle;
+
+  /// Body of the dialog confirming that the peer chat key goes to the dispute solver: what the solver can read, and only that
+  ///
+  /// In en, this message translates to:
+  /// **'If you confirm, the resolver of this dispute will be able to read the whole chat between you and your counterparty in this order, and only that chat: not the chats of your earlier or later trades. This cannot be undone. Sharing is optional, but it helps the resolver settle the dispute faster.'**
+  String get shareChatKeyBody;
+
+  /// Confirm button of the dialog that shares the peer chat key with the solver
+  ///
+  /// In en, this message translates to:
+  /// **'Share'**
+  String get shareChatKeyConfirm;
+
+  /// Dispute chat app bar: tooltip of the share-chat-key action once the chat key went to the current solver (it can still be sent again)
+  ///
+  /// In en, this message translates to:
+  /// **'Chat key shared with the resolver'**
+  String get chatKeySharedIndicator;
+
+  /// Error in the share-chat-key dialog: the counterparty or trade key of this order is not known on this device
+  ///
+  /// In en, this message translates to:
+  /// **'The chat key of this trade is not available on this device.'**
+  String get shareChatKeyUnavailable;
+
+  /// «…» in a chat message's menu, and the title of the sheet with every emoji
+  ///
+  /// In en, this message translates to:
+  /// **'More reactions'**
+  String get moreReactions;
+
+  /// Screen-reader label of the reaction shown under a chat message
+  ///
+  /// In en, this message translates to:
+  /// **'Reaction: {emoji}'**
+  String messageReactionLabel(String emoji);
+
+  /// Snackbar shown when a reaction to a chat message could not be sent
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn\'t send the reaction. Please try again.'**
+  String get reactionSendFailed;
+
+  /// Screen-reader hint of a chat message: what tapping it (or holding an attachment) opens
+  ///
+  /// In en, this message translates to:
+  /// **'Open the message menu'**
+  String get messageMenuHint;
+
+  /// Mint of a Cashu node that lists no mint and so accepts any the order's maker picks (MostroP2P/mostro#1047): value in Settings, About and the node selector
+  ///
+  /// In en, this message translates to:
+  /// **'Any mint'**
+  String get cashuAnyMint;
+
+  /// Settings, Payments group — label of a row naming a Cashu mint the active node accepts (one row per mint); shown only when the node runs Cashu
+  ///
+  /// In en, this message translates to:
+  /// **'Mint'**
+  String get settingsMintLabel;
+
+  /// Snackbar after tapping a mint row in Settings, which copies the mint's full URL
+  ///
+  /// In en, this message translates to:
+  /// **'Mint URL copied'**
+  String get settingsMintCopied;
 }
 
 class _AppLocalizationsDelegate

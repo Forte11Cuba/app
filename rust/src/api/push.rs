@@ -68,8 +68,6 @@ pub(crate) trait PushServer {
         mostro_pubkey: &str,
     ) -> impl std::future::Future<Output = ServerOutcome>;
     fn unregister(&self, trade_pubkey: &str) -> impl std::future::Future<Output = ServerOutcome>;
-    // The web build does not wake peers yet (mostro-push-server#44).
-    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     fn notify(&self, trade_pubkey: &str) -> impl std::future::Future<Output = ServerOutcome>;
 }
 
@@ -754,34 +752,28 @@ pub(crate) enum NotifyOutcome {
 ///   server, and a failure never fails the send.
 /// - **Peer chat only.** The dispute channel does not call this: its
 ///   counterpart is a solver, not a push client (§7.3).
-/// - **Not from the web build** until the server answers CORS
-///   (mostro-push-server#44, T4.5): the browser would block the request.
+/// - **From the web build too**: the server answers CORS once
+///   mostro-push-server#48 is deployed. A browser that cannot reach it logs the
+///   failure, like any other undelivered wake.
 pub(crate) fn wake_peer(peer_trade_pubkey: &str) {
-    #[cfg(target_arch = "wasm32")]
-    {
-        let _ = peer_trade_pubkey;
-    }
     #[cfg(not(target_arch = "wasm32"))]
-    {
-        if tokio::runtime::Handle::try_current().is_err() {
-            return;
-        }
-        let peer = peer_trade_pubkey.to_string();
-        crate::rt::spawn(async move {
-            let outcome = notify_peer_with(
-                &production_server(),
-                last_notify(),
-                &peer,
-                crate::rt::unix_now(),
-            )
-            .await;
-            log::debug!("[push] peer wake: {outcome:?}");
-        });
+    if tokio::runtime::Handle::try_current().is_err() {
+        return;
     }
+    let peer = peer_trade_pubkey.to_string();
+    crate::rt::spawn(async move {
+        let outcome = notify_peer_with(
+            &production_server(),
+            last_notify(),
+            &peer,
+            crate::rt::unix_now(),
+        )
+        .await;
+        log::debug!("[push] peer wake: {outcome:?}");
+    });
 }
 
 /// The wake, with its server, its debounce memory and its clock injected.
-#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 pub(crate) async fn notify_peer_with(
     server: &impl PushServer,
     last_notify: &std::sync::Mutex<HashMap<String, i64>>,
@@ -818,7 +810,6 @@ pub(crate) async fn notify_peer_with(
     }
 }
 
-#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 fn last_notify() -> &'static std::sync::Mutex<HashMap<String, i64>> {
     static LAST: std::sync::OnceLock<std::sync::Mutex<HashMap<String, i64>>> =
         std::sync::OnceLock::new();
@@ -868,6 +859,18 @@ mod tests {
     use std::sync::Mutex;
 
     const NOW: i64 = 1_800_000_000;
+
+    /// The web Settings line `pushWebStopsWithTab` promises push for 30 to
+    /// 48 h after the tab last ran: the server keeps a registration 48 h, and
+    /// a running tab re-sends one only once it is `REFRESH_SECS` old, which
+    /// the timer notices up to `TIMER_SECS` late. Changing either constant
+    /// changes that copy.
+    #[test]
+    fn web_push_outlives_the_tab_by_the_window_settings_states() {
+        const SERVER_TTL_SECS: i64 = 48 * 3600;
+        let oldest_at_close = crate::mostro::push::REFRESH_SECS + TIMER_SECS as i64;
+        assert_eq!(SERVER_TTL_SECS - oldest_at_close, 30 * 3600);
+    }
     const NODE_A: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
     const NODE_B: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
     const K1: &str = "1111111111111111111111111111111111111111111111111111111111111111";

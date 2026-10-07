@@ -70,6 +70,79 @@ void main() {
       expect(_chat(OrderStatus.success).canCompose, isFalse);
     });
 
+    group('the grace window after a completed trade (#642)', () {
+      const doneAt = 1700000000;
+      ChatRowState completed(
+        OrderStatus status, {
+        int? completedAt,
+        int? now,
+      }) => ChatRowState.of(
+        status: status,
+        trade: TradeRowState.of(
+          status: status,
+          isBuyer: true,
+          ratedByMe: false,
+          canRate: true,
+        ),
+        completedAt: completedAt,
+        now: now ?? doneAt,
+      );
+
+      test('a completed trade keeps its conversation open for an hour', () {
+        final row = completed(
+          OrderStatus.success,
+          completedAt: doneAt,
+          now: doneAt + kPeerChatGraceSeconds - 1,
+        );
+        expect(row.group, ChatGroup.active);
+        expect(row.canCompose, isTrue);
+        expect(row.isReadOnly, isFalse);
+      });
+
+      test('and closes once the hour is over', () {
+        final row = completed(
+          OrderStatus.success,
+          completedAt: doneAt,
+          now: doneAt + kPeerChatGraceSeconds,
+        );
+        expect(row.group, ChatGroup.closed);
+        expect(row.isReadOnly, isTrue);
+      });
+
+      test('a completion with no recorded time stays closed', () {
+        expect(completed(OrderStatus.success).isReadOnly, isTrue);
+      });
+
+      test('only a success opens a window', () {
+        for (final status in [
+          OrderStatus.canceled,
+          OrderStatus.cooperativelyCanceled,
+          OrderStatus.expired,
+          OrderStatus.canceledByAdmin,
+          OrderStatus.settledByAdmin,
+          OrderStatus.completedByAdmin,
+        ]) {
+          expect(
+            completed(status, completedAt: doneAt).isReadOnly,
+            isTrue,
+            reason: '$status',
+          );
+        }
+      });
+
+      test('chatGraceEndsAt dates the end of the window', () {
+        expect(
+          chatGraceEndsAt(status: OrderStatus.success, completedAt: doneAt),
+          doneAt + kPeerChatGraceSeconds,
+        );
+        expect(chatGraceEndsAt(status: OrderStatus.success), isNull);
+        expect(
+          chatGraceEndsAt(status: OrderStatus.canceled, completedAt: doneAt),
+          isNull,
+        );
+      });
+    });
+
     test('only a closed conversation is read-only', () {
       expect(_chat(OrderStatus.success).isReadOnly, isTrue);
       expect(_chat(OrderStatus.active).isReadOnly, isFalse);

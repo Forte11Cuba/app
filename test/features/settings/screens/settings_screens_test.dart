@@ -79,11 +79,15 @@ List<Override> _overrides({
   List<RelayInfo>? relays,
   NwcWalletState? wallet,
   bool permissionDenied = false,
+  bool permissionUnasked = false,
+  Future<void> Function()? requestPermission,
   bool pushSupported = true,
+  bool pushExpiresWithTab = false,
   PushStatus? push,
   PushToggle? toggle,
 }) => [
   pushSupportedProvider.overrideWithValue(pushSupported),
+  pushExpiresWithTabProvider.overrideWithValue(pushExpiresWithTab),
   pushStatusProvider.overrideWith((ref) => Stream.value(push ?? _push())),
   pushToggleProvider.overrideWithValue(toggle ?? _RecordingToggle()),
   relayListLoaderProvider.overrideWithValue(() async => relays ?? _mixedRelays),
@@ -99,6 +103,12 @@ List<Override> _overrides({
   appVersionProvider.overrideWith((ref) async => '2.0.1'),
   notificationPermissionDeniedProvider.overrideWith(
     (ref) async => permissionDenied,
+  ),
+  notificationPermissionUnaskedProvider.overrideWith(
+    (ref) async => permissionUnasked,
+  ),
+  requestNotificationPermissionProvider.overrideWithValue(
+    requestPermission ?? () async {},
   ),
   if (wallet != null)
     nwcProvider.overrideWith((ref) => _FixedNwc(wallet))
@@ -515,6 +525,39 @@ void main() {
       },
     );
 
+    // Web has no OS job to refresh the registration once the tab is closed,
+    // and the push server forgets it 48 h after the last one, which a running
+    // tab sent 12 to 18 h earlier at most (docs/PUSH_NOTIFICATIONS.md §2.6,
+    // §9.1).
+    testWidgets('on the web the toggle says when push stops', (tester) async {
+      await _pump(
+        tester,
+        const NotificationSettingsScreen(),
+        overrides: _overrides(pushExpiresWithTab: true),
+      );
+
+      expect(
+        find.text('Stops 30 to 48 h after this tab last ran Mostro'),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('off the web the toggle does not mention a tab', (
+      tester,
+    ) async {
+      await _pump(
+        tester,
+        const NotificationSettingsScreen(),
+        overrides: _overrides(),
+      );
+
+      expect(_masterToggle, findsOneWidget);
+      expect(
+        find.text('Stops 30 to 48 h after this tab last ran Mostro'),
+        findsNothing,
+      );
+    });
+
     testWidgets('an unsupported platform shows an info row, not a toggle', (
       tester,
     ) async {
@@ -567,6 +610,54 @@ void main() {
       }
       // Turning push off still unregisters every trade from the server.
       expect(tester.widget<MostroToggle>(_masterToggle).onChanged, isNotNull);
+    });
+
+    testWidgets('an unasked browser permission is offered as a tap', (
+      tester,
+    ) async {
+      var asked = 0;
+      await _pump(
+        tester,
+        const NotificationSettingsScreen(),
+        overrides: _overrides(
+          permissionUnasked: true,
+          requestPermission: () async => asked++,
+        ),
+      );
+
+      expect(
+        find.textContaining('not been allowed to show notifications'),
+        findsOneWidget,
+      );
+      await tester.tap(find.text('Allow notifications'));
+      await tester.pump();
+      expect(asked, 1);
+    });
+
+    testWidgets('no permission tap while push is off', (tester) async {
+      await _pump(
+        tester,
+        const NotificationSettingsScreen(),
+        overrides: _overrides(
+          permissionUnasked: true,
+          push: _push(enabled: false),
+        ),
+      );
+
+      expect(find.text('Allow notifications'), findsNothing);
+    });
+
+    testWidgets('a denied permission shows its own banner, not the tap', (
+      tester,
+    ) async {
+      await _pump(
+        tester,
+        const NotificationSettingsScreen(),
+        overrides: _overrides(permissionUnasked: true, permissionDenied: true),
+      );
+
+      expect(find.text('Allow notifications'), findsNothing);
+      expect(find.text('Open settings'), findsOneWidget);
     });
 
     testWidgets('toggling an event persists it', (tester) async {

@@ -51,8 +51,8 @@ class AppLocalizationsIt extends AppLocalizations {
   String get orderDispute => 'Disputa ordine';
 
   @override
-  String get disputeAdminAssigned =>
-      'Un amministratore è stato assegnato alla tua disputa. Ti contatterà qui a breve.';
+  String get disputeSolverAssigned =>
+      'Un mediatore ha preso in carico la tua disputa. Ti contatterà qui a breve.';
 
   @override
   String get disputeChatClosed =>
@@ -86,36 +86,70 @@ class AppLocalizationsIt extends AppLocalizations {
       'L\'ordine è stato annullato cooperativamente. Nessun fondo è stato trasferito.';
 
   @override
-  String disputeWithBuyer(String handle) {
-    return 'Controversia con l\'Acquirente: $handle';
-  }
-
-  @override
-  String disputeWithSeller(String handle) {
-    return 'Controversia con il Venditore: $handle';
-  }
-
-  @override
   String orderLabel(String orderId) {
     return 'Ordine $orderId';
   }
 
   @override
-  String get disputeInitiated => 'Avviato';
+  String get disputeStatusClosed => 'Chiusa';
 
   @override
-  String get disputeInProgress => 'In corso';
+  String disputeWith(String role, String counterparty) {
+    return 'Controversia con $role: $counterparty';
+  }
 
   @override
-  String get disputeStatusClosed => 'Chiuso';
+  String get seller => 'Venditore';
+
+  @override
+  String get buyer => 'Compratore';
+
+  @override
+  String get disputeStatusInitiated => 'Avviata';
+
+  @override
+  String get disputeStatusInProgress => 'In corso';
+
+  @override
+  String get disputeStatusResolved => 'Risolta';
+
+  @override
+  String get disputeInProgress =>
+      'Questa disputa è attualmente in corso. Un risolutore sta esaminando il tuo caso.';
+
+  @override
+  String get disputeInstruction1 =>
+      'Attendi che un risolutore prenda in carico la tua disputa. Una volta arrivato, condividi qualsiasi prova rilevante per aiutare a chiarire la situazione.';
+
+  @override
+  String get disputeInstruction2 =>
+      'La decisione finale sarà presa sulla base delle prove presentate.';
+
+  @override
+  String get disputeInstruction3 =>
+      'Se non rispondi, il sistema presumerà che tu non voglia collaborare e potresti perdere la disputa.';
+
+  @override
+  String disputeOpenedByYouAgainstSeller(String counterparty) {
+    return 'Hai aperto questa disputa contro il venditore $counterparty, leggi attentamente di seguito:';
+  }
+
+  @override
+  String disputeOpenedByYouAgainstBuyer(String counterparty) {
+    return 'Hai aperto questa disputa contro l\'acquirente $counterparty, leggi attentamente di seguito:';
+  }
+
+  @override
+  String get disputeWaitingForAdmin =>
+      'In attesa di assegnazione amministratore';
 
   @override
   String get disputeLostFundsToBuyer =>
-      'L\'amministratore ha risolto la controversia a favore dell\'acquirente. I sats sono stati rilasciati all\'acquirente.';
+      'Il mediatore ha risolto la controversia a favore dell\'acquirente. I sats sono stati rilasciati all\'acquirente.';
 
   @override
   String get disputeLostFundsToSeller =>
-      'L\'amministratore ha annullato l\'ordine e restituito i sats al venditore. Non hai ricevuto i sats.';
+      'Il mediatore ha annullato l\'ordine e restituito i sats al venditore. Non hai ricevuto i sats.';
 
   @override
   String get walkthroughSlideOneTitle =>
@@ -144,7 +178,7 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get walkthroughSlideFourBody =>
-      'Ogni operazione ha la propria chat privata, cifrata end-to-end. Solo i due utenti coinvolti possono leggerla. In caso di disputa, puoi fornire la chiave condivisa a un amministratore per aiutare a risolvere il problema.';
+      'Ogni operazione ha la propria chat privata, cifrata end-to-end. Solo i due utenti coinvolti possono leggerla. In caso di disputa, puoi fornire la chiave condivisa a un mediatore per aiutare a risolvere il problema.';
 
   @override
   String get walkthroughSlideFiveTitle => 'Prendi un\'offerta';
@@ -239,9 +273,6 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get comingSoonMessage => 'Prossimamente';
-
-  @override
-  String get tradeStatusActive => 'Attivo';
 
   @override
   String get tradeStatusCompleted => 'Completato';
@@ -985,7 +1016,7 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get openDisputeConfirmation =>
-      'Sei sicuro di voler aprire una contestazione? Questo inoltra lo scambio a un amministratore e non può essere annullato.';
+      'Sei sicuro di voler aprire una contestazione? Questo inoltra lo scambio a un mediatore e non può essere annullato.';
 
   @override
   String get disputeAlreadyOpen =>
@@ -1229,7 +1260,7 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get notifDisputeUpdatesSubtitle =>
-      'Azioni degli amministratori e risoluzioni delle dispute';
+      'Azioni dei mediatori e risoluzioni delle dispute';
 
   @override
   String get searchCurrenciesHint => 'Cerca valute…';
@@ -1472,13 +1503,17 @@ class AppLocalizationsIt extends AppLocalizations {
   String get tradeInformationTitle => 'Informazioni operazione';
 
   @override
-  String get orderIdLabel => 'ID ordine';
+  String get orderIdLabel => 'ID Ordine';
 
   @override
   String get fiatAmountLabel => 'Importo fiat';
 
   @override
   String get satsAmountLabel => 'Importo in sats';
+
+  @override
+  String get peerReputationUnavailable =>
+      'La reputazione di questo utente non è disponibile';
 
   @override
   String get statusLabel => 'Stato';
@@ -1490,25 +1525,7 @@ class AppLocalizationsIt extends AppLocalizations {
   String get createdLabel => 'Creata';
 
   @override
-  String get tradeDetailsPlaceholder =>
-      'Dettagli disponibili quando il provider di operazioni sarà pronto (Fase 10+)';
-
-  @override
   String get userInformationTitle => 'Informazioni utente';
-
-  @override
-  String get peerPublicKeyLabel => 'Chiave pubblica del peer';
-
-  @override
-  String get yourSharedKeyLabel => 'La tua chiave condivisa';
-
-  @override
-  String get sharedKeyPlaceholder =>
-      'Disponibile dopo l\'integrazione del bridge (Fase 10+)';
-
-  @override
-  String get sharedKeySafetyNote =>
-      'Conserva la tua chiave condivisa al sicuro — è necessaria per la risoluzione delle dispute';
 
   @override
   String get fileTypeVideo => 'Video';
@@ -1567,7 +1584,7 @@ class AppLocalizationsIt extends AppLocalizations {
   String get enterInvoiceManually => 'Inserisci la fattura manualmente';
 
   @override
-  String get submitButton => 'Invia';
+  String get rangeAmountTakeAction => 'Prendi l\'ordine';
 
   @override
   String get buyerReputation => 'Reputazione dell\'acquirente';
@@ -1585,13 +1602,13 @@ class AppLocalizationsIt extends AppLocalizations {
   String get daysActiveStatLabel => 'giorni attivo';
 
   @override
-  String timeRemainingLabel(String time) {
-    return 'Tempo rimanente: $time';
+  String orderAmountOutOfRange(int min, int max) {
+    return 'L\'importo deve essere compreso tra $min e $max sats per questo nodo Mostro';
   }
 
   @override
-  String orderAmountOutOfRange(int min, int max) {
-    return 'L\'importo deve essere compreso tra $min e $max sats per questo nodo Mostro';
+  String orderCurrencyNotAccepted(String currency) {
+    return 'Questo nodo Mostro non accetta $currency. Scegli un\'altra valuta';
   }
 
   @override
@@ -1648,9 +1665,9 @@ class AppLocalizationsIt extends AppLocalizations {
     String _temp0 = intl.Intl.pluralLogic(
       count,
       locale: localeName,
-      other: '$count scelti',
-      one: '1 scelto',
-      zero: 'nessuno scelto',
+      other: '$count selezionati',
+      one: '1 selezionato',
+      zero: 'nessuno selezionato',
     );
     return '$_temp0';
   }
@@ -1794,7 +1811,7 @@ class AppLocalizationsIt extends AppLocalizations {
   String get disputeDetailsTitle => 'Dettagli della disputa';
 
   @override
-  String get disputeIdLabel => 'ID disputa';
+  String get disputeIdLabel => 'ID Controversia';
 
   @override
   String disputeReasonLabel(String reason) {
@@ -1802,7 +1819,18 @@ class AppLocalizationsIt extends AppLocalizations {
   }
 
   @override
-  String get adminLabel => 'Amministratore';
+  String get solverLabel => 'Mediatore';
+
+  @override
+  String get serberoLabel => 'Serbero';
+
+  @override
+  String get disputeSerberoAssigned =>
+      'Serbero, un assistente automatico, sta aiutando con la tua disputa. Ti farà alcune domande qui e passerà il caso a una persona se necessario.';
+
+  @override
+  String get disputeSolverTookOver =>
+      'Un mediatore ha preso in carico la tua disputa.';
 
   @override
   String get disputeScreenTitle => 'Disputa';
@@ -2113,9 +2141,6 @@ class AppLocalizationsIt extends AppLocalizations {
   String get aboutCashuMintUrlLabel => 'Mint';
 
   @override
-  String get aboutCashuMintNotAdvertised => 'Non dichiarata';
-
-  @override
   String get aboutCashuLocktimeLabel => 'Blocco del deposito';
 
   @override
@@ -2196,6 +2221,13 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get tradeChatEncrypted => 'Chat cifrata end-to-end';
+
+  @override
+  String get tradeChatClosed => 'Conversazione chiusa · vedi i messaggi';
+
+  @override
+  String get tradeChatClosedAnnouncement =>
+      'La conversazione è chiusa. Puoi ancora leggere i suoi messaggi';
 
   @override
   String get tradeBodyWaitingPaymentBuyer =>
@@ -2431,6 +2463,9 @@ class AppLocalizationsIt extends AppLocalizations {
   String get takeOrderUnavailable => 'Non più disponibile';
 
   @override
+  String get takeOrderFailed => 'Impossibile prendere l\'ordine. Riprova.';
+
+  @override
   String get takeOrderClosed => 'Chiusa';
 
   @override
@@ -2541,6 +2576,13 @@ class AppLocalizationsIt extends AppLocalizations {
   String get openSystemSettingsAction => 'Apri impostazioni';
 
   @override
+  String get notificationsPermissionNotAsked =>
+      'Questo browser non è ancora autorizzato a mostrare notifiche.';
+
+  @override
+  String get allowNotificationsAction => 'Consenti le notifiche';
+
+  @override
   String get notificationsPrivacyFootnote =>
       'Le notifiche non includono importi né controparti. Un push passa dai server di Google o di Apple e dice solo che c’è qualcosa da vedere.';
 
@@ -2550,6 +2592,10 @@ class AppLocalizationsIt extends AppLocalizations {
   @override
   String get pushMasterToggleSubtitle =>
       'Risveglia l’app quando arriva un aggiornamento di scambio o un messaggio. La notifica in sé non contiene nulla.';
+
+  @override
+  String get pushWebStopsWithTab =>
+      'Si ferma tra 30 e 48 h dopo l’ultima volta che questa scheda ha aperto Mostro';
 
   @override
   String get pushStatusOff => 'Disattivate: nulla è registrato sul server push';
@@ -2949,7 +2995,7 @@ class AppLocalizationsIt extends AppLocalizations {
   String get bondTitle => 'Deposito di garanzia';
 
   @override
-  String get bondRefundableLabel => 'DEPOSITO RIMBORSABILE';
+  String get bondRefundableLabel => 'Deposito rimborsabile';
 
   @override
   String get bondComesBack => 'torna a te al completamento';
@@ -3006,9 +3052,8 @@ class AppLocalizationsIt extends AppLocalizations {
       'Mostro non custodisce fondi, quindi non può penalizzare chi abbandona uno scambio; il deposito fa quel lavoro e protegge tutti gli utenti dai truffatori.';
 
   @override
-  String bondWhyHold(String hold) {
-    return 'È una fattura $hold: il wallet riserva i sats senza inviarli; al completamento, la riserva si annulla da sola.';
-  }
+  String get bondWhyHold =>
+      'Il tuo wallet trattiene i sats senza inviarli; al completamento dello scambio, vengono liberati da soli.';
 
   @override
   String get bondWhyDispute =>
@@ -3085,6 +3130,20 @@ class AppLocalizationsIt extends AppLocalizations {
   String get bondRemoveFromDevice => 'Rimuovi da questo dispositivo';
 
   @override
+  String get bondLeaveMakerTitle => 'Non pubblicare questo ordine?';
+
+  @override
+  String get bondLeaveMakerBody =>
+      'L\'ordine non viene pubblicato e la sua fattura di deposito viene annullata.';
+
+  @override
+  String get bondLeaveTakerTitle => 'Non prendere questo ordine?';
+
+  @override
+  String get bondLeaveTakerBody =>
+      'L\'ordine resta nel registro per gli altri e la fattura di deposito viene annullata.';
+
+  @override
   String get bondKeepWaiting => 'Continua ad aspettare';
 
   @override
@@ -3100,7 +3159,7 @@ class AppLocalizationsIt extends AppLocalizations {
   String get bondClaimTitle => 'Reclama la tua parte';
 
   @override
-  String get bondClaimShareLabel => 'LA TUA PARTE';
+  String get bondClaimShareLabel => 'La tua parte';
 
   @override
   String bondClaimShareSemantics(String sats) {
@@ -3290,9 +3349,6 @@ class AppLocalizationsIt extends AppLocalizations {
       'Il nodo non ha reinviato la fattura del deposito';
 
   @override
-  String get invoiceOrderIdCopied => 'ID dell\'ordine copiato';
-
-  @override
   String get invoiceYouReceiveLabel => 'Riceverai';
 
   @override
@@ -3408,9 +3464,8 @@ class AppLocalizationsIt extends AppLocalizations {
   String get invoiceOpenWallet => 'Apri nel mio wallet';
 
   @override
-  String invoiceHoldNote(String hold) {
-    return 'È una fattura $hold: i sats restano bloccati, non lasciano il tuo wallet finché non confermi il pagamento dell\'acquirente.';
-  }
+  String get invoiceHoldNote =>
+      'I sats restano trattenuti: non lasciano il tuo wallet finché non confermi il pagamento dell\'acquirente.';
 
   @override
   String invoiceQrSemantics(String invoice) {
@@ -3443,6 +3498,12 @@ class AppLocalizationsIt extends AppLocalizations {
   String invoiceCountdownHours(String hours, String minutes) {
     return '$hours h $minutes';
   }
+
+  @override
+  String get countdownExpiresInLabel => 'Scade tra';
+
+  @override
+  String get bondPayWithinLabel => 'Paga entro';
 
   @override
   String get tradeCardWaitingBuyerInvoiceTitle =>
@@ -3597,6 +3658,10 @@ class AppLocalizationsIt extends AppLocalizations {
       'Il tuo account non è sincronizzato con questo nodo Mostro, che ha quindi rifiutato l\'ordine. Riprova tra un momento';
 
   @override
+  String get invalidFiatCurrencyError =>
+      'Questo nodo Mostro non accetta questa valuta, quindi ha rifiutato l\'ordine. Scegli un\'altra valuta';
+
+  @override
   String get recoveringTradesMessage =>
       'Account importato. Recupero dei tuoi scambi da Mostro…';
 
@@ -3617,7 +3682,7 @@ class AppLocalizationsIt extends AppLocalizations {
       'Account importato, ma Mostro non ha risposto: i tuoi scambi in corso non sono stati recuperati';
 
   @override
-  String get paymentMethodsChosenLabel => 'Scelti';
+  String get paymentMethodsChosenLabel => 'Selezionati';
 
   @override
   String paymentMethodsSelectedCount(int count) {
@@ -3626,7 +3691,7 @@ class AppLocalizationsIt extends AppLocalizations {
       locale: localeName,
       other: '$count metodi selezionati',
       one: '1 metodo selezionato',
-      zero: 'Scegli almeno un metodo',
+      zero: 'Seleziona almeno un metodo',
     );
     return '$_temp0';
   }
@@ -4082,8 +4147,8 @@ class AppLocalizationsIt extends AppLocalizations {
       'Il tuo deposito è bloccato ma il nodo non lo ha confermato. Riprovare è sicuro: non verrà bloccato una seconda volta.';
 
   @override
-  String get lockEscrowMintUnknown =>
-      'Questo nodo non ha pubblicato il suo mint, quindi non c\'è dove bloccare l\'escrow.';
+  String get lockEscrowMintNotSupported =>
+      'Questo nodo lascia che ogni ordine scelga il proprio mint, e questa versione dell\'app può bloccare l\'escrow solo su un nodo con un solo mint.';
 
   @override
   String get lockEscrowNotRecorded =>
@@ -4124,4 +4189,50 @@ class AppLocalizationsIt extends AppLocalizations {
   @override
   String get tradeBodyWaitingPaymentBuyerCashu =>
       'Stanno bloccando i sats nell\'escrow. Una volta bloccato, tocca a te pagare il fiat.';
+
+  @override
+  String get shareChatKeyAction =>
+      'Condividi la chiave della chat con il mediatore';
+
+  @override
+  String get shareChatKeyTitle =>
+      'Condividere la chiave della chat con il mediatore?';
+
+  @override
+  String get shareChatKeyBody =>
+      'Se confermi, il mediatore di questa controversia potrà leggere l\'intera chat tra te e la tua controparte in questo ordine, e solo quella chat: non le chat delle tue operazioni precedenti o successive. L\'operazione non può essere annullata. La condivisione è facoltativa, ma aiuta il mediatore a risolvere la controversia più rapidamente.';
+
+  @override
+  String get shareChatKeyConfirm => 'Condividi';
+
+  @override
+  String get chatKeySharedIndicator =>
+      'Chiave della chat condivisa con il mediatore';
+
+  @override
+  String get shareChatKeyUnavailable =>
+      'La chiave della chat di questa operazione non è disponibile su questo dispositivo.';
+
+  @override
+  String get moreReactions => 'Altre reazioni';
+
+  @override
+  String messageReactionLabel(String emoji) {
+    return 'Reazione: $emoji';
+  }
+
+  @override
+  String get reactionSendFailed => 'Impossibile inviare la reazione. Riprova.';
+
+  @override
+  String get messageMenuHint => 'Apri il menu del messaggio';
+
+  @override
+  String get cashuAnyMint => 'Qualsiasi mint';
+
+  @override
+  String get settingsMintLabel => 'Mint';
+
+  @override
+  String get settingsMintCopied => 'URL del mint copiato';
 }

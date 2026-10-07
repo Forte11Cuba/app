@@ -53,14 +53,15 @@ A buy or sell offer on the Mostro network.
 | cached_at | Timestamp | When this order was last fetched/updated locally |
 | rating | f64 | Maker reputation from the Kind 38383 `rating` tag (`total_rating`, 0–5; 0.0 = no reputation: full privacy (`none`), missing tag, or malformed/invalid data) |
 | total_reviews | u32 | Number of reviews behind `rating` (`total_reviews`) |
-| days_active | u32 | Days the maker has been active on the node (`days`) |
+| days_active | u32 | Days the maker has been active on the node (`days`, deprecated on the wire; the display fallback when `maker_since` is absent) |
+| maker_since | i64? | The maker's first trade (`since`): Unix seconds, truncated to the UTC day start. Null from daemons that predate it. The UI shows the age computed at display time (now − `maker_since`, whole days, never negative) and falls back to `days_active` |
 
 **Validation rules**:
 - `fiat_code` MUST be a valid ISO 4217 code.
 - Either `fiat_amount` OR both `fiat_amount_min` and `fiat_amount_max` MUST be provided, but NOT both. If `fiat_amount` is present, `fiat_amount_min` and `fiat_amount_max` MUST be absent; if `fiat_amount_min`/`fiat_amount_max` are present, `fiat_amount` MUST be absent.
 - If range: `fiat_amount_min` MUST be > 0 and < `fiat_amount_max`.
 - `premium` is a signed float (negative = discount).
-- `rating` MUST be within 0–5. Each reputation field (`rating`, `total_reviews`, `days_active`) is validated independently: an out-of-range, non-integer, or malformed value degrades that field alone to 0, and the order is never rejected because of its `rating` tag.
+- `rating` MUST be within 0–5. Each reputation field (`rating`, `total_reviews`, `days_active`) is validated independently: an out-of-range, non-integer, or malformed value degrades that field alone to 0, and the order is never rejected because of its `rating` tag. `maker_since` is likewise validated alone: anything but a positive integer that fits i64 leaves it null.
 
 **State machine** (15 mostro-core states):
 ```text
@@ -100,10 +101,15 @@ status" in `contracts/orders.md`.
 An active transaction linking buyer, seller, and order. Only one active
 trade at a time (v2.0 scope constraint).
 
+Stored as one row per trade: `id` is the primary key and every other field
+lives inside a JSON-serialised `TradeInfo` in `data`. There is **no
+`order_id` column** — the order's id sits in that blob at `$.order.id`, which
+is why the schema carries an expression index over it.
+
 | Field | Type | Description |
 |-------|------|-------------|
-| id | UUID | Trade identifier |
-| order_id | UUID | FK → Order |
+| id | UUID | **The row's own id, not the order's.** A take made on this device mints a fresh UUID here while `$.order.id` holds the id the daemon knows; a row rebuilt rather than taken — a replayed daemon message on a fresh device, a restored bond — reuses the order id for both. So the two may match or diverge, and neither case says whose row it is (`order.is_mine` and `role` carry that). No trade lookup uses this field: it exists so `save_trade` replaces a row instead of inserting a second one, which is why a rebuild carries it forward rather than minting a new one (issue #395) |
+| order.id | UUID | The daemon's id for the order, inside `data`. **Every accessor keys on this** — read, update, delete, and the chat's `messages.trade_id` — whether or not it equals the row's `id`. `get_trade`, which keyed on the primary key and so missed the rows where they diverge, was removed |
 | role | Enum | `Buyer` or `Seller` |
 | counterparty_pubkey | String | Other party's public key |
 | current_step | Enum | Current progress step (see below) |
@@ -114,7 +120,7 @@ trade at a time (v2.0 scope constraint).
 | cooperative_cancel_state | Enum? | `RequestedByMe`, `RequestedByPeer`, `Accepted`, null |
 | timeout_at | Timestamp? | When current state times out (set on take: `now + 900`; used by the stale-state sweep as its age gate) |
 | started_at | Timestamp | When trade began |
-| completed_at | Timestamp? | When trade finished (null if active) |
+| completed_at | Timestamp? | When the trade completed with `success` (issue #642): recorded (`db.mark_trade_completed`, first write wins, never later than now) before the `success` is written, from the `created_at` of what carried it — the buyer's `purchase-completed`, or the Kind 38383 `success` revision for the seller. Null while active, for every other ending, and for a `success` completed before #642 or at an unknown time; an admin verdict that later refines a replayed `success` leaves it in place. Dates the peer chat's one-hour grace window, which only a `success` row opens (`contracts/messages.md`) |
 | outcome | Enum? | `Success`, `Canceled`, `Expired`, `DisputeWon`, `DisputeLost` |
 | rated_at | Timestamp? | When the local user rated the counterparty; durable marker written by `db.mark_trade_rated` after `submit_rating` publishes (issue #339). "Did I rate this trade" is local knowledge nothing on the wire can rebuild, so the in-memory `RATING_STORE` rehydrates from this on restart — the store stays the cache, this is authoritative on load. The score itself is not persisted (the rated UI shows only a label) |
 | bond | BondInfo? | Anti-abuse bond the node required for this trade (`docs/ANTI_ABUSE_BOND.md` §7.1): `role` (`Maker`/`Taker`), `amount_sats`, `invoice` (the bond bolt11, `None` after a fresh-device restore), `state` (`Requested`/`Locked`/`Released`/`Slashed`), `requested_at`, `expires_at` (decoded from the bolt11), `locked_at`. Null on nodes without bonds and on rows written before the field |
@@ -153,7 +159,7 @@ disputes. Persisted locally after decryption.
 | Field | Type | Description |
 |-------|------|-------------|
 | id | UUID | Primary key |
-| trade_id | UUID | FK → Trade |
+| trade_id | UUID | The **order id**, which is what the chat keys are derived from — deliberately **not** a foreign key to `trades(id)`: a row whose own id diverges from its order's would fail that check and lose its history on restart (issue #246) |
 | sender_pubkey | String | Sender's public key |
 | recipient_pubkey | String | Recipient's public key |
 | content | String | Decrypted message text |

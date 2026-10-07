@@ -61,7 +61,11 @@ other end: the subscription never existed, and the `NOTICE` names none.
    re-issues a recorded one after 30 s, 2 min and 10 min, then waits for the relay's next
    `Connected` (#523). A trade that ends gives its own REQs back at once — its place in the
    d-tag REQ, its daemon-message watcher and chats (`release_finished_trade_subscriptions`) —
-   instead of holding them until an idle timeout. Every order we follow by d-tag shares one
+   instead of holding them until an idle timeout. The one deferral is a `success`'s peer chat,
+   held for its one-hour grace window (`PEER_CHAT_GRACE_SECS`, #642) and closed at its end by
+   `schedule_chat_grace_end` — or, when the window ended while the app was away, by the
+   resume's `resubscribe_active_chats` (a relay that reconnects first may be sent the expired
+   REQ again; the CLOSE follows). Every order we follow by d-tag shares one
    REQ, `mostro-orders-watched`, rebuilt by `sync_watched_orders` whenever the set of d-tag
    tasks changes: one REQ per order filled nos.lol's per-connection cap. strfry relays refuse a
    REQ past that cap with a `NOTICE` that names no subscription, so unlike a `CLOSED` there is

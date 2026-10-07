@@ -54,10 +54,21 @@ class ChatRowState {
   ///
   /// Closure comes from the protocol status, not from the trades list's
   /// group: a successful trade not rated yet sits in `Requieren tu acción`
-  /// there, but its conversation is over — Rust keeps a send to a finished
-  /// trade local, so a live composer would mislead the sender.
-  factory ChatRowState.of({OrderStatus? status, TradeRowState? trade}) {
-    if (status != null && isTradeFinished(status)) {
+  /// there, but its conversation is over once its grace window ends
+  /// ([chatGraceEndsAt], `now` in Unix seconds) — Rust gives the chat back
+  /// then, so a live composer would mislead the sender.
+  factory ChatRowState.of({
+    OrderStatus? status,
+    TradeRowState? trade,
+    int? completedAt,
+    int now = 0,
+  }) {
+    final graceEnd =
+        status == null
+            ? null
+            : chatGraceEndsAt(status: status, completedAt: completedAt);
+    final inGrace = graceEnd != null && now < graceEnd;
+    if (status != null && isTradeFinished(status) && !inGrace) {
       return const ChatRowState(
         group: ChatGroup.closed,
         tone: ChatAvatarTone.closed,
@@ -72,6 +83,21 @@ class ChatRowState {
     );
   }
 }
+
+/// How long the conversation of a successfully completed trade stays open,
+/// in seconds (#642): the parties tend to thank each other and announce
+/// their ratings. Mirrors Rust's `PEER_CHAT_GRACE_SECS`, which keeps the
+/// chat subscribed for as long.
+const kPeerChatGraceSeconds = 3600;
+
+/// When a completed trade's conversation closes (Unix seconds): the
+/// completion time Rust recorded plus [kPeerChatGraceSeconds]. Null for any
+/// status but `success`, and for a trade completed before the time was
+/// recorded — its conversation is closed.
+int? chatGraceEndsAt({required OrderStatus status, int? completedAt}) =>
+    status == OrderStatus.success && completedAt != null
+        ? completedAt + kPeerChatGraceSeconds
+        : null;
 
 /// Whether the trade has ended — completed (rated or not), settled by an
 /// admin, cancelled or expired. A dispute is not an end.

@@ -1,6 +1,5 @@
 import 'dart:async';
 
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mostro/features/order/providers/bond_providers.dart';
 import 'package:mostro/features/order/providers/trade_state_provider.dart';
@@ -15,40 +14,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../support/fake_trades.dart';
 import '../../../support/provider_harness.dart';
-
-/// A container whose trades are [trades], each live status taken from
-/// [live] (falling back to the persisted one), nobody rated, and every
-/// counterparty named `peer`.
-ProviderContainer _container(
-  List<TradeInfo> trades, {
-  Map<String, OrderStatus> live = const {},
-  List<BondClaim> claims = const [],
-}) => createContainer(
-  overrides: [
-    rawTradesProvider.overrideWith((ref) async => trades),
-    bondClaimsProvider.overrideWith((ref) async => claims),
-    for (final t in trades)
-      tradeStatusProvider(
-        t.order.id,
-      ).overrideWith((ref) => Stream.value(live[t.order.id] ?? t.order.status)),
-    for (final t in trades)
-      tradeRatingProvider(t.order.id).overrideWith((ref) async => null),
-    for (final t in trades)
-      peerNymProvider(t.counterpartyPubkey).overrideWith(
-        (ref) async =>
-            const NymIdentity(pseudonym: 'peer', iconIndex: 0, colorHue: 0),
-      ),
-  ],
-);
-
-Future<List<TradeRow>> _rows(ProviderContainer container) async {
-  // Subscribe first, as a screen would: the live status and the pseudonym
-  // are only fetched once something listens to the rows.
-  container.listen(tradeRowsProvider, (_, __) {});
-  await container.read(rawTradesProvider.future);
-  await pumpEventQueue();
-  return container.read(tradeRowsProvider).value!;
-}
+import '../../../support/trade_rows_harness.dart';
 
 BondClaim _claim(
   String orderId,
@@ -75,26 +41,27 @@ void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
   group('payout claims in the rows (docs/ANTI_ABUSE_BOND.md §8.3)', () {
-    test('a trade with a pending claim carries the badge and the verb',
-        () async {
-      final c = _container(
-        [fakeTrade(id: 'a', status: OrderStatus.canceled)],
-        claims: [_claim('order-a', BondClaimPhase.pending)],
-      );
-      final row = (await _rows(c)).single;
-      expect(row.claimBadge, TradeClaimBadge.payoutPending);
-      expect(row.claimOnly, isFalse);
-      expect(row.state.group, TradeGroup.needsAction);
-      expect(row.state.verb, TradeRowVerb.claimPayout);
-    });
+    test(
+      'a trade with a pending claim carries the badge and the verb',
+      () async {
+        final c = tradeRowsContainer(
+          [fakeTrade(id: 'a', status: OrderStatus.canceled)],
+          claims: [_claim('order-a', BondClaimPhase.pending)],
+        );
+        final row = (await loadTradeRows(c)).single;
+        expect(row.claimBadge, TradeClaimBadge.payoutPending);
+        expect(row.claimOnly, isFalse);
+        expect(row.state.group, TradeGroup.needsAction);
+        expect(row.state.verb, TradeRowVerb.claimPayout);
+      },
+    );
 
-    test('a claim whose trade row is gone renders a row of its own',
-        () async {
-      final c = _container(
+    test('a claim whose trade row is gone renders a row of its own', () async {
+      final c = tradeRowsContainer(
         [fakeTrade(id: 'a', status: OrderStatus.success)],
         claims: [_claim('order-gone', BondClaimPhase.acknowledged)],
       );
-      final rows = await _rows(c);
+      final rows = await loadTradeRows(c);
       expect(rows.map((r) => r.orderId), ['order-a', 'order-gone']);
       final claimRow = rows.last;
       expect(claimRow.claimOnly, isTrue);
@@ -103,63 +70,73 @@ void main() {
       expect(claimRow.paymentMethod, 'PagoMovil');
       expect(claimRow.startedAt, 500);
       expect(claimRow.state.group, TradeGroup.closed);
+      // No trade row is left to keep a conversation open.
+      expect(claimRow.rowStatus, OrderStatus.canceled);
     });
 
     test('an older expired claim never masks a newer open one', () async {
       // Newest first, as the core lists them: node-b's claim changed last
       // and is closed; node-a's older claim is still pending.
-      final c = _container(
+      final c = tradeRowsContainer(
         [fakeTrade(id: 'a', status: OrderStatus.canceled)],
         claims: [
-          _claim('order-a', BondClaimPhase.expired, node: 'node-b', updatedAt: 900),
+          _claim(
+            'order-a',
+            BondClaimPhase.expired,
+            node: 'node-b',
+            updatedAt: 900,
+          ),
           _claim('order-a', BondClaimPhase.pending, updatedAt: 600),
         ],
       );
-      final row = (await _rows(c)).single;
+      final row = (await loadTradeRows(c)).single;
       expect(row.claimBadge, TradeClaimBadge.payoutPending);
       expect(row.state.verb, TradeRowVerb.claimPayout);
     });
 
     test('an expired claim adds nothing', () async {
-      final c = _container(
+      final c = tradeRowsContainer(
         const [],
         claims: [_claim('order-x', BondClaimPhase.expired)],
       );
-      expect(await _rows(c), isEmpty);
+      expect(await loadTradeRows(c), isEmpty);
     });
   });
 
   group('tradeRowsProvider', () {
     test('the live status wins over the persisted one', () async {
-      final c = _container(
+      final c = tradeRowsContainer(
         [fakeTrade(id: 'a', status: OrderStatus.waitingPayment)],
         live: {'order-a': OrderStatus.active},
       );
-      final row = (await _rows(c)).single;
+      final row = (await loadTradeRows(c)).single;
       expect(row.status, OrderStatus.active);
       // The fixture is a buyer: active means the fiat is theirs to send.
       expect(row.state.verb, TradeRowVerb.sendPayment);
     });
 
     test('a terminal trade keeps its persisted status', () async {
-      final c = _container(
+      final c = tradeRowsContainer(
         [fakeTrade(id: 'a', status: OrderStatus.canceled)],
         live: {'order-a': OrderStatus.active},
       );
-      expect((await _rows(c)).single.status, OrderStatus.canceled);
+      expect((await loadTradeRows(c)).single.status, OrderStatus.canceled);
     });
 
     test('a take keeps its own status over a public pending', () async {
       // A take parked at its bond: publicly the order is still `pending`.
-      final c = _container(
+      final c = tradeRowsContainer(
         [fakeTrade(id: 'a', status: OrderStatus.waitingTakerBond)],
         live: {'order-a': OrderStatus.pending},
       );
-      expect((await _rows(c)).single.status, OrderStatus.waitingTakerBond);
+      expect(
+        (await loadTradeRows(c)).single.status,
+        OrderStatus.waitingTakerBond,
+      );
     });
 
     test("a maker's pending order still follows the book", () async {
-      final c = _container(
+      final c = tradeRowsContainer(
         [
           fakeTrade(
             id: 'a',
@@ -169,12 +146,12 @@ void main() {
         ],
         live: {'order-a': OrderStatus.pending},
       );
-      expect((await _rows(c)).single.status, OrderStatus.pending);
+      expect((await loadTradeRows(c)).single.status, OrderStatus.pending);
     });
 
     test('a durable rating marker closes a successful trade', () async {
       final rated = fakeTrade(id: 'a', status: OrderStatus.success);
-      final c = _container([
+      final c = tradeRowsContainer([
         TradeInfo(
           id: rated.id,
           order: rated.order,
@@ -187,18 +164,52 @@ void main() {
           ratedAt: 2000,
         ),
       ]);
-      expect((await _rows(c)).single.state.group, TradeGroup.closed);
+      expect((await loadTradeRows(c)).single.state.group, TradeGroup.closed);
     });
 
     test('names the counterparty once its key is known', () async {
-      final c = _container([fakeTrade(id: 'a')]);
-      expect((await _rows(c)).single.peerHandle, 'peer');
+      final c = tradeRowsContainer([fakeTrade(id: 'a')]);
+      expect((await loadTradeRows(c)).single.peerHandle, 'peer');
     });
+
+    test(
+      'a completed trade carries the time Rust recorded it (#642)',
+      () async {
+        final c = tradeRowsContainer([
+          fakeTrade(id: 'a', status: OrderStatus.success, completedAt: 1500),
+        ]);
+        final row = (await loadTradeRows(c)).single;
+        expect(row.completedAt, 1500);
+        expect(row.rowStatus, OrderStatus.success);
+      },
+    );
+
+    test(
+      'the row status stays the persisted one under a live status',
+      () async {
+        // A seller's row still at the release while the book already says
+        // success: the card shows the book, the conversation follows the row.
+        final c = tradeRowsContainer(
+          [
+            fakeTrade(
+              id: 'a',
+              status: OrderStatus.settledHoldInvoice,
+              role: TradeRole.seller,
+            ),
+          ],
+          live: {'order-a': OrderStatus.success},
+        );
+        final row = (await loadTradeRows(c)).single;
+        expect(row.status, OrderStatus.success);
+        expect(row.rowStatus, OrderStatus.settledHoldInvoice);
+        expect(row.completedAt, isNull);
+      },
+    );
   });
 
   group('needsActionCountProvider', () {
     test('counts only the trades whose next step is the user\'s', () async {
-      final c = _container([
+      final c = tradeRowsContainer([
         fakeTrade(id: 'buyer-active', status: OrderStatus.active),
         fakeTrade(
           id: 'seller-active',
@@ -207,17 +218,17 @@ void main() {
         ),
         fakeTrade(id: 'done', status: OrderStatus.canceled),
       ]);
-      await _rows(c);
+      await loadTradeRows(c);
       expect(c.read(needsActionCountProvider), 1);
       // The tab badge is the same figure.
       expect(c.read(orderBookNotificationCountProvider), 1);
     });
 
     test('ignores the list filter', () async {
-      final c = _container([
+      final c = tradeRowsContainer([
         fakeTrade(id: 'buyer-active', status: OrderStatus.active),
       ]);
-      await _rows(c);
+      await loadTradeRows(c);
       await c
           .read(tradeListFilterProvider.notifier)
           .select(TradeListFilter.cancelled);
@@ -227,11 +238,11 @@ void main() {
 
   group('groupedTradeRowsProvider', () {
     test('applies the filter before grouping', () async {
-      final c = _container([
+      final c = tradeRowsContainer([
         fakeTrade(id: 'active', status: OrderStatus.active, startedAt: 5),
         fakeTrade(id: 'gone', status: OrderStatus.canceled, startedAt: 9),
       ]);
-      await _rows(c);
+      await loadTradeRows(c);
       await c
           .read(tradeListFilterProvider.notifier)
           .select(TradeListFilter.cancelled);
@@ -279,12 +290,12 @@ void main() {
     test(
       'null until the trades load, then the ids that need the user',
       () async {
-        final c = _container([
+        final c = tradeRowsContainer([
           fakeTrade(id: 'buyer-active', status: OrderStatus.active),
           fakeTrade(id: 'done', status: OrderStatus.canceled),
         ]);
         expect(c.read(needsActionIdsProvider), isNull);
-        await _rows(c);
+        await loadTradeRows(c);
         expect(c.read(needsActionIdsProvider), {'order-buyer-active'});
       },
     );
@@ -327,14 +338,14 @@ void main() {
           ],
         );
 
-        final row = (await _rows(c)).single;
+        final row = (await loadTradeRows(c)).single;
         expect(row.state.group, TradeGroup.closed);
         expect(row.state.chip, TradeChipLabel.completed);
       },
     );
 
     test('not yet rated, the released trade asks the seller to rate', () async {
-      final c = _container([
+      final c = tradeRowsContainer([
         fakeTrade(
           id: 'released',
           status: OrderStatus.settledHoldInvoice,
@@ -342,7 +353,7 @@ void main() {
         ),
       ]);
 
-      final row = (await _rows(c)).single;
+      final row = (await loadTradeRows(c)).single;
       expect(row.state.needsAction, isTrue);
       expect(row.state.verb, TradeRowVerb.rate);
     });
