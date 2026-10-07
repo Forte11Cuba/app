@@ -1590,7 +1590,7 @@ class AppLocalizationsFr extends AppLocalizations {
   String get enterInvoiceManually => 'Saisir la facture manuellement';
 
   @override
-  String get submitButton => 'Envoyer';
+  String get rangeAmountTakeAction => 'Prendre l\'ordre';
 
   @override
   String get buyerReputation => 'Réputation de l\'acheteur';

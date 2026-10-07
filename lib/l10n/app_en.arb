@@ -2016,9 +2016,9 @@
   "@enterInvoiceManually": {
     "description": "Button to switch to manual invoice entry"
   },
-  "submitButton": "Submit",
-  "@submitButton": {
-    "description": "Generic submit button label"
+  "rangeAmountTakeAction": "Take order",
+  "@rangeAmountTakeAction": {
+    "description": "Answer of the range amount dialog, opened from the take-order button. Same wording as takeOrderButton (DS-CMP-26)."
   },
   "buyerReputation": "Buyer reputation",
   "@buyerReputation": {

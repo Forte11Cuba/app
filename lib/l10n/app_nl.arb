@@ -461,7 +461,7 @@
   "waitingForTradeAmount": "Wachten op het handelsbedrag. Probeer het zo weer.",
   "fetchingTradeAmount": "Handelsbedrag ophalen…",
   "enterInvoiceManually": "Invoice handmatig invullen",
-  "submitButton": "Versturen",
+  "rangeAmountTakeAction": "Order accepteren",
   "buyerReputation": "Reputatie van de koper",
   "sellerReputation": "Reputatie van de verkoper",
   "ratingStatLabel": "beoordeling",

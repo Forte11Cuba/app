@@ -502,7 +502,7 @@ class _PrimaryButton extends StatelessWidget {
                   height: 18,
                   child: CircularProgressIndicator(strokeWidth: 2, color: ink),
                 )
-                : Text(action.label),
+                : _ActionLabel(action.label),
       ),
       action.automationId,
     );
@@ -531,11 +531,26 @@ class _SecondaryButton extends StatelessWidget {
           ),
           textStyle: _secondaryTextStyle,
         ),
-        child: Text(action.label),
+        child: _ActionLabel(action.label),
       ),
       action.automationId,
     );
   }
+}
+
+/// An action's label: one line, shrunk to fit rather than breaking the
+/// word (DS-TYP-7). A stacked footer gives it the full width first; this
+/// covers a label that is still too wide there, as German at 2x text is.
+class _ActionLabel extends StatelessWidget {
+  const _ActionLabel(this.label);
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) => FittedBox(
+    fit: BoxFit.scaleDown,
+    child: Text(label, maxLines: 1),
+  );
 }
 
 Color _fillOf(OrderBookPalette book, ModalTone tone) => switch (tone) {

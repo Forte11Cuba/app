@@ -144,7 +144,7 @@ class _RangeAmountDialogState extends State<_RangeAmountDialog> {
         onPressed: () => Navigator.pop(context),
       ),
       primary: ModalAction(
-        label: l10n.submitButton,
+        label: l10n.rangeAmountTakeAction,
         onPressed: _isValid ? () => Navigator.pop(context, _parsed) : null,
         automationId: AutomationIds.orderTakeAmountConfirm,
       ),

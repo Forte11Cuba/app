@@ -1582,7 +1582,7 @@ class AppLocalizationsNl extends AppLocalizations {
   String get enterInvoiceManually => 'Invoice handmatig invullen';
 
   @override
-  String get submitButton => 'Versturen';
+  String get rangeAmountTakeAction => 'Order accepteren';
 
   @override
   String get buyerReputation => 'Reputatie van de koper';

@@ -1593,7 +1593,7 @@ class AppLocalizationsDe extends AppLocalizations {
   String get enterInvoiceManually => 'Rechnung manuell eingeben';
 
   @override
-  String get submitButton => 'Absenden';
+  String get rangeAmountTakeAction => 'Order annehmen';
 
   @override
   String get buyerReputation => 'Reputation des Käufers';
