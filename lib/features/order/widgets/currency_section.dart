@@ -32,12 +32,15 @@ final selectedFiatCurrencyProvider = Provider<FiatCurrency?>((ref) {
 /// The fiat codes the active node accepts ([activeNodeCurrenciesProvider]),
 /// or null when it sets no limit
 /// (an empty list, which mostrod reads as "any currency"). Also null while
-/// the cache is read, for a node never seen, or when the read fails: the
-/// form never waits on it, and the node still refuses a currency it does not
-/// take. A previous node's list is dropped, not kept, while a new one loads.
+/// the cache is first read, for a node never seen, or when the read fails:
+/// the form never waits on it, and the node still refuses a currency it does
+/// not take. A previous node's list is dropped, not kept, while a new one
+/// loads; a reread of the same node keeps its list until the read returns,
+/// so a refused currency stays refused meanwhile.
 final acceptedFiatCodesProvider = Provider.autoDispose<List<String>?>((ref) {
-  final codes =
-      ref.watch(activeNodeCurrenciesProvider).unwrapPrevious().valueOrNull;
+  final async = ref.watch(activeNodeCurrenciesProvider);
+  // isReloading: the active node changed. A plain invalidate is isRefreshing.
+  final codes = async.isReloading ? null : async.valueOrNull;
   return codes == null || codes.isEmpty ? null : codes;
 });
 

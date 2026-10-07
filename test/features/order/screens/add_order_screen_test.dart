@@ -560,6 +560,30 @@ void main() {
       expect(container.read(selectedFiatCodeProvider), 'ARS');
     });
 
+    testWidgets('a reread of the same node keeps a refused currency refused', (
+      tester,
+    ) async {
+      final byNode = {defaultMostroPubkey: Completer<List<String>>()};
+      final container = await _pump(tester, acceptedByNode: byNode);
+      await tester.enterText(_amountField(), '100');
+      container.read(selectedPaymentMethodsProvider.notifier).state = ['Zelle'];
+      byNode[defaultMostroPubkey]!.complete(const ['ARS']);
+      await tester.pumpAndSettle();
+      expect(_publishButton(tester).onPressed, isNull);
+
+      // The cache is written again and the local read is still pending.
+      byNode[defaultMostroPubkey] = Completer<List<String>>();
+      container.invalidate(activeNodeCurrenciesProvider);
+      await tester.pump();
+      await tester.pump();
+
+      expect(container.read(acceptedFiatCodesProvider), ['ARS']);
+      expect(_publishButton(tester).onPressed, isNull);
+
+      byNode[defaultMostroPubkey]!.complete(const ['ARS']);
+      await tester.pumpAndSettle();
+    });
+
     testWidgets('a pick survives the same list arriving again', (
       tester,
     ) async {
