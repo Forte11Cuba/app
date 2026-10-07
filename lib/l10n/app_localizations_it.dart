@@ -1607,6 +1607,11 @@ class AppLocalizationsIt extends AppLocalizations {
   }
 
   @override
+  String orderCurrencyNotAccepted(String currency) {
+    return 'Questo nodo Mostro non accetta $currency. Scegli un\'altra valuta';
+  }
+
+  @override
   String orderAmountOutOfRangeFiat(int min, int max, String currency) {
     return 'L\'importo deve essere compreso tra $min e $max $currency per questo nodo Mostro';
   }
@@ -3644,6 +3649,10 @@ class AppLocalizationsIt extends AppLocalizations {
   @override
   String get invalidTradeIndexError =>
       'Il tuo account non è sincronizzato con questo nodo Mostro, che ha quindi rifiutato l\'ordine. Riprova tra un momento';
+
+  @override
+  String get invalidFiatCurrencyError =>
+      'Questo nodo Mostro non accetta questa valuta, quindi ha rifiutato l\'ordine. Scegli un\'altra valuta';
 
   @override
   String get recoveringTradesMessage =>

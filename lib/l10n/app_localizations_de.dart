@@ -1616,6 +1616,11 @@ class AppLocalizationsDe extends AppLocalizations {
   }
 
   @override
+  String orderCurrencyNotAccepted(String currency) {
+    return 'Dieser Mostro-Knoten akzeptiert $currency nicht. Wähle eine andere Währung';
+  }
+
+  @override
   String orderAmountOutOfRangeFiat(int min, int max, String currency) {
     return 'Der Betrag muss für diesen Mostro-Knoten zwischen $min und $max $currency liegen';
   }
@@ -3657,6 +3662,10 @@ class AppLocalizationsDe extends AppLocalizations {
   @override
   String get invalidTradeIndexError =>
       'Dein Konto ist nicht mit diesem Mostro-Knoten synchronisiert, daher wurde die Order abgelehnt. Versuche es gleich noch einmal';
+
+  @override
+  String get invalidFiatCurrencyError =>
+      'Dieser Mostro-Knoten akzeptiert diese Währung nicht, daher wurde die Order abgelehnt. Wähle eine andere Währung';
 
   @override
   String get recoveringTradesMessage =>

@@ -1605,6 +1605,11 @@ class AppLocalizationsNl extends AppLocalizations {
   }
 
   @override
+  String orderCurrencyNotAccepted(String currency) {
+    return 'Deze Mostro-node accepteert geen $currency. Kies een andere valuta';
+  }
+
+  @override
   String orderAmountOutOfRangeFiat(int min, int max, String currency) {
     return 'Het bedrag moet tussen $min en $max $currency liggen voor deze Mostro-node';
   }
@@ -3640,6 +3645,10 @@ class AppLocalizationsNl extends AppLocalizations {
   @override
   String get invalidTradeIndexError =>
       'Je account loopt niet gelijk met deze Mostro-node, dus de order is geweigerd. Probeer het zo weer';
+
+  @override
+  String get invalidFiatCurrencyError =>
+      'Deze Mostro-node accepteert deze valuta niet, dus de order is geweigerd. Kies een andere valuta';
 
   @override
   String get recoveringTradesMessage =>

@@ -1613,6 +1613,11 @@ class AppLocalizationsFr extends AppLocalizations {
   }
 
   @override
+  String orderCurrencyNotAccepted(String currency) {
+    return 'Ce nœud Mostro n\'accepte pas $currency. Choisissez une autre devise';
+  }
+
+  @override
   String orderAmountOutOfRangeFiat(int min, int max, String currency) {
     return 'Le montant doit être compris entre $min et $max $currency pour ce nœud Mostro';
   }
@@ -3649,6 +3654,10 @@ class AppLocalizationsFr extends AppLocalizations {
   @override
   String get invalidTradeIndexError =>
       'Votre compte n\'est pas synchronisé avec ce nœud Mostro, qui a donc refusé l\'ordre. Réessayez dans un instant';
+
+  @override
+  String get invalidFiatCurrencyError =>
+      'Ce nœud Mostro n\'accepte pas cette devise, il a donc refusé l\'ordre. Choisissez une autre devise';
 
   @override
   String get recoveringTradesMessage =>
