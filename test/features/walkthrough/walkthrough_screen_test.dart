@@ -259,6 +259,43 @@ void main() {
       expect(tester.hasRunningAnimations, isTrue);
     });
 
+    testWidgets('the glint comes back when animations are turned on again', (
+      tester,
+    ) async {
+      final still = ValueNotifier(true);
+      addTearDown(still.dispose);
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: _container(),
+          child: MaterialApp(
+            theme: buildDarkTheme(),
+            localizationsDelegates: AppLocalizations.localizationsDelegates,
+            supportedLocales: AppLocalizations.supportedLocales,
+            builder:
+                (context, child) => ValueListenableBuilder(
+                  valueListenable: still,
+                  builder:
+                      (context, off, _) => MediaQuery(
+                        data: MediaQuery.of(
+                          context,
+                        ).copyWith(disableAnimations: off),
+                        child: child!,
+                      ),
+                ),
+            home: const WalkthroughScreen(),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(tester.hasRunningAnimations, isFalse);
+
+      still.value = false;
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+
+      expect(tester.hasRunningAnimations, isTrue);
+    });
+
     testWidgets('nothing moves once animations are off', (tester) async {
       await _pumpWalkthrough(tester);
 

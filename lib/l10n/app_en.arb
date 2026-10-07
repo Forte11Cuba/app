@@ -236,7 +236,7 @@
   "@walkthroughHeldTitle": {
     "description": "Walkthrough slide 3: title"
   },
-  "walkthroughHeldBody1": "The seller's sats stay held in their own wallet until the trade ends. This protects both sides.",
+  "walkthroughHeldBody1": "The seller's sats stay locked until the trade ends. This protects both sides.",
   "@walkthroughHeldBody1": {
     "description": "Walkthrough slide 3: first paragraph"
   },
@@ -248,11 +248,11 @@
   "@walkthroughChatTitle": {
     "description": "Walkthrough slide 4: title"
   },
-  "walkthroughChatBody1": "Each trade has its own private chat, end-to-end encrypted. Only the two users involved can read it.",
+  "walkthroughChatBody1": "Each trade has its own private chat, end-to-end encrypted. Only you and your counterpart can read it, unless one of you shares its key.",
   "@walkthroughChatBody1": {
     "description": "Walkthrough slide 4: first paragraph"
   },
-  "walkthroughChatBody2": "In case of a dispute, you can share the key with a dispute resolver so they can help settle it.",
+  "walkthroughChatBody2": "In a dispute, sharing that key with a dispute resolver lets them read the chat and help settle it.",
   "@walkthroughChatBody2": {
     "description": "Walkthrough slide 4: second paragraph"
   },

@@ -85,6 +85,9 @@ class _WalkthroughArtState extends State<WalkthroughArt>
       _entrance.value = 1;
     } else if (!_started) {
       _entrance.forward();
+    } else if (_entrance.isCompleted && !_glint.isAnimating) {
+      // Animations turned back on after the entrance: resume the loop.
+      _glint.repeat();
     }
     _started = true;
   }

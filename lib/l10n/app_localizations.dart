@@ -427,7 +427,7 @@ abstract class AppLocalizations {
   /// Walkthrough slide 3: first paragraph
   ///
   /// In en, this message translates to:
-  /// **'The seller\'s sats stay held in their own wallet until the trade ends. This protects both sides.'**
+  /// **'The seller\'s sats stay locked until the trade ends. This protects both sides.'**
   String get walkthroughHeldBody1;
 
   /// Walkthrough slide 3: second paragraph
@@ -445,13 +445,13 @@ abstract class AppLocalizations {
   /// Walkthrough slide 4: first paragraph
   ///
   /// In en, this message translates to:
-  /// **'Each trade has its own private chat, end-to-end encrypted. Only the two users involved can read it.'**
+  /// **'Each trade has its own private chat, end-to-end encrypted. Only you and your counterpart can read it, unless one of you shares its key.'**
   String get walkthroughChatBody1;
 
   /// Walkthrough slide 4: second paragraph
   ///
   /// In en, this message translates to:
-  /// **'In case of a dispute, you can share the key with a dispute resolver so they can help settle it.'**
+  /// **'In a dispute, sharing that key with a dispute resolver lets them read the chat and help settle it.'**
   String get walkthroughChatBody2;
 
   /// Walkthrough slide 5: title

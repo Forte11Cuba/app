@@ -198,7 +198,7 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get walkthroughHeldBody1 =>
-      'Die Sats des Verkäufers werden bis zum Ende des Trades in seiner eigenen Wallet gehalten. Das schützt beide Seiten.';
+      'Die Sats des Verkäufers bleiben bis zum Ende des Trades gesperrt. Das schützt beide Seiten.';
 
   @override
   String get walkthroughHeldBody2 =>
@@ -209,11 +209,11 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get walkthroughChatBody1 =>
-      'Jeder Trade hat seinen eigenen privaten Chat, Ende-zu-Ende-verschlüsselt. Nur die beiden Beteiligten können ihn lesen.';
+      'Jeder Trade hat seinen eigenen privaten Chat, Ende-zu-Ende-verschlüsselt. Nur du und deine Gegenpartei könnt ihn lesen, außer einer von euch teilt seinen Schlüssel.';
 
   @override
   String get walkthroughChatBody2 =>
-      'Im Streitfall kannst du den Schlüssel mit einem Schlichter teilen, damit er bei der Lösung hilft.';
+      'Im Streitfall kann ein Schlichter den Chat lesen, wenn du diesen Schlüssel mit ihm teilst, und so bei der Lösung helfen.';
 
   @override
   String get walkthroughTakeTitle => 'Eine Order annehmen';

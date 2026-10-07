@@ -196,7 +196,7 @@ class AppLocalizationsNl extends AppLocalizations {
 
   @override
   String get walkthroughHeldBody1 =>
-      'De sats van de verkoper blijven tot het einde van de trade vastgezet in zijn eigen wallet. Dat beschermt beide kanten.';
+      'De sats van de verkoper staan vast tot het einde van de trade. Dat beschermt beide kanten.';
 
   @override
   String get walkthroughHeldBody2 =>
@@ -207,11 +207,11 @@ class AppLocalizationsNl extends AppLocalizations {
 
   @override
   String get walkthroughChatBody1 =>
-      'Elke trade heeft een eigen privéchat, end-to-end versleuteld. Alleen de twee betrokken gebruikers kunnen hem lezen.';
+      'Elke trade heeft een eigen privéchat, end-to-end versleuteld. Alleen jij en je tegenpartij kunnen hem lezen, tenzij een van jullie de sleutel deelt.';
 
   @override
   String get walkthroughChatBody2 =>
-      'Bij een dispuut kun je de sleutel delen met een solver, die je helpt de zaak op te lossen.';
+      'Bij een dispuut kan een solver de chat lezen als je de sleutel met hem deelt, en zo helpen de zaak op te lossen.';
 
   @override
   String get walkthroughTakeTitle => 'Een order accepteren';

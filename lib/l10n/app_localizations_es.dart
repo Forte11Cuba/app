@@ -196,7 +196,7 @@ class AppLocalizationsEs extends AppLocalizations {
 
   @override
   String get walkthroughHeldBody1 =>
-      'Los sats del vendedor quedan retenidos en su propia billetera hasta que termina la operación. Esto protege a ambas partes.';
+      'Los sats del vendedor quedan bloqueados hasta que termina la operación. Esto protege a ambas partes.';
 
   @override
   String get walkthroughHeldBody2 =>
@@ -207,11 +207,11 @@ class AppLocalizationsEs extends AppLocalizations {
 
   @override
   String get walkthroughChatBody1 =>
-      'Cada operación tiene su propio chat privado, cifrado de extremo a extremo. Solo los dos usuarios involucrados pueden leerlo.';
+      'Cada operación tiene su propio chat privado, cifrado de extremo a extremo. Solo tú y tu contraparte pueden leerlo, salvo que uno de los dos comparta su clave.';
 
   @override
   String get walkthroughChatBody2 =>
-      'En caso de disputa, puedes compartir la clave con un resolutor para que te ayude a solucionarla.';
+      'En caso de disputa, compartir esa clave con un resolutor le permite leer el chat y ayudar a solucionarla.';
 
   @override
   String get walkthroughTakeTitle => 'Toma una orden';
