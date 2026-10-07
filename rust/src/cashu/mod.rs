@@ -22,7 +22,7 @@ pub mod escrow;
 mod wallet;
 
 #[cfg(not(target_arch = "wasm32"))]
-pub use wallet::{CashuWallet, MintCapabilities};
+pub use wallet::{token_mint_url, CashuWallet, MintCapabilities};
 
 // ── WASM stub ────────────────────────────────────────────────────────────────
 
@@ -46,6 +46,12 @@ impl MintCapabilities {
     pub fn missing(&self) -> Vec<&'static str> {
         vec!["storage"]
     }
+}
+
+/// No token decoding on web either: the wallet it would bind cannot run there.
+#[cfg(target_arch = "wasm32")]
+pub fn token_mint_url(_encoded: &str) -> anyhow::Result<String> {
+    anyhow::bail!("CashuUnsupportedOnWeb")
 }
 
 /// Web build: no proof storage, so no wallet. Every call fails with the

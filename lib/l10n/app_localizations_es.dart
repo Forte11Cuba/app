@@ -3999,6 +3999,45 @@ class AppLocalizationsEs extends AppLocalizations {
   String get cashuNotConnected => 'Sin conexión a un mint';
 
   @override
+  String get cashuNoMintSet =>
+      'No hay mint configurado. Configurá uno, o recibí un token para usar su mint.';
+
+  @override
+  String get cashuSetMintButton => 'Configurar mint';
+
+  @override
+  String get cashuChangeMintButton => 'Cambiar mint';
+
+  @override
+  String get cashuMintDialogTitle => 'Mint de Cashu';
+
+  @override
+  String get cashuMintFieldLabel => 'URL del mint';
+
+  @override
+  String get cashuMintFieldHint => 'https://mint.example.com';
+
+  @override
+  String get cashuChangeMintTitle => '¿Cambiar de mint?';
+
+  @override
+  String cashuChangeMintWarning(String sats, String mint) {
+    return 'Tus $sats sats quedan en $mint. Vuelven cuando te conectes de nuevo a ese mint.';
+  }
+
+  @override
+  String get cashuErrorNoMint =>
+      'Primero configurá un mint en la Billetera Cashu.';
+
+  @override
+  String get cashuErrorInvalidMintUrl =>
+      'Eso no es una URL de mint. Tiene que empezar con https:// o http://.';
+
+  @override
+  String get cashuErrorWalletOnOtherMint =>
+      'Tu billetera Cashu usa otro mint. Cambiala al mint de este nodo en Configuración → Billetera Cashu y volvé a intentar.';
+
+  @override
   String get cashuReceiveButton => 'Recibir';
 
   @override
@@ -4036,7 +4075,7 @@ class AppLocalizationsEs extends AppLocalizations {
 
   @override
   String get cashuWalletExplanation =>
-      'Esta billetera guarda ecash emitido por el mint que usa tu nodo Mostro. Existe para financiar y cobrar operaciones en ese nodo: no es una billetera de uso general.';
+      'Esta billetera guarda ecash del mint que elijas. Existe para financiar y cobrar operaciones con Cashu: no es una billetera de uso general.';
 
   @override
   String get cashuErrorNotEnabled =>
@@ -4095,10 +4134,6 @@ class AppLocalizationsEs extends AppLocalizations {
   @override
   String get cashuTokenTooLargeForQr =>
       'Este token es demasiado grande para un código QR. Copialo en su lugar.';
-
-  @override
-  String get cashuErrorMintChanged =>
-      'El nodo activo cambió y esta billetera está ligada a otro mint. Volvé atrás y abrí la billetera de nuevo.';
 
   @override
   String get cashuErrorNoMnemonic =>

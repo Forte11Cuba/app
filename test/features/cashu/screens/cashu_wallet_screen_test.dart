@@ -16,7 +16,7 @@ import '../../../support/provider_harness.dart';
 /// overridden — an un-overridden one would call into Rust and hang the test
 /// rather than fail it.
 class _FakeController extends CashuWalletController {
-  const _FakeController({
+  _FakeController({
     this.connectError,
     this.createTokenError,
     this.token = 'cashuBtesttoken',
@@ -26,9 +26,14 @@ class _FakeController extends CashuWalletController {
   final Object? createTokenError;
   final String token;
 
+  /// Every mint a connect asked for, `null` for "the usual one".
+  final List<String?> connects = [];
+
   @override
-  Future<CashuWalletStatus> connect() async {
-    if (connectError != null) throw connectError!;
+  Future<CashuWalletStatus> connect({String? mintUrl}) async {
+    connects.add(mintUrl);
+    // The open-time connect fails as configured; a mint the user chose binds.
+    if (mintUrl == null && connectError != null) throw connectError!;
     return _status(connected: true, balance: 0);
   }
 
@@ -59,12 +64,14 @@ CashuWalletStatus _status({required bool connected, required int? balance}) {
 Future<void> _pump(
   WidgetTester tester, {
   required CashuWalletStatus status,
-  CashuWalletController controller = const _FakeController(),
+  CashuWalletController? controller,
   Locale locale = const Locale('en'),
 }) async {
   final container = createContainer(overrides: [
     cashuWalletProvider.overrideWith((ref) => Stream.value(status)),
-    cashuWalletControllerProvider.overrideWithValue(controller),
+    cashuWalletControllerProvider.overrideWithValue(
+      controller ?? _FakeController(),
+    ),
   ]);
 
   await tester.pumpWidget(
@@ -280,7 +287,7 @@ void main() {
       await _pump(
         tester,
         status: _status(connected: true, balance: 100),
-        controller: const _FakeController(
+        controller: _FakeController(
           createTokenError: 'CashuSendUnresolved: revoke failed',
         ),
       );
@@ -333,7 +340,7 @@ void main() {
       await _pump(
         tester,
         status: _status(connected: false, balance: 0),
-        controller: const _FakeController(
+        controller: _FakeController(
           connectError: 'CashuNotEnabled: whatever Rust appended',
         ),
       );
@@ -352,7 +359,7 @@ void main() {
       await _pump(
         tester,
         status: _status(connected: false, balance: 0),
-        controller: const _FakeController(
+        controller: _FakeController(
           connectError: 'SomeFutureMarker: internal detail',
         ),
       );
@@ -391,6 +398,130 @@ void main() {
         findsOneWidget,
       );
       expect(find.textContaining('AnyhowException'), findsNothing);
+    });
+  });
+
+  group('CashuWalletScreen — the wallet\'s mint is the user\'s', () {
+    testWidgets('with no mint set, the wallet asks for one instead of failing',
+        (tester) async {
+      // A Lightning node on a fresh install: nothing to bind to yet, which is
+      // a state to explain, not an error to flash.
+      await _pump(
+        tester,
+        status: _status(connected: false, balance: 0),
+        controller: _FakeController(connectError: 'CashuNoMint'),
+      );
+
+      expect(
+        find.text('No mint set. Set one, or receive a token to use its mint.'),
+        findsOneWidget,
+      );
+      expect(find.text('Set mint'), findsOneWidget);
+      expect(find.byType(SnackBar), findsNothing);
+    });
+
+    testWidgets('receiving stays available with no mint set', (tester) async {
+      // The first token received names the mint the wallet binds to.
+      await _pump(
+        tester,
+        status: _status(connected: false, balance: 0),
+        controller: _FakeController(connectError: 'CashuNoMint'),
+      );
+
+      final receive = tester.widget<FilledButton>(
+        find.ancestor(
+          of: find.text('Receive'),
+          matching: find.byWidgetPredicate((w) => w is FilledButton),
+        ),
+      );
+      expect(receive.onPressed, isNotNull);
+    });
+
+    testWidgets('setting a mint connects the wallet to it', (tester) async {
+      // Arrange
+      final controller = _FakeController(connectError: 'CashuNoMint');
+      await _pump(
+        tester,
+        status: _status(connected: false, balance: 0),
+        controller: controller,
+      );
+
+      // Act
+      await tester.tap(find.text('Set mint'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField), ' https://mint.new.com ');
+      await tester.tap(find.text('Connect'));
+      await tester.pumpAndSettle();
+
+      // Assert — the open-time connect, then the chosen mint, trimmed.
+      expect(controller.connects, [null, 'https://mint.new.com']);
+    });
+
+    testWidgets('an empty mint URL is refused in the dialog', (tester) async {
+      final controller = _FakeController(connectError: 'CashuNoMint');
+      await _pump(
+        tester,
+        status: _status(connected: false, balance: 0),
+        controller: controller,
+      );
+
+      await tester.tap(find.text('Set mint'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Connect'));
+      await tester.pumpAndSettle();
+
+      expect(controller.connects, [null]);
+      expect(find.text('Connect'), findsOneWidget);
+    });
+
+    testWidgets('an empty connected wallet changes its mint without a warning',
+        (tester) async {
+      await _pump(tester, status: _status(connected: true, balance: 0));
+
+      await tester.tap(find.text('Change mint'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Mint URL'), findsOneWidget);
+      expect(find.text('Change mint?'), findsNothing);
+    });
+
+    testWidgets('the mint cannot change while the balance is unknown',
+        (tester) async {
+      // The warning that the balance stays at the old mint needs the balance.
+      await _pump(tester, status: _status(connected: true, balance: null));
+
+      final change = tester.widget<TextButton>(
+        find.ancestor(
+          of: find.text('Change mint'),
+          matching: find.byType(TextButton),
+        ),
+      );
+      expect(change.onPressed, isNull);
+    });
+
+    testWidgets('changing the mint with a balance says where the balance stays',
+        (tester) async {
+      // Arrange
+      await _pump(tester, status: _status(connected: true, balance: 500));
+
+      // Act
+      await tester.tap(find.text('Change mint'));
+      await tester.pumpAndSettle();
+
+      // Assert — the sats are not lost, and the user is told where they are.
+      expect(find.text('Change mint?'), findsOneWidget);
+      expect(
+        find.text(
+          'Your 500 sats stay at https://mint.example.com. They come back '
+          'when you connect to that mint again.',
+        ),
+        findsOneWidget,
+      );
+
+      // And going on opens the mint dialog.
+      await tester.tap(find.text('Continue'));
+      await tester.pumpAndSettle();
+      expect(find.text('Mint URL'), findsOneWidget);
     });
   });
 }

@@ -16,14 +16,14 @@ import 'package:mostro/src/rust/api/types.dart';
 
 /// The embedded Cashu wallet — phase C3 of `docs/cashu/README.md`.
 ///
-/// Deliberately minimal: balance, redeem a token, export a token. It exists to
-/// fund and drain escrows against the node's mint, not to be a general Cashu
-/// wallet. Melt/mint to Lightning, multiple mints and backup UX are later
-/// phases.
+/// Deliberately minimal: balance, redeem a token, export a token, and the mint
+/// it all happens at. It exists to fund and drain escrows, not to be a general
+/// Cashu wallet. Melt/mint to Lightning, holding several mints at once and
+/// backup UX are later phases.
 ///
-/// Reachable only when the active node runs Cashu — the Settings entry point is
-/// gated, and every Rust call behind it refuses on a Lightning node anyway, so
-/// a deep link here shows the disconnected state rather than doing anything.
+/// Always reachable from Settings, on every node (docs/cashu/README.md §1.2).
+/// The mint is the user's: set here, or taken from the first token received,
+/// and never changed by a node switch.
 class CashuWalletScreen extends ConsumerStatefulWidget {
   const CashuWalletScreen({super.key});
 
@@ -44,6 +44,10 @@ class _CashuWalletScreenState extends ConsumerState<CashuWalletScreen> {
   /// with it.
   String? _lastToken;
 
+  /// No mint was ever set, so the open-time connect had nothing to bind to.
+  /// A state to explain, not an error to flash.
+  bool _noMint = false;
+
   @override
   void initState() {
     super.initState();
@@ -52,11 +56,20 @@ class _CashuWalletScreenState extends ConsumerState<CashuWalletScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) => _connect());
   }
 
+  /// Holds the busy flag, so "Set mint" cannot race the open-time connect.
   Future<void> _connect() async {
+    setState(() => _busy = true);
     try {
       await ref.read(cashuWalletControllerProvider).connect();
     } catch (e) {
-      if (mounted) _showError(e);
+      if (!mounted) return;
+      if (e.toString().contains('CashuNoMint')) {
+        setState(() => _noMint = true);
+      } else {
+        _showError(e);
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
     }
   }
 
@@ -122,7 +135,10 @@ class _CashuWalletScreenState extends ConsumerState<CashuWalletScreen> {
       final amount = await ref
           .read(cashuWalletControllerProvider)
           .receiveToken(token.trim());
-      if (mounted) _showMessage(l10n.cashuReceived(amount.toInt()));
+      if (!mounted) return;
+      // With no mint set, the token's mint is now the wallet's.
+      setState(() => _noMint = false);
+      _showMessage(l10n.cashuReceived(amount.toInt()));
     });
   }
 
@@ -156,6 +172,57 @@ class _CashuWalletScreenState extends ConsumerState<CashuWalletScreen> {
       builder:
           (_) => PopScope(canPop: false, child: _TokenDialog(token: token)),
     );
+  }
+
+  /// Set the wallet's mint, or change it. A balance never moves with the mint:
+  /// it stays at the old one, and the user is told so before they switch.
+  Future<void> _setMint(CashuWalletStatus? status) async {
+    final l10n = AppLocalizations.of(context);
+    final balance = status?.balanceSats;
+    final oldMint = status?.mintUrl;
+    if (status?.connected == true &&
+        oldMint != null &&
+        balance != null &&
+        balance > BigInt.zero) {
+      final locale = Localizations.localeOf(context).toString();
+      final goOn = await _prompt(
+        () => showMostroDialog<bool>(
+          context: context,
+          builder:
+              (dialogContext) => MostroDialog(
+                title: l10n.cashuChangeMintTitle,
+                content: Text(
+                  l10n.cashuChangeMintWarning(
+                    _fmtSats(balance, locale),
+                    oldMint,
+                  ),
+                ),
+                secondary: ModalAction(
+                  label: l10n.cancel,
+                  onPressed: () => Navigator.of(dialogContext).pop(false),
+                ),
+                primary: ModalAction(
+                  label: l10n.continueButtonLabel,
+                  onPressed: () => Navigator.of(dialogContext).pop(true),
+                ),
+              ),
+        ),
+      );
+      if (goOn != true || !mounted) return;
+    }
+
+    final mintUrl = await _prompt(
+      () => showMostroDialog<String>(
+        context: context,
+        builder: (_) => const _MintDialog(),
+      ),
+    );
+    if (mintUrl == null || !mounted) return;
+
+    await _run(() async {
+      await ref.read(cashuWalletControllerProvider).connect(mintUrl: mintUrl);
+      if (mounted) setState(() => _noMint = false);
+    });
   }
 
   /// Housekeeping against the mint. It refreshes the balance by forgetting
@@ -193,7 +260,18 @@ class _CashuWalletScreenState extends ConsumerState<CashuWalletScreen> {
       body: ListView(
         padding: const EdgeInsets.all(AppSpacing.lg),
         children: [
-          _BalanceCard(status: status, colors: colors),
+          _BalanceCard(
+            status: status,
+            colors: colors,
+            noMint: _noMint,
+            // Not while a connected wallet's balance is unknown: the warning
+            // that the balance stays at the old mint could not be shown.
+            onSetMint:
+                _busy ||
+                        (status?.connected == true && balance == null)
+                    ? null
+                    : () => _setMint(status),
+          ),
           const SizedBox(height: AppSpacing.lg),
           Row(
             children: [
@@ -293,12 +371,24 @@ String _fmtSats(BigInt sats, String locale) {
   return buffer.toString();
 }
 
-/// Balance, mint, and — when the wallet could not bind — that it did not.
+/// Balance, mint, and — when the wallet could not bind — that it did not, with
+/// the way to set or change the mint.
 class _BalanceCard extends StatelessWidget {
-  const _BalanceCard({required this.status, required this.colors});
+  const _BalanceCard({
+    required this.status,
+    required this.colors,
+    required this.noMint,
+    required this.onSetMint,
+  });
 
   final CashuWalletStatus? status;
   final AppColors colors;
+
+  /// No mint was ever set: say how to get one rather than "not connected".
+  final bool noMint;
+
+  /// Opens the mint flow; `null` while a command runs.
+  final VoidCallback? onSetMint;
 
   @override
   Widget build(BuildContext context) {
@@ -331,7 +421,12 @@ class _BalanceCard extends StatelessWidget {
             ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w600),
           ),
           const SizedBox(height: AppSpacing.md),
-          if (!connected)
+          if (!connected && noMint)
+            Text(
+              l10n.cashuNoMintSet,
+              style: TextStyle(color: colors.textSubtle, fontSize: 13),
+            )
+          else if (!connected)
             Text(
               l10n.cashuNotConnected,
               style: TextStyle(color: colors.destructiveRed, fontSize: 13),
@@ -343,8 +438,131 @@ class _BalanceCard extends StatelessWidget {
               l10n.cashuMintLabel(mintUrl),
               style: TextStyle(color: colors.textSubtle, fontSize: 13),
             ),
+          Align(
+            alignment: AlignmentDirectional.centerStart,
+            child: TextButton(
+              onPressed: onSetMint,
+              child: Text(
+                connected
+                    ? l10n.cashuChangeMintButton
+                    : l10n.cashuSetMintButton,
+              ),
+            ),
+          ),
         ],
       ),
+    );
+  }
+}
+
+/// Which mint the wallet binds to, typed, pasted or scanned. Only emptiness is
+/// checked here: whether it is a usable mint is Rust's call (`InvalidMintUrl`,
+/// `CashuMintUnreachable`, `CashuMintUnusable`), and nothing is remembered
+/// until the mint has answered.
+class _MintDialog extends StatefulWidget {
+  const _MintDialog();
+
+  @override
+  State<_MintDialog> createState() => _MintDialogState();
+}
+
+class _MintDialogState extends State<_MintDialog> {
+  final _controller = TextEditingController();
+  String? _error;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _fill(String value) {
+    _controller.text = value.trim();
+    if (_error != null) setState(() => _error = null);
+  }
+
+  Future<void> _paste() async {
+    final data = await Clipboard.getData(Clipboard.kTextPlain);
+    final text = data?.text?.trim() ?? '';
+    if (!mounted) return;
+    if (text.isEmpty) {
+      setState(() => _error = AppLocalizations.of(context).clipboardEmptyError);
+      return;
+    }
+    _fill(text);
+  }
+
+  Future<void> _scan() async {
+    final l10n = AppLocalizations.of(context);
+    final scanned = await showMostroSheet<String>(
+      context: context,
+      builder:
+          (sheetContext) => Padding(
+            padding: EdgeInsets.only(
+              bottom: MediaQuery.of(sheetContext).viewInsets.bottom,
+            ),
+            child: PlatformAwareQrScanner(
+              hint: l10n.cashuMintFieldHint,
+              onDetected: (value) => Navigator.of(sheetContext).pop(value),
+            ),
+          ),
+    );
+    if (scanned != null && mounted) _fill(scanned);
+  }
+
+  void _submit() {
+    final url = _controller.text.trim();
+    if (url.isEmpty) {
+      setState(() => _error = AppLocalizations.of(context).enterValueError);
+      return;
+    }
+    Navigator.of(context).pop(url);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    return MostroDialog(
+      title: l10n.cashuMintDialogTitle,
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          TextField(
+            controller: _controller,
+            autofocus: true,
+            keyboardType: TextInputType.url,
+            autocorrect: false,
+            decoration: InputDecoration(
+              labelText: l10n.cashuMintFieldLabel,
+              hintText: l10n.cashuMintFieldHint,
+              errorText: _error,
+            ),
+            onSubmitted: (_) => _submit(),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          Wrap(
+            spacing: AppSpacing.sm,
+            children: [
+              TextButton.icon(
+                onPressed: _paste,
+                icon: const Icon(Icons.content_paste),
+                label: Text(l10n.pasteButtonLabel),
+              ),
+              TextButton.icon(
+                onPressed: _scan,
+                icon: const Icon(Icons.qr_code_scanner),
+                label: Text(l10n.scanQrButtonLabel),
+              ),
+            ],
+          ),
+        ],
+      ),
+      secondary: ModalAction(
+        label: l10n.cancel,
+        onPressed: () => Navigator.of(context).pop(),
+      ),
+      primary: ModalAction(label: l10n.connectButtonLabel, onPressed: _submit),
     );
   }
 }

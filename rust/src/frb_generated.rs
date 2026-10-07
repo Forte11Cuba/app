@@ -2343,11 +2343,12 @@ fn wire__crate__api__cashu__cashu_connect_impl(
             };
             let mut deserializer =
                 flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_mint_url = <Option<String>>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| async move {
                 transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
                     (move || async move {
-                        let output_ok = crate::api::cashu::cashu_connect().await?;
+                        let output_ok = crate::api::cashu::cashu_connect(api_mint_url).await?;
                         Ok(output_ok)
                     })()
                     .await,

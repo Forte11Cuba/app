@@ -8567,11 +8567,9 @@ pub(crate) async fn refresh_subscriptions_for_active_node() {
     // rate applied to another's order is a lock the daemon rejects.
     crate::mostro::node_fee::clear();
 
-    // And the wallet, which is bound to the old node's mint. Proofs stay on
-    // disk; only the binding is dropped.
-    if let Err(e) = crate::api::cashu::cashu_disconnect().await {
-        log::warn!("[orders] failed to disconnect the Cashu wallet on node switch: {e}");
-    }
+    // The Cashu wallet stays bound: its mint is the user's, not the node's
+    // (docs/cashu/README.md §1.2). An escrow checks the two match before it
+    // locks anything.
 
     let Ok(pool) = crate::api::nostr::get_pool() else {
         log::warn!(

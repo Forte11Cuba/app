@@ -421,6 +421,22 @@ impl CashuWallet {
     }
 }
 
+/// The mint an encoded token was minted at, as the token names it.
+///
+/// Read without contacting any mint: it is how a wallet with no mint set yet
+/// learns which one to bind to from the first token it receives.
+///
+/// **Errors**: `CashuReceiveFailed` when the token does not parse or names no
+/// single mint.
+pub fn token_mint_url(encoded: &str) -> Result<String> {
+    let token = Token::from_str(&normalize_token(encoded))
+        .map_err(|e| anyhow!("CashuReceiveFailed: {e}"))?;
+    let mint = token
+        .mint_url()
+        .map_err(|e| anyhow!("CashuReceiveFailed: {e}"))?;
+    Ok(mint.to_string())
+}
+
 /// Strip whitespace and the `cashu:` URI scheme.
 ///
 /// QR payloads routinely carry `cashu:cashuB…`, and a wallet that rejects them
@@ -573,6 +589,28 @@ mod tests {
         // Assert — only the scheme is stripped, never a prefix that happens to
         // look like one inside the payload.
         assert_eq!(normalize_token("cashuBcashu:inner"), "cashuBcashu:inner");
+    }
+
+    #[test]
+    fn a_token_names_the_mint_it_was_minted_at() {
+        // Arrange — a token needs no mint to be read, only to be redeemed.
+        let mint = cdk::mint_url::MintUrl::from_str("https://mint.example.com").unwrap();
+        let encoded = Token::new(mint, Vec::new(), None, CurrencyUnit::Sat).to_string();
+
+        // Act / Assert — with or without the URI scheme a wallet may add.
+        assert_eq!(
+            token_mint_url(&encoded).unwrap(),
+            "https://mint.example.com"
+        );
+        assert_eq!(
+            token_mint_url(&format!("cashu:{encoded}")).unwrap(),
+            "https://mint.example.com"
+        );
+        // Something that is not a token names no mint.
+        assert!(token_mint_url("cashuBanything")
+            .unwrap_err()
+            .to_string()
+            .contains("CashuReceiveFailed"));
     }
 
     #[test]

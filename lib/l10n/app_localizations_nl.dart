@@ -4006,6 +4006,45 @@ class AppLocalizationsNl extends AppLocalizations {
   String get cashuNotConnected => 'Niet verbonden met een mint';
 
   @override
+  String get cashuNoMintSet =>
+      'Geen mint ingesteld. Stel er een in, of ontvang een token om de mint daarvan te gebruiken.';
+
+  @override
+  String get cashuSetMintButton => 'Mint instellen';
+
+  @override
+  String get cashuChangeMintButton => 'Mint wijzigen';
+
+  @override
+  String get cashuMintDialogTitle => 'Cashu-mint';
+
+  @override
+  String get cashuMintFieldLabel => 'Mint-URL';
+
+  @override
+  String get cashuMintFieldHint => 'https://mint.example.com';
+
+  @override
+  String get cashuChangeMintTitle => 'Mint wijzigen?';
+
+  @override
+  String cashuChangeMintWarning(String sats, String mint) {
+    return 'Je $sats sats blijven bij $mint. Ze komen terug zodra je weer met die mint verbindt.';
+  }
+
+  @override
+  String get cashuErrorNoMint =>
+      'Stel eerst een mint in de Cashu-portemonnee in.';
+
+  @override
+  String get cashuErrorInvalidMintUrl =>
+      'Dat is geen mint-URL. Hij moet beginnen met https:// of http://.';
+
+  @override
+  String get cashuErrorWalletOnOtherMint =>
+      'Je Cashu-portemonnee gebruikt een andere mint. Schakel in Instellingen → Cashu-portemonnee over naar de mint van deze node en probeer het opnieuw.';
+
+  @override
   String get cashuReceiveButton => 'Ontvangen';
 
   @override
@@ -4043,7 +4082,7 @@ class AppLocalizationsNl extends AppLocalizations {
 
   @override
   String get cashuWalletExplanation =>
-      'Deze portemonnee bewaart ecash die is uitgegeven door de mint die je Mostro-node gebruikt. Hij dient om trades op die node te financieren en te ontvangen — het is geen portemonnee voor algemeen gebruik.';
+      'Deze portemonnee bewaart ecash van de mint die je kiest. Hij dient om Cashu-trades te financieren en te ontvangen — het is geen portemonnee voor algemeen gebruik.';
 
   @override
   String get cashuErrorNotEnabled =>
@@ -4102,10 +4141,6 @@ class AppLocalizationsNl extends AppLocalizations {
   @override
   String get cashuTokenTooLargeForQr =>
       'Deze token is te groot voor een QR-code. Kopieer hem in plaats daarvan.';
-
-  @override
-  String get cashuErrorMintChanged =>
-      'De actieve node is gewijzigd en deze portemonnee hoort bij een andere mint. Ga terug en open de portemonnee opnieuw.';
 
   @override
   String get cashuErrorNoMnemonic =>

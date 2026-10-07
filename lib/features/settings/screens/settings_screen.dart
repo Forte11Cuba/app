@@ -90,28 +90,20 @@ class SettingsScreen extends ConsumerWidget {
           const SizedBox(height: settingsGroupGap),
           SettingsGroup(
             header: l10n.settingsGroupPayments,
-            // The rows follow the backend the active node settles over, never
-            // both: a Cashu node has no invoice step and no bond (bonds are
-            // Lightning-only, docs/ANTI_ABUSE_BOND.md), so a Lightning address
-            // or an NWC wallet does nothing there, and on a Lightning node
-            // there is no mint. A node that has not said yet reads as
-            // Lightning, as everywhere else.
+            // Lightning, NWC and the Cashu wallet are always here, whatever
+            // the active node runs (docs/cashu/README.md §1.2): the node's
+            // escrow mode decides how a trade settles, never which payment
+            // methods the app offers. A Cashu node adds the mints it accepts.
             rows: [
-              if (ref.watch(isCashuModeProvider)) ...[
+              _lightningAddressRow(context, ref, l10n, settings),
+              _walletRow(context, ref, l10n),
+              SettingsRow(
+                icon: Icons.savings_outlined,
+                label: l10n.cashuWalletTitle,
+                onTap: () => context.push(AppRoute.cashuWallet),
+              ),
+              if (ref.watch(isCashuModeProvider))
                 ..._mintRows(context, ref, l10n),
-                // The wallet binds to one mint: shown only on a node that
-                // pins one. On a node that accepts several, or any, each
-                // order names its own, which the wallet cannot follow yet.
-                if (ref.watch(isCashuAvailableProvider))
-                  SettingsRow(
-                    icon: Icons.savings_outlined,
-                    label: l10n.cashuWalletTitle,
-                    onTap: () => context.push(AppRoute.cashuWallet),
-                  ),
-              ] else ...[
-                _lightningAddressRow(context, ref, l10n, settings),
-                _walletRow(context, ref, l10n),
-              ],
             ],
           ),
           const SizedBox(height: settingsGroupGap),
