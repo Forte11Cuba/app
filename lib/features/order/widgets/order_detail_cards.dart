@@ -355,7 +355,6 @@ class OrderIdRow extends StatelessWidget {
     final book = OrderBookPalette.of(context);
     final l10n = AppLocalizations.of(context);
     return Semantics(
-      button: true,
       hint: l10n.copyOrderIdTooltip,
       child: ConstrainedBox(
         constraints: const BoxConstraints(minHeight: 48),
