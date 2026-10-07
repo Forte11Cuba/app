@@ -45,6 +45,36 @@ int? holdInvoiceFee({required int holdSats, required double? nodeFee}) {
   return null;
 }
 
+// ── Step expiry ───────────────────────────────────────────────────────────────
+
+/// What mostrod does with the order when a waiting step runs out
+/// (`scheduler.rs`): it goes back to the book when the taker owed the step,
+/// and is cancelled when the maker did. Both sides of the trade read the same
+/// outcome.
+enum StepExpiry { backToBook, cancelled }
+
+/// [buyerStep] is the buyer's invoice; otherwise the step is the seller's
+/// hold-invoice payment. The taker owes the buyer's invoice on a sell order
+/// and the seller's payment on a buy order, so [kind] is enough to tell who
+/// owes the step without knowing which side the user took.
+StepExpiry stepExpiry({
+  required bool buyerStep,
+  required rust_types.OrderKind kind,
+}) =>
+    buyerStep == (kind == rust_types.OrderKind.sell)
+        ? StepExpiry.backToBook
+        : StepExpiry.cancelled;
+
+/// Whether [status] says the order was called off, however it ended: an
+/// invoice screen then has nothing left to ask for and leaves for home.
+bool invoiceOrderCancelled(rust_types.OrderStatus status) => switch (status) {
+  rust_types.OrderStatus.canceled ||
+  rust_types.OrderStatus.cooperativelyCanceled ||
+  rust_types.OrderStatus.canceledByAdmin ||
+  rust_types.OrderStatus.expired => true,
+  _ => false,
+};
+
 // ── Buyer input ───────────────────────────────────────────────────────────────
 
 const _scheme = 'lightning:';

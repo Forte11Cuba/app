@@ -21,6 +21,30 @@ void main() {
     });
   });
 
+  group('stepExpiry', () {
+    test('the taker owes the step: the order goes back to the book', () {
+      expect(
+        stepExpiry(buyerStep: true, kind: rust_types.OrderKind.sell),
+        StepExpiry.backToBook,
+      );
+      expect(
+        stepExpiry(buyerStep: false, kind: rust_types.OrderKind.buy),
+        StepExpiry.backToBook,
+      );
+    });
+
+    test('the maker owes the step: the order is cancelled', () {
+      expect(
+        stepExpiry(buyerStep: true, kind: rust_types.OrderKind.buy),
+        StepExpiry.cancelled,
+      );
+      expect(
+        stepExpiry(buyerStep: false, kind: rust_types.OrderKind.sell),
+        StepExpiry.cancelled,
+      );
+    });
+  });
+
   group('formatInvoiceMsat', () {
     test('shows whole sats like formatInvoiceSats', () {
       expect(formatInvoiceMsat(2439000, 'es'), '2.439');

@@ -2662,11 +2662,17 @@ abstract class AppLocalizations {
   /// **'If it expires, the order is removed from the book. It won\'t affect your reputation.'**
   String get tradeTimerPendingConsequence;
 
-  /// Timer consequence for the waiting-invoice/payment state
+  /// Trade screen countdown note on a waiting step the taker owes: mostrod puts the order back in the book when it runs out
   ///
   /// In en, this message translates to:
-  /// **'If it expires, the trade is cancelled and the order returns to the book.'**
-  String get tradeTimerWaitingInvoiceConsequence;
+  /// **'If it expires, the order goes back to the book.'**
+  String get tradeTimerExpiryBackToBook;
+
+  /// Trade screen countdown note on a waiting step the maker owes: mostrod cancels the order when it runs out
+  ///
+  /// In en, this message translates to:
+  /// **'If it expires, the order is cancelled.'**
+  String get tradeTimerExpiryCancelled;
 
   /// Timeline step: order taken
   ///
@@ -5902,35 +5908,29 @@ abstract class AppLocalizations {
   /// **'Lightning invoice QR code: {invoice}'**
   String invoiceQrSemantics(String invoice);
 
-  /// 13b terminal state when the hold invoice ran out
-  ///
-  /// In en, this message translates to:
-  /// **'The invoice expired'**
-  String get invoiceExpiredTitle;
-
-  /// 13b terminal state explanation
-  ///
-  /// In en, this message translates to:
-  /// **'It was not paid in time: Mostro cancels the trade and no sats left your wallet.'**
-  String get invoiceExpiredBody;
-
-  /// 13b terminal state action
+  /// Terminal state action of the bond invoice screens
   ///
   /// In en, this message translates to:
   /// **'Back to the order book'**
   String get invoiceBackToBook;
 
-  /// 13a terminal state when the buyer's invoice window ran out
+  /// Countdown at 00:00 on the invoice screens while the order side is not known yet: the local window ended, the daemon has not acted yet.
   ///
   /// In en, this message translates to:
-  /// **'Time is up'**
-  String get invoiceTimeUpTitle;
+  /// **'Time is up. Mostro will close this step shortly unless it is completed.'**
+  String get invoiceStepElapsed;
 
-  /// 13a terminal state explanation
+  /// Countdown at 00:00 on a waiting step the taker owes (trade and invoice screens): the daemon has not acted yet
   ///
   /// In en, this message translates to:
-  /// **'The invoice was not sent in time: Mostro cancels the trade. Nothing was committed on your side.'**
-  String get invoiceTimeUpBody;
+  /// **'Time is up. If it is not completed, Mostro will return the order to the book shortly.'**
+  String get stepElapsedBackToBook;
+
+  /// Countdown at 00:00 on a waiting step the maker owes (trade and invoice screens): the daemon has not acted yet
+  ///
+  /// In en, this message translates to:
+  /// **'Time is up. If it is not completed, Mostro will cancel the order shortly.'**
+  String get stepElapsedCancelled;
 
   /// 13a validation error: the invoice is for another chain than the node's; both are LND network names like mainnet or testnet
   ///

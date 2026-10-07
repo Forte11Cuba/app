@@ -346,6 +346,16 @@ void main() {
           orderId: 'order-8a',
           isBuyer: true,
           status: OrderStatus.waitingPayment,
+          // A buy order: the seller who owes the payment took it, so expiry
+          // puts the order back in the book.
+          trades: [
+            fakeTrade(
+              id: 'order-8a',
+              orderId: 'order-8a',
+              status: OrderStatus.waitingPayment,
+              kind: OrderKind.buy,
+            ),
+          ],
         );
 
         expect(find.text(_en.tradeScreenTitle), findsOneWidget);
@@ -355,10 +365,7 @@ void main() {
         expect(find.byType(TradeChatLockedLine), findsOneWidget);
         expect(find.byType(TradeChatCard), findsNothing);
         expect(find.text(_en.tradeTimerTheyHave), findsOneWidget);
-        expect(
-          find.text(_en.tradeTimerWaitingInvoiceConsequence),
-          findsOneWidget,
-        );
+        expect(find.text(_en.tradeTimerExpiryBackToBook), findsOneWidget);
         expect(_outlinedButtonWithText(_en.cancelTradeButton), findsOneWidget);
         expect(_outlinedButtonWithText(_en.openDisputeButton), findsNothing);
         expect(
@@ -1490,6 +1497,42 @@ void main() {
         );
         expect(tester.takeException(), isNull);
       });
+    }
+
+    // DS-A11Y-4: 320 dp, 2× text, German. The id row (label, shortened id,
+    // copy icon and, with the order in the book, its creation date) is the
+    // one this screen's own code lays out; the step block header has its own
+    // debt, so these statuses are the ones whose header fits.
+    for (final status in [OrderStatus.waitingPayment, OrderStatus.success]) {
+      for (final inBook in [false, true]) {
+        testWidgets('the id row fits 320 dp at 2× text in German '
+            '($status, ${inBook ? 'with' : 'without'} the creation date)', (
+          tester,
+        ) async {
+          tester.view.physicalSize = const Size(320, 760);
+          tester.view.devicePixelRatio = 1.0;
+          tester.platformDispatcher.textScaleFactorTestValue = 2.0;
+          addTearDown(tester.view.reset);
+          addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+
+          await _pumpTradeDetail(
+            tester,
+            orderId: 'order-de-narrow',
+            isBuyer: true,
+            status: status,
+            locale: const Locale('de'),
+            book: inBook ? [fakeOrder(id: 'order-de-narrow')] : const [],
+          );
+          // The row closes the scroll: bring it on screen so its last
+          // layout is the one checked, with the date when the order is in
+          // the book.
+          await tester.scrollUntilVisible(find.text('ID'), 200);
+          if (inBook) {
+            expect(find.textContaining('erstellt'), findsOneWidget);
+          }
+          expect(tester.takeException(), isNull);
+        });
+      }
     }
 
     // DS-A11Y-4: the disputed bar gained the buyer's Cancel; the seller's

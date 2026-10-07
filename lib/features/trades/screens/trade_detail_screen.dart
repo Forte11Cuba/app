@@ -23,6 +23,7 @@ import 'package:mostro/features/notifications/providers/notifications_provider.d
 import 'package:mostro/features/order/providers/invoice_providers.dart';
 import 'package:mostro/features/order/providers/trade_state_provider.dart';
 import 'package:mostro/features/order/widgets/invoice_clock.dart';
+import 'package:mostro/features/order/widgets/invoice_widgets.dart';
 import 'package:mostro/features/order/widgets/order_detail_cards.dart'
     show OrderIdValue, copyOrderId;
 import 'package:mostro/features/rate/providers/rating_providers.dart';
@@ -40,6 +41,7 @@ import 'package:mostro/features/trades/widgets/trade_countdown.dart';
 import 'package:mostro/features/trades/widgets/trade_step_block.dart';
 import 'package:mostro/features/trades/widgets/trade_timeline.dart';
 import 'package:mostro/features/order/models/bond_rules.dart';
+import 'package:mostro/features/order/models/invoice_rules.dart';
 import 'package:mostro/features/trades/widgets/bond_claim_banner.dart';
 import 'package:mostro/features/trades/widgets/bond_slashed_notice.dart';
 import 'package:mostro/features/trades/widgets/cancel_request_notice.dart';
@@ -56,7 +58,7 @@ import 'package:mostro/src/rust/api/reputation.dart' as reputation_api;
 import 'package:mostro/features/cashu/seller_funding_route.dart';
 import 'package:mostro/features/settings/providers/escrow_mode_provider.dart';
 import 'package:mostro/src/rust/api/types.dart'
-    show CooperativeCancelState, TradeInfo, TradeRole;
+    show CooperativeCancelState, OrderKind, TradeInfo, TradeRole;
 
 export 'package:mostro/features/trades/models/trade_status.dart';
 
@@ -821,6 +823,7 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen>
                                 status,
                                 isBuyer,
                                 order,
+                                kind: trade?.order.kind,
                                 amount: amount,
                                 summary: summary,
                                 loadFailed: loadFailed,
@@ -998,6 +1001,7 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen>
     TradeStatus status,
     bool isBuyer,
     OrderItem? order, {
+    required OrderKind? kind,
     required String? amount,
     required String? summary,
     required bool loadFailed,
@@ -1016,7 +1020,7 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen>
               ? TextSpan(text: l10n.tradeLoadError)
               : _body(l10n, status, isBuyer, order?.paymentMethod),
       warning: view.showsReleaseWarning ? l10n.tradeReleaseIrreversible : null,
-      countdown: view.showsTimer ? _countdown(l10n, view, status) : null,
+      countdown: view.showsTimer ? _countdown(l10n, view, status, kind) : null,
       statusReadout: status.machineName,
     );
   }
@@ -1134,15 +1138,34 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen>
   }
 
   /// The per-tick repaint reaches this builder only.
-  Widget _countdown(AppLocalizations l10n, TradeView view, TradeStatus status) {
+  ///
+  /// [kind] is the order's side, from the trade row; while it is unknown a
+  /// waiting step names no outcome rather than guess one.
+  Widget _countdown(
+    AppLocalizations l10n,
+    TradeView view,
+    TradeStatus status,
+    OrderKind? kind,
+  ) {
     final label = switch (view.timer) {
       TradeTimerOwner.user => l10n.tradeTimerYouHave,
       TradeTimerOwner.counterpart => l10n.tradeTimerTheyHave,
       TradeTimerOwner.order => l10n.tradeTimerOrderHas,
       TradeTimerOwner.none => '',
     };
+    final expiry =
+        kind == null
+            ? null
+            : stepExpiry(
+              buyerStep: status == TradeStatus.waitingInvoice,
+              kind: kind,
+            );
     final note = switch (view.note) {
-      TradeTimerNote.expiresCancels => l10n.tradeTimerWaitingInvoiceConsequence,
+      TradeTimerNote.stepOutcome => switch (expiry) {
+        StepExpiry.backToBook => l10n.tradeTimerExpiryBackToBook,
+        StepExpiry.cancelled => l10n.tradeTimerExpiryCancelled,
+        null => null,
+      },
       TradeTimerNote.coordinateInChat => l10n.tradeTimerNoteCoordinate,
       TradeTimerNote.leavesBook => l10n.tradeTimerPendingConsequence,
       TradeTimerNote.none => null,
@@ -1165,7 +1188,16 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen>
                       total: total,
                       label: label,
                       isWaiting: isWaiting,
-                      note: note,
+                      // 00:00 is the client's estimate of the node's window:
+                      // the note says what mostrod is about to do (#569).
+                      note:
+                          remaining == Duration.zero
+                              ? stepElapsedNotice(
+                                l10n,
+                                buyerStep: status == TradeStatus.waitingInvoice,
+                                kind: kind,
+                              )
+                              : note,
                     ),
       );
     }

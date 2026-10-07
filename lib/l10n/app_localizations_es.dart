@@ -1474,8 +1474,11 @@ class AppLocalizationsEs extends AppLocalizations {
       'Si expira, la orden se elimina del libro. No afectará tu reputación.';
 
   @override
-  String get tradeTimerWaitingInvoiceConsequence =>
-      'Si expira, la operación se cancela y la orden vuelve al libro.';
+  String get tradeTimerExpiryBackToBook =>
+      'Si expira, la orden vuelve al libro.';
+
+  @override
+  String get tradeTimerExpiryCancelled => 'Si expira, la orden se cancela.';
 
   @override
   String get tradeStepOrderTaken => 'Orden tomada';
@@ -3526,21 +3529,19 @@ class AppLocalizationsEs extends AppLocalizations {
   }
 
   @override
-  String get invoiceExpiredTitle => 'La factura venció';
-
-  @override
-  String get invoiceExpiredBody =>
-      'No se pagó a tiempo: Mostro cancela la operación y ningún sat salió de tu billetera.';
-
-  @override
   String get invoiceBackToBook => 'Volver al libro de órdenes';
 
   @override
-  String get invoiceTimeUpTitle => 'Se acabó el tiempo';
+  String get invoiceStepElapsed =>
+      'El plazo terminó. Mostro cerrará este paso en breve si no se completa.';
 
   @override
-  String get invoiceTimeUpBody =>
-      'La factura no se envió a tiempo: Mostro cancela la operación. De tu lado no se comprometió nada.';
+  String get stepElapsedBackToBook =>
+      'El plazo terminó. Si no se completa, Mostro devolverá la orden al libro en breve.';
+
+  @override
+  String get stepElapsedCancelled =>
+      'El plazo terminó. Si no se completa, Mostro cancelará la orden en breve.';
 
   @override
   String invoiceErrorWrongNetwork(String invoice, String node) {

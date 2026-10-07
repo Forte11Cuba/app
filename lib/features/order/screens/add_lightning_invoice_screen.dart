@@ -43,7 +43,8 @@ import 'package:mostro/src/rust/api/types.dart'
 /// for a new invoice while the order still reads settled — also after an
 /// admin settle, which mostrod records as `settled-hold-invoice` before
 /// paying, so the admin outcomes below are final. Cancellations end the step
-/// too, but leave for home with their own notice (`_listenForCancellation`).
+/// too, but leave for home with their own notice
+/// (`_AddLightningInvoiceScreenState._leaveIfEnded`).
 bool invoiceStepIsOver(OrderStatus status) => switch (status) {
   OrderStatus.active ||
   OrderStatus.fiatSent ||
@@ -186,6 +187,13 @@ class _AddLightningInvoiceScreenState
     ref.listenManual<AsyncValue<int?>>(
       invoiceDeadlineProvider(widget.orderId),
       (_, next) => trackInvoiceDeadline(next.valueOrNull),
+      fireImmediately: true,
+    );
+    // Read as it stands, not only as it changes: an order the daemon ended
+    // while this screen was closed sends it no TradeUpdate.
+    ref.listenManual<AsyncValue<OrderStatus>>(
+      tradeStatusProvider(widget.orderId),
+      (_, next) => _leaveIfEnded(next.valueOrNull),
       fireImmediately: true,
     );
     _prefillDefaultLightningAddress();
@@ -667,27 +675,53 @@ class _AddLightningInvoiceScreenState
   /// waiting-state window expire): the daemon ignores messages for a
   /// canceled order, so without this the form just sits here and every
   /// submit dies with a 10s NoDaemonResponse.
-  void _listenForCancellation(AppLocalizations l10n) {
+  void _listenForCancellation() {
     ref.listen<AsyncValue<TradeUpdate>>(tradeUpdatesProvider, (prev, next) {
       final update = next.valueOrNull;
-      if (update == null || _navigated || !mounted) return;
-      if (update.orderId != widget.orderId) return;
-      switch (update.status) {
-        case OrderStatus.canceled:
-        case OrderStatus.cooperativelyCanceled:
-        case OrderStatus.canceledByAdmin:
-        case OrderStatus.expired:
-          _navigated = true;
-          // The wiped trade must also disappear from the My Trades cache.
-          refreshTrades(ref);
-          ScaffoldMessenger.of(
-            context,
-          ).showSnackBar(SnackBar(content: Text(l10n.orderNoLongerActive)));
-          context.go(AppRoute.home);
-        default:
-          break;
-      }
+      if (update == null || update.orderId != widget.orderId) return;
+      if (invoiceOrderCancelled(update.status)) _leaveHome();
     });
+  }
+
+  /// Leave for home when the order's [status] says it is no longer the
+  /// user's to give an invoice for. The form stays at 00:00 (#569), so this
+  /// is the way out of an order that ended while the screen was closed —
+  /// opened later from a notification, say: cancelled, or `pending` again
+  /// once mostrod put it back in the book and wiped the trade.
+  void _leaveIfEnded(OrderStatus? status) {
+    if (status == null || _navigated) return;
+    if (invoiceOrderCancelled(status)) {
+      // Possibly from initState, where the screen cannot navigate yet.
+      WidgetsBinding.instance.addPostFrameCallback((_) => _leaveHome());
+    } else if (status == OrderStatus.pending) {
+      unawaited(_leaveIfNoLongerTaking());
+    }
+  }
+
+  /// A maker's own order reads `pending` while it is theirs, so a `pending`
+  /// only ends the step once the trades confirm the user no longer takes
+  /// part. Read through the bridge, not the cached list, which can lag a
+  /// take that has just been saved; an unreadable store keeps the screen.
+  Future<void> _leaveIfNoLongerTaking() async {
+    final List<TradeInfo> trades;
+    try {
+      trades = await ref.read(tradeListReaderProvider)();
+    } catch (e) {
+      debugPrint('[AddLightningInvoiceScreen] reading the trades failed: $e');
+      return;
+    }
+    if (participatingRole(trades, widget.orderId) == null) _leaveHome();
+  }
+
+  void _leaveHome() {
+    if (_navigated || !mounted) return;
+    _navigated = true;
+    // The wiped trade must also disappear from the My Trades cache.
+    refreshTrades(ref);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(AppLocalizations.of(context).orderNoLongerActive)),
+    );
+    context.go(AppRoute.home);
   }
 
   /// Leave for the trade once the order moves past the invoice step. The
@@ -723,7 +757,7 @@ class _AddLightningInvoiceScreenState
       onBack: canPop ? () => Navigator.of(context).maybePop() : null,
     );
 
-    _listenForCancellation(l10n);
+    _listenForCancellation();
     _listenForProgress();
 
     // Resolve sats: provider first (live polling), fall back to constructor param.
@@ -853,28 +887,9 @@ class _AddLightningInvoiceScreenState
       // under the field rather than in the footer.
       resizeToAvoidBottomInset: true,
       appBar: appBar,
-      // At 00:00 the form goes: mostrod still accepts a late invoice until
-      // its scheduler cancels, but the screen does not invite one — same
-      // terminal state as 13b. A submission already in flight finishes.
-      body: ValueListenableBuilder<Duration?>(
-        valueListenable: invoiceRemaining,
-        builder:
-            (context, remaining, _) =>
-                remaining == Duration.zero && !_submitting
-                    ? _withId(
-                      InvoiceTimeUpView(
-                        title: l10n.invoiceTimeUpTitle,
-                        body: l10n.invoiceTimeUpBody,
-                        actionLabel: l10n.invoiceBackToBook,
-                        onAction: () {
-                          _navigated = true;
-                          refreshTrades(ref);
-                          context.go(AppRoute.home);
-                        },
-                      ),
-                    )
-                    : _scrollableForm(l10n, sats, trade),
-      ),
+      // The form stays at 00:00: the step ends when mostrod says so, and
+      // until then it still accepts an invoice (#569).
+      body: _scrollableForm(l10n, sats, trade),
     );
   }
 
@@ -945,6 +960,11 @@ class _AddLightningInvoiceScreenState
                           window: ref.watch(invoiceStepWindowProvider),
                           sentence: l10n.invoiceTimeToSend,
                           hours: l10n.invoiceCountdownHours,
+                          elapsed: stepElapsedNotice(
+                            l10n,
+                            buyerStep: true,
+                            kind: trade?.order.kind,
+                          ),
                         ),
                       ),
         ),

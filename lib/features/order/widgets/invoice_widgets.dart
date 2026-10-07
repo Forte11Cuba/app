@@ -13,7 +13,7 @@ import 'package:mostro/l10n/app_localizations.dart';
 import 'package:mostro/shared/providers/peer_nym_provider.dart';
 import 'package:mostro/shared/utils/countdown.dart';
 import 'package:mostro/shared/widgets/countdown_urgency_announcer.dart';
-import 'package:mostro/src/rust/api/types.dart' show TradeInfo;
+import 'package:mostro/src/rust/api/types.dart' show OrderKind, TradeInfo;
 
 /// Building blocks shared by the two invoice screens
 /// (`design_handoff_factura_lightning`, 13a and 13b). Both screens import
@@ -182,6 +182,21 @@ class InvoiceHeroCard extends StatelessWidget {
 
 // ── Time band ─────────────────────────────────────────────────────────────────
 
+/// What the countdown says at 00:00 on a waiting step: what mostrod is about
+/// to do with the order ([stepExpiry]), or, while the order's [kind] is not
+/// known yet, only that the step is about to close.
+String stepElapsedNotice(
+  AppLocalizations l10n, {
+  required bool buyerStep,
+  required OrderKind? kind,
+}) => switch (kind == null
+    ? null
+    : stepExpiry(buyerStep: buyerStep, kind: kind)) {
+  StepExpiry.backToBook => l10n.stepElapsedBackToBook,
+  StepExpiry.cancelled => l10n.stepElapsedCancelled,
+  null => l10n.invoiceStepElapsed,
+};
+
 /// Amber band with the time left; red, with a pulsing figure, once
 /// `countdownTone` turns urgent — under a minute in an invoice window of
 /// 15 minutes or less, under five in a longer one (DS-CMP-21).
@@ -195,6 +210,7 @@ class InvoiceTimeBand extends StatefulWidget {
     required this.window,
     required this.sentence,
     required this.hours,
+    this.elapsed,
   });
 
   final Duration remaining;
@@ -202,6 +218,11 @@ class InvoiceTimeBand extends StatefulWidget {
   /// The whole window the band counts down, or null when unknown.
   final Duration? window;
   final String Function(String time) sentence;
+
+  /// Shown instead of [sentence] once [remaining] reaches zero. The local
+  /// clock running out is not the daemon acting: the step stays open until
+  /// its message arrives.
+  final String? elapsed;
 
   /// The localized countdown above an hour (`1 h 05`).
   final String Function(String hours, String minutes) hours;
@@ -260,6 +281,7 @@ class _InvoiceTimeBandState extends State<InvoiceTimeBand>
     final figureColor = urgent ? pal.errorInk : pal.timeFigure;
     final time = formatCountdown(widget.remaining, hours: widget.hours);
     final (before, after) = _splitAround(widget.sentence);
+    final elapsed = widget.remaining == Duration.zero ? widget.elapsed : null;
 
     return CountdownUrgencyAnnouncer(
       urgent: urgent,
@@ -276,33 +298,44 @@ class _InvoiceTimeBandState extends State<InvoiceTimeBand>
             Icon(Icons.schedule, size: 14, color: figureColor),
             const SizedBox(width: 8),
             Expanded(
-              child: Semantics(
-                label: widget.sentence(time),
-                excludeSemantics: true,
-                child: AnimatedBuilder(
-                  animation: _pulse,
-                  builder:
-                      (context, _) => Text.rich(
-                        TextSpan(
+              child:
+                  elapsed != null
+                      // Appears while the user watches the countdown: announced
+                      // (DS-A11Y-2). The ticking figure below is not.
+                      ? Semantics(
+                        liveRegion: true,
+                        child: Text(
+                          elapsed,
                           style: TextStyle(fontSize: 12, color: ink),
-                          children: [
-                            TextSpan(text: before),
-                            TextSpan(
-                              text: time,
-                              style: TextStyle(
-                                fontFamily: AppFonts.figures,
-                                fontWeight: FontWeight.w700,
-                                color: figureColor.withValues(
-                                  alpha: 1 - 0.65 * _pulse.value,
+                        ),
+                      )
+                      : Semantics(
+                        label: widget.sentence(time),
+                        excludeSemantics: true,
+                        child: AnimatedBuilder(
+                          animation: _pulse,
+                          builder:
+                              (context, _) => Text.rich(
+                                TextSpan(
+                                  style: TextStyle(fontSize: 12, color: ink),
+                                  children: [
+                                    TextSpan(text: before),
+                                    TextSpan(
+                                      text: time,
+                                      style: TextStyle(
+                                        fontFamily: AppFonts.figures,
+                                        fontWeight: FontWeight.w700,
+                                        color: figureColor.withValues(
+                                          alpha: 1 - 0.65 * _pulse.value,
+                                        ),
+                                      ),
+                                    ),
+                                    TextSpan(text: after),
+                                  ],
                                 ),
                               ),
-                            ),
-                            TextSpan(text: after),
-                          ],
                         ),
                       ),
-                ),
-              ),
             ),
           ],
         ),

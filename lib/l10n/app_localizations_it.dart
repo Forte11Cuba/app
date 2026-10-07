@@ -1473,8 +1473,12 @@ class AppLocalizationsIt extends AppLocalizations {
       'Se scade, l\'ordine viene rimosso dal book. Non influirà sulla tua reputazione.';
 
   @override
-  String get tradeTimerWaitingInvoiceConsequence =>
-      'Se scade, l\'operazione viene annullata e l\'ordine torna nel book.';
+  String get tradeTimerExpiryBackToBook =>
+      'Se scade, l\'ordine torna nel book.';
+
+  @override
+  String get tradeTimerExpiryCancelled =>
+      'Se scade, l\'ordine viene annullato.';
 
   @override
   String get tradeStepOrderTaken => 'Ordine preso';
@@ -3527,21 +3531,19 @@ class AppLocalizationsIt extends AppLocalizations {
   }
 
   @override
-  String get invoiceExpiredTitle => 'La fattura è scaduta';
-
-  @override
-  String get invoiceExpiredBody =>
-      'Non è stata pagata in tempo: Mostro annulla l\'operazione e nessun sat ha lasciato il tuo wallet.';
-
-  @override
   String get invoiceBackToBook => 'Torna al registro ordini';
 
   @override
-  String get invoiceTimeUpTitle => 'Il tempo è scaduto';
+  String get invoiceStepElapsed =>
+      'Il tempo è scaduto. Mostro chiuderà a breve questo passaggio se non viene completato.';
 
   @override
-  String get invoiceTimeUpBody =>
-      'La fattura non è stata inviata in tempo: Mostro annulla l\'operazione. Da parte tua non è stato impegnato nulla.';
+  String get stepElapsedBackToBook =>
+      'Il tempo è scaduto. Se non viene completato, Mostro riporterà a breve l\'ordine nel book.';
+
+  @override
+  String get stepElapsedCancelled =>
+      'Il tempo è scaduto. Se non viene completato, Mostro annullerà a breve l\'ordine.';
 
   @override
   String invoiceErrorWrongNetwork(String invoice, String node) {

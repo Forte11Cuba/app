@@ -89,9 +89,19 @@ class TradeCountdown extends StatelessWidget {
         ),
         if (note != null) ...[
           const SizedBox(height: 8),
-          Text(
-            note!,
-            style: TextStyle(fontSize: 11, height: 1.45, color: book.textFaint),
+          // The note changes while the user watches: at 00:00 it says what
+          // mostrod is about to do (#569). Announced; the figure is not, or
+          // it would be read every second (DS-A11Y-2).
+          Semantics(
+            liveRegion: true,
+            child: Text(
+              note!,
+              style: TextStyle(
+                fontSize: 11,
+                height: 1.45,
+                color: book.textFaint,
+              ),
+            ),
           ),
         ],
       ],

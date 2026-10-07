@@ -1483,8 +1483,12 @@ class AppLocalizationsDe extends AppLocalizations {
       'Bei Ablauf wird die Bestellung aus dem Buch entfernt. Es wirkt sich nicht auf deine Reputation aus.';
 
   @override
-  String get tradeTimerWaitingInvoiceConsequence =>
-      'Bei Ablauf wird der Trade storniert und die Bestellung kehrt ins Buch zurück.';
+  String get tradeTimerExpiryBackToBook =>
+      'Bei Ablauf kehrt die Bestellung ins Buch zurück.';
+
+  @override
+  String get tradeTimerExpiryCancelled =>
+      'Bei Ablauf wird die Bestellung storniert.';
 
   @override
   String get tradeStepOrderTaken => 'Bestellung angenommen';
@@ -3543,21 +3547,19 @@ class AppLocalizationsDe extends AppLocalizations {
   }
 
   @override
-  String get invoiceExpiredTitle => 'Die Rechnung ist abgelaufen';
-
-  @override
-  String get invoiceExpiredBody =>
-      'Sie wurde nicht rechtzeitig bezahlt: Mostro bricht den Handel ab, und keine Sats haben deine Wallet verlassen.';
-
-  @override
   String get invoiceBackToBook => 'Zurück zum Orderbuch';
 
   @override
-  String get invoiceTimeUpTitle => 'Die Zeit ist abgelaufen';
+  String get invoiceStepElapsed =>
+      'Die Zeit ist abgelaufen. Mostro schließt diesen Schritt in Kürze, falls er nicht abgeschlossen wird.';
 
   @override
-  String get invoiceTimeUpBody =>
-      'Die Rechnung wurde nicht rechtzeitig gesendet: Mostro bricht den Handel ab. Auf deiner Seite wurde nichts gebunden.';
+  String get stepElapsedBackToBook =>
+      'Die Zeit ist abgelaufen. Wird der Schritt nicht abgeschlossen, stellt Mostro die Bestellung in Kürze zurück ins Buch.';
+
+  @override
+  String get stepElapsedCancelled =>
+      'Die Zeit ist abgelaufen. Wird der Schritt nicht abgeschlossen, storniert Mostro die Bestellung in Kürze.';
 
   @override
   String invoiceErrorWrongNetwork(String invoice, String node) {

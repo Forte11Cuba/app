@@ -1460,8 +1460,12 @@ class AppLocalizationsEn extends AppLocalizations {
       'If it expires, the order is removed from the book. It won\'t affect your reputation.';
 
   @override
-  String get tradeTimerWaitingInvoiceConsequence =>
-      'If it expires, the trade is cancelled and the order returns to the book.';
+  String get tradeTimerExpiryBackToBook =>
+      'If it expires, the order goes back to the book.';
+
+  @override
+  String get tradeTimerExpiryCancelled =>
+      'If it expires, the order is cancelled.';
 
   @override
   String get tradeStepOrderTaken => 'Order taken';
@@ -3500,21 +3504,19 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
-  String get invoiceExpiredTitle => 'The invoice expired';
-
-  @override
-  String get invoiceExpiredBody =>
-      'It was not paid in time: Mostro cancels the trade and no sats left your wallet.';
-
-  @override
   String get invoiceBackToBook => 'Back to the order book';
 
   @override
-  String get invoiceTimeUpTitle => 'Time is up';
+  String get invoiceStepElapsed =>
+      'Time is up. Mostro will close this step shortly unless it is completed.';
 
   @override
-  String get invoiceTimeUpBody =>
-      'The invoice was not sent in time: Mostro cancels the trade. Nothing was committed on your side.';
+  String get stepElapsedBackToBook =>
+      'Time is up. If it is not completed, Mostro will return the order to the book shortly.';
+
+  @override
+  String get stepElapsedCancelled =>
+      'Time is up. If it is not completed, Mostro will cancel the order shortly.';
 
   @override
   String invoiceErrorWrongNetwork(String invoice, String node) {
