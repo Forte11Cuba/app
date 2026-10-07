@@ -584,6 +584,21 @@ void main() {
       await tester.pumpAndSettle();
     });
 
+    testWidgets("rereads the node's list when its info event is fetched live", (
+      tester,
+    ) async {
+      var cached = const <String>[];
+      final container = await _pump(tester, cachedList: () => cached);
+      expect(container.read(selectedFiatCodeProvider), 'USD');
+
+      // The live fetch behind mostroNodeProvider writes the cache in Rust.
+      cached = const ['ARS'];
+      container.invalidate(mostroNodeProvider);
+      await tester.pumpAndSettle();
+
+      expect(container.read(selectedFiatCodeProvider), 'ARS');
+    });
+
     testWidgets('a pick survives the same list arriving again', (
       tester,
     ) async {

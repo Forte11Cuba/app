@@ -5,6 +5,7 @@ import 'package:mostro/core/app_theme.dart';
 import 'package:mostro/core/automation/automation_id.dart';
 import 'package:mostro/core/automation/automation_ids.dart';
 import 'package:mostro/core/create_order_palette.dart';
+import 'package:mostro/features/about/providers/mostro_node_provider.dart';
 import 'package:mostro/features/order/models/create_order_rules.dart';
 import 'package:mostro/features/settings/providers/node_stats_provider.dart';
 import 'package:mostro/l10n/app_localizations.dart';
@@ -38,6 +39,13 @@ final selectedFiatCurrencyProvider = Provider<FiatCurrency?>((ref) {
 /// loads; a reread of the same node keeps its list until the read returns,
 /// so a refused currency stays refused meanwhile.
 final acceptedFiatCodesProvider = Provider.autoDispose<List<String>?>((ref) {
+  // The live fetch of the node's info event (the form watches it for the
+  // sats range) also writes the cache in Rust: reread it once it lands.
+  ref.listen<AsyncValue<Object?>>(mostroNodeProvider, (_, next) {
+    if (next.hasValue && !next.isLoading) {
+      ref.invalidate(activeNodeCurrenciesProvider);
+    }
+  });
   final async = ref.watch(activeNodeCurrenciesProvider);
   // isReloading: the active node changed. A plain invalidate is isRefreshing.
   final codes = async.isReloading ? null : async.valueOrNull;

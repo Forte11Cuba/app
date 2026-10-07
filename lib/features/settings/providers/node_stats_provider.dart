@@ -24,7 +24,9 @@ final nodeStatsProvider =
       if (pubkeys.isEmpty) return const {};
       final rows = await node_stats_api.fetchMostroNodeStats(pubkeys: pubkeys);
       // The fetch rewrote the kind 38385 cache: reread the active node's list.
-      ref.invalidate(activeNodeCurrenciesProvider);
+      // Through the container, which only touches a provider already alive:
+      // `ref.invalidate` would create it in debug builds just to check it.
+      ref.container.invalidate(activeNodeCurrenciesProvider);
       return {for (final r in rows) r.pubkey: r};
     });
 
@@ -53,7 +55,8 @@ final cachedNodeStatsProvider =
 /// node's cached kind 38385 event ([node_stats_api.cachedMostroNodeStats]):
 /// a local read, with no relay round trip. Empty for a node never seen, or
 /// one that sets no limit. Reread whenever the cache is written: by the
-/// startup warm-up (`app_bootstrap.dart`) and by [nodeStatsProvider].
+/// startup warm-up (`app_bootstrap.dart`), by [nodeStatsProvider], and by the
+/// live fetch behind `mostroNodeProvider` (`acceptedFiatCodesProvider`).
 final activeNodeCurrenciesProvider = FutureProvider.autoDispose<List<String>>((
   ref,
 ) async {
