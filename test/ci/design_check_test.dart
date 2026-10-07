@@ -160,11 +160,14 @@ rename to lib/b.dart
       git(['commit', '-qm', 'change']);
     }
 
-    ProcessResult check() => Process.runSync('dart', [
-      tool,
-      '--base',
-      'main',
-    ], workingDirectory: repo.path);
+    // Not in annotation mode, which CI's own GITHUB_ACTIONS would turn on:
+    // these tests read the plain `path:line: RULE` lines.
+    ProcessResult check() => Process.runSync(
+      'dart',
+      [tool, '--base', 'main'],
+      workingDirectory: repo.path,
+      environment: {'GITHUB_ACTIONS': 'false'},
+    );
 
     setUp(() {
       repo = Directory.systemTemp.createTempSync('design_check_');
