@@ -16800,6 +16800,340 @@ mod tests {
         );
     }
 
+    // ── #628: a book `pending` older than the take ─────────────────────────
+
+    /// The sweep's relay lookup for a row whose order the book holds.
+    async fn no_relay_lookup(_: String) -> Option<(i64, OrderStatus)> {
+        panic!("the book holds the order; no relay lookup expected")
+    }
+
+    /// A maker's range order, in the book since long before the sweep's age
+    /// gate (`started_at` 1), taken a minute ago: the daemon's `take`
+    /// message reached the maker at the returned time.
+    async fn maker_taken_a_minute_ago(
+        kind: crate::api::types::OrderKind,
+        take: Action,
+        payload: Option<Payload>,
+        tag: &str,
+    ) -> (String, i64) {
+        let _ = bond_test_db().await;
+        let order_uuid = uuid::Uuid::new_v4();
+        let order_id = order_uuid.to_string();
+        let row = save_maker_range_row(order_uuid, kind, OrderStatus::Pending).await;
+        store_trade_key_index(&order_id, row.trade_key_index).await;
+        let taken_at = crate::rt::unix_now() - 60;
+        dispatch_mostro_message(
+            daemon_message(order_uuid, take, payload, taken_at as u64),
+            tag,
+            "ff00f628",
+            row.trade_key_index,
+        )
+        .await;
+        let taken = crate::db::app_db::db()
+            .expect("store initialised")
+            .get_trade_by_order_id(&order_id)
+            .await
+            .expect("lookup")
+            .expect("row kept");
+        assert!(
+            is_maker_waiting_step(&taken.order.status),
+            "the take did not reach the row: {:?}",
+            taken.order.status
+        );
+        assert_eq!(load_status_cursor(&order_id).await, Some(taken_at));
+        (order_id, taken_at)
+    }
+
+    /// A buyer's take, sixteen minutes old: past the client's take + 900 s
+    /// gate while the daemon may still be waiting on the seller.
+    async fn taker_taken_sixteen_minutes_ago(tag: &str) -> (String, i64) {
+        let db = bond_test_db().await;
+        let order_uuid = uuid::Uuid::new_v4();
+        let order_id = order_uuid.to_string();
+        let taken_at = crate::rt::unix_now() - 16 * 60;
+        let mut order_info = dummy_order_info(&order_id);
+        order_info.status = OrderStatus::WaitingPayment;
+        let mut row = cancel_test_row(order_info);
+        row.trade_key_index = 9;
+        row.started_at = taken_at - 600;
+        row.timeout_at = Some(taken_at + SWEEP_MIN_AGE_SECS);
+        db.save_trade(&row).await.expect("save the taker's row");
+        store_trade_key_index(&order_id, row.trade_key_index).await;
+        dispatch_mostro_message(
+            daemon_message(
+                order_uuid,
+                Action::WaitingSellerToPay,
+                None,
+                taken_at as u64,
+            ),
+            tag,
+            "ff00f629",
+            row.trade_key_index,
+        )
+        .await;
+        assert_eq!(load_status_cursor(&order_id).await, Some(taken_at));
+        (order_id, taken_at)
+    }
+
+    /// Ingest the order's Kind 38383 `pending` dated `at`, as a relay serves
+    /// it, then sweep the order's row. Returns what the book and the row
+    /// hold afterwards.
+    async fn book_pending_then_sweep(
+        order_id: &str,
+        at: i64,
+    ) -> (Option<OrderStatus>, Option<OrderStatus>) {
+        let db = bond_test_db().await;
+        let author = nostr_sdk::prelude::Keys::generate();
+        ingest_order_event(&book_event_at(order_id, "pending", &author, at as u64)).await;
+        let row = db
+            .get_trade_by_order_id(order_id)
+            .await
+            .expect("lookup")
+            .expect("the row exists before the sweep");
+        sweep_trades(db, vec![row], &Default::default(), no_relay_lookup).await;
+        let book = order_book().get_order(order_id).await.map(|o| o.status);
+        let row = db
+            .get_trade_by_order_id(order_id)
+            .await
+            .expect("lookup")
+            .map(|t| t.order.status);
+        (book, row)
+    }
+
+    /// #628: a relay still serving the revision from before the take must not
+    /// put a buy maker's order back on the book while the seller pays.
+    #[tokio::test]
+    async fn a_pending_from_before_the_take_keeps_a_buy_makers_step() {
+        // Arrange
+        let (order_id, taken_at) = maker_taken_a_minute_ago(
+            crate::api::types::OrderKind::Buy,
+            Action::WaitingSellerToPay,
+            None,
+            "test-628-buy-maker-take",
+        )
+        .await;
+
+        // Act: the order's revision from when it was created, a day back.
+        let (book, row) = book_pending_then_sweep(&order_id, taken_at - 86_400).await;
+
+        // Assert
+        assert_eq!(
+            row,
+            Some(OrderStatus::WaitingPayment),
+            "the sweep ended the step"
+        );
+        assert_eq!(
+            book,
+            Some(OrderStatus::WaitingPayment),
+            "the book reopened the order"
+        );
+    }
+
+    /// #628 for a sell maker whose taker has no invoice yet.
+    #[tokio::test]
+    async fn a_pending_from_before_the_take_keeps_a_sell_makers_invoice_wait() {
+        // Arrange
+        let (order_id, taken_at) = maker_taken_a_minute_ago(
+            crate::api::types::OrderKind::Sell,
+            Action::WaitingBuyerInvoice,
+            None,
+            "test-628-sell-maker-wait",
+        )
+        .await;
+
+        // Act
+        let (book, row) = book_pending_then_sweep(&order_id, taken_at - 86_400).await;
+
+        // Assert
+        assert_eq!(
+            row,
+            Some(OrderStatus::WaitingBuyerInvoice),
+            "the sweep ended the step"
+        );
+        assert_eq!(
+            book,
+            Some(OrderStatus::WaitingBuyerInvoice),
+            "the book reopened the order"
+        );
+    }
+
+    /// #628 for a sell maker asked to pay the hold invoice.
+    #[tokio::test]
+    async fn a_pending_from_before_the_take_keeps_a_sell_makers_hold_invoice() {
+        // Arrange
+        let (order_id, taken_at) = maker_taken_a_minute_ago(
+            crate::api::types::OrderKind::Sell,
+            Action::PayInvoice,
+            Some(Payload::PaymentRequest(
+                None,
+                "lnbc1holdinvoice".into(),
+                Some(1_000),
+            )),
+            "test-628-sell-maker-pay",
+        )
+        .await;
+
+        // Act
+        let (book, row) = book_pending_then_sweep(&order_id, taken_at - 86_400).await;
+
+        // Assert
+        assert_eq!(
+            row,
+            Some(OrderStatus::WaitingPayment),
+            "the sweep ended the step"
+        );
+        assert_eq!(
+            book,
+            Some(OrderStatus::WaitingPayment),
+            "the book reopened the order"
+        );
+    }
+
+    /// The age gate does not protect a taker past the client's take + 900 s
+    /// (#630 review, finding 3): a `pending` from before the take must not
+    /// wipe a trade the daemon is still waiting on.
+    #[tokio::test]
+    async fn a_pending_from_before_the_take_does_not_wipe_a_takers_trade() {
+        // Arrange
+        let (order_id, taken_at) = taker_taken_sixteen_minutes_ago("test-628-taker-take").await;
+
+        // Act: the order's revision from before it was taken.
+        let (_, row) = book_pending_then_sweep(&order_id, taken_at - 600).await;
+
+        // Assert
+        assert_eq!(
+            row,
+            Some(OrderStatus::WaitingPayment),
+            "the sweep wiped the trade"
+        );
+    }
+
+    /// The book-miss half of the above: the sweep asks the relays for the
+    /// order, and the newest revision they hold predates the take.
+    #[tokio::test]
+    async fn a_fetched_pending_from_before_the_take_does_not_wipe_a_takers_trade() {
+        // Arrange: nothing in the book for this order.
+        let db = bond_test_db().await;
+        let (order_id, taken_at) =
+            taker_taken_sixteen_minutes_ago("test-628-taker-miss-take").await;
+        assert_eq!(order_book().get_order(&order_id).await, None);
+        let row = db
+            .get_trade_by_order_id(&order_id)
+            .await
+            .expect("lookup")
+            .expect("row saved");
+
+        // Act
+        sweep_trades(db, vec![row], &Default::default(), |_| async move {
+            Some((taken_at - 600, OrderStatus::Pending))
+        })
+        .await;
+
+        // Assert
+        let row = db.get_trade_by_order_id(&order_id).await.expect("lookup");
+        assert_eq!(
+            row.map(|t| t.order.status),
+            Some(OrderStatus::WaitingPayment),
+            "the sweep wiped the trade"
+        );
+    }
+
+    /// Control: a `pending` stamped in the same second as the take's message
+    /// is not older than it, and still applies (#630 review, finding 5): the
+    /// daemon's queue can send the take's message after the taker's cancel
+    /// that followed within the second.
+    #[tokio::test]
+    async fn a_pending_in_the_same_second_as_the_take_reopens_the_order() {
+        // Arrange
+        let (order_id, taken_at) = maker_taken_a_minute_ago(
+            crate::api::types::OrderKind::Buy,
+            Action::WaitingSellerToPay,
+            None,
+            "test-628-same-second-take",
+        )
+        .await;
+
+        // Act
+        let (book, row) = book_pending_then_sweep(&order_id, taken_at).await;
+
+        // Assert
+        assert_eq!(book, Some(OrderStatus::Pending));
+        assert_eq!(row, Some(OrderStatus::Pending));
+    }
+
+    /// Control: a republish after the take — the taker walked away and the
+    /// daemon's `new-order` never landed — still ends the maker's step.
+    #[tokio::test]
+    async fn a_pending_after_the_take_ends_the_makers_step() {
+        // Arrange
+        let (order_id, taken_at) = maker_taken_a_minute_ago(
+            crate::api::types::OrderKind::Buy,
+            Action::WaitingSellerToPay,
+            None,
+            "test-628-republish-take",
+        )
+        .await;
+
+        // Act
+        let (book, row) = book_pending_then_sweep(&order_id, taken_at + 30).await;
+
+        // Assert
+        assert_eq!(book, Some(OrderStatus::Pending));
+        assert_eq!(row, Some(OrderStatus::Pending));
+    }
+
+    /// Control (#630 review, findings 1 and 2): once the republish's
+    /// `new-order` is applied, the take replayed behind it on a cold start is
+    /// older than the cursor and must not walk the order back.
+    #[tokio::test]
+    async fn a_take_replayed_after_the_republish_does_not_walk_it_back() {
+        // Arrange: taken, then republished thirty seconds later.
+        let db = bond_test_db().await;
+        let (order_id, taken_at) = maker_taken_a_minute_ago(
+            crate::api::types::OrderKind::Buy,
+            Action::WaitingSellerToPay,
+            None,
+            "test-628-replay-take",
+        )
+        .await;
+        let order_uuid = uuid::Uuid::parse_str(&order_id).expect("uuid");
+        let trade_key_index = 7;
+        dispatch_mostro_message(
+            daemon_message(
+                order_uuid,
+                Action::NewOrder,
+                Some(Payload::Order(pending_small_order(order_uuid))),
+                (taken_at + 30) as u64,
+            ),
+            "test-628-replay-republish",
+            "ff00f628",
+            trade_key_index,
+        )
+        .await;
+
+        // Act: the take again, as a newest-first backlog delivers it.
+        dispatch_mostro_message(
+            daemon_message(
+                order_uuid,
+                Action::WaitingSellerToPay,
+                None,
+                taken_at as u64,
+            ),
+            "test-628-replay-take-again",
+            "ff00f628",
+            trade_key_index,
+        )
+        .await;
+
+        // Assert
+        let row = db.get_trade_by_order_id(&order_id).await.expect("lookup");
+        assert_eq!(row.map(|t| t.order.status), Some(OrderStatus::Pending));
+        assert_eq!(
+            order_book().get_order(&order_id).await.map(|o| o.status),
+            Some(OrderStatus::Pending)
+        );
+    }
+
     /// The maker's half of #567, which the generation on the key cannot
     /// reach. A maker keeps one trade key for the whole life of the order —
     /// mostrod's taker-cancel path clears only the counterparty's pubkeys
