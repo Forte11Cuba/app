@@ -34,8 +34,10 @@ dependencies:
   # Preferences (first-run flag, settings)
   shared_preferences: ^2.5.3
 
-  # Onboarding walkthrough
-  introduction_screen: ^3.1.14
+  # Onboarding walkthrough illustrations (static SVG assets; the motion is
+  # Flutter's, since flutter_svg runs no CSS)
+  # 2.2.3 needs Dart 3.8; this app still supports Dart 3.7 (environment above).
+  flutter_svg: ">=2.2.2 <2.2.3"
 
   # QR code display and scanning
   qr_flutter: ^4.1.0
@@ -118,6 +120,7 @@ flutter:
     - assets/data/fiat.json
     - assets/data/payment_methods.json
     - assets/images/
+    - assets/images/walkthrough/
     - assets/fonts/outfit/OFL.txt
     - assets/fonts/manrope/OFL.txt
     - assets/fonts/nym_animals/LICENSE.txt

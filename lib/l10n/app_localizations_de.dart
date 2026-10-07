@@ -153,46 +153,102 @@ class AppLocalizationsDe extends AppLocalizations {
       'Der Schlichter hat die Bestellung storniert und die Sats an den Verkäufer zurückgegeben. Du hast keine Sats erhalten.';
 
   @override
-  String get walkthroughSlideOneTitle => 'Bitcoin frei handeln — kein KYC';
+  String get walkthroughWelcomeTitle => 'P2P-Bitcoin ohne KYC';
 
   @override
-  String get walkthroughSlideOneBody =>
-      'Mostro ist eine Peer-to-Peer-Börse, mit der du Bitcoin gegen jede Währung und Zahlungsmethode tauschen kannst — ohne KYC und ohne deine Daten an irgendjemanden weiterzugeben. Es basiert auf Nostr, was es zensurresistent macht. Niemand kann dich am Handeln hindern.';
+  String get walkthroughWelcomeBody1 =>
+      'Mostro ist eine Peer-to-Peer-Börse, auf der du Bitcoin in jeder Währung und mit jeder Zahlungsmethode handelst, ohne KYC und ohne deine Daten an irgendjemanden weiterzugeben.';
 
   @override
-  String get walkthroughSlideTwoTitle => 'Privatsphäre als Standard';
+  String get walkthroughWelcomeBody2 =>
+      'Es basiert auf Nostr und ist dadurch zensurresistent. Niemand kann dich am Handeln hindern.';
 
   @override
-  String get walkthroughSlideTwoBody =>
-      'Mostro generiert für jeden Austausch eine neue Identität, sodass deine Trades nicht verknüpft werden können. Du kannst auch selbst entscheiden, wie viel Privatsphäre du möchtest:\n• Reputationsmodus – Andere können deine erfolgreichen Trades und dein Vertrauenslevel sehen.\n• Vollständiger Privatsphäre-Modus – Es wird keine Reputation aufgebaut, aber deine Aktivität ist vollständig anonym.\nWechsle jederzeit den Modus im Konto-Bildschirm, wo du auch deine geheimen Wörter sichern solltest — sie sind die einzige Möglichkeit, dein Konto wiederherzustellen.';
+  String get walkthroughPrivacyTitle => 'Privatsphäre als Standard';
 
   @override
-  String get walkthroughSlideThreeTitle => 'Sicherheit bei jedem Schritt';
+  String get walkthroughPrivacyBody1 =>
+      'Mostro erzeugt für jeden Trade eine neue Identität, sodass sich deine Trades nicht miteinander verknüpfen lassen.';
 
   @override
-  String get walkthroughSlideThreeBody =>
-      'Mostro verwendet Hold Invoices (zurückgehaltene Rechnungen): Die Sats verbleiben bis zum Ende des Handels in der Wallet des Verkäufers. Das schützt beide Seiten. Die App ist außerdem so gestaltet, dass sie intuitiv und einfach für alle Arten von Nutzern ist.';
+  String get walkthroughPrivacyBody2 =>
+      'Du entscheidest außerdem, wie privat du sein möchtest:';
 
   @override
-  String get walkthroughSlideFourTitle => 'Vollständig verschlüsselter Chat';
+  String get walkthroughReputationModeName => 'Reputationsmodus';
 
   @override
-  String get walkthroughSlideFourBody =>
-      'Jeder Trade hat seinen eigenen privaten Chat, der Ende-zu-Ende verschlüsselt ist. Nur die beiden beteiligten Nutzer können ihn lesen. Im Streitfall kannst du den gemeinsamen Schlüssel einem Schlichter geben, um bei der Lösung zu helfen.';
+  String get walkthroughReputationModeBody =>
+      'Andere sehen deine erfolgreichen Trades und dein Vertrauenslevel.';
 
   @override
-  String get walkthroughSlideFiveTitle => 'Ein Angebot annehmen';
+  String get walkthroughFullPrivacyModeName =>
+      'Vollständiger Privatsphäre-Modus';
 
   @override
-  String get walkthroughSlideFiveBody =>
-      'Durchsuche das Orderbuch, wähle ein Angebot, das für dich passt, und folge dem Trade-Ablauf Schritt für Schritt. Du kannst das Profil des anderen Nutzers prüfen, sicher chatten und den Trade problemlos abschließen.';
+  String get walkthroughFullPrivacyModeBody =>
+      'Es wird keine Reputation aufgebaut, aber deine Aktivität bleibt vollständig anonym.';
 
   @override
-  String get walkthroughSlideSixTitle => 'Findest du nicht, was du brauchst?';
+  String get walkthroughPrivacyFooter =>
+      'Du kannst den Modus jederzeit auf dem Konto-Bildschirm wechseln. Dort solltest du auch deine geheimen Wörter sichern: Sie sind die einzige Möglichkeit, dein Konto wiederherzustellen.';
 
   @override
-  String get walkthroughSlideSixBody =>
-      'Du kannst auch dein eigenes Angebot erstellen und warten, bis jemand es annimmt. Lege den Betrag und die bevorzugte Zahlungsmethode fest — Mostro erledigt den Rest.';
+  String get walkthroughHeldTitle => 'Sicherheit bei jedem Schritt';
+
+  @override
+  String get walkthroughHeldBody1 =>
+      'Die Sats des Verkäufers bleiben bis zum Ende des Trades gesperrt. Das schützt beide Seiten.';
+
+  @override
+  String get walkthroughHeldBody2 =>
+      'Die App ist außerdem so gestaltet, dass sie für alle intuitiv und einfach zu bedienen ist.';
+
+  @override
+  String get walkthroughChatTitle => 'Vollständig verschlüsselter Chat';
+
+  @override
+  String get walkthroughChatBody1 =>
+      'Jeder Trade hat seinen eigenen privaten Chat, Ende-zu-Ende-verschlüsselt. Nur du und deine Gegenpartei könnt ihn lesen, außer einer von euch teilt seinen Schlüssel.';
+
+  @override
+  String get walkthroughChatBody2 =>
+      'Im Streitfall kann ein Schlichter den Chat lesen, wenn du diesen Schlüssel mit ihm teilst, und so bei der Lösung helfen.';
+
+  @override
+  String get walkthroughTakeTitle => 'Eine Order annehmen';
+
+  @override
+  String get walkthroughTakeBody1 =>
+      'Durchsuche das Orderbuch, wähle eine Order, die zu dir passt, und folge dem Trade Schritt für Schritt.';
+
+  @override
+  String get walkthroughTakeBody2 =>
+      'Du kannst das Profil deiner Gegenpartei prüfen, sicher chatten und den Trade problemlos abschließen.';
+
+  @override
+  String get walkthroughMakeTitle => 'Findest du nicht, was du brauchst?';
+
+  @override
+  String get walkthroughMakeBody1 =>
+      'Du kannst auch deine eigene Order erstellen und warten, bis jemand sie annimmt.';
+
+  @override
+  String get walkthroughMakeBody2 =>
+      'Lege den Betrag und die bevorzugte Zahlungsmethode fest. Mostro erledigt den Rest.';
+
+  @override
+  String get walkthroughNext => 'Weiter';
+
+  @override
+  String walkthroughStepCounter(int current, int total) {
+    return '$current / $total';
+  }
+
+  @override
+  String walkthroughStepSemantics(int current, int total) {
+    return 'Schritt $current von $total';
+  }
 
   @override
   String get tabBuyBtc => 'BTC kaufen';

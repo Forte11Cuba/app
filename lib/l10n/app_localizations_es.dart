@@ -152,47 +152,101 @@ class AppLocalizationsEs extends AppLocalizations {
       'El resolutor canceló la orden y devolvió los sats al vendedor. No recibiste los sats.';
 
   @override
-  String get walkthroughSlideOneTitle =>
-      'Intercambia Bitcoin libremente — sin KYC';
+  String get walkthroughWelcomeTitle => 'Bitcoin P2P sin KYC';
 
   @override
-  String get walkthroughSlideOneBody =>
-      'Mostro es un exchange peer-to-peer que te permite intercambiar Bitcoin por cualquier moneda y método de pago — sin KYC y sin necesidad de dar tus datos a nadie. Está construido sobre Nostr, lo que lo hace resistente a la censura. Nadie puede impedirte operar.';
+  String get walkthroughWelcomeBody1 =>
+      'Mostro es un exchange peer-to-peer que te permite comprar y vender Bitcoin con cualquier moneda y método de pago, sin KYC y sin entregar tus datos a nadie.';
 
   @override
-  String get walkthroughSlideTwoTitle => 'Privacidad por defecto';
+  String get walkthroughWelcomeBody2 =>
+      'Está construido sobre Nostr, lo que lo hace resistente a la censura. Nadie puede impedirte operar.';
 
   @override
-  String get walkthroughSlideTwoBody =>
-      'Mostro genera una nueva identidad en cada intercambio, de modo que tus operaciones no pueden vincularse. También puedes decidir cuánta privacidad quieres:\n• Modo reputación – Permite que otros vean tus operaciones exitosas y tu nivel de confianza.\n• Modo privacidad total – No se construye reputación, pero tu actividad es completamente anónima.\nCambia de modo en cualquier momento desde la pantalla de Cuenta, donde también debes guardar tus palabras secretas — son la única forma de recuperar tu cuenta.';
+  String get walkthroughPrivacyTitle => 'Privacidad por defecto';
 
   @override
-  String get walkthroughSlideThreeTitle => 'Seguridad en cada paso';
+  String get walkthroughPrivacyBody1 =>
+      'Mostro genera una identidad nueva para cada operación, así nadie puede vincular unas con otras.';
 
   @override
-  String get walkthroughSlideThreeBody =>
-      'Mostro usa Hold Invoices (facturas retenidas): los sats permanecen en la billetera del vendedor hasta el final del intercambio. Esto protege a ambas partes. La aplicación también está diseñada para ser intuitiva y fácil para todo tipo de usuarios.';
+  String get walkthroughPrivacyBody2 =>
+      'También puedes decidir cuánta privacidad quieres:';
 
   @override
-  String get walkthroughSlideFourTitle => 'Chat totalmente cifrado';
+  String get walkthroughReputationModeName => 'Modo reputación';
 
   @override
-  String get walkthroughSlideFourBody =>
-      'Cada operación tiene su propio chat privado, cifrado de extremo a extremo. Solo los dos usuarios involucrados pueden leerlo. En caso de disputa, puedes compartir la clave con un resolutor para ayudar a resolver el problema.';
+  String get walkthroughReputationModeBody =>
+      'Permite que otros vean tus operaciones exitosas y tu nivel de confianza.';
 
   @override
-  String get walkthroughSlideFiveTitle => 'Toma una oferta';
+  String get walkthroughFullPrivacyModeName => 'Modo privacidad total';
 
   @override
-  String get walkthroughSlideFiveBody =>
-      'Explora el libro de órdenes, elige una oferta que te convenga y sigue el flujo de la operación paso a paso. Podrás revisar el perfil del otro usuario, chatear de forma segura y completar la operación con facilidad.';
+  String get walkthroughFullPrivacyModeBody =>
+      'No se construye reputación, pero tu actividad es completamente anónima.';
 
   @override
-  String get walkthroughSlideSixTitle => '¿No encuentras lo que necesitas?';
+  String get walkthroughPrivacyFooter =>
+      'Cambia de modo cuando quieras desde la pantalla de Cuenta. Ahí también deberías guardar tus palabras secretas: son la única forma de recuperar tu cuenta.';
 
   @override
-  String get walkthroughSlideSixBody =>
-      'También puedes crear tu propia oferta y esperar a que alguien la tome. Establece el monto y el método de pago preferido — Mostro se encarga del resto.';
+  String get walkthroughHeldTitle => 'Seguridad en cada paso';
+
+  @override
+  String get walkthroughHeldBody1 =>
+      'Los sats del vendedor quedan bloqueados hasta que termina la operación. Esto protege a ambas partes.';
+
+  @override
+  String get walkthroughHeldBody2 =>
+      'La aplicación también está pensada para que cualquier persona la use de forma intuitiva y sencilla.';
+
+  @override
+  String get walkthroughChatTitle => 'Chat totalmente cifrado';
+
+  @override
+  String get walkthroughChatBody1 =>
+      'Cada operación tiene su propio chat privado, cifrado de extremo a extremo. Solo tú y tu contraparte pueden leerlo, salvo que uno de los dos comparta su clave.';
+
+  @override
+  String get walkthroughChatBody2 =>
+      'En caso de disputa, compartir esa clave con un resolutor le permite leer el chat y ayudar a solucionarla.';
+
+  @override
+  String get walkthroughTakeTitle => 'Toma una orden';
+
+  @override
+  String get walkthroughTakeBody1 =>
+      'Explora el libro de órdenes, elige una orden que te convenga y sigue la operación paso a paso.';
+
+  @override
+  String get walkthroughTakeBody2 =>
+      'Podrás ver el perfil de tu contraparte, chatear de forma segura y completar la operación sin complicaciones.';
+
+  @override
+  String get walkthroughMakeTitle => '¿No encuentras lo que necesitas?';
+
+  @override
+  String get walkthroughMakeBody1 =>
+      'También puedes crear tu propia orden y esperar a que alguien la tome.';
+
+  @override
+  String get walkthroughMakeBody2 =>
+      'Indica el monto y tu método de pago preferido. Mostro se encarga del resto.';
+
+  @override
+  String get walkthroughNext => 'Siguiente';
+
+  @override
+  String walkthroughStepCounter(int current, int total) {
+    return '$current / $total';
+  }
+
+  @override
+  String walkthroughStepSemantics(int current, int total) {
+    return 'Paso $current de $total';
+  }
 
   @override
   String get tabBuyBtc => 'Comprar BTC';

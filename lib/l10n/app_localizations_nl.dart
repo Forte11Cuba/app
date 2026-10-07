@@ -152,46 +152,101 @@ class AppLocalizationsNl extends AppLocalizations {
       'De solver heeft de order geannuleerd en de sats aan de verkoper teruggegeven. Jij hebt de sats niet ontvangen.';
 
   @override
-  String get walkthroughSlideOneTitle => 'Handel vrij in bitcoin, zonder KYC';
+  String get walkthroughWelcomeTitle => 'P2P-bitcoin, zonder KYC';
 
   @override
-  String get walkthroughSlideOneBody =>
-      'Mostro is een peer-to-peer exchange waar je bitcoin verhandelt tegen elke valuta en betaalmethode, zonder KYC en zonder je gegevens aan iemand te geven. Hij draait op Nostr, en is daarmee bestand tegen censuur. Niemand kan je tegenhouden om te handelen.';
+  String get walkthroughWelcomeBody1 =>
+      'Mostro is een peer-to-peer exchange waar je bitcoin verhandelt tegen elke valuta en betaalmethode, zonder KYC en zonder je gegevens aan iemand te geven.';
 
   @override
-  String get walkthroughSlideTwoTitle => 'Privacy vanaf het begin';
+  String get walkthroughWelcomeBody2 =>
+      'Hij draait op Nostr en is daarmee bestand tegen censuur. Niemand kan je tegenhouden om te handelen.';
 
   @override
-  String get walkthroughSlideTwoBody =>
-      'Mostro maakt voor elke handel een nieuwe identiteit aan, zodat je trades niet aan elkaar te koppelen zijn. Je bepaalt zelf hoe privé je blijft:\n• Reputatiemodus: anderen zien je geslaagde trades en hoe betrouwbaar je bent.\n• Volledig privé: je bouwt geen reputatie op, maar wat je doet blijft volledig anoniem.\nJe kunt altijd wisselen in het scherm Account; sla daar ook je geheime woorden op, want dat is de enige manier om je account terug te krijgen.';
+  String get walkthroughPrivacyTitle => 'Privacy vanaf het begin';
 
   @override
-  String get walkthroughSlideThreeTitle => 'Zekerheid bij elke stap';
+  String get walkthroughPrivacyBody1 =>
+      'Mostro maakt voor elke trade een nieuwe identiteit aan, zodat je trades niet aan elkaar te koppelen zijn.';
 
   @override
-  String get walkthroughSlideThreeBody =>
-      'Mostro werkt met hold invoices: de sats blijven in de wallet van de verkoper tot het einde van de trade. Dat beschermt beide kanten. De app is bovendien gemaakt om voor iedereen vanzelfsprekend te werken.';
+  String get walkthroughPrivacyBody2 =>
+      'Je bepaalt ook zelf hoe privé je blijft:';
 
   @override
-  String get walkthroughSlideFourTitle => 'Volledig versleutelde chat';
+  String get walkthroughReputationModeName => 'Reputatiemodus';
 
   @override
-  String get walkthroughSlideFourBody =>
-      'Elke trade heeft een eigen privéchat, end-to-end versleuteld. Alleen de twee betrokken gebruikers kunnen hem lezen. Bij een dispuut kun je de gedeelde sleutel aan een solver geven om de zaak op te lossen.';
+  String get walkthroughReputationModeBody =>
+      'Anderen zien je geslaagde trades en hoe betrouwbaar je bent.';
 
   @override
-  String get walkthroughSlideFiveTitle => 'Een aanbod accepteren';
+  String get walkthroughFullPrivacyModeName => 'Volledig privé';
 
   @override
-  String get walkthroughSlideFiveBody =>
-      'Blader door het orderboek, kies een aanbod dat je bevalt en loop de trade stap voor stap door. Je kunt het profiel van de ander bekijken, veilig chatten en de trade zonder gedoe afronden.';
+  String get walkthroughFullPrivacyModeBody =>
+      'Je bouwt geen reputatie op, maar wat je doet blijft volledig anoniem.';
 
   @override
-  String get walkthroughSlideSixTitle => 'Niet gevonden wat je zoekt?';
+  String get walkthroughPrivacyFooter =>
+      'Je kunt altijd wisselen in het scherm Account. Sla daar ook je geheime woorden op: dat is de enige manier om je account terug te krijgen.';
 
   @override
-  String get walkthroughSlideSixBody =>
-      'Je kunt ook je eigen aanbod plaatsen en wachten tot iemand het accepteert. Kies het bedrag en je betaalmethode; Mostro regelt de rest.';
+  String get walkthroughHeldTitle => 'Zekerheid bij elke stap';
+
+  @override
+  String get walkthroughHeldBody1 =>
+      'De sats van de verkoper staan vast tot het einde van de trade. Dat beschermt beide kanten.';
+
+  @override
+  String get walkthroughHeldBody2 =>
+      'De app is bovendien gemaakt om voor iedereen vanzelfsprekend te werken.';
+
+  @override
+  String get walkthroughChatTitle => 'Volledig versleutelde chat';
+
+  @override
+  String get walkthroughChatBody1 =>
+      'Elke trade heeft een eigen privéchat, end-to-end versleuteld. Alleen jij en je tegenpartij kunnen hem lezen, tenzij een van jullie de sleutel deelt.';
+
+  @override
+  String get walkthroughChatBody2 =>
+      'Bij een dispuut kan een solver de chat lezen als je de sleutel met hem deelt, en zo helpen de zaak op te lossen.';
+
+  @override
+  String get walkthroughTakeTitle => 'Een order accepteren';
+
+  @override
+  String get walkthroughTakeBody1 =>
+      'Blader door het orderboek, kies een order die je bevalt en loop de trade stap voor stap door.';
+
+  @override
+  String get walkthroughTakeBody2 =>
+      'Je kunt het profiel van je tegenpartij bekijken, veilig chatten en de trade zonder gedoe afronden.';
+
+  @override
+  String get walkthroughMakeTitle => 'Niet gevonden wat je zoekt?';
+
+  @override
+  String get walkthroughMakeBody1 =>
+      'Je kunt ook je eigen order plaatsen en wachten tot iemand hem accepteert.';
+
+  @override
+  String get walkthroughMakeBody2 =>
+      'Kies het bedrag en je favoriete betaalmethode. Mostro regelt de rest.';
+
+  @override
+  String get walkthroughNext => 'Volgende';
+
+  @override
+  String walkthroughStepCounter(int current, int total) {
+    return '$current / $total';
+  }
+
+  @override
+  String walkthroughStepSemantics(int current, int total) {
+    return 'Stap $current van $total';
+  }
 
   @override
   String get tabBuyBtc => 'BTC kopen';
