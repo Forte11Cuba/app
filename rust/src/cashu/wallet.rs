@@ -5,7 +5,8 @@ use std::sync::Arc;
 use anyhow::{anyhow, bail, Result};
 use cdk::amount::SplitTarget;
 use cdk::nuts::nut10::SpendingConditions;
-use cdk::nuts::{CurrencyUnit, Proof, Token};
+use cdk::nuts::{CurrencyUnit, KeySetInfo, Proof, Token};
+use cdk::wallet::types::KeysetLoadPolicy;
 use cdk::wallet::{ReceiveOptions, SendMemo, SendOptions, Wallet};
 use cdk::Amount;
 use cdk_sqlite::WalletSqliteDatabase;
@@ -133,8 +134,12 @@ impl CashuWallet {
             .map_err(|e| anyhow!("CashuMintUnreachable: {e}"))?
             .ok_or_else(|| anyhow!("CashuMintUnreachable: mint published no info"))?;
 
+        // `Refresh`: the mint was just reached for its info, so ask it rather
+        // than trust a keyset list the store kept from an earlier session. cdk
+        // returns every keyset of the wallet's unit, rotated ones included, so
+        // `active` has to be checked here.
         let keysets = wallet
-            .load_mint_keysets()
+            .keysets(KeysetLoadPolicy::Refresh)
             .await
             .map_err(|e| anyhow!("CashuMintUnreachable: {e}"))?;
 
@@ -142,7 +147,9 @@ impl CashuWallet {
             nut07_state_check: info.nuts.nut07.supported,
             nut11_p2pk: info.nuts.nut11.supported,
             nut12_dleq: info.nuts.nut12.supported,
-            has_sat_keyset: keysets.iter().any(|k| k.unit == CurrencyUnit::Sat),
+            has_sat_keyset: keysets
+                .iter()
+                .any(|k| k.unit == CurrencyUnit::Sat && k.active == Some(true)),
         })
     }
 
@@ -162,12 +169,24 @@ impl CashuWallet {
     ///
     /// Needs the mint's keysets — a v4 token identifies its keyset by id — so
     /// this cannot be a free function on the token alone.
+    ///
+    /// Rotated keysets count: a token minted before a rotation is still ecash
+    /// at this mint. That mirrors cdk's own (crate-private) `token_proofs`.
     pub(crate) async fn proofs_of(&self, token: &Token) -> Result<Vec<Proof>> {
-        let keysets = self
+        let keysets: Vec<KeySetInfo> = self
             .inner
-            .load_mint_keysets()
+            .keysets(KeysetLoadPolicy::default())
             .await
-            .map_err(|e| anyhow!("CashuMintUnreachable: {e}"))?;
+            .map_err(|e| anyhow!("CashuMintUnreachable: {e}"))?
+            .into_iter()
+            .map(|k| KeySetInfo {
+                id: k.id,
+                unit: k.unit,
+                active: k.active.unwrap_or(false),
+                input_fee_ppk: k.input_fee_ppk,
+                final_expiry: k.final_expiry,
+            })
+            .collect();
         token
             .proofs(&keysets)
             .map_err(|e| anyhow!("InvalidEscrowToken: unreadable proofs ({e})"))
@@ -196,7 +215,7 @@ impl CashuWallet {
     ///
     /// DLEQ (NUT-12) is verified **here**, before the swap, rather than left to
     /// `cdk`: its receive path verifies a proof only `if proof.dleq.is_some()`
-    /// (`wallet/receive/saga/mod.rs`, cdk 0.17.3), so a token whose proofs carry
+    /// (`wallet/receive/saga/mod.rs`, cdk 0.18.1), so a token whose proofs carry
     /// none is accepted on trust. That is the softer guarantee NUT-12 is a hard
     /// connect requirement to avoid — [`Wallet::verify_token_dleq`] rejects the
     /// missing proof instead of skipping it.
@@ -376,7 +395,7 @@ impl CashuWallet {
     ///
     /// **Housekeeping, not recovery — nothing comes back from this call.** Two
     /// facts about `cdk`'s `check_all_pending_proofs` (`wallet/proofs.rs`,
-    /// cdk 0.17.3) decide that:
+    /// cdk 0.18.1) decide that:
     ///
     /// * it looks only at proofs no operation owns
     ///   (`p.used_by_operation.is_none()`), and `prepare_send` reserves
@@ -653,9 +672,9 @@ mod tests {
         let token = Token::from_str(&encoded).unwrap();
 
         // Act — the same token, minus the evidence that the mint issued it.
-        let keysets = receiver.inner.load_mint_keysets().await.unwrap();
-        let stripped: Vec<_> = token
-            .proofs(&keysets)
+        let stripped: Vec<_> = receiver
+            .proofs_of(&token)
+            .await
             .unwrap()
             .into_iter()
             .map(|mut p| {
