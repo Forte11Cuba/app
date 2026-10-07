@@ -261,6 +261,34 @@ void main() {
     expect(slides.skip(1).map((s) => s.flow), everyElement(isNull));
   });
 
+  test('the welcome and security slides carry a flickering bolt', () {
+    final bolts = walkthroughSlides(_en()).map((s) => s.bolt != null).toList();
+
+    expect(bolts, [true, false, true, false, false, false]);
+  });
+
+  group('the bolt flickers on the handoff keyframes', () {
+    test('steady before the glint ends its run', () {
+      final zap = zapAt(0.2);
+      expect(zap.opacity, 1);
+      expect(zap.glow, 0);
+    });
+
+    test('dips at 36% and 40%, back to full at 38% and 43%', () {
+      expect(zapAt(0.36).opacity, moreOrLessEquals(0.35));
+      expect(zapAt(0.38).opacity, moreOrLessEquals(1));
+      expect(zapAt(0.40).opacity, moreOrLessEquals(0.55));
+      expect(zapAt(0.43).opacity, moreOrLessEquals(1));
+    });
+
+    test('glows 5 at 38%, 9 at 43%, 2 at 55%, then fades out', () {
+      expect(zapAt(0.38).glow, moreOrLessEquals(5));
+      expect(zapAt(0.43).glow, moreOrLessEquals(9));
+      expect(zapAt(0.55).glow, moreOrLessEquals(2));
+      expect(zapAt(0.99).glow, lessThan(0.5));
+    });
+  });
+
   testWidgets('the counter reads as a step to a screen reader', (tester) async {
     final handle = tester.ensureSemantics();
     await _pumpWalkthrough(tester);
@@ -336,7 +364,13 @@ void main() {
   });
 
   test('every illustration and frame layer is a bundled asset', () async {
-    final arts = walkthroughSlides(_en()).map((s) => s.art);
+    final arts = [
+      for (final s in walkthroughSlides(_en())) ...[
+        s.art,
+        if (s.flow case final flow?) flow.front,
+        if (s.bolt case final bolt?) bolt,
+      ],
+    ];
     for (final path in [...arts, ...WalkthroughArt.frameAssets]) {
       final data = await rootBundle.loadString(path);
       expect(data, startsWith('<svg'), reason: path);

@@ -241,6 +241,7 @@ class _SlideBody extends StatelessWidget {
             asset: slide.art,
             size: artSize,
             flow: slide.flow,
+            bolt: slide.bolt,
           ),
         ),
         const SizedBox(height: 20),

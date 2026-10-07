@@ -35,6 +35,7 @@ class WalkthroughSlide {
     this.modes = const [],
     this.footer,
     this.flow,
+    this.bolt,
   });
 
   /// Asset path of the slide's illustration.
@@ -48,6 +49,9 @@ class WalkthroughSlide {
 
   /// The animated line drawn into the art, if the slide has one.
   final WalkthroughFlow? flow;
+
+  /// Asset of a bolt drawn on top of the art, flickering with the glint.
+  final String? bolt;
 }
 
 /// The six slides, in order.
@@ -63,6 +67,7 @@ List<WalkthroughSlide> walkthroughSlides(AppLocalizations l10n) => [
       to: Offset(153.8, 120),
       front: '$walkthroughArtDir/welcome_hub.svg',
     ),
+    bolt: '$walkthroughArtDir/welcome_bolt.svg',
   ),
   WalkthroughSlide(
     art: '$walkthroughArtDir/privacy.svg',
@@ -84,6 +89,7 @@ List<WalkthroughSlide> walkthroughSlides(AppLocalizations l10n) => [
     art: '$walkthroughArtDir/held.svg',
     title: l10n.walkthroughHeldTitle,
     paragraphs: [l10n.walkthroughHeldBody1, l10n.walkthroughHeldBody2],
+    bolt: '$walkthroughArtDir/held_bolt.svg',
   ),
   WalkthroughSlide(
     art: '$walkthroughArtDir/chat.svg',

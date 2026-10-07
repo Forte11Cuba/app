@@ -25,6 +25,7 @@ class WalkthroughArt extends StatefulWidget {
     required this.asset,
     required this.size,
     this.flow,
+    this.bolt,
   });
 
   /// The slide's drawing, laid over the disc.
@@ -35,6 +36,9 @@ class WalkthroughArt extends StatefulWidget {
 
   /// A dashed line streaming over [asset], under its front layer.
   final WalkthroughFlow? flow;
+
+  /// A bolt drawn on top, flickering as the glint ends its run.
+  final String? bolt;
 
   static const _glow = '$walkthroughArtDir/glow.svg';
   static const _disc = '$walkthroughArtDir/disc.svg';
@@ -81,6 +85,65 @@ const _flowGap = 6 * _flowScale;
 const _flowWidth = 2.5 * _flowScale;
 const _flowAdvance = 20 * _flowScale;
 const _flowPeriod = Duration(milliseconds: 1200);
+
+// The bolt's flicker (the handoff's `.zap`), on the glint's 4.2 s cycle: two
+// dips in opacity, and a drop shadow that flares lime, then light lime, then
+// dies away. Each track is (time, value); CSS eases between keyframes.
+const _zapOpacity = [
+  (0.0, 1.0),
+  (0.34, 1.0),
+  (0.36, 0.35),
+  (0.38, 1.0),
+  (0.40, 0.55),
+  (0.43, 1.0),
+  (1.0, 1.0),
+];
+const _zapGlow = [
+  (0.0, 0.0),
+  (0.34, 0.0),
+  (0.38, 5.0),
+  (0.43, 9.0),
+  (0.55, 2.0),
+  (1.0, 0.0),
+];
+const _zapShadowAlpha = [
+  (0.0, 0.0),
+  (0.34, 0.0),
+  (0.38, 1.0),
+  (0.55, 1.0),
+  (1.0, 0.0),
+];
+const _zapLight = [
+  (0.0, 0.0),
+  (0.38, 0.0),
+  (0.43, 1.0),
+  (0.55, 0.0),
+  (1.0, 0.0),
+];
+
+/// The bolt at [t] of the glint's cycle: its [opacity], the drop shadow's
+/// blur radius ([glow], in view-box units) and alpha ([shadow]), and how far
+/// the shadow has turned from lime to light lime ([light]).
+@visibleForTesting
+({double opacity, double glow, double shadow, double light}) zapAt(double t) =>
+    (
+      opacity: _track(_zapOpacity, t),
+      glow: _track(_zapGlow, t),
+      shadow: _track(_zapShadowAlpha, t),
+      light: _track(_zapLight, t),
+    );
+
+double _track(List<(double, double)> keys, double t) {
+  for (var i = 1; i < keys.length; i++) {
+    final (t1, v1) = keys[i];
+    if (t <= t1) {
+      final (t0, v0) = keys[i - 1];
+      final f = Curves.ease.transform((t - t0) / (t1 - t0));
+      return v0 + (v1 - v0) * f;
+    }
+  }
+  return keys.last.$2;
+}
 
 class _WalkthroughArtState extends State<WalkthroughArt>
     with TickerProviderStateMixin {
@@ -203,6 +266,21 @@ class _WalkthroughArtState extends State<WalkthroughArt>
                       ),
                       SvgPicture.asset(flow.front),
                     ],
+                    if (widget.bolt case final bolt?)
+                      RepaintBoundary(
+                        child: AnimatedBuilder(
+                          animation: _glint,
+                          builder:
+                              (_, __) => _Bolt(
+                                asset: bolt,
+                                // Steady unless the loop runs.
+                                zap: zapAt(
+                                  _glint.isAnimating ? _glint.value : 0,
+                                ),
+                                scale: size / _viewBox,
+                              ),
+                        ),
+                      ),
                   ],
                 ),
               ),
@@ -227,6 +305,48 @@ class _WalkthroughArtState extends State<WalkthroughArt>
       child: Transform.rotate(
         angle: 2 * math.pi * t / _glintTravel,
         child: glint,
+      ),
+    );
+  }
+}
+
+/// A bolt under its zap: faded by its opacity, over a blurred, tinted copy of
+/// itself standing in for the handoff's `drop-shadow`.
+class _Bolt extends StatelessWidget {
+  const _Bolt({required this.asset, required this.zap, required this.scale});
+
+  final String asset;
+  final ({double opacity, double glow, double shadow, double light}) zap;
+
+  /// Logical pixels per view-box unit.
+  final double scale;
+
+  @override
+  Widget build(BuildContext context) {
+    // The disc is dark in both themes, so its glow takes the dark inks.
+    const palette = OrderBookPalette.dark;
+    final color = Color.lerp(
+      palette.lime,
+      palette.limeIcon,
+      zap.light,
+    )!.withValues(alpha: zap.shadow);
+    // A CSS blur radius is twice the Gaussian's sigma.
+    final sigma = zap.glow / 2 * scale;
+    return Opacity(
+      opacity: zap.opacity.clamp(0.0, 1.0),
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          if (sigma > 0 && zap.shadow > 0)
+            ImageFiltered(
+              imageFilter: ImageFilter.blur(sigmaX: sigma, sigmaY: sigma),
+              child: ColorFiltered(
+                colorFilter: ColorFilter.mode(color, BlendMode.srcIn),
+                child: SvgPicture.asset(asset),
+              ),
+            ),
+          SvgPicture.asset(asset),
+        ],
       ),
     );
   }
