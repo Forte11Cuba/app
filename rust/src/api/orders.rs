@@ -8201,8 +8201,9 @@ struct SweepTally {
 /// The per-row half of [`run_stale_sweep_once`], over the rows it is handed.
 ///
 /// `looked_up` names orders whose public status the restored-history pass
-/// already asked for. `public_revision` answers a book miss: the daemon's
-/// newest public revision of that order, as its time and status.
+/// already asked for. `public_revision` is the daemon's newest public
+/// revision of an order, as its time and status: asked on a book miss, and to
+/// date a payout the book shows without a time.
 ///
 /// Split out so a test sweeps its own rows and answers the relay lookup
 /// itself: the store and the book are process-wide, and a pass over every
@@ -8266,10 +8267,26 @@ where
         let cursor_before = load_status_cursor(&oid).await;
         // The book first (free); on a miss, ask the relays for this one order.
         // A miss is the long-offline case the windowed filter cannot cover.
-        let book_status = match order_book().get_order(&oid).await.map(|o| o.status) {
-            Some(status) => Some(status),
-            None => public_revision(oid.clone()).await.map(|(_, status)| status),
+        // Only the relays' answer comes with its revision's time: what the
+        // book holds was dated when it was ingested.
+        let cached = order_book().get_order(&oid).await.map(|o| o.status);
+        let (book_status, revision_at) = match cached {
+            Some(status) => (Some(status), None),
+            None => match public_revision(oid.clone()).await {
+                Some((at, status)) => (Some(status), Some(at)),
+                None => (None, None),
+            },
         };
+        // The same date check as the ingest's (#628): a relay that lags still
+        // serves the `pending` from before the take.
+        if book_status == Some(crate::api::types::OrderStatus::Pending)
+            && wire_pending_is_stale(Some(&trade.order.status), revision_at, cursor_before)
+        {
+            log::info!(
+                "[orders] sweep: order={oid} fetched a pending from before the take — leaving its step alone"
+            );
+            continue;
+        }
 
         match sweep_action(
             trade.order.is_mine,
@@ -8277,7 +8294,18 @@ where
             book_status.as_ref(),
         ) {
             SweepAction::SyncSuccess => {
-                apply_payout_completed(&oid, fetch_public_success_time(&oid).await).await;
+                // Dated by the revision a book miss already fetched; the book
+                // carries no time, so a hit asks once. A second fetch that
+                // failed would leave the completion undated, and its chat
+                // closed (#642).
+                let completed_at = match revision_at {
+                    Some(at) => Some(at),
+                    None => public_revision(oid.clone())
+                        .await
+                        .filter(|(_, status)| *status == crate::api::types::OrderStatus::Success)
+                        .map(|(at, _)| at),
+                };
+                apply_payout_completed(&oid, completed_at).await;
                 log::info!("[orders] sweep: payout completed for order={oid}");
                 resynced += 1;
             }
@@ -17202,6 +17230,69 @@ mod tests {
             order_book().get_order(&order_id).await.map(|o| o.status),
             Some(OrderStatus::Pending)
         );
+    }
+
+    /// The sweep's relay lookups for a seller's payout, counted, all answering
+    /// a `success` published at `paid_at`.
+    async fn sweep_settled_row(order_id: &str, paid_at: i64) -> (usize, Option<i64>) {
+        let db = bond_test_db().await;
+        let row = db
+            .get_trade_by_order_id(order_id)
+            .await
+            .expect("lookup")
+            .expect("row saved");
+        let lookups = std::sync::atomic::AtomicUsize::new(0);
+        sweep_trades(db, vec![row], &Default::default(), |_| {
+            lookups.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            async move { Some((paid_at, OrderStatus::Success)) }
+        })
+        .await;
+        let row = db
+            .get_trade_by_order_id(order_id)
+            .await
+            .expect("lookup")
+            .expect("row kept");
+        assert_eq!(row.order.status, OrderStatus::Success);
+        (lookups.into_inner(), row.completed_at)
+    }
+
+    /// A payout found on a book miss is dated by the revision that found it.
+    /// Asking again could fail, and an undated completion closes its chat
+    /// at once (#642).
+    #[tokio::test]
+    async fn a_payout_found_on_a_book_miss_is_dated_by_that_lookup() {
+        // Arrange: nothing in the book for this order.
+        let db = bond_test_db().await;
+        let order_id = uuid::Uuid::new_v4().to_string();
+        saved_settled_seller_row(db, &order_id, true).await;
+        let paid_at = crate::rt::unix_now() - 120;
+
+        // Act
+        let (lookups, completed_at) = sweep_settled_row(&order_id, paid_at).await;
+
+        // Assert
+        assert_eq!(lookups, 1);
+        assert_eq!(completed_at, Some(paid_at));
+    }
+
+    /// The book's `success` carries no time: the sweep asks once to date it.
+    #[tokio::test]
+    async fn a_payout_the_book_shows_is_dated_by_one_lookup() {
+        // Arrange
+        let db = bond_test_db().await;
+        let order_id = uuid::Uuid::new_v4().to_string();
+        saved_settled_seller_row(db, &order_id, true).await;
+        let mut public = dummy_order_info(&order_id);
+        public.status = OrderStatus::Success;
+        order_book().upsert_order(public).await;
+        let paid_at = crate::rt::unix_now() - 120;
+
+        // Act
+        let (lookups, completed_at) = sweep_settled_row(&order_id, paid_at).await;
+
+        // Assert
+        assert_eq!(lookups, 1);
+        assert_eq!(completed_at, Some(paid_at));
     }
 
     /// The maker's half of #567, which the generation on the key cannot
