@@ -2866,11 +2866,11 @@ abstract class AppLocalizations {
   /// **'Enter invoice manually'**
   String get enterInvoiceManually;
 
-  /// Generic submit button label
+  /// Answer of the range amount dialog, opened from the take-order button. Same wording as takeOrderButton (DS-CMP-26).
   ///
   /// In en, this message translates to:
-  /// **'Submit'**
-  String get submitButton;
+  /// **'Take order'**
+  String get rangeAmountTakeAction;
 
   /// Title of the counterpart reputation card when the taker is the buyer
   ///
@@ -2901,12 +2901,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'days active'**
   String get daysActiveStatLabel;
-
-  /// Countdown label below the take-order timer
-  ///
-  /// In en, this message translates to:
-  /// **'Time remaining: {time}'**
-  String timeRemainingLabel(String time);
 
   /// Shown when a fixed-sats order amount is outside the node min/max order amount
   ///
@@ -3004,10 +2998,10 @@ abstract class AppLocalizations {
   /// **'Maximum'**
   String get amountMaxLabel;
 
-  /// Counter in the payment-methods card header
+  /// Counter in the payment-methods card header. Says "selected" (glossary, DS-L10N-4); the key name predates the glossary
   ///
   /// In en, this message translates to:
-  /// **'{count, plural, =0{none chosen} =1{1 chosen} other{{count} chosen}}'**
+  /// **'{count, plural, =0{none selected} =1{1 selected} other{{count} selected}}'**
   String paymentMethodsChosenCount(int count);
 
   /// Chip that opens the payment-method picker; also the button that turns the custom text into a chip
@@ -3124,7 +3118,7 @@ abstract class AppLocalizations {
   /// **'Publish order'**
   String get publishOrder;
 
-  /// Accessibility label of the × on a chosen payment-method chip
+  /// Accessibility label of the × on a selected payment-method chip
   ///
   /// In en, this message translates to:
   /// **'Remove {method}'**
@@ -4174,7 +4168,7 @@ abstract class AppLocalizations {
   /// **'Could not take the order. Please try again.'**
   String get takeOrderFailed;
 
-  /// Replaces the countdown in the app bar once the order is gone
+  /// Value of the take order's countdown row once the order is gone
   ///
   /// In en, this message translates to:
   /// **'Closed'**
@@ -5059,7 +5053,7 @@ abstract class AppLocalizations {
   /// 14a hero label above the bond amount
   ///
   /// In en, this message translates to:
-  /// **'REFUNDABLE DEPOSIT'**
+  /// **'Refundable deposit'**
   String get bondRefundableLabel;
 
   /// 14a hero context line without a fiat rate
@@ -5140,11 +5134,11 @@ abstract class AppLocalizations {
   /// **'Mostro does not hold funds, so it cannot penalise whoever abandons a trade; the deposit does that job, and protects every user against scammers.'**
   String get bondWhyCustody;
 
-  /// 14b explainer paragraph 2; hold is the protocol term, rendered bold and left untranslated
+  /// 14b explainer paragraph 2: the wallet holds the deposit's sats without sending them. Plain words, no "hold" term (DS-L10N-4)
   ///
   /// In en, this message translates to:
-  /// **'It is a {hold} invoice: your wallet reserves the sats without sending them; when the trade completes, the reservation is cancelled on its own.'**
-  String bondWhyHold(String hold);
+  /// **'Your wallet holds the sats without sending them; when the trade completes, they are released on their own.'**
+  String get bondWhyHold;
 
   /// 14b explainer paragraph 3 on a node that does not slash on timeout
   ///
@@ -5311,7 +5305,7 @@ abstract class AppLocalizations {
   /// Claim screen hero label, upper case
   ///
   /// In en, this message translates to:
-  /// **'YOUR SHARE'**
+  /// **'Your share'**
   String get bondClaimShareLabel;
 
   /// Semantics of the claim hero
@@ -5800,11 +5794,11 @@ abstract class AppLocalizations {
   /// **'Open in my wallet'**
   String get invoiceOpenWallet;
 
-  /// 13b note explaining the hold invoice; hold is the protocol term 'hold', rendered bold and deliberately left untranslated in every locale (as in 'factura hold') — move the placeholder, do not replace it
+  /// 13b note: paying the invoice keeps the sats held in the seller's wallet until they confirm the buyer's payment. Plain words, no "hold" term (DS-L10N-4)
   ///
   /// In en, this message translates to:
-  /// **'This is a {hold} invoice: the sats are held, they don\'t leave your wallet until you confirm the buyer\'s payment.'**
-  String invoiceHoldNote(String hold);
+  /// **'The sats are held: they don\'t leave your wallet until you confirm the buyer\'s payment.'**
+  String get invoiceHoldNote;
 
   /// 13b screen reader label of the QR: the whole invoice
   ///
@@ -5848,11 +5842,23 @@ abstract class AppLocalizations {
   /// **'The invoice is for {invoice}, the node uses {node}'**
   String invoiceErrorWrongNetwork(String invoice, String node);
 
-  /// Invoice time band countdown above one hour; hours is a whole number, minutes is always two digits (e.g. 1 h 05). Keep it short: it sits inside a sentence
+  /// Every countdown above one hour (DS-CMP-21: invoice band, trade step, take order, my order, chat); hours is a whole number, minutes is always two digits (e.g. 1 h 05). Keep it short: it sits inside a sentence or a row
   ///
   /// In en, this message translates to:
   /// **'{hours} h {minutes}'**
   String invoiceCountdownHours(String hours, String minutes);
+
+  /// Label of an order's countdown (take order data row, own order status); the figure follows it, e.g. Expires in 23 h 12
+  ///
+  /// In en, this message translates to:
+  /// **'Expires in'**
+  String get countdownExpiresInLabel;
+
+  /// Label above the bond time pill in the compact amount row: the time left to pay the bond invoice
+  ///
+  /// In en, this message translates to:
+  /// **'Pay within'**
+  String get bondPayWithinLabel;
 
   /// Notifications card title for a trade status change (issue #474); role-neutral, both sides see it
   ///
@@ -6100,16 +6106,16 @@ abstract class AppLocalizations {
   /// **'Account imported, but Mostro did not answer, so your trades in progress were not recovered'**
   String get recoverTradesFailedMessage;
 
-  /// Label in front of the chips summarising the methods chosen so far on the payment-method picker screen
+  /// Label in front of the chips summarising the methods selected so far on the payment-method picker screen (glossary: selected, DS-L10N-4)
   ///
   /// In en, this message translates to:
-  /// **'Chosen'**
+  /// **'Selected'**
   String get paymentMethodsChosenLabel;
 
   /// Count line above the confirm button of the payment-method picker screen
   ///
   /// In en, this message translates to:
-  /// **'{count, plural, =0{Choose at least one method} =1{1 method selected} other{{count} methods selected}}'**
+  /// **'{count, plural, =0{Select at least one method} =1{1 method selected} other{{count} methods selected}}'**
   String paymentMethodsSelectedCount(int count);
 
   /// Button that saves the payment-method selection and closes the picker screen

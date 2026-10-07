@@ -17,8 +17,10 @@ import 'package:mostro/features/about/providers/mostro_node_provider.dart';
 import 'package:mostro/features/order/models/invoice_rules.dart';
 import 'package:mostro/features/order/providers/invoice_providers.dart';
 import 'package:mostro/features/order/providers/trade_state_provider.dart';
+import 'package:mostro/features/order/widgets/explanatory_note.dart';
 import 'package:mostro/features/order/widgets/invoice_clock.dart';
 import 'package:mostro/features/order/widgets/invoice_widgets.dart';
+import 'package:mostro/features/order/widgets/order_detail_cards.dart';
 import 'package:mostro/features/settings/providers/nwc_provider.dart';
 import 'package:mostro/features/trades/providers/trades_providers.dart'
     show refreshTrades, tradeInfoProvider;
@@ -394,7 +396,6 @@ class _PayLightningInvoiceScreenState
       nodeFee: ref.watch(mostroNodeProvider).valueOrNull?.fee,
     );
     final fiat = formatInvoiceFiat(l10n, peer);
-    final method = peer.order.paymentMethod.trim();
 
     return LayoutBuilder(
       builder:
@@ -440,17 +441,15 @@ class _PayLightningInvoiceScreenState
                       const SizedBox(height: 12),
                       InvoiceTimeBand(
                         remaining: remaining,
+                        window: ref.watch(invoiceStepWindowProvider),
                         sentence: l10n.invoiceExpiresIn,
                         hours: l10n.invoiceCountdownHours,
                       ),
                     ],
                     const SizedBox(height: 12),
-                    InvoiceHoldNote(
-                      sentence: l10n.invoiceHoldNote,
-                      boldWord: 'hold',
-                    ),
+                    ExplanatoryNote(text: l10n.invoiceHoldNote),
                     const SizedBox(height: 12),
-                    InvoiceCounterpartCard(
+                    OrderDataCard(
                       rows: [
                         invoiceCounterpartRow(
                           ref,
@@ -459,14 +458,16 @@ class _PayLightningInvoiceScreenState
                           l10n.invoiceBuyerLabel,
                         ),
                         if (fiat != null)
-                          (
-                            label: l10n.invoiceYouGetLabel,
-                            value: method.isEmpty ? fiat : '$fiat · $method',
-                            trailing: null,
+                          invoiceFiatRow(
+                            l10n.invoiceYouGetLabel,
+                            fiat,
+                            peer.order.paymentMethod,
                           ),
+                        OrderIdRow(
+                          orderId: widget.orderId,
+                          automationId: AutomationIds.payOrderId,
+                        ),
                       ],
-                      orderId: widget.orderId,
-                      orderIdAutomationId: AutomationIds.payOrderId,
                     ),
                     const Spacer(),
                     const SizedBox(height: 16),

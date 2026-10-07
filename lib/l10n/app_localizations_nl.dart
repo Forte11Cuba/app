@@ -1582,7 +1582,7 @@ class AppLocalizationsNl extends AppLocalizations {
   String get enterInvoiceManually => 'Invoice handmatig invullen';
 
   @override
-  String get submitButton => 'Versturen';
+  String get rangeAmountTakeAction => 'Order accepteren';
 
   @override
   String get buyerReputation => 'Reputatie van de koper';
@@ -1598,11 +1598,6 @@ class AppLocalizationsNl extends AppLocalizations {
 
   @override
   String get daysActiveStatLabel => 'dagen actief';
-
-  @override
-  String timeRemainingLabel(String time) {
-    return 'Resterende tijd: $time';
-  }
 
   @override
   String orderAmountOutOfRange(int min, int max) {
@@ -1663,9 +1658,9 @@ class AppLocalizationsNl extends AppLocalizations {
     String _temp0 = intl.Intl.pluralLogic(
       count,
       locale: localeName,
-      other: '$count gekozen',
-      one: '1 gekozen',
-      zero: 'niets gekozen',
+      other: '$count geselecteerd',
+      one: '1 geselecteerd',
+      zero: 'niets geselecteerd',
     );
     return '$_temp0';
   }
@@ -2990,7 +2985,7 @@ class AppLocalizationsNl extends AppLocalizations {
   String get bondTitle => 'Borg tegen misbruik';
 
   @override
-  String get bondRefundableLabel => 'TERUGBETAALBARE BORG';
+  String get bondRefundableLabel => 'Terugbetaalbare borg';
 
   @override
   String get bondComesBack => 'komt terug zodra de trade is afgerond';
@@ -3047,9 +3042,8 @@ class AppLocalizationsNl extends AppLocalizations {
       'Mostro houdt geen geld vast en kan dus niemand straffen die een trade laat lopen; dat doet de borg, en die beschermt iedereen tegen oplichters.';
 
   @override
-  String bondWhyHold(String hold) {
-    return 'Het is een $hold invoice: je wallet reserveert de sats zonder ze te versturen, en zodra de trade klaar is vervalt die reservering vanzelf.';
-  }
+  String get bondWhyHold =>
+      'Je wallet zet de sats vast zonder ze te versturen; zodra de trade klaar is, komen ze vanzelf weer vrij.';
 
   @override
   String get bondWhyDispute =>
@@ -3155,7 +3149,7 @@ class AppLocalizationsNl extends AppLocalizations {
   String get bondClaimTitle => 'Haal je deel op';
 
   @override
-  String get bondClaimShareLabel => 'JOUW DEEL';
+  String get bondClaimShareLabel => 'Jouw deel';
 
   @override
   String bondClaimShareSemantics(String sats) {
@@ -3459,9 +3453,8 @@ class AppLocalizationsNl extends AppLocalizations {
   String get invoiceOpenWallet => 'Openen in mijn wallet';
 
   @override
-  String invoiceHoldNote(String hold) {
-    return 'Dit is een $hold invoice: de sats staan vast en gaan pas uit je wallet als jij de betaling van de koper bevestigt.';
-  }
+  String get invoiceHoldNote =>
+      'De sats blijven vastgezet: ze gaan pas uit je wallet als jij de betaling van de koper bevestigt.';
 
   @override
   String invoiceQrSemantics(String invoice) {
@@ -3494,6 +3487,12 @@ class AppLocalizationsNl extends AppLocalizations {
   String invoiceCountdownHours(String hours, String minutes) {
     return '$hours u $minutes';
   }
+
+  @override
+  String get countdownExpiresInLabel => 'Verloopt over';
+
+  @override
+  String get bondPayWithinLabel => 'Betaal binnen';
 
   @override
   String get tradeCardWaitingBuyerInvoiceTitle =>
@@ -3666,16 +3665,16 @@ class AppLocalizationsNl extends AppLocalizations {
       'Account geïmporteerd, maar Mostro gaf geen antwoord, dus je lopende trades zijn niet hersteld';
 
   @override
-  String get paymentMethodsChosenLabel => 'Gekozen';
+  String get paymentMethodsChosenLabel => 'Geselecteerd';
 
   @override
   String paymentMethodsSelectedCount(int count) {
     String _temp0 = intl.Intl.pluralLogic(
       count,
       locale: localeName,
-      other: '$count methodes gekozen',
-      one: '1 methode gekozen',
-      zero: 'Kies minstens één methode',
+      other: '$count methodes geselecteerd',
+      one: '1 methode geselecteerd',
+      zero: 'Selecteer minstens één methode',
     );
     return '$_temp0';
   }

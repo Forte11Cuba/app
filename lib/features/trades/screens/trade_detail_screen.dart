@@ -43,6 +43,7 @@ import 'package:mostro/features/trades/widgets/bond_claim_banner.dart';
 import 'package:mostro/features/trades/widgets/bond_slashed_notice.dart';
 import 'package:mostro/features/trades/widgets/cancel_request_notice.dart';
 import 'package:mostro/l10n/app_localizations.dart';
+import 'package:mostro/shared/utils/countdown.dart';
 import 'package:mostro/shared/utils/reputation_age.dart';
 import 'package:mostro/shared/widgets/mostro_modal.dart';
 import 'package:mostro/shared/utils/platform_int64.dart';
@@ -183,13 +184,14 @@ class _TradeDetailScreenState extends ConsumerState<TradeDetailScreen>
     }
   }
 
-  /// Repaints every second under an hour and once a minute above it: the
-  /// clock shows no seconds at that scale, so ticking faster decides nothing.
+  /// Repaints when the displayed value changes (`countdownTick`): every
+  /// second under an hour, on the minute above it, where the clock shows no
+  /// seconds and ticking faster decides nothing.
   void _scheduleTick() {
     _tick?.cancel();
     final remaining = _remaining.value;
     if (remaining <= Duration.zero) return;
-    final step = nextCountdownTick(remaining);
+    final step = countdownTick(remaining);
     _tick = Timer(step, () {
       if (!mounted) return;
       final next = _remaining.value - step;

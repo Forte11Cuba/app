@@ -61,52 +61,6 @@ void main() {
     });
   });
 
-  group('countdown', () {
-    test('reads mm:ss under an hour and the localized h mm above', () {
-      String hours(String h, String m) => '$h Std. $m';
-      expect(
-        formatInvoiceCountdown(
-          const Duration(minutes: 14, seconds: 38),
-          hours: hours,
-        ),
-        '14:38',
-      );
-      expect(
-        formatInvoiceCountdown(
-          const Duration(hours: 1, minutes: 5),
-          hours: hours,
-        ),
-        '1 Std. 05',
-      );
-      expect(
-        formatInvoiceCountdown(const Duration(seconds: -3), hours: hours),
-        '00:00',
-      );
-    });
-
-    test('turns urgent under a minute', () {
-      expect(isInvoiceCountdownUrgent(const Duration(seconds: 60)), isFalse);
-      expect(isInvoiceCountdownUrgent(const Duration(seconds: 59)), isTrue);
-    });
-
-    test('ticks every second under an hour, on the minute above', () {
-      expect(
-        invoiceCountdownTick(const Duration(minutes: 10)),
-        const Duration(seconds: 1),
-      );
-      // 2:00:15 still reads 2 h 00 at +15 s; it turns 1 h 59 at +16 s.
-      expect(
-        invoiceCountdownTick(const Duration(hours: 2, seconds: 15)),
-        const Duration(seconds: 16),
-      );
-      // 2:00:00 turns 1 h 59 one second later, not a minute later.
-      expect(
-        invoiceCountdownTick(const Duration(hours: 2)),
-        const Duration(seconds: 1),
-      );
-    });
-  });
-
   group('invoiceCheckFromVerdict', () {
     test('maps every verdict onto the row model', () {
       expect(

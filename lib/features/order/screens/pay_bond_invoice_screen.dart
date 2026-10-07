@@ -22,6 +22,7 @@ import 'package:mostro/features/order/providers/trade_state_provider.dart';
 import 'package:mostro/features/order/widgets/bond_widgets.dart';
 import 'package:mostro/features/order/widgets/invoice_clock.dart';
 import 'package:mostro/features/order/widgets/invoice_widgets.dart';
+import 'package:mostro/features/order/widgets/order_detail_cards.dart';
 import 'package:mostro/features/settings/providers/nwc_provider.dart';
 import 'package:mostro/features/trades/providers/trades_providers.dart'
     show refreshTrades, tradeInfoProvider;
@@ -364,18 +365,7 @@ class _PayBondInvoiceScreenState extends ConsumerState<PayBondInvoiceScreen>
     final trade = tradeAsync.valueOrNull;
     final bond = trade?.bond;
     final maker = bondIsMakers(bond, isMine: trade?.order.isMine ?? false);
-    final orderExpiresAt = trade?.order.expiresAt;
-    trackInvoiceDeadline(
-      bondCountdownEnd(
-        invoiceExpiresAt:
-            bond?.expiresAt == null
-                ? null
-                : platformInt64ToInt(bond!.expiresAt!),
-        orderExpiresAt:
-            orderExpiresAt == null ? null : platformInt64ToInt(orderExpiresAt),
-        maker: maker,
-      ),
-    );
+    trackInvoiceDeadline(_countdownEnd(trade, maker: maker));
     _listen(l10n, trade?.role, maker: maker);
 
     final canPop = Navigator.of(context).canPop();
@@ -429,6 +419,19 @@ class _PayBondInvoiceScreenState extends ConsumerState<PayBondInvoiceScreen>
     );
   }
 
+  /// When the bond's countdown ends (unix seconds), or null when unknown.
+  int? _countdownEnd(TradeInfo? trade, {required bool maker}) {
+    final bond = trade?.bond;
+    final orderExpiresAt = trade?.order.expiresAt;
+    return bondCountdownEnd(
+      invoiceExpiresAt:
+          bond?.expiresAt == null ? null : platformInt64ToInt(bond!.expiresAt!),
+      orderExpiresAt:
+          orderExpiresAt == null ? null : platformInt64ToInt(orderExpiresAt),
+      maker: maker,
+    );
+  }
+
   Widget _payable(
     AppLocalizations l10n, {
     required TradeInfo trade,
@@ -439,6 +442,13 @@ class _PayBondInvoiceScreenState extends ConsumerState<PayBondInvoiceScreen>
     required bool maker,
   }) {
     final open = ref.watch(bondExplainerOpenProvider);
+    // The countdown's whole run, from the bond request to its end: it sets
+    // when the pill and the band turn urgent (DS-CMP-21).
+    final end = _countdownEnd(trade, maker: maker);
+    final window =
+        end == null
+            ? null
+            : Duration(seconds: end - platformInt64ToInt(bond.requestedAt));
     final node = ref.watch(mostroNodeProvider).valueOrNull;
     final rate =
         ref.watch(exchangeRateProvider(trade.order.fiatCode)).valueOrNull;
@@ -478,6 +488,8 @@ class _PayBondInvoiceScreenState extends ConsumerState<PayBondInvoiceScreen>
                         label: l10n.bondRefundableLabel,
                         sats: amountSats,
                         remaining: remaining,
+                        window: window,
+                        timeLabel: l10n.bondPayWithinLabel,
                         hours: l10n.invoiceCountdownHours,
                         unit: l10n.satsUnitLabel,
                       )
@@ -497,6 +509,7 @@ class _PayBondInvoiceScreenState extends ConsumerState<PayBondInvoiceScreen>
                         const SizedBox(height: 12),
                         InvoiceTimeBand(
                           remaining: remaining,
+                          window: window,
                           sentence:
                               maker
                                   ? l10n.bondPublishesIn
@@ -530,18 +543,20 @@ class _PayBondInvoiceScreenState extends ConsumerState<PayBondInvoiceScreen>
                     // The trade's context rows join the ID row (DS-CMP-22)
                     // once the explainer is open.
                     const SizedBox(height: 12),
-                    InvoiceCounterpartCard(
-                      rows:
-                          open
-                              ? _context(
-                                l10n,
-                                trade,
-                                node?.bondAmountPct,
-                                maker: maker,
-                              )
-                              : const [],
-                      orderId: widget.orderId,
-                      orderIdAutomationId: AutomationIds.bondOrderId,
+                    OrderDataCard(
+                      rows: [
+                        if (open)
+                          ..._context(
+                            l10n,
+                            trade,
+                            node?.bondAmountPct,
+                            maker: maker,
+                          ),
+                        OrderIdRow(
+                          orderId: widget.orderId,
+                          automationId: AutomationIds.bondOrderId,
+                        ),
+                      ],
                     ),
                     const Spacer(),
                     const SizedBox(height: 16),
@@ -592,27 +607,16 @@ class _PayBondInvoiceScreenState extends ConsumerState<PayBondInvoiceScreen>
   }
 
   List<InlineSpan> _explainer(AppLocalizations l10n, bool slashOnTimeout) {
-    final bold = TextStyle(
-      fontWeight: FontWeight.w600,
-      color: OrderBookPalette.of(context).textPrimary,
-    );
-    final (before, after) = bondSentenceParts(l10n.bondWhyHold);
     return [
       TextSpan(text: l10n.bondWhyCustody),
-      TextSpan(
-        children: [
-          TextSpan(text: before),
-          TextSpan(text: 'hold', style: bold),
-          if (after.isNotEmpty) TextSpan(text: after),
-        ],
-      ),
+      TextSpan(text: l10n.bondWhyHold),
       TextSpan(
         text: slashOnTimeout ? l10n.bondWhyDisputeTimeout : l10n.bondWhyDispute,
       ),
     ];
   }
 
-  List<InvoiceCardRow> _context(
+  List<Widget> _context(
     AppLocalizations l10n,
     TradeInfo trade,
     double? bondAmountPct, {
@@ -623,17 +627,18 @@ class _PayBondInvoiceScreenState extends ConsumerState<PayBondInvoiceScreen>
     final share = bondSharePercent(bondAmountPct);
     return [
       if (fiat != null)
-        (
+        OrderDataRow(
+          icon: Icons.receipt_long_outlined,
           label: l10n.bondContextOrder,
-          value:
-              buying ? l10n.bondContextBuy(fiat) : l10n.bondContextSell(fiat),
-          trailing: null,
+          value: OrderDataValue(
+            buying ? l10n.bondContextBuy(fiat) : l10n.bondContextSell(fiat),
+          ),
         ),
       if (share != null)
-        (
+        OrderDataRow(
+          icon: Icons.percent_rounded,
           label: l10n.bondContextEquals,
-          value: l10n.bondContextPercent(share),
-          trailing: null,
+          value: OrderDataValue(l10n.bondContextPercent(share), figures: true),
         ),
     ];
   }

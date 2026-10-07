@@ -2016,9 +2016,9 @@
   "@enterInvoiceManually": {
     "description": "Button to switch to manual invoice entry"
   },
-  "submitButton": "Submit",
-  "@submitButton": {
-    "description": "Generic submit button label"
+  "rangeAmountTakeAction": "Take order",
+  "@rangeAmountTakeAction": {
+    "description": "Answer of the range amount dialog, opened from the take-order button. Same wording as takeOrderButton (DS-CMP-26)."
   },
   "buyerReputation": "Buyer reputation",
   "@buyerReputation": {
@@ -2039,15 +2039,6 @@
   "daysActiveStatLabel": "days active",
   "@daysActiveStatLabel": {
     "description": "Reputation stat label: days active"
-  },
-  "timeRemainingLabel": "Time remaining: {time}",
-  "@timeRemainingLabel": {
-    "description": "Countdown label below the take-order timer",
-    "placeholders": {
-      "time": {
-        "type": "String"
-      }
-    }
   },
   "orderAmountOutOfRange": "Amount must be between {min} and {max} sats for this Mostro node",
   "@orderAmountOutOfRange": {
@@ -2132,9 +2123,9 @@
   "@amountMaxLabel": {
     "description": "Label of the range maximum field (rendered uppercase)"
   },
-  "paymentMethodsChosenCount": "{count, plural, =0{none chosen} =1{1 chosen} other{{count} chosen}}",
+  "paymentMethodsChosenCount": "{count, plural, =0{none selected} =1{1 selected} other{{count} selected}}",
   "@paymentMethodsChosenCount": {
-    "description": "Counter in the payment-methods card header",
+    "description": "Counter in the payment-methods card header. Says \"selected\" (glossary, DS-L10N-4); the key name predates the glossary",
     "placeholders": {
       "count": {
         "type": "int"
@@ -2304,7 +2295,7 @@
   },
   "removePaymentMethod": "Remove {method}",
   "@removePaymentMethod": {
-    "description": "Accessibility label of the × on a chosen payment-method chip",
+    "description": "Accessibility label of the × on a selected payment-method chip",
     "placeholders": {
       "method": {
         "type": "String"
@@ -3195,7 +3186,7 @@
   },
   "takeOrderClosed": "Closed",
   "@takeOrderClosed": {
-    "description": "Replaces the countdown in the app bar once the order is gone"
+    "description": "Value of the take order's countdown row once the order is gone"
   },
   "easterEggWhitepaper": "31 October 2008: nine pages, nobody's permission. Happy Halloween.",
   "@easterEggWhitepaper": {
@@ -3717,7 +3708,7 @@
   "@invoiceLockTitle": {"description": "13b app bar title: the seller pays the hold invoice that locks the sats"},
   "bondTitle": "Anti-abuse deposit",
   "@bondTitle": {"description": "14 app bar title: the anti-abuse bond the taker locks before the trade starts"},
-  "bondRefundableLabel": "REFUNDABLE DEPOSIT",
+  "bondRefundableLabel": "Refundable deposit",
   "@bondRefundableLabel": {"description": "14a hero label above the bond amount"},
   "bondComesBack": "comes back to you when the trade completes",
   "@bondComesBack": {"description": "14a hero context line without a fiat rate"},
@@ -3745,8 +3736,8 @@
   "@bondWhyTitle": {"description": "14 explainer accordion header"},
   "bondWhyCustody": "Mostro does not hold funds, so it cannot penalise whoever abandons a trade; the deposit does that job, and protects every user against scammers.",
   "@bondWhyCustody": {"description": "14b explainer paragraph 1"},
-  "bondWhyHold": "It is a {hold} invoice: your wallet reserves the sats without sending them; when the trade completes, the reservation is cancelled on its own.",
-  "@bondWhyHold": {"description": "14b explainer paragraph 2; hold is the protocol term, rendered bold and left untranslated", "placeholders": {"hold": {"type": "String"}}},
+  "bondWhyHold": "Your wallet holds the sats without sending them; when the trade completes, they are released on their own.",
+  "@bondWhyHold": {"description": "14b explainer paragraph 2: the wallet holds the deposit's sats without sending them. Plain words, no \"hold\" term (DS-L10N-4)"},
   "bondWhyDispute": "If you open a dispute and win, you get it back too. It is only charged when you lose a dispute.",
   "@bondWhyDispute": {"description": "14b explainer paragraph 3 on a node that does not slash on timeout"},
   "bondWhyDisputeTimeout": "If you open a dispute and win, you get it back too. It is only charged when you lose a dispute or let a waiting step time out.",
@@ -3801,7 +3792,7 @@
   "@createOrderBondNotice": {"description": "Create-order preview notice on a node whose bond applies to makers"},
   "bondClaimTitle": "Claim your share",
   "@bondClaimTitle": {"description": "Claim screen title (payout of a slashed bond's counterparty share)"},
-  "bondClaimShareLabel": "YOUR SHARE",
+  "bondClaimShareLabel": "Your share",
   "@bondClaimShareLabel": {"description": "Claim screen hero label, upper case"},
   "bondClaimShareSemantics": "Share of {sats} sats to claim",
   "@bondClaimShareSemantics": {"description": "Semantics of the claim hero", "placeholders": {"sats": {"type": "String"}}},
@@ -3965,8 +3956,8 @@
   "@invoiceCancelTrade": {"description": "13a/13b cancel link below the actions"},
   "invoiceOpenWallet": "Open in my wallet",
   "@invoiceOpenWallet": {"description": "13b primary action: opens the hold invoice as a lightning: deep link"},
-  "invoiceHoldNote": "This is a {hold} invoice: the sats are held, they don't leave your wallet until you confirm the buyer's payment.",
-  "@invoiceHoldNote": {"description": "13b note explaining the hold invoice; hold is the protocol term 'hold', rendered bold and deliberately left untranslated in every locale (as in 'factura hold') — move the placeholder, do not replace it", "placeholders": {"hold": {"type": "String"}}},
+  "invoiceHoldNote": "The sats are held: they don't leave your wallet until you confirm the buyer's payment.",
+  "@invoiceHoldNote": {"description": "13b note: paying the invoice keeps the sats held in the seller's wallet until they confirm the buyer's payment. Plain words, no \"hold\" term (DS-L10N-4)"},
   "invoiceQrSemantics": "Lightning invoice QR code: {invoice}",
   "@invoiceQrSemantics": {"description": "13b screen reader label of the QR: the whole invoice", "placeholders": {"invoice": {"type": "String"}}},
   "invoiceExpiredTitle": "The invoice expired",
@@ -3982,7 +3973,11 @@
   "invoiceErrorWrongNetwork": "The invoice is for {invoice}, the node uses {node}",
   "@invoiceErrorWrongNetwork": {"description": "13a validation error: the invoice is for another chain than the node's; both are LND network names like mainnet or testnet", "placeholders": {"invoice": {"type": "String"}, "node": {"type": "String"}}},
   "invoiceCountdownHours": "{hours} h {minutes}",
-  "@invoiceCountdownHours": {"description": "Invoice time band countdown above one hour; hours is a whole number, minutes is always two digits (e.g. 1 h 05). Keep it short: it sits inside a sentence", "placeholders": {"hours": {"type": "String"}, "minutes": {"type": "String"}}},
+  "@invoiceCountdownHours": {"description": "Every countdown above one hour (DS-CMP-21: invoice band, trade step, take order, my order, chat); hours is a whole number, minutes is always two digits (e.g. 1 h 05). Keep it short: it sits inside a sentence or a row", "placeholders": {"hours": {"type": "String"}, "minutes": {"type": "String"}}},
+  "countdownExpiresInLabel": "Expires in",
+  "@countdownExpiresInLabel": {"description": "Label of an order's countdown (take order data row, own order status); the figure follows it, e.g. Expires in 23 h 12"},
+  "bondPayWithinLabel": "Pay within",
+  "@bondPayWithinLabel": {"description": "Label above the bond time pill in the compact amount row: the time left to pay the bond invoice"},
   "tradeCardWaitingBuyerInvoiceTitle": "Waiting for the buyer's invoice",
   "@tradeCardWaitingBuyerInvoiceTitle": {"description": "Notifications card title for a trade status change (issue #474); role-neutral, both sides see it"},
   "tradeCardWaitingBuyerInvoiceMessage": "The trade continues once the buyer adds a Lightning invoice.",
@@ -4065,9 +4060,9 @@
   "@recoveredTradesMessage": {"description": "Snackbar shown after a mnemonic import once Mostro returned the identity's trades in progress; count is how many orders and disputes came back", "placeholders": {"count": {"type": "int"}}},
   "recoverTradesFailedMessage": "Account imported, but Mostro did not answer, so your trades in progress were not recovered",
   "@recoverTradesFailedMessage": {"description": "Snackbar shown after a mnemonic import when Mostro did not answer the recovery request; the import itself succeeded"},
-  "paymentMethodsChosenLabel": "Chosen",
-  "@paymentMethodsChosenLabel": {"description": "Label in front of the chips summarising the methods chosen so far on the payment-method picker screen"},
-  "paymentMethodsSelectedCount": "{count, plural, =0{Choose at least one method} =1{1 method selected} other{{count} methods selected}}",
+  "paymentMethodsChosenLabel": "Selected",
+  "@paymentMethodsChosenLabel": {"description": "Label in front of the chips summarising the methods selected so far on the payment-method picker screen (glossary: selected, DS-L10N-4)"},
+  "paymentMethodsSelectedCount": "{count, plural, =0{Select at least one method} =1{1 method selected} other{{count} methods selected}}",
   "@paymentMethodsSelectedCount": {"description": "Count line above the confirm button of the payment-method picker screen", "placeholders": {"count": {"type": "int"}}},
   "paymentMethodsConfirm": "Confirm methods",
   "@paymentMethodsConfirm": {"description": "Button that saves the payment-method selection and closes the picker screen"},

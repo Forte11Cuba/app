@@ -19,7 +19,7 @@ Flutter's `Semantics.identifier` — surfaced on Android as the accessibility
 ```dart
 FilledButton(
   onPressed: _submit,
-  child: Text(l10n.submitButton),
+  child: Text(l10n.publishOrder),
 ).withAutomationId(AutomationIds.orderCreateSubmit)
 ```
 

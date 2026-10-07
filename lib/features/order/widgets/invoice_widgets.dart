@@ -7,9 +7,12 @@ import 'package:mostro/core/automation/automation_id.dart';
 import 'package:mostro/core/automation/automation_ids.dart';
 import 'package:mostro/core/invoice_palette.dart';
 import 'package:mostro/features/order/models/invoice_rules.dart';
+import 'package:mostro/features/order/widgets/hero_amount_card.dart';
 import 'package:mostro/features/order/widgets/order_detail_cards.dart';
 import 'package:mostro/l10n/app_localizations.dart';
 import 'package:mostro/shared/providers/peer_nym_provider.dart';
+import 'package:mostro/shared/utils/countdown.dart';
+import 'package:mostro/shared/widgets/countdown_urgency_announcer.dart';
 import 'package:mostro/src/rust/api/types.dart' show TradeInfo;
 
 /// Building blocks shared by the two invoice screens
@@ -29,9 +32,9 @@ String? formatInvoiceFiat(AppLocalizations l10n, TradeInfo trade) {
   return '$formatted ${trade.order.fiatCode}';
 }
 
-/// The counterpart's pseudonym, with their reputation beside it once the
-/// daemon's snapshot has arrived.
-InvoiceCardRow invoiceCounterpartRow(
+/// The counterpart's pseudonym as a data row (DS-CMP-24), with their
+/// reputation trailing it once the daemon's snapshot has arrived.
+Widget invoiceCounterpartRow(
   WidgetRef ref,
   AppLocalizations l10n,
   TradeInfo trade,
@@ -43,14 +46,30 @@ InvoiceCardRow invoiceCounterpartRow(
           ? null
           : ref.watch(peerNymProvider(pubkey)).valueOrNull?.pseudonym;
   final hasSnapshot = trade.peerRating != null;
-  return (
+  return OrderDataRow(
+    icon: Icons.person_outline_rounded,
     label: label,
-    value: handle ?? l10n.unknownPeerHandle,
-    trailing:
-        hasSnapshot
-            ? counterpartStars(trade.peerRating, trade.peerReviews) ??
-                l10n.invoiceNoTrades
-            : null,
+    value: OrderDataValue(
+      handle ?? l10n.unknownPeerHandle,
+      trailing:
+          hasSnapshot
+              ? counterpartStars(trade.peerRating, trade.peerReviews) ??
+                  l10n.invoiceNoTrades
+              : null,
+    ),
+  );
+}
+
+/// The fiat side of the trade as a data row: `312 ARS · Mercado Pago`.
+Widget invoiceFiatRow(String label, String fiat, String paymentMethod) {
+  final method = paymentMethod.trim();
+  return OrderDataRow(
+    icon: Icons.payments_outlined,
+    label: label,
+    value: OrderDataValue(
+      method.isEmpty ? fiat : '$fiat · $method',
+      figures: true,
+    ),
   );
 }
 
@@ -117,8 +136,9 @@ class InvoiceAppBar extends StatelessWidget implements PreferredSizeWidget {
 
 // ── Hero amount ───────────────────────────────────────────────────────────────
 
-/// The amount as the headline of the screen: label, figure with `sats` on its
-/// baseline, a context line, and (13b) the QR below.
+/// The sats amount as the headline of the screen: the shared
+/// [HeroAmountCard] (DS-CMP-23) with `sats` as its unit, a context line, and
+/// (13b) the QR below.
 class InvoiceHeroCard extends StatelessWidget {
   const InvoiceHeroCard({
     super.key,
@@ -145,85 +165,26 @@ class InvoiceHeroCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final book = OrderBookPalette.of(context);
-    final pal = InvoicePalette.of(context);
+    final l10n = AppLocalizations.of(context);
     final line = contextLine;
-
-    Widget figure = Semantics(
-      label: semanticsLabel,
-      excludeSemantics: true,
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        crossAxisAlignment: CrossAxisAlignment.baseline,
-        textBaseline: TextBaseline.alphabetic,
-        children: [
-          Text(
-            formatInvoiceSats(sats, Localizations.localeOf(context).toString()),
-            style: TextStyle(
-              fontFamily: AppFonts.figures,
-              fontSize: 38,
-              fontWeight: FontWeight.w700,
-              letterSpacing: -0.76,
-              height: 1.1,
-              color: book.textPrimary,
-            ),
-          ),
-          const SizedBox(width: 6),
-          Text(
-            'sats',
-            style: TextStyle(
-              fontSize: 15,
-              fontWeight: FontWeight.w600,
-              color: book.textSecondary,
-            ),
-          ),
-        ],
-      ),
-    );
-    final id = automationId;
-    if (id != null) {
-      figure = figure.withAutomationId(id, label: automationLabel);
-    }
-
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 18),
-      decoration: BoxDecoration(
-        color: book.surface,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: pal.cardBorder),
-      ),
-      child: Column(
-        children: [
-          Text(
-            label.toUpperCase(),
-            style: TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.w600,
-              letterSpacing: 0.66,
-              color: book.textSecondary,
-            ),
-          ),
-          const SizedBox(height: 4),
-          figure,
-          if (line != null) ...[
-            const SizedBox(height: 4),
-            Text(
-              line,
-              textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 12, color: book.textSecondary),
-            ),
-          ],
-          if (child != null) ...[const SizedBox(height: 14), child!],
-        ],
-      ),
+    return HeroAmountCard(
+      label: label,
+      figure: formatInvoiceSats(sats, l10n.localeName),
+      unit: l10n.satsUnitLabel,
+      semanticsLabel: semanticsLabel,
+      automationId: automationId,
+      automationLabel: automationLabel,
+      footer: line == null ? null : HeroContextLine(line),
+      child: child,
     );
   }
 }
 
 // ── Time band ─────────────────────────────────────────────────────────────────
 
-/// Amber band with the time left; red, with a pulsing figure, under a minute.
+/// Amber band with the time left; red, with a pulsing figure, once
+/// `countdownTone` turns urgent — under a minute in an invoice window of
+/// 15 minutes or less, under five in a longer one (DS-CMP-21).
 ///
 /// [sentence] receives the figure and returns the localized sentence around
 /// it, so the figure can be styled on its own wherever the locale puts it.
@@ -231,11 +192,15 @@ class InvoiceTimeBand extends StatefulWidget {
   const InvoiceTimeBand({
     super.key,
     required this.remaining,
+    required this.window,
     required this.sentence,
     required this.hours,
   });
 
   final Duration remaining;
+
+  /// The whole window the band counts down, or null when unknown.
+  final Duration? window;
   final String Function(String time) sentence;
 
   /// The localized countdown above an hour (`1 h 05`).
@@ -271,9 +236,11 @@ class _InvoiceTimeBandState extends State<InvoiceTimeBand>
     super.dispose();
   }
 
-  bool get _pulsing =>
-      widget.remaining > Duration.zero &&
-      isInvoiceCountdownUrgent(widget.remaining);
+  bool get _urgent =>
+      countdownTone(widget.remaining, window: widget.window) ==
+      CountdownTone.urgent;
+
+  bool get _pulsing => widget.remaining > Duration.zero && _urgent;
 
   void _syncPulse() {
     if (_pulsing) {
@@ -288,53 +255,57 @@ class _InvoiceTimeBandState extends State<InvoiceTimeBand>
   @override
   Widget build(BuildContext context) {
     final pal = InvoicePalette.of(context);
-    final urgent = isInvoiceCountdownUrgent(widget.remaining);
+    final urgent = _urgent;
     final ink = urgent ? pal.errorInk : pal.timeInk;
     final figureColor = urgent ? pal.errorInk : pal.timeFigure;
-    final time = formatInvoiceCountdown(widget.remaining, hours: widget.hours);
+    final time = formatCountdown(widget.remaining, hours: widget.hours);
     final (before, after) = _splitAround(widget.sentence);
 
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 11),
-      decoration: BoxDecoration(
-        color: urgent ? pal.errorFill : pal.timeFill,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: urgent ? pal.errorBorder : pal.timeBorder),
-      ),
-      child: Row(
-        children: [
-          Icon(Icons.schedule, size: 15, color: figureColor),
-          const SizedBox(width: 9),
-          Expanded(
-            child: Semantics(
-              label: widget.sentence(time),
-              excludeSemantics: true,
-              child: AnimatedBuilder(
-                animation: _pulse,
-                builder:
-                    (context, _) => Text.rich(
-                      TextSpan(
-                        style: TextStyle(fontSize: 12, color: ink),
-                        children: [
-                          TextSpan(text: before),
-                          TextSpan(
-                            text: time,
-                            style: TextStyle(
-                              fontFamily: AppFonts.figures,
-                              fontWeight: FontWeight.w700,
-                              color: figureColor.withValues(
-                                alpha: 1 - 0.65 * _pulse.value,
+    return CountdownUrgencyAnnouncer(
+      urgent: urgent,
+      message: widget.sentence(time),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          color: urgent ? pal.errorFill : pal.timeFill,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: urgent ? pal.errorBorder : pal.timeBorder),
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.schedule, size: 14, color: figureColor),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Semantics(
+                label: widget.sentence(time),
+                excludeSemantics: true,
+                child: AnimatedBuilder(
+                  animation: _pulse,
+                  builder:
+                      (context, _) => Text.rich(
+                        TextSpan(
+                          style: TextStyle(fontSize: 12, color: ink),
+                          children: [
+                            TextSpan(text: before),
+                            TextSpan(
+                              text: time,
+                              style: TextStyle(
+                                fontFamily: AppFonts.figures,
+                                fontWeight: FontWeight.w700,
+                                color: figureColor.withValues(
+                                  alpha: 1 - 0.65 * _pulse.value,
+                                ),
                               ),
                             ),
-                          ),
-                          TextSpan(text: after),
-                        ],
+                            TextSpan(text: after),
+                          ],
+                        ),
                       ),
-                    ),
+                ),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -533,146 +504,10 @@ class InvoiceIconAction extends StatelessWidget {
 
 // ── Cards ─────────────────────────────────────────────────────────────────────
 
-/// One label → value row of [InvoiceCounterpartCard]; [trailing] is the
-/// reputation beside the counterpart's name.
-typedef InvoiceCardRow = ({String label, String value, String? trailing});
-
-/// Counterpart and fiat side of the trade, as label → value rows. The first
-/// row is a name; the rest are figures and use the figures face. With an
-/// [orderId], the last row is the order's ID row (DS-CMP-22); with no
-/// [rows], that row is the whole card.
-class InvoiceCounterpartCard extends StatelessWidget {
-  const InvoiceCounterpartCard({
-    super.key,
-    this.rows = const [],
-    this.orderId,
-    this.orderIdAutomationId = AutomationIds.orderId,
-  });
-
-  final List<InvoiceCardRow> rows;
-  final String? orderId;
-
-  /// The readout carrying the full id, which each screen names its own.
-  final String orderIdAutomationId;
-
-  @override
-  Widget build(BuildContext context) {
-    final book = OrderBookPalette.of(context);
-    final pal = InvoicePalette.of(context);
-    final orderId = this.orderId;
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: book.surface,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: pal.cardBorder),
-      ),
-      child: Column(
-        children: [
-          for (var i = 0; i < rows.length; i++) ...[
-            if (i > 0) const SizedBox(height: 8),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.baseline,
-              textBaseline: TextBaseline.alphabetic,
-              children: [
-                Text(
-                  rows[i].label,
-                  style: TextStyle(fontSize: 12, color: book.textSecondary),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    rows[i].value,
-                    textAlign: TextAlign.right,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontFamily: i == 0 ? null : AppFonts.figures,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: book.textStrong,
-                    ),
-                  ),
-                ),
-                if (rows[i].trailing != null) ...[
-                  const SizedBox(width: 8),
-                  Text(
-                    rows[i].trailing!,
-                    style: TextStyle(
-                      fontFamily: AppFonts.figures,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                      color: book.textSecondary,
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          ],
-          if (orderId != null) ...[
-            if (rows.isNotEmpty) const SizedBox(height: 4),
-            _InvoiceOrderIdRow(
-              orderId: orderId,
-              automationId: orderIdAutomationId,
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-/// The ID row of [InvoiceCounterpartCard]: label, the short id and the copy
-/// icon; the whole row copies the full id (DS-CMP-22). 48 high, the minimum
-/// target (DS-CMP-6).
-class _InvoiceOrderIdRow extends StatelessWidget {
-  const _InvoiceOrderIdRow({required this.orderId, required this.automationId});
-
-  final String orderId;
-  final String automationId;
-
-  @override
-  Widget build(BuildContext context) {
-    final book = OrderBookPalette.of(context);
-    return Semantics(
-      button: true,
-      label: AppLocalizations.of(context).copyOrderIdTooltip,
-      child: Material(
-        type: MaterialType.transparency,
-        child: InkWell(
-          onTap: () => copyOrderId(context, orderId),
-          borderRadius: BorderRadius.circular(12),
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(minHeight: 48),
-            child: Row(
-              children: [
-                Text(
-                  AppLocalizations.of(context).orderDetailIdLabel,
-                  style: TextStyle(fontSize: 12, color: book.textSecondary),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Align(
-                    alignment: AlignmentDirectional.centerEnd,
-                    child: OrderIdValue(
-                      orderId: orderId,
-                      color: book.textStrong,
-                      automationId: automationId,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
 /// A state of an invoice screen with no card of its own (loading, waiting,
-/// paying through the wallet, closed): the order's ID card on top, [child]
-/// below, so the id reads the same in every state (DS-CMP-22).
+/// paying through the wallet, closed): a data card holding only the order's
+/// ID row on top, [child] below, so the id reads the same in every state
+/// (DS-CMP-22, DS-CMP-24).
 class InvoiceOrderIdBody extends StatelessWidget {
   const InvoiceOrderIdBody({
     super.key,
@@ -697,73 +532,12 @@ class InvoiceOrderIdBody extends StatelessWidget {
             kInvoiceGutter,
             0,
           ),
-          child: InvoiceCounterpartCard(
-            orderId: orderId,
-            orderIdAutomationId: automationId,
+          child: OrderDataCard(
+            rows: [OrderIdRow(orderId: orderId, automationId: automationId)],
           ),
         ),
         Expanded(child: child),
       ],
-    );
-  }
-}
-
-/// Lock + the sentence explaining what a hold invoice does, with [boldWord]
-/// set in bold wherever the locale places it in [sentence].
-class InvoiceHoldNote extends StatelessWidget {
-  const InvoiceHoldNote({
-    super.key,
-    required this.sentence,
-    required this.boldWord,
-  });
-
-  final String Function(String hold) sentence;
-  final String boldWord;
-
-  @override
-  Widget build(BuildContext context) {
-    final book = OrderBookPalette.of(context);
-    final pal = InvoicePalette.of(context);
-    final (before, after) = _splitAround(sentence);
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 11),
-      decoration: BoxDecoration(
-        color: pal.subtleFill,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: pal.subtleBorder),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: const EdgeInsets.only(top: 1),
-            child: Icon(Icons.lock_outline, size: 15, color: pal.icon),
-          ),
-          const SizedBox(width: 9),
-          Expanded(
-            child: Text.rich(
-              TextSpan(
-                style: TextStyle(
-                  fontSize: 11,
-                  height: 1.45,
-                  color: book.textSecondary,
-                ),
-                children: [
-                  TextSpan(text: before),
-                  TextSpan(
-                    text: boldWord,
-                    style: TextStyle(
-                      fontWeight: FontWeight.w700,
-                      color: book.textStrong,
-                    ),
-                  ),
-                  TextSpan(text: after),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
     );
   }
 }
