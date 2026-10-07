@@ -447,11 +447,18 @@ mod tests {
     ///
     /// ```text
     /// docker run -p 3338:3338 cashubtc/nutshell:latest poetry run mint
-    /// MOSTRO_TEST_MINT_URL=http://localhost:3338 cargo test -- --ignored
+    /// MOSTRO_TEST_MINT_URL=http://localhost:3338 cargo test --lib cashu:: -- --ignored
     /// ```
     ///
     /// or, without Docker, at the public test mint, whose Lightning backend is
-    /// fake too: `MOSTRO_TEST_MINT_URL=https://testnut.cashu.space`.
+    /// fake too:
+    ///
+    /// ```text
+    /// MOSTRO_TEST_MINT_URL=https://testnut.cashu.space cargo test --lib cashu:: -- --ignored
+    /// ```
+    ///
+    /// `cashu::` keeps the run to these tests: an unfiltered `--ignored` also
+    /// starts the NWC and regtest ones, which fail without their own setup.
     ///
     /// They are `#[ignore]` so CI stays green without one. A mock is not an
     /// option here: it would have to fake blind signatures and DLEQ proofs, and

@@ -100,11 +100,14 @@ When moving off the current pin:
    with no compile-time guarantee of *semantic* stability.
 2. `cargo check --target wasm32-unknown-unknown` (the stub must still build even
    though it does not use cdk).
-3. Run the `#[ignore]`d integration tests against a local nutshell:
-   `MOSTRO_TEST_MINT_URL=http://localhost:3338 cargo test -- --ignored`, or
-   against the public test mint, `MOSTRO_TEST_MINT_URL=https://testnut.cashu.space`.
-   They are the only thing that exercises real blind signatures and DLEQ; a unit
-   test cannot substitute for them.
+3. Run the `#[ignore]`d Cashu integration tests against a local nutshell:
+   `MOSTRO_TEST_MINT_URL=http://localhost:3338 cargo test --lib cashu:: -- --ignored`,
+   or against the public test mint:
+   `MOSTRO_TEST_MINT_URL=https://testnut.cashu.space cargo test --lib cashu:: -- --ignored`.
+   Keep the `cashu::` filter: an unfiltered `--ignored` also starts the NWC and
+   regtest tests, which fail without their own setup. These are the only thing
+   that exercises real blind signatures and DLEQ; a unit test cannot substitute
+   for them.
 4. Check `SendOptions` and `ReceiveOptions` field by field — they are built with
    `..Default::default()`, so a new field lands silently.
 5. Re-read the cdk internals that comments in `rust/src/cashu/` cite by file and
