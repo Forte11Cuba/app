@@ -66,13 +66,18 @@ bool isChecked(String path) {
 bool isScreen(String path) => path.contains('/screens/');
 
 /// The new-side line numbers each file gains in [diff], the output of
-/// `git diff --unified=0`. A file that only loses lines maps to none;
-/// deleted files are left out.
+/// `git diff --unified=0`. A file that only loses lines, or is only renamed,
+/// maps to none; deleted files are left out.
 Map<String, Set<int>> addedLines(String diff) {
   final result = <String, Set<int>>{};
   final hunk = RegExp(r'^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@');
   Set<int>? current;
   for (final line in diff.split('\n')) {
+    // A pure rename has no `+++` line: only its header names the new path.
+    if (line.startsWith('rename to ')) {
+      result.putIfAbsent(line.substring(10), () => <int>{});
+      continue;
+    }
     if (line.startsWith('+++ ')) {
       final target = line.substring(4);
       current =

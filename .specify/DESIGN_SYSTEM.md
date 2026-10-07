@@ -21,7 +21,7 @@ information architecture. It does not keep v1's look.
     `lib/core/`, where tokens are defined): every top-level declaration (a class, mixin, enum,
     extension, function or variable) with an added or changed line, **read whole**, so a
     button whose `icon:` changed is checked for its `style:`. A **screen** (a file under a
-    `screens/` directory) is read whole instead: any added, changed or removed line in it
+    `screens/` directory) is read whole instead: a rename or any added, changed or removed line
     checks the entire file. It judges literal values and
     named v1 tokens only: a value derived from a token is left to review. Run it locally with
     `dart tool/design_check.dart`.
