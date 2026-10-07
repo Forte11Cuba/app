@@ -29,6 +29,8 @@ import 'package:mostro/features/order/widgets/range_amount_modal.dart';
 import 'package:mostro/features/trades/providers/trades_providers.dart'
     show refreshTrades;
 import 'package:mostro/l10n/app_localizations.dart';
+import 'package:mostro/shared/utils/countdown.dart';
+import 'package:mostro/shared/widgets/countdown_urgency_announcer.dart';
 import 'package:mostro/src/rust/api/settings.dart' as settings_api;
 import 'package:mostro/src/rust/api/types.dart';
 
@@ -65,7 +67,7 @@ class TakeOrderScreen extends ConsumerStatefulWidget {
 class _TakeOrderScreenState extends ConsumerState<TakeOrderScreen> {
   static const _rateRefresh = Duration(seconds: 30);
 
-  /// Drives only the app-bar countdown. A notifier rather than screen state:
+  /// Drives only the countdown row. A notifier rather than screen state:
   /// under an hour this ticks every second, and rebuilding the whole screen
   /// for it means re-running the entire order layout once a second.
   final ValueNotifier<Duration> _remaining = ValueNotifier(Duration.zero);
@@ -110,8 +112,8 @@ class _TakeOrderScreenState extends ConsumerState<TakeOrderScreen> {
     context.go(AppRoute.tradeDetailPath(widget.orderId));
   }
 
-  /// (Re)starts the countdown for [order]. Repaints once a minute above an
-  /// hour, once a second under it; at zero the button dies in place.
+  /// (Re)starts the countdown for [order]. Repaints when the displayed value
+  /// changes (`countdownTick`); at zero the button dies in place.
   void _syncCountdown(OrderItem order) {
     _countdown?.cancel();
     _countdown = null;
@@ -409,12 +411,6 @@ class _TakeOrderScreenState extends ConsumerState<TakeOrderScreen> {
         context,
         title: widget.isBuying ? l10n.tabBuyBtc : l10n.tabSellBtc,
         onBack: back,
-        trailing: ValueListenableBuilder<Duration>(
-          valueListenable: _remaining,
-          builder:
-              (context, remaining, _) =>
-                  _Countdown(remaining: remaining, isClosed: isUnavailable),
-        ),
       ),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(
@@ -444,6 +440,15 @@ class _TakeOrderScreenState extends ConsumerState<TakeOrderScreen> {
                 label: l10n.takeOrderPublishedLabel,
                 value: OrderDataValue(orderRelativeTime(l10n, order.createdAt)),
               ),
+              ValueListenableBuilder<Duration>(
+                valueListenable: _remaining,
+                builder:
+                    (context, remaining, _) => _CountdownRow(
+                      remaining: remaining,
+                      window: order.expiresAt?.difference(order.createdAt),
+                      isClosed: isUnavailable,
+                    ),
+              ),
               OrderIdRow(orderId: order.id),
             ],
           ),
@@ -471,14 +476,23 @@ class _TakeOrderScreenState extends ConsumerState<TakeOrderScreen> {
   }
 }
 
-// ── App bar countdown ─────────────────────────────────────────────────────────
+// ── Countdown row ─────────────────────────────────────────────────────────────
 
-/// Clock + time left; amber under an hour, coral under five minutes.
-/// `Closed` once the order is gone, `Expired` once the clock ran out.
-class _Countdown extends StatelessWidget {
-  const _Countdown({required this.remaining, required this.isClosed});
+/// The order's time left as a row of the data card (DS-CMP-21): `Expires in`
+/// and the figure, toned by `countdownTone` — lime while the order is the
+/// user's to take, amber under an hour, coral at the end. Once the order is
+/// gone the row reads `Status · Closed` or `Status · Expired`.
+class _CountdownRow extends StatelessWidget {
+  const _CountdownRow({
+    required this.remaining,
+    required this.window,
+    required this.isClosed,
+  });
 
   final Duration remaining;
+
+  /// The order's whole lifetime, which sets when the figure turns urgent.
+  final Duration? window;
   final bool isClosed;
 
   @override
@@ -492,27 +506,36 @@ class _Countdown extends StatelessWidget {
       fontWeight: FontWeight.w600,
       color: book.textTertiary,
     );
-    if (isClosed) return Text(l10n.takeOrderClosed, style: figures);
-    if (remaining <= Duration.zero) {
-      return Text(l10n.orderStatusExpired, style: figures);
+    final ended = isClosed || remaining <= Duration.zero;
+    if (ended) {
+      return OrderDataRow(
+        icon: Icons.schedule_rounded,
+        label: l10n.statusLabel,
+        value: Text(
+          isClosed ? l10n.takeOrderClosed : l10n.orderStatusExpired,
+          style: figures,
+        ),
+      );
     }
-    final color = switch (countdownTone(remaining)) {
+    final tone = countdownTone(remaining, window: window);
+    final color = switch (tone) {
       CountdownTone.calm => book.limeIcon,
       CountdownTone.warning => book.yellowInk,
       CountdownTone.urgent => pal.danger,
     };
-    final text = formatRemaining(remaining);
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Icon(Icons.schedule_rounded, size: 13, color: color),
-        const SizedBox(width: 5),
-        Text(
-          text,
-          semanticsLabel: l10n.timeRemainingLabel(text),
+    return OrderDataRow(
+      icon: Icons.schedule_rounded,
+      label: l10n.countdownExpiresInLabel,
+      value: CountdownUrgencyAnnouncer(
+        urgent: tone == CountdownTone.urgent,
+        message:
+            '${l10n.countdownExpiresInLabel} '
+            '${formatCountdown(remaining, hours: l10n.invoiceCountdownHours)}',
+        child: Text(
+          formatCountdown(remaining, hours: l10n.invoiceCountdownHours),
           style: figures.copyWith(color: color),
         ),
-      ],
+      ),
     );
   }
 }

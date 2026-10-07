@@ -2902,12 +2902,6 @@ abstract class AppLocalizations {
   /// **'days active'**
   String get daysActiveStatLabel;
 
-  /// Countdown label below the take-order timer
-  ///
-  /// In en, this message translates to:
-  /// **'Time remaining: {time}'**
-  String timeRemainingLabel(String time);
-
   /// Shown when a fixed-sats order amount is outside the node min/max order amount
   ///
   /// In en, this message translates to:
@@ -4168,7 +4162,7 @@ abstract class AppLocalizations {
   /// **'Could not take the order. Please try again.'**
   String get takeOrderFailed;
 
-  /// Replaces the countdown in the app bar once the order is gone
+  /// Value of the take order's countdown row once the order is gone
   ///
   /// In en, this message translates to:
   /// **'Closed'**
@@ -5842,11 +5836,23 @@ abstract class AppLocalizations {
   /// **'The invoice is for {invoice}, the node uses {node}'**
   String invoiceErrorWrongNetwork(String invoice, String node);
 
-  /// Invoice time band countdown above one hour; hours is a whole number, minutes is always two digits (e.g. 1 h 05). Keep it short: it sits inside a sentence
+  /// Every countdown above one hour (DS-CMP-21: invoice band, trade step, take order, my order, chat); hours is a whole number, minutes is always two digits (e.g. 1 h 05). Keep it short: it sits inside a sentence or a row
   ///
   /// In en, this message translates to:
   /// **'{hours} h {minutes}'**
   String invoiceCountdownHours(String hours, String minutes);
+
+  /// Label of an order's countdown (take order data row, own order status); the figure follows it, e.g. Expires in 23 h 12
+  ///
+  /// In en, this message translates to:
+  /// **'Expires in'**
+  String get countdownExpiresInLabel;
+
+  /// Label above the bond time pill in the compact amount row: the time left to pay the bond invoice
+  ///
+  /// In en, this message translates to:
+  /// **'Pay within'**
+  String get bondPayWithinLabel;
 
   /// Notifications card title for a trade status change (issue #474); role-neutral, both sides see it
   ///

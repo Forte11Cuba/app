@@ -133,6 +133,7 @@ OrderItem _order({
   int tradeCount = 16,
   int daysActive = 219,
   Duration expiresIn = const Duration(hours: 23, minutes: 12),
+  int minutesAgo = 3,
 }) => fakeOrder(
   id: _id,
   kind: kind,
@@ -147,7 +148,7 @@ OrderItem _order({
   rating: rating,
   tradeCount: tradeCount,
   daysActive: daysActive,
-  minutesAgo: 3,
+  minutesAgo: minutesAgo,
   expiresAt: kFakeNow.add(expiresIn),
 );
 
@@ -163,13 +164,88 @@ TextSpan _figureOf(WidgetTester tester, String prefix) {
 }
 
 void main() {
+  // DS-CMP-21 (#723): a time left says what runs out and sits in the body,
+  // never as a bare clock in the app bar, and hours never read as `23:12`.
+  group('TakeOrderScreen countdown', () {
+    testWidgets('announces turning urgent once, not every tick', (
+      tester,
+    ) async {
+      var now = kFakeNow;
+      await withClock(Clock(() => now), () async {
+        // Created 3 minutes ago: a short window, urgent under a minute.
+        await _pump(
+          tester,
+          order: _order(expiresIn: const Duration(minutes: 1, seconds: 2)),
+        );
+        tester.takeAnnouncements();
+
+        for (var i = 0; i < 8; i++) {
+          now = now.add(const Duration(seconds: 1));
+          await tester.pump(const Duration(seconds: 1));
+        }
+
+        expect(
+          [for (final a in tester.takeAnnouncements()) a.message],
+          ['Expires in 00:59'],
+        );
+      });
+    });
+
+    testWidgets('is a labeled row of the data card, not an app-bar clock', (
+      tester,
+    ) async {
+      await withClock(Clock.fixed(kFakeNow), () async {
+        await _pump(tester, order: _order());
+
+        final row = find.ancestor(
+          of: find.text('Expires in'),
+          matching: find.byType(OrderDataRow),
+        );
+        expect(row, findsOneWidget);
+        expect(
+          find.descendant(of: row, matching: find.text('23 h 12')),
+          findsOneWidget,
+        );
+        expect(find.text('23:12'), findsNothing);
+        expect(
+          find.descendant(
+            of: find.byType(AppBar),
+            matching: find.byIcon(Icons.schedule_rounded),
+          ),
+          findsNothing,
+        );
+      });
+    });
+
+    testWidgets('names the end in the same row once the order is gone', (
+      tester,
+    ) async {
+      await withClock(Clock.fixed(kFakeNow), () async {
+        await _pump(
+          tester,
+          order: _order(expiresIn: const Duration(seconds: -1)),
+        );
+
+        final row = find.ancestor(
+          of: find.text('Closed'),
+          matching: find.byType(OrderDataRow),
+        );
+        expect(row, findsOneWidget);
+        expect(
+          find.descendant(of: row, matching: find.text('Status')),
+          findsOneWidget,
+        );
+      });
+    });
+  });
+
   group('TakeOrderScreen buying BTC', () {
     testWidgets('shows what is paid, received, and who sells', (tester) async {
       await withClock(Clock.fixed(kFakeNow), () async {
         await _pump(tester, order: _order());
 
         expect(find.text('Buy BTC'), findsOneWidget);
-        expect(find.text('23:12'), findsOneWidget);
+        expect(find.text('23 h 12'), findsOneWidget);
         expect(find.text('You pay'), findsOneWidget);
         expect(find.text('1,000'), findsOneWidget);
         expect(find.text('You receive'), findsOneWidget);
@@ -343,9 +419,14 @@ void main() {
 
     testWidgets('urges under five minutes', (tester) async {
       await withClock(Clock.fixed(kFakeNow), () async {
+        // A day-long order: under DS-CMP-21 only a window of 15 minutes or
+        // less waits for the last minute.
         await _pump(
           tester,
-          order: _order(expiresIn: const Duration(minutes: 4, seconds: 59)),
+          order: _order(
+            expiresIn: const Duration(minutes: 4, seconds: 59),
+            minutesAgo: 24 * 60 - 5,
+          ),
         );
         expect(_colorOf(tester, '04:59'), _dark.danger);
       });

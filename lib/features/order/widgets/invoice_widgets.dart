@@ -11,6 +11,8 @@ import 'package:mostro/features/order/widgets/hero_amount_card.dart';
 import 'package:mostro/features/order/widgets/order_detail_cards.dart';
 import 'package:mostro/l10n/app_localizations.dart';
 import 'package:mostro/shared/providers/peer_nym_provider.dart';
+import 'package:mostro/shared/utils/countdown.dart';
+import 'package:mostro/shared/widgets/countdown_urgency_announcer.dart';
 import 'package:mostro/src/rust/api/types.dart' show TradeInfo;
 
 /// Building blocks shared by the two invoice screens
@@ -180,7 +182,9 @@ class InvoiceHeroCard extends StatelessWidget {
 
 // ── Time band ─────────────────────────────────────────────────────────────────
 
-/// Amber band with the time left; red, with a pulsing figure, under a minute.
+/// Amber band with the time left; red, with a pulsing figure, once
+/// `countdownTone` turns urgent — under a minute in an invoice window of
+/// 15 minutes or less, under five in a longer one (DS-CMP-21).
 ///
 /// [sentence] receives the figure and returns the localized sentence around
 /// it, so the figure can be styled on its own wherever the locale puts it.
@@ -188,11 +192,15 @@ class InvoiceTimeBand extends StatefulWidget {
   const InvoiceTimeBand({
     super.key,
     required this.remaining,
+    required this.window,
     required this.sentence,
     required this.hours,
   });
 
   final Duration remaining;
+
+  /// The whole window the band counts down, or null when unknown.
+  final Duration? window;
   final String Function(String time) sentence;
 
   /// The localized countdown above an hour (`1 h 05`).
@@ -228,9 +236,11 @@ class _InvoiceTimeBandState extends State<InvoiceTimeBand>
     super.dispose();
   }
 
-  bool get _pulsing =>
-      widget.remaining > Duration.zero &&
-      isInvoiceCountdownUrgent(widget.remaining);
+  bool get _urgent =>
+      countdownTone(widget.remaining, window: widget.window) ==
+      CountdownTone.urgent;
+
+  bool get _pulsing => widget.remaining > Duration.zero && _urgent;
 
   void _syncPulse() {
     if (_pulsing) {
@@ -245,53 +255,57 @@ class _InvoiceTimeBandState extends State<InvoiceTimeBand>
   @override
   Widget build(BuildContext context) {
     final pal = InvoicePalette.of(context);
-    final urgent = isInvoiceCountdownUrgent(widget.remaining);
+    final urgent = _urgent;
     final ink = urgent ? pal.errorInk : pal.timeInk;
     final figureColor = urgent ? pal.errorInk : pal.timeFigure;
-    final time = formatInvoiceCountdown(widget.remaining, hours: widget.hours);
+    final time = formatCountdown(widget.remaining, hours: widget.hours);
     final (before, after) = _splitAround(widget.sentence);
 
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 11),
-      decoration: BoxDecoration(
-        color: urgent ? pal.errorFill : pal.timeFill,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: urgent ? pal.errorBorder : pal.timeBorder),
-      ),
-      child: Row(
-        children: [
-          Icon(Icons.schedule, size: 15, color: figureColor),
-          const SizedBox(width: 9),
-          Expanded(
-            child: Semantics(
-              label: widget.sentence(time),
-              excludeSemantics: true,
-              child: AnimatedBuilder(
-                animation: _pulse,
-                builder:
-                    (context, _) => Text.rich(
-                      TextSpan(
-                        style: TextStyle(fontSize: 12, color: ink),
-                        children: [
-                          TextSpan(text: before),
-                          TextSpan(
-                            text: time,
-                            style: TextStyle(
-                              fontFamily: AppFonts.figures,
-                              fontWeight: FontWeight.w700,
-                              color: figureColor.withValues(
-                                alpha: 1 - 0.65 * _pulse.value,
+    return CountdownUrgencyAnnouncer(
+      urgent: urgent,
+      message: widget.sentence(time),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          color: urgent ? pal.errorFill : pal.timeFill,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: urgent ? pal.errorBorder : pal.timeBorder),
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.schedule, size: 14, color: figureColor),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Semantics(
+                label: widget.sentence(time),
+                excludeSemantics: true,
+                child: AnimatedBuilder(
+                  animation: _pulse,
+                  builder:
+                      (context, _) => Text.rich(
+                        TextSpan(
+                          style: TextStyle(fontSize: 12, color: ink),
+                          children: [
+                            TextSpan(text: before),
+                            TextSpan(
+                              text: time,
+                              style: TextStyle(
+                                fontFamily: AppFonts.figures,
+                                fontWeight: FontWeight.w700,
+                                color: figureColor.withValues(
+                                  alpha: 1 - 0.65 * _pulse.value,
+                                ),
                               ),
                             ),
-                          ),
-                          TextSpan(text: after),
-                        ],
+                            TextSpan(text: after),
+                          ],
+                        ),
                       ),
-                    ),
+                ),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
