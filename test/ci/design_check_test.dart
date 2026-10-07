@@ -68,6 +68,16 @@ index 1..2 100644
 ''';
       expect(addedLines(diff), {'lib/a.dart': <int>{}});
     });
+
+    test('keeps a file it only renames, with none', () {
+      const diff = '''
+diff --git a/lib/a.dart b/lib/b.dart
+similarity index 100%
+rename from lib/a.dart
+rename to lib/b.dart
+''';
+      expect(addedLines(diff), {'lib/b.dart': <int>{}});
+    });
   });
 
   group('which files it reads', () {
@@ -181,6 +191,19 @@ index 1..2 100644
 
       expect(result.exitCode, 1, reason: '${result.stdout}');
       expect(result.stdout, contains('$screen:1: DS-COL-1'));
+    });
+
+    test('fails when it only renames such a screen', () {
+      git(['mv', screen, 'lib/features/x/screens/y_screen.dart']);
+      git(['commit', '-qm', 'rename']);
+
+      final result = check();
+
+      expect(result.exitCode, 1, reason: '${result.stdout}');
+      expect(
+        result.stdout,
+        contains('lib/features/x/screens/y_screen.dart:1: DS-COL-1'),
+      );
     });
 
     test('reads a widget only where it touches it', () {
