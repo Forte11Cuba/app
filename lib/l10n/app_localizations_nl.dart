@@ -2987,7 +2987,7 @@ class AppLocalizationsNl extends AppLocalizations {
   String get bondTitle => 'Borg tegen misbruik';
 
   @override
-  String get bondRefundableLabel => 'TERUGBETAALBARE BORG';
+  String get bondRefundableLabel => 'Terugbetaalbare borg';
 
   @override
   String get bondComesBack => 'komt terug zodra de trade is afgerond';
@@ -3152,7 +3152,7 @@ class AppLocalizationsNl extends AppLocalizations {
   String get bondClaimTitle => 'Haal je deel op';
 
   @override
-  String get bondClaimShareLabel => 'JOUW DEEL';
+  String get bondClaimShareLabel => 'Jouw deel';
 
   @override
   String bondClaimShareSemantics(String sats) {

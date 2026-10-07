@@ -5053,7 +5053,7 @@ abstract class AppLocalizations {
   /// 14a hero label above the bond amount
   ///
   /// In en, this message translates to:
-  /// **'REFUNDABLE DEPOSIT'**
+  /// **'Refundable deposit'**
   String get bondRefundableLabel;
 
   /// 14a hero context line without a fiat rate
@@ -5305,7 +5305,7 @@ abstract class AppLocalizations {
   /// Claim screen hero label, upper case
   ///
   /// In en, this message translates to:
-  /// **'YOUR SHARE'**
+  /// **'Your share'**
   String get bondClaimShareLabel;
 
   /// Semantics of the claim hero

@@ -250,6 +250,75 @@ void main() {
       });
     });
 
+    // DS-CMP-23: one hero, left-aligned, its unit on the figure's baseline.
+    testWidgets(
+      'the hero states the currency beside the figure, not in a chip',
+      (tester) async {
+        await withClock(Clock.fixed(kFakeNow), () async {
+          await _pump(tester, order: _order());
+
+          expect(find.byType(OrderCurrencyChip), findsNothing);
+          final label = tester.widget<Text>(find.text('You pay'));
+          expect(label.style?.fontSize, 12);
+          expect(label.style?.color, _book.textSecondary);
+          final figure = tester.widget<Text>(find.text('1,000'));
+          expect(figure.style?.fontSize, 38);
+          expect(figure.style?.fontWeight, FontWeight.w700);
+          final unit = tester.widget<Text>(find.text('ARS'));
+          expect(unit.style?.fontSize, 15);
+          expect(unit.style?.color, _book.textSecondary);
+          // Left-aligned: the label and the figure share their start edge,
+          // and the unit follows the figure on its line.
+          final figureBox = tester.getRect(find.text('1,000'));
+          expect(tester.getTopLeft(find.text('You pay')).dx, figureBox.left);
+          final unitBox = tester.getRect(find.text('ARS'));
+          expect(unitBox.left, greaterThan(figureBox.right));
+          expect(unitBox.bottom, lessThanOrEqualTo(figureBox.bottom));
+          expect(unitBox.top, greaterThan(figureBox.top));
+        });
+      },
+    );
+
+    testWidgets(
+      'the amount received stacks under the one paid, in lime at 19',
+      (tester) async {
+        await withClock(Clock.fixed(kFakeNow), () async {
+          await _pump(tester, order: _order());
+
+          final line = tester.widget<Text>(find.text('≈ 1,000 sats'));
+          final figure = (line.textSpan! as TextSpan).children![1] as TextSpan;
+          expect(figure.text, '≈ 1,000');
+          expect(figure.style?.fontSize, 19);
+          expect(figure.style?.color, _book.limeInk);
+          final receive = tester.getRect(find.text('You receive'));
+          expect(receive.left, tester.getTopLeft(find.text('1,000')).dx);
+          expect(
+            tester.getTopLeft(find.text('≈ 1,000 sats')).dy,
+            greaterThanOrEqualTo(receive.bottom),
+          );
+        });
+      },
+    );
+
+    testWidgets('a range too wide for 38 drops to 26 rather than truncate', (
+      tester,
+    ) async {
+      await withClock(Clock.fixed(kFakeNow), () async {
+        await _pump(
+          tester,
+          order: _order(
+            fiatAmount: null,
+            fiatAmountMin: 100000,
+            fiatAmountMax: 2500000,
+          ),
+        );
+
+        final figure = tester.widget<Text>(find.text('100,000 – 2,500,000'));
+        expect(figure.style?.fontSize, 26);
+        expect(figure.overflow, isNot(TextOverflow.ellipsis));
+      });
+    });
+
     testWidgets('introduces a maker nobody rated as new', (tester) async {
       await withClock(Clock.fixed(kFakeNow), () async {
         await _pump(

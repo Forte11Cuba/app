@@ -7,6 +7,7 @@ import 'package:mostro/core/automation/automation_id.dart';
 import 'package:mostro/core/automation/automation_ids.dart';
 import 'package:mostro/core/invoice_palette.dart';
 import 'package:mostro/features/order/models/invoice_rules.dart';
+import 'package:mostro/features/order/widgets/hero_amount_card.dart';
 import 'package:mostro/features/order/widgets/order_detail_cards.dart';
 import 'package:mostro/l10n/app_localizations.dart';
 import 'package:mostro/shared/providers/peer_nym_provider.dart';
@@ -117,8 +118,9 @@ class InvoiceAppBar extends StatelessWidget implements PreferredSizeWidget {
 
 // ── Hero amount ───────────────────────────────────────────────────────────────
 
-/// The amount as the headline of the screen: label, figure with `sats` on its
-/// baseline, a context line, and (13b) the QR below.
+/// The sats amount as the headline of the screen: the shared
+/// [HeroAmountCard] (DS-CMP-23) with `sats` as its unit, a context line, and
+/// (13b) the QR below.
 class InvoiceHeroCard extends StatelessWidget {
   const InvoiceHeroCard({
     super.key,
@@ -145,78 +147,17 @@ class InvoiceHeroCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final book = OrderBookPalette.of(context);
-    final pal = InvoicePalette.of(context);
+    final l10n = AppLocalizations.of(context);
     final line = contextLine;
-
-    Widget figure = Semantics(
-      label: semanticsLabel,
-      excludeSemantics: true,
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        crossAxisAlignment: CrossAxisAlignment.baseline,
-        textBaseline: TextBaseline.alphabetic,
-        children: [
-          Text(
-            formatInvoiceSats(sats, Localizations.localeOf(context).toString()),
-            style: TextStyle(
-              fontFamily: AppFonts.figures,
-              fontSize: 38,
-              fontWeight: FontWeight.w700,
-              letterSpacing: -0.76,
-              height: 1.1,
-              color: book.textPrimary,
-            ),
-          ),
-          const SizedBox(width: 6),
-          Text(
-            'sats',
-            style: TextStyle(
-              fontSize: 15,
-              fontWeight: FontWeight.w600,
-              color: book.textSecondary,
-            ),
-          ),
-        ],
-      ),
-    );
-    final id = automationId;
-    if (id != null) {
-      figure = figure.withAutomationId(id, label: automationLabel);
-    }
-
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 18),
-      decoration: BoxDecoration(
-        color: book.surface,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: pal.cardBorder),
-      ),
-      child: Column(
-        children: [
-          Text(
-            label.toUpperCase(),
-            style: TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.w600,
-              letterSpacing: 0.66,
-              color: book.textSecondary,
-            ),
-          ),
-          const SizedBox(height: 4),
-          figure,
-          if (line != null) ...[
-            const SizedBox(height: 4),
-            Text(
-              line,
-              textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 12, color: book.textSecondary),
-            ),
-          ],
-          if (child != null) ...[const SizedBox(height: 14), child!],
-        ],
-      ),
+    return HeroAmountCard(
+      label: label,
+      figure: formatInvoiceSats(sats, l10n.localeName),
+      unit: l10n.satsUnitLabel,
+      semanticsLabel: semanticsLabel,
+      automationId: automationId,
+      automationLabel: automationLabel,
+      footer: line == null ? null : HeroContextLine(line),
+      child: child,
     );
   }
 }

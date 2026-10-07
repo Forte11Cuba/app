@@ -23,12 +23,12 @@ import 'package:mostro/features/order/providers/bond_providers.dart';
 import 'package:mostro/features/order/providers/exchange_rate_provider.dart';
 import 'package:mostro/features/order/providers/trade_state_provider.dart';
 import 'package:mostro/features/order/widgets/explanatory_note.dart';
+import 'package:mostro/features/order/widgets/hero_amount_card.dart';
 import 'package:mostro/features/order/widgets/order_detail_cards.dart';
 import 'package:mostro/features/order/widgets/range_amount_modal.dart';
 import 'package:mostro/features/trades/providers/trades_providers.dart'
     show refreshTrades;
 import 'package:mostro/l10n/app_localizations.dart';
-import 'package:mostro/shared/utils/fiat_currencies.dart';
 import 'package:mostro/src/rust/api/settings.dart' as settings_api;
 import 'package:mostro/src/rust/api/types.dart';
 
@@ -389,7 +389,6 @@ class _TakeOrderScreenState extends ConsumerState<TakeOrderScreen> {
       );
     }
 
-    final flags = ref.watch(currencyFlagsProvider);
     final privacyMode = ref.watch(privacyModeProvider);
     // Not while a take is in flight: the user's own take moves the order out
     // of `pending` before it settles (Rust updates the book entry as soon as
@@ -425,11 +424,7 @@ class _TakeOrderScreenState extends ConsumerState<TakeOrderScreen> {
           24,
         ),
         children: [
-          _AmountBlock(
-            order: order,
-            isBuying: widget.isBuying,
-            flag: flags[order.fiatCode] ?? '',
-          ),
+          _AmountBlock(order: order, isBuying: widget.isBuying),
           if (!privacyMode) ...[
             const SizedBox(height: orderDetailBlockGap),
             _CounterpartyCard(order: order),
@@ -524,19 +519,14 @@ class _Countdown extends StatelessWidget {
 
 // ── Amount block ──────────────────────────────────────────────────────────────
 
-/// `You pay 1,000 ARS` over `You receive ≈ 8,420 sats`, then the price
-/// line. The `≈` is not decorative: until the order is taken the market
+/// The hero (DS-CMP-23): `You pay 1,000 ARS` over `You receive ≈ 8,420
+/// sats`, then the price line. The `≈` is not decorative: until the order is taken the market
 /// price keeps moving.
 class _AmountBlock extends ConsumerWidget {
-  const _AmountBlock({
-    required this.order,
-    required this.isBuying,
-    required this.flag,
-  });
+  const _AmountBlock({required this.order, required this.isBuying});
 
   final OrderItem order;
   final bool isBuying;
-  final String flag;
 
   static const _fade = Duration(milliseconds: 150);
 
@@ -547,83 +537,56 @@ class _AmountBlock extends ConsumerWidget {
     final formats = OrderCardFormats.of(
       Localizations.localeOf(context).toString(),
     );
-    final label = TextStyle(fontSize: 11, color: book.textTertiary);
     // Watched so the estimate follows the node's rate; the screen refreshes
     // it every 30 s. Null while loading or when the node publishes none.
     final rate =
         order.hasFixedSats
             ? null
             : ref.watch(exchangeRateProvider(order.fiatCode)).valueOrNull;
+    final (sentence, figure) = _sats(l10n, formats, rate);
 
-    return OrderDetailCard(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Text(
-                isBuying ? l10n.takeOrderYouPay : l10n.takeOrderYouReceive,
-                style: label,
+    return HeroAmountCard(
+      label: isBuying ? l10n.takeOrderYouPay : l10n.takeOrderYouReceive,
+      figure: formats.amount(order),
+      unit: order.fiatCode,
+      second: HeroAmountSecond(
+        label: isBuying ? l10n.takeOrderYouReceive : l10n.takeOrderYouSend,
+        value: AnimatedSwitcher(
+          duration: _fade,
+          layoutBuilder:
+              (current, previous) => Stack(
+                alignment: AlignmentDirectional.centerStart,
+                children: [...previous, if (current != null) current],
               ),
-              const Spacer(),
-              OrderCurrencyChip(flag: flag, code: order.fiatCode),
-            ],
+          child: HeroSecondFigure(
+            key: ValueKey(rate),
+            sentence: sentence,
+            figure: figure,
           ),
-          const SizedBox(height: 10),
-          OrderAmountFigure(text: formats.amount(order)),
-          const SizedBox(height: 12),
-          Divider(height: 1, thickness: 1, color: book.border),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              Text(
-                isBuying ? l10n.takeOrderYouReceive : l10n.takeOrderYouSend,
-                style: label,
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Align(
-                  alignment: AlignmentDirectional.centerEnd,
-                  child: AnimatedSwitcher(
-                    duration: _fade,
-                    child: Text(
-                      _satsText(l10n, formats, rate),
-                      key: ValueKey(rate),
-                      textAlign: TextAlign.end,
-                      style: TextStyle(
-                        fontFamily: AppFonts.figures,
-                        fontSize: 17,
-                        fontWeight: FontWeight.w600,
-                        color: book.limeInk,
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          _footer(l10n, formats, book),
-        ],
+        ),
       ),
+      footer: _footer(l10n, formats, book),
     );
   }
 
   /// `≈ 8,420 sats`; `from ≈ 8,420 sats` on a range (priced on its
-  /// minimum); the exact figure on a fixed-sats order; a dash without a rate.
-  String _satsText(
+  /// minimum); the exact figure on a fixed-sats order; a dash without a
+  /// rate. Returns the sentence and the figure inside it.
+  (String, String) _sats(
     AppLocalizations l10n,
     OrderCardFormats formats,
     double? rate,
   ) {
     if (order.hasFixedSats) {
-      return l10n.satsAmount(formats.decimal.format(order.amountSats!.toInt()));
+      final figure = formats.decimal.format(order.amountSats!.toInt());
+      return (l10n.satsAmount(figure), figure);
     }
     final fiat = order.isRange ? order.fiatAmountMin! : order.fiatAmount!;
     final sats = estimateSats(fiat: fiat, rate: rate, premium: order.premium);
-    if (sats == null) return '—';
-    final figure = '≈ ${l10n.satsAmount(formats.decimal.format(sats))}';
-    return order.isRange ? l10n.takeOrderSatsFrom(figure) : figure;
+    if (sats == null) return ('—', '—');
+    final figure = '≈ ${formats.decimal.format(sats)}';
+    final line = l10n.satsAmount(figure);
+    return (order.isRange ? l10n.takeOrderSatsFrom(line) : line, figure);
   }
 
   /// The premium is coloured from the taker's side, like the order-book
@@ -633,10 +596,11 @@ class _AmountBlock extends ConsumerWidget {
     OrderCardFormats formats,
     OrderBookPalette book,
   ) {
+    // The hero's context line (DS-CMP-23), with its figure styled.
     final style = TextStyle(
-      fontSize: 11,
+      fontSize: 12,
       height: 1.5,
-      color: book.textTertiary,
+      color: book.textSecondary,
     );
     if (order.hasFixedSats) {
       final sats = l10n.satsAmount(

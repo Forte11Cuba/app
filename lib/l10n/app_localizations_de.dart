@@ -3001,7 +3001,7 @@ class AppLocalizationsDe extends AppLocalizations {
   String get bondTitle => 'Sicherheitseinlage';
 
   @override
-  String get bondRefundableLabel => 'RÜCKZAHLBARE EINLAGE';
+  String get bondRefundableLabel => 'Rückzahlbare Einlage';
 
   @override
   String get bondComesBack => 'kommt beim Abschluss zu dir zurück';
@@ -3167,7 +3167,7 @@ class AppLocalizationsDe extends AppLocalizations {
   String get bondClaimTitle => 'Deinen Anteil einfordern';
 
   @override
-  String get bondClaimShareLabel => 'DEIN ANTEIL';
+  String get bondClaimShareLabel => 'Dein Anteil';
 
   @override
   String bondClaimShareSemantics(String sats) {
