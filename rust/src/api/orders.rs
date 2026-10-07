@@ -6467,6 +6467,71 @@ async fn status_write_blocked(
     false
 }
 
+/// Whether a Kind 38383 `pending` dated `revision_at` predates the take that
+/// left an order of ours at `local`, and so must not reopen it (#628).
+///
+/// The book is no record of the take: relays do not all hold an order's
+/// newest revision, so after a cold start, or on a refetch, one that lags
+/// still serves the `pending` from before it. A maker's row gives no defence
+/// either — it is dated by the order's creation, which a take does not move —
+/// and a taker's age gate ends at the client's take + 900 s while the daemon
+/// may still be waiting. The status cursor ([`load_status_cursor`]) does date
+/// the take: it holds the last daemon status this client accepted for the
+/// order, in the node's clock, which also dates the revision.
+///
+/// Strictly older, as in [`status_write_blocked`]: a taker's cancel within
+/// the same second as the take's message is a genuine republish. Without a
+/// cursor or a revision time nothing can be dated, and the `pending` applies
+/// as before.
+///
+/// Both roles wait in the same statuses. The bond windows are not among
+/// them: a `WaitingTakerBond` order publishes as `pending` and is still
+/// takeable by others.
+fn wire_pending_is_stale(
+    local: Option<&OrderStatus>,
+    revision_at: Option<i64>,
+    cursor: Option<i64>,
+) -> bool {
+    let (Some(local), Some(at), Some(cursor)) = (local, revision_at, cursor) else {
+        return false;
+    };
+    is_maker_waiting_step(local) && at < cursor
+}
+
+/// The status a `pending` revision of `order` must yield to, when
+/// [`wire_pending_is_stale`]; `None` when it applies.
+///
+/// Only an order with a trade-key binding — ours, either role — reads its row
+/// and cursor: for a stranger's, the common case on the book feed, the lookup
+/// is answered from memory.
+async fn pending_older_than_the_take(
+    order: &OrderInfo,
+    revision_at: Option<i64>,
+) -> Option<OrderStatus> {
+    if order.status != OrderStatus::Pending || revision_at.is_none() {
+        return None;
+    }
+    if !order.is_mine && lookup_trade_key_index(&order.id).await.is_none() {
+        return None;
+    }
+    let local = local_trade_status(&order.id).await;
+    let cursor = load_status_cursor(&order.id).await;
+    if !wire_pending_is_stale(local.as_ref(), revision_at, cursor) {
+        return None;
+    }
+    if let (Some(at), Some(cursor)) = (revision_at, cursor) {
+        crate::api::logging::blog_info(
+            "orders",
+            format!(
+                "skip pending revision order={}: {}s older than the last applied status",
+                crate::api::logging::short_id(&order.id),
+                cursor.saturating_sub(at),
+            ),
+        );
+    }
+    local
+}
+
 // ── Public vs private order status ────────────────────────────────────────────
 
 /// Whether a status parsed from a public Kind 38383 event may replace the one
@@ -9051,6 +9116,11 @@ async fn classify_ingested_order(
                 info.status = local;
             }
         }
+    }
+    // A relay still serving the revision from before the take: the book
+    // keeps the taken order, and the sweep then leaves its row alone.
+    if let Some(local) = pending_older_than_the_take(&info, revision_at).await {
+        info.status = local;
     }
     // After the wipe decision above, which settles a never-active take
     // from this very view.
@@ -17579,6 +17649,39 @@ mod tests {
     /// The sweep only acts on positive daemon signals: pending republish
     /// (wipe for takers, resync for makers) and outright cancellation;
     /// absence from the book or ambiguous statuses leave the trade alone.
+    /// Only a dated `pending`, strictly older than a dated take, of an order
+    /// still waiting on it is stale (#628).
+    #[test]
+    fn a_wire_pending_is_stale_only_when_both_times_date_it_before_the_take() {
+        use crate::api::types::OrderStatus as S;
+        let waiting = S::WaitingPayment;
+        assert!(wire_pending_is_stale(Some(&waiting), Some(99), Some(100)));
+        assert!(wire_pending_is_stale(
+            Some(&S::WaitingBuyerInvoice),
+            Some(99),
+            Some(100)
+        ));
+        // Same second, later, or undatable: the `pending` applies.
+        assert!(!wire_pending_is_stale(Some(&waiting), Some(100), Some(100)));
+        assert!(!wire_pending_is_stale(Some(&waiting), Some(101), Some(100)));
+        assert!(!wire_pending_is_stale(Some(&waiting), None, Some(100)));
+        assert!(!wire_pending_is_stale(Some(&waiting), Some(99), None));
+        assert!(!wire_pending_is_stale(None, Some(99), Some(100)));
+        // Not waiting on a take: a bond window publishes as `pending`, and an
+        // order still `Pending` locally has nothing to keep.
+        for local in [
+            S::WaitingTakerBond,
+            S::WaitingMakerBond,
+            S::Pending,
+            S::Active,
+        ] {
+            assert!(
+                !wire_pending_is_stale(Some(&local), Some(99), Some(100)),
+                "{local:?}"
+            );
+        }
+    }
+
     #[test]
     fn sweep_action_requires_a_positive_book_signal() {
         use crate::api::types::OrderStatus as S;
