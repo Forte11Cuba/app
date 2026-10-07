@@ -6091,19 +6091,6 @@ pub async fn request_bond_invoice_again(
     Ok(updated)
 }
 
-/// Current locally known status for a trade: the DB row when present
-/// (authoritative across restarts), else the in-memory book entry.
-/// The daemon also sends `new-order` to the maker of a taken order it put
-/// back on the book: the taker cancelled, or let the waiting window lapse,
-/// and the order is pending again under the same id (mostrod's cancel path
-/// republishes and then notifies the maker with the order payload).
-///
-/// A trade this client still holds in a waiting state is synced back to
-/// `Pending` right away — the stale sweep would do the same, but only after
-/// its 30-minute cadence and 15-minute minimum age, so until then My Trades
-/// and the trade detail kept showing a take that no longer exists. A trade
-/// this client never held, one already past the waiting states, or a stale
-/// replay is left alone. Returns whether the trade was resynced.
 /// The maker's invoice step has ended: their order is back on the book.
 ///
 /// Clearing the start is what opens the next take's step, because a maker
@@ -6114,9 +6101,9 @@ pub async fn request_bond_invoice_again(
 /// (#567).
 ///
 /// Two paths notice the order is back: the daemon's `new-order`
-/// ([`resync_republished_maker_order`]) and, when that message never landed
-/// or was refused as stale, the sweep's `SyncPending`. Both end the step, so
-/// both clear it; anything that learns of it in future must call this too.
+/// ([`resync_republished_maker_order`]) and, when that message never landed,
+/// the sweep's `SyncPending`. Both end the step, so both clear it; anything
+/// that learns of it in future must call this too.
 async fn clear_maker_step_start(db: &impl Storage, order_id: &str) -> bool {
     if let Err(e) = db
         .delete_setting(&crate::db::settings_keys::invoice_step_start(order_id))
@@ -6250,6 +6237,17 @@ async fn end_maker_waiting_step(
     write_maker_step_end(db, order_id).await
 }
 
+/// The daemon also sends `new-order` to the maker of a taken order it put
+/// back on the book: the taker cancelled, or let the waiting window lapse,
+/// and the order is pending again under the same id (mostrod's cancel path
+/// republishes and then notifies the maker with the order payload).
+///
+/// A trade this client still holds in a waiting state is synced back to
+/// `Pending` right away — the stale sweep would do the same, but only after
+/// its 30-minute cadence and 15-minute minimum age, so until then My Trades
+/// and the trade detail kept showing a take that no longer exists. A trade
+/// this client never held, one already past the waiting states, or a stale
+/// replay is left alone. Returns whether the trade was resynced.
 async fn resync_republished_maker_order(
     order_id: &str,
     kind: &mostro_core::message::MessageKind,
@@ -6290,6 +6288,8 @@ async fn resync_republished_maker_order(
     true
 }
 
+/// Current locally known status for a trade: the DB row when present
+/// (authoritative across restarts), else the in-memory book entry.
 async fn current_local_status(order_id: &str) -> Option<OrderStatus> {
     if let Some(db) = crate::db::app_db::db() {
         if let Ok(Some(trade)) = db.get_trade_by_order_id(order_id).await {
@@ -8047,16 +8047,8 @@ fn spawn_stale_sweep() {
     });
 }
 
-/// Look a single order's public status up directly on the relays, bypassing
-/// the in-memory book.
-///
-/// The book is fed by [`order_book_filters`], whose any-status half is
-/// windowed to `RECENT_ORDERS_WINDOW_SECS` (48 h). A trade whose cancellation
-/// the app missed while offline for longer than that window therefore has no
-/// cached status at all, and the sweep would keep it waiting forever — which
-/// is exactly the case the sweep exists for. An unwindowed `d`-tag query
-/// returns a single addressable event, so it is cheap and no relay replay cap
-/// can hide it.
+/// [`fetch_public_order_revision`]'s status alone, for the restored-history
+/// pass ([`reconcile_history_with`]), which decides on the status only.
 async fn fetch_public_order_status(order_id: &str) -> Option<crate::api::types::OrderStatus> {
     fetch_public_order_revision(order_id)
         .await
@@ -8065,7 +8057,7 @@ async fn fetch_public_order_status(order_id: &str) -> Option<crate::api::types::
 
 /// The time the daemon published `order_id` as `success` (#642), from its
 /// newest public event. `None` when that event says anything else, or on the
-/// failures [`fetch_public_order_status`] reads as no answer.
+/// failures [`fetch_public_order_revision`] reads as no answer.
 async fn fetch_public_success_time(order_id: &str) -> Option<i64> {
     fetch_public_order_revision(order_id)
         .await
@@ -8074,7 +8066,22 @@ async fn fetch_public_success_time(order_id: &str) -> Option<i64> {
 }
 
 /// The daemon's newest public event for `order_id`, as an order with the time
-/// of that revision.
+/// of that revision, looked up directly on the relays, bypassing the
+/// in-memory book.
+///
+/// The book is fed by [`order_book_filters`], whose any-status half is
+/// windowed to `RECENT_ORDERS_WINDOW_SECS` (48 h). A trade whose cancellation
+/// the app missed while offline for longer than that window therefore has no
+/// cached status at all, and the sweep would keep it waiting forever — which
+/// is exactly the case the sweep exists for. An unwindowed `d`-tag query is
+/// cheap, and no relay replay cap can hide the order.
+///
+/// Each relay answers with the revision it holds, and they do not all hold
+/// the newest: the newest among the answers is kept
+/// ([`newest_book_revision`]). That one can still predate the take, when no
+/// relay that answered holds anything newer, which is why the sweep dates it
+/// (#628). `None` without a pool, on a relay failure or timeout, or when no
+/// relay holds the order.
 async fn fetch_public_order_revision(order_id: &str) -> Option<(i64, OrderInfo)> {
     let pool = crate::api::nostr::get_pool().ok()?;
     let mostro_pubkey = nostr_sdk::prelude::PublicKey::from_hex(&active_mostro_pubkey()).ok()?;
@@ -8332,9 +8339,11 @@ where
                 // reentrant.
                 let _guard = lock_order(&oid).await;
                 // Same end of the same step as the daemon-driven path,
-                // reached when that message never landed or was refused as
-                // stale by the cursor. The row is re-read in there: what was
-                // decided above is a snapshot, and a take may have begun.
+                // reached when that message never landed. A `pending` older
+                // than the cursor never gets here (#628), so neither does a
+                // `new-order` the cursor refused. The row is re-read in
+                // there: what was decided above is a snapshot, and a take may
+                // have begun.
                 if end_maker_waiting_step(db, &oid, cursor_before).await {
                     emit_trade_update(&oid, crate::api::types::OrderStatus::Pending);
                     log::info!(
@@ -16852,9 +16861,9 @@ mod tests {
     }
 
     /// The sweep reaches the same end of the same step as the daemon's
-    /// `new-order`, and is what runs when that message never landed or the
-    /// cursor refused it as stale. It must clear the step start too, or the
-    /// maker's next take counts from the previous one (#574 review).
+    /// `new-order`, and is what runs when that message never landed. It must
+    /// clear the step start too, or the maker's next take counts from the
+    /// previous one (#574 review).
     #[tokio::test]
     async fn the_sweep_clears_the_step_start_of_a_republished_maker_order() {
         // Arrange: a maker's waiting trade older than the sweep's age gate,
