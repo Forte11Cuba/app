@@ -65,6 +65,16 @@ StepExpiry stepExpiry({
         ? StepExpiry.backToBook
         : StepExpiry.cancelled;
 
+/// Whether [status] says the order was called off, however it ended: an
+/// invoice screen then has nothing left to ask for and leaves for home.
+bool invoiceOrderCancelled(rust_types.OrderStatus status) => switch (status) {
+  rust_types.OrderStatus.canceled ||
+  rust_types.OrderStatus.cooperativelyCanceled ||
+  rust_types.OrderStatus.canceledByAdmin ||
+  rust_types.OrderStatus.expired => true,
+  _ => false,
+};
+
 // ── Buyer input ───────────────────────────────────────────────────────────────
 
 const _scheme = 'lightning:';
