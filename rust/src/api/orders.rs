@@ -8102,6 +8102,56 @@ async fn run_stale_sweep_once() {
             return;
         }
     };
+    let SweepTally {
+        examined,
+        wiped,
+        resynced,
+    } = sweep_trades(db, trades, &looked_up, |oid: String| async move {
+        fetch_public_order_revision(&oid)
+            .await
+            .map(|(at, order)| (at, order.status))
+    })
+    .await;
+    let sessions_dropped = crate::mostro::session::session_manager()
+        .cleanup_stale_sessions(SWEEP_SESSION_TTL_SECS)
+        .await;
+    if examined > 0 || sessions_dropped > 0 {
+        crate::api::logging::blog_info(
+            "orders",
+            format!(
+                "stale sweep: examined={examined} wiped={wiped} resynced={resynced} sessions_dropped={sessions_dropped}"
+            ),
+        );
+    }
+}
+
+/// What one sweep pass did, counted for its log line.
+#[derive(Debug, PartialEq)]
+struct SweepTally {
+    examined: usize,
+    wiped: usize,
+    resynced: usize,
+}
+
+/// The per-row half of [`run_stale_sweep_once`], over the rows it is handed.
+///
+/// `looked_up` names orders whose public status the restored-history pass
+/// already asked for. `public_revision` answers a book miss: the daemon's
+/// newest public revision of that order, as its time and status.
+///
+/// Split out so a test sweeps its own rows and answers the relay lookup
+/// itself: the store and the book are process-wide, and a pass over every
+/// row closes or resyncs the rows of tests running beside it.
+async fn sweep_trades<F, Fut>(
+    db: &impl crate::db::Storage,
+    trades: Vec<crate::api::types::TradeInfo>,
+    looked_up: &std::collections::HashSet<String>,
+    public_revision: F,
+) -> SweepTally
+where
+    F: Fn(String) -> Fut,
+    Fut: std::future::Future<Output = Option<(i64, crate::api::types::OrderStatus)>>,
+{
     let now = crate::rt::unix_now();
     let (mut examined, mut wiped, mut resynced) = (0usize, 0usize, 0usize);
     for trade in trades {
@@ -8153,7 +8203,7 @@ async fn run_stale_sweep_once() {
         // A miss is the long-offline case the windowed filter cannot cover.
         let book_status = match order_book().get_order(&oid).await.map(|o| o.status) {
             Some(status) => Some(status),
-            None => fetch_public_order_status(&oid).await,
+            None => public_revision(oid.clone()).await.map(|(_, status)| status),
         };
 
         match sweep_action(
@@ -8203,16 +8253,10 @@ async fn run_stale_sweep_once() {
             SweepAction::Keep => {}
         }
     }
-    let sessions_dropped = crate::mostro::session::session_manager()
-        .cleanup_stale_sessions(SWEEP_SESSION_TTL_SECS)
-        .await;
-    if examined > 0 || sessions_dropped > 0 {
-        crate::api::logging::blog_info(
-            "orders",
-            format!(
-                "stale sweep: examined={examined} wiped={wiped} resynced={resynced} sessions_dropped={sessions_dropped}"
-            ),
-        );
+    SweepTally {
+        examined,
+        wiped,
+        resynced,
     }
 }
 
@@ -16742,8 +16786,11 @@ mod tests {
         order_info.status = crate::api::types::OrderStatus::Pending;
         order_book().upsert_order(order_info).await;
 
-        // Act
-        run_stale_sweep_once().await;
+        // Act: the book answers, so no relay is asked.
+        sweep_trades(db, vec![row], &Default::default(), |_| async {
+            panic!("the book holds the order; no relay lookup expected")
+        })
+        .await;
 
         // Assert
         assert_eq!(
