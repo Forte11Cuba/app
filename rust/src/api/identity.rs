@@ -21,49 +21,9 @@ use tokio::sync::RwLock;
 use crate::api::types::{IdentityInfo, NymIdentity};
 use crate::crypto::{keys as key_ops, nym};
 use crate::db::Storage;
+use crate::identity_slot::{AppDeletionHooks, DeletionHooks, IdentitySlot, IdentityState};
 
 // ── Global in-memory identity state ──────────────────────────────────────────
-
-struct IdentityState {
-    mnemonic_words: Vec<String>,
-    keys: Keys,
-    identity_info: IdentityInfo,
-}
-
-/// The loaded identity and the generation that tells it from the next one.
-///
-/// The process has one ([`identity_slot`]); the lifecycle seams (`create_in`,
-/// `load_in`, `import_in`, `import_nsec_in`, `delete_in`) take it as a
-/// parameter so a test can drive them on a slot of its own, without racing
-/// the tests that share the global one.
-#[flutter_rust_bridge::frb(ignore)]
-struct IdentitySlot {
-    state: RwLock<Option<IdentityState>>,
-    /// Bumped by every identity deletion, under the write lock: it tells work
-    /// that started under one identity apart from the next — even when the
-    /// same mnemonic is imported again, which a pubkey comparison would not.
-    generation: std::sync::atomic::AtomicU64,
-    /// Held by every transition of the slot — creation, load, import,
-    /// deletion — from its first read to its last write, so none interleaves
-    /// with another (review round 4 of #573). A deletion awaits the relays,
-    /// the push server and the store between reading its owner and wiping
-    /// that owner's rows; without this, a second deletion could clear the
-    /// marker it recorded, a reload release it, or a replacement land before
-    /// the wipe and lose its rows to it. Readers of the identity take only
-    /// `state`, so none of them waits on a transition's I/O.
-    lifecycle: tokio::sync::Mutex<()>,
-}
-
-#[flutter_rust_bridge::frb(ignore)]
-impl IdentitySlot {
-    const fn new() -> Self {
-        Self {
-            state: RwLock::const_new(None),
-            generation: std::sync::atomic::AtomicU64::new(0),
-            lifecycle: tokio::sync::Mutex::const_new(()),
-        }
-    }
-}
 
 fn identity_slot() -> &'static IdentitySlot {
     static SLOT: IdentitySlot = IdentitySlot::new();
@@ -537,36 +497,6 @@ async fn delete_identity_inner(wipe_data: bool) -> Result<()> {
     Ok(())
 }
 
-/// What a deletion does to the rest of the process, outside the slot and the
-/// store: injectable so a test can stand in for the process-wide stores and
-/// pause the deletion at each of these points.
-#[flutter_rust_bridge::frb(ignore)]
-trait DeletionHooks {
-    /// Give back the identity's relay subscriptions.
-    fn release_subscriptions(&self) -> impl std::future::Future<Output = ()>;
-    /// Stop the push server waking this device for the identity's keys.
-    fn unregister_push(&self) -> impl std::future::Future<Output = ()>;
-    /// Empty the in-memory stores of the deleted identity.
-    fn forget_state(&self) -> impl std::future::Future<Output = ()>;
-}
-
-/// The process's own [`DeletionHooks`].
-#[flutter_rust_bridge::frb(ignore)]
-struct AppDeletionHooks;
-
-#[flutter_rust_bridge::frb(ignore)]
-impl DeletionHooks for AppDeletionHooks {
-    async fn release_subscriptions(&self) {
-        crate::api::orders::release_identity_subscriptions().await;
-    }
-    async fn unregister_push(&self) {
-        crate::api::push::unregister_all().await;
-    }
-    async fn forget_state(&self) {
-        forget_identity_state().await;
-    }
-}
-
 /// [`delete_identity_inner`] on `slot`, against `db`, up to the log clear:
 /// returns the cleanup failures to report.
 async fn delete_in<S: Storage>(
@@ -880,7 +810,7 @@ pub async fn funds_at_risk() -> Result<Vec<crate::api::types::FundsAtRisk>> {
 /// The stores are process-wide singletons, so without this the new user sees
 /// the previous one's disputes, ratings and `is_mine` marks until a restart,
 /// whatever the database says.
-async fn forget_identity_state() {
+pub(crate) async fn forget_identity_state() {
     crate::api::disputes::forget_identity_disputes().await;
     crate::api::reputation::forget_identity_ratings().await;
     crate::mostro::session::session_manager().clear().await;
@@ -2722,7 +2652,10 @@ mod tests {
                 "pub(crate) async fn release_identity_subscriptions()",
             )),
             code(body(production(identity), "async fn forget_identity_state()")),
-            code(body(production(identity), "impl DeletionHooks for AppDeletionHooks")),
+            code(body(
+                include_str!("../identity_slot.rs"),
+                "impl DeletionHooks for AppDeletionHooks",
+            )),
         ]
         .join("\n");
         let restore = [

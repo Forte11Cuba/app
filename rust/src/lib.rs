@@ -10,6 +10,7 @@ pub mod cashu;
 pub mod config;
 pub mod crypto;
 pub mod db;
+mod identity_slot;
 pub mod mostro;
 pub mod nostr;
 pub mod nwc;
