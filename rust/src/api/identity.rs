@@ -169,16 +169,18 @@ async fn create_in<S: Storage>(
     db: Option<&S>,
 ) -> Result<IdentityCreationResult> {
     let _transition = slot.lifecycle.lock().await;
-    let mut guard = slot.state.write().await;
-    if guard.is_some() {
+    // Checked with a read lock, which is not held across the wipe below: the
+    // lifecycle lock keeps the slot as checked until the install, so readers
+    // of the identity never wait on the wipe (review of #573).
+    if slot.state.read().await.is_some() {
         bail!("AlreadyExists");
     }
 
     // A point where retrying a pending data wipe is safe: the slot is empty
-    // (checked above, under the write lock), so the tables hold nothing of a
-    // live identity (issue #555). A retry that fails again refuses the new
-    // identity: once one is installed, the launch reload never retries, and
-    // the previous user's rows would stay for the life of the install.
+    // (checked above), so the tables hold nothing of a live identity (issue
+    // #555). A retry that fails again refuses the new identity: once one is
+    // installed, the launch reload never retries, and the previous user's
+    // rows would stay for the life of the install.
     if let Some(db) = db {
         retry_pending_wipe(db).await?;
     }
@@ -196,7 +198,7 @@ async fn create_in<S: Storage>(
         created_at: now,
     };
 
-    *guard = Some(IdentityState {
+    *slot.state.write().await = Some(IdentityState {
         mnemonic_words: mnemonic_words.clone(),
         keys,
         identity_info,
@@ -667,7 +669,7 @@ fn clear_logs_and_report(failures: &[String]) {
 /// Retry the data wipe a previous deletion left pending, if any (issue #555).
 ///
 /// Only sound while no identity holds the session — `create_identity` calls
-/// it under the write lock, after refusing to replace a loaded identity, and
+/// it after refusing to replace a loaded identity, and
 /// `import_from_mnemonic` through [`retry_pending_wipe_if_vacant`]:
 /// `clear_identity_data` empties whole tables, so a retry with a live
 /// identity would take its trades — and its payout claims, which no restore
@@ -726,8 +728,9 @@ async fn retry_pending_wipe_if_vacant_in<S: Storage>(
     slot: &IdentitySlot,
     db: Option<&S>,
 ) -> Result<()> {
-    let guard = slot.state.write().await;
-    if guard.is_some() {
+    // A read lock, released before the wipe: the caller's lifecycle lock is
+    // what keeps the slot as checked, so readers never wait on the wipe.
+    if slot.state.read().await.is_some() {
         return Ok(());
     }
     if let Some(db) = db {
@@ -2508,7 +2511,9 @@ mod tests {
         let retry = body
             .find("retry_pending_wipe(db).await?")
             .expect("create_identity retries the pending wipe and stops on failure");
-        let install = body.find("*guard = Some").expect("the install exists");
+        let install = body
+            .find("= Some(IdentityState {")
+            .expect("the install exists");
         assert!(
             guard < retry && retry < install,
             "the retry must run after the guard and before the install"
@@ -2521,7 +2526,7 @@ mod tests {
                 .expect("the import retries the pending wipe and stops on failure");
             let install = body
                 .find("load_unlocked(")
-                .or_else(|| body.find("*guard = Some"))
+                .or_else(|| body.find("= Some(IdentityState {"))
                 .expect("the import installs");
             assert!(
                 retry < install,
@@ -2531,7 +2536,7 @@ mod tests {
 
         let body = body_of("async fn retry_pending_wipe_if_vacant_in<");
         let vacant = body
-            .find("if guard.is_some()")
+            .find("slot.state.read().await.is_some()")
             .expect("the import's retry checks the slot");
         let retry = body
             .find("retry_pending_wipe(db).await?")
