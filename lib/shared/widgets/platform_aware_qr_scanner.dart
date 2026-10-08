@@ -5,7 +5,10 @@ import 'package:flutter/services.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
 import 'package:mostro/core/app_theme.dart';
+import 'package:mostro/features/order/widgets/order_detail_cards.dart';
 import 'package:mostro/l10n/app_localizations.dart';
+import 'package:mostro/shared/widgets/input_source_action.dart';
+import 'package:mostro/shared/widgets/paste_field.dart';
 
 /// How [PlatformAwareQrScanner] takes its input on a platform.
 enum QrInput {
@@ -85,7 +88,10 @@ class _PlatformAwareQrScannerState extends State<PlatformAwareQrScanner> {
     final data = await Clipboard.getData(Clipboard.kTextPlain);
     final text = data?.text?.trim() ?? '';
     if (text.isEmpty) {
-      if (mounted) setState(() => _errorText = AppLocalizations.of(context).clipboardEmptyError);
+      if (!mounted) return;
+      setState(
+        () => _errorText = AppLocalizations.of(context).clipboardEmptyError,
+      );
       return;
     }
     if (!mounted) return;
@@ -171,10 +177,8 @@ class _PasteFallback extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colors = Theme.of(context).extension<AppColors>();
-    if (colors == null) {
-      throw StateError('AppColors theme extension must be registered');
-    }
+    final book = OrderBookPalette.of(context);
+    final l10n = AppLocalizations.of(context);
 
     return Padding(
       padding: const EdgeInsets.all(AppSpacing.lg),
@@ -183,38 +187,30 @@ class _PasteFallback extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Text(
-            AppLocalizations.of(context).pasteQrCodeHeading,
-            style: Theme.of(context).textTheme.titleMedium,
+            l10n.pasteQrCodeHeading,
+            style: TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.w600,
+              color: book.textPrimary,
+            ),
           ),
           const SizedBox(height: AppSpacing.md),
-          TextField(
+          PasteField(
             controller: controller,
-            decoration: InputDecoration(
-              hintText: hint,
-              errorText: errorText,
-            ),
-            autocorrect: false,
-            enableSuggestions: false,
+            hint: hint,
+            errorText: errorText,
             onChanged: onChanged,
           ),
           const SizedBox(height: AppSpacing.md),
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: onPaste,
-                  icon: const Icon(Icons.content_paste),
-                  label: Text(AppLocalizations.of(context).pasteButtonLabel),
-                ),
-              ),
-              const SizedBox(width: AppSpacing.md),
-              Expanded(
-                child: FilledButton(
-                  onPressed: onSubmit,
-                  child: Text(AppLocalizations.of(context).submitButtonLabel),
-                ),
-              ),
-            ],
+          InputSourceAction(
+            icon: Icons.content_paste_outlined,
+            label: l10n.pasteButtonLabel,
+            onTap: onPaste,
+          ),
+          const SizedBox(height: 18),
+          OrderPrimaryButton(
+            label: l10n.submitButtonLabel,
+            onPressed: onSubmit,
           ),
         ],
       ),
