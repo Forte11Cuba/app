@@ -631,6 +631,9 @@ class _MintDialogState extends State<_MintDialog> {
     final l10n = AppLocalizations.of(context);
     final book = OrderBookPalette.of(context);
     final pal = SettingsPalette.of(context);
+    // Read once, so whether Scan QR works and the reason it gives cannot
+    // disagree.
+    final canScan = canScanQr();
     return MostroDialog(
       title: l10n.cashuMintDialogTitle,
       content: TextField(
@@ -651,7 +654,13 @@ class _MintDialogState extends State<_MintDialog> {
       // Ways to fill the field, not answers to the dialog: links, not buttons.
       links: [
         ModalLink(label: l10n.pasteButtonLabel, onPressed: _paste),
-        ModalLink(label: l10n.scanQrButtonLabel, onPressed: _scan),
+        ModalLink(
+          label: l10n.scanQrButtonLabel,
+          // As in the Receive dialog: where there is no camera, the scanner
+          // would only be a second paste field over this one.
+          onPressed: canScan ? _scan : null,
+          tooltip: canScan ? null : l10n.qrScanUnavailable,
+        ),
       ],
       secondary: ModalAction(
         label: l10n.cancel,
