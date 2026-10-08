@@ -392,8 +392,10 @@ async fn import_in<S: Storage>(
 /// Import identity from an nsec (bech32-encoded Nostr secret key).
 /// Note: nsec import produces a single key with no BIP-39 mnemonic backup.
 ///
-/// Gated like [`import_from_mnemonic`]: into an empty slot only after a
-/// pending wipe is settled, refusing with `PendingWipeFailed` otherwise.
+/// Gated like [`import_from_mnemonic`]: when the slot is empty, a pending
+/// wipe is retried first, and a retry that fails refuses the import with
+/// `PendingWipeFailed`. A slot already taken is installed over, as before
+/// issue #555, without a generation bump.
 pub async fn import_from_nsec(nsec: String) -> Result<IdentityInfo> {
     import_nsec_in(identity_slot(), crate::db::app_db::db(), nsec).await
 }
@@ -670,7 +672,7 @@ fn clear_logs_and_report(failures: &[String]) {
 ///
 /// Only sound while no identity holds the session — `create_identity` calls
 /// it after refusing to replace a loaded identity, and
-/// `import_from_mnemonic` through [`retry_pending_wipe_if_vacant`]:
+/// `import_from_mnemonic` through [`retry_pending_wipe_if_vacant_in`]:
 /// `clear_identity_data` empties whole tables, so a retry with a live
 /// identity would take its trades — and its payout claims, which no restore
 /// brings back — along with the leftovers. That is why the launch reload

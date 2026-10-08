@@ -59,8 +59,10 @@ Future<IdentityInfo> importFromMnemonic({
 /// Import identity from an nsec (bech32-encoded Nostr secret key).
 /// Note: nsec import produces a single key with no BIP-39 mnemonic backup.
 ///
-/// Gated like [`import_from_mnemonic`]: into an empty slot only after a
-/// pending wipe is settled, refusing with `PendingWipeFailed` otherwise.
+/// Gated like [`import_from_mnemonic`]: when the slot is empty, a pending
+/// wipe is retried first, and a retry that fails refuses the import with
+/// `PendingWipeFailed`. A slot already taken is installed over, as before
+/// issue #555, without a generation bump.
 Future<IdentityInfo> importFromNsec({required String nsec}) =>
     RustLib.instance.api.crateApiIdentityImportFromNsec(nsec: nsec);
 

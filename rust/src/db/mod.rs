@@ -256,17 +256,19 @@ pub mod settings_keys {
         format!("{TRADE_WIPED_PREFIX}{order_id}")
     }
 
-    /// Set when an identity deletion could not wipe the identity's data
-    /// (`clear_identity_data` failed): the previous identity's rows are still
-    /// on disk. The next identity creation or import retries the wipe and
-    /// clears this (`api::identity::retry_pending_wipe`, issue #555). The
-    /// value is the deleted identity's public key: reloading that identity
-    /// means the rows are its own, and the marker goes without a wipe
+    /// The intent of an identity deletion to wipe the identity's data,
+    /// recorded before the deletion gives anything up
+    /// (`api::identity::record_wipe_intent`, issue #555) and cleared by the
+    /// wipe that succeeds. While it holds, the previous identity's rows may
+    /// still be on disk: the next identity creation or import retries the
+    /// wipe and clears it (`api::identity::retry_pending_wipe`). The value is
+    /// the deleted identity's public key: reloading that identity means the
+    /// rows are its own, and the marker goes without a wipe
     /// (`api::identity::release_own_wipe_marker`).
     ///
     /// Deliberately absent from [`IDENTITY_SCOPED_PREFIXES`]: the wipe that
-    /// would drop it is the wipe that failed, and the marker must outlive the
-    /// identity swap to drive the retry.
+    /// would drop it is the wipe that may fail, and the marker must outlive
+    /// the identity swap to drive the retry.
     pub const IDENTITY_WIPE_PENDING: &str = "identity_wipe_pending";
 }
 
