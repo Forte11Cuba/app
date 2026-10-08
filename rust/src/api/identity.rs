@@ -2216,13 +2216,17 @@ mod tests {
 
     /// A memory-only session (`init_db` failed) has nowhere to record the
     /// intent, and the rows earlier sessions persisted are still on disk: the
-    /// deletion is refused as an unwritable marker is.
+    /// deletion is refused, deliberately, even though that keeps a possibly
+    /// compromised identity until the store comes back (review of #573).
+    /// With its own marker, the app's usual one for a session without a
+    /// database: unlike an unwritable marker, no retry in this session can
+    /// succeed, so the Account screen must not invite one.
     #[tokio::test]
     async fn without_a_database_the_deletion_is_refused() {
         let err = record_wipe_intent::<WipeFailingStore>(None, "owner-pubkey")
             .await
             .expect_err("no database, no marker, no deletion");
-        assert_eq!(err.to_string(), "WipeNotRecorded");
+        assert_eq!(err.to_string(), "StorageUnavailable");
     }
 
     /// A marker that cannot be read may name a wipe still pending: the

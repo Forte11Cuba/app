@@ -723,6 +723,54 @@ void main() {
     });
   });
 
+  // Review of #573, finding 2: a session without a database refuses every
+  // swap until the store comes back. Retrying cannot help there, so the
+  // message must not ask for one — it says what will.
+  group('a session without a database', () {
+    testWidgets('refuses the generation and says a restart is needed', (
+      tester,
+    ) async {
+      final container = await _pumpAccount(
+        tester,
+        reminderArmed: false,
+        backedUp: true,
+        onRegenerate:
+            () async => throw StateError('AnyhowException(StorageUnavailable)'),
+      );
+      await _seedPreviousUser(container);
+
+      await _generate(tester);
+
+      expect(
+        find.text(l10n.identitySwapStorageUnavailableMessage),
+        findsOneWidget,
+      );
+      expect(find.text(l10n.wipeNotRecordedMessage), findsNothing);
+      expect(find.text('home'), findsNothing);
+      expect(container.read(tradeRoleProvider), {'old': true});
+    });
+
+    testWidgets('refuses the import, not as a bad phrase', (tester) async {
+      await _pumpAccount(
+        tester,
+        reminderArmed: true,
+        backedUp: false,
+        onImport:
+            (_) async =>
+                throw StateError('AnyhowException(StorageUnavailable)'),
+      );
+
+      await _submitImport(tester, l10n);
+
+      expect(
+        find.text(l10n.identitySwapStorageUnavailableMessage),
+        findsOneWidget,
+      );
+      expect(find.text(l10n.invalidMnemonicMessage), findsNothing);
+      expect(find.text('home'), findsNothing);
+    });
+  });
+
   group('generating a new identity', () {
     testWidgets('still arms the reminder and clears the backed-up flag', (
       tester,
