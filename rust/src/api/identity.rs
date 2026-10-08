@@ -2657,6 +2657,97 @@ mod tests {
         assert!(install < claim, "the claim comes after the install");
     }
 
+    /// Everything a deletion gives up has its way back for an identity loaded
+    /// again in the same session (review of #573): a replacement refused after
+    /// the deletion reloads the previous identity, and `restore_identity_session`
+    /// must rebuild what a cold start would. A teardown step added without its
+    /// restore — or without saying why a cold start does not rebuild it either —
+    /// fails here.
+    #[test]
+    fn every_identity_teardown_has_its_restore() {
+        fn body<'a>(source: &'a str, signature: &str) -> &'a str {
+            let start = source.find(signature).unwrap_or_else(|| panic!("{signature}"));
+            &source[start..start + source[start..].find("\n}\n").expect("it ends")]
+        }
+        // Statements only: what the comments say does not count.
+        fn code(body: &str) -> String {
+            body.lines()
+                .filter(|line| !line.trim_start().starts_with("//"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        }
+        let identity = include_str!("identity.rs");
+        let orders = include_str!("orders.rs");
+        let production = |source: &'static str| {
+            &source[..source.find("#[cfg(test)]\nmod tests").expect("tests")]
+        };
+        let teardown = [
+            code(body(
+                production(orders),
+                "pub(crate) async fn release_identity_subscriptions()",
+            )),
+            code(body(production(identity), "async fn forget_identity_state()")),
+            code(body(production(identity), "impl DeletionHooks for AppDeletionHooks")),
+        ]
+        .join("\n");
+        let restore = [
+            code(body(production(identity), "pub async fn restore_identity_session()")),
+            code(body(
+                production(orders),
+                "pub(crate) async fn restore_identity_subscriptions()",
+            )),
+            code(body(production(orders), "pub(crate) async fn reclaim_book_ownership()")),
+        ]
+        .join("\n");
+
+        // Each step of the teardown, and what undoes it — `None` where a cold
+        // start leaves it empty too, so the reload matches a restart.
+        let steps: [(&str, Option<&str>); 16] = [
+            // Per-trade receivers are temporary; the bulk feed covers the keys.
+            ("single_order_tasks()", None),
+            ("global_dm_keys()", Some("seed_global_dm_coverage()")),
+            ("watched_orders_subscription_id()", Some("resync_watched_orders(")),
+            // Per-trade REQs: a cold start opens none either.
+            ("subscriptions::teardown(", None),
+            ("mostro_dm_subscription_id()", Some("resubscribe_global_dm_filter()")),
+            ("forget_identity_chats()", Some("resubscribe_active_chats()")),
+            // Filled again on demand from the persisted bindings.
+            ("trade_key_map()", None),
+            ("trade_key_misses()", None),
+            // A cold start replays the history with an empty window too.
+            ("forget_processed_daemon_messages()", None),
+            ("forget_identity_disputes()", Some("resubscribe_active_dispute_chats()")),
+            // Hydrated from the trade rows on the first read.
+            ("forget_identity_ratings()", None),
+            // The chat rearm installs the sessions again.
+            ("session_manager().clear()", Some("resubscribe_active_chats()")),
+            ("set_claim_nodes(", Some("refresh_claim_nodes()")),
+            ("clear_retained()", Some("refresh_claim_nodes()")),
+            ("forget_book_ownership()", Some("reclaim_book_ownership()")),
+            ("unregister_all()", Some("push::request_reconcile()")),
+        ];
+        for (step, undo) in steps {
+            assert!(
+                teardown.contains(step),
+                "{step} is no longer a teardown step: update this list"
+            );
+            if let Some(undo) = undo {
+                assert!(
+                    restore.contains(undo),
+                    "{step} is given up by a deletion, so the reload must call {undo}"
+                );
+            }
+        }
+        // A tripwire on the size of the teardown: a new step changes it, and
+        // whoever adds one updates `steps` and the restore with it.
+        assert_eq!(
+            teardown.matches(';').count(),
+            20,
+            "the identity teardown changed: give the new step its restore \
+             (or say why a cold start does not rebuild it), then update this count"
+        );
+    }
+
     /// The nsec import used to install over whatever the slot held, without
     /// the pending-wipe gate: it is gated now like the phrase import.
     #[tokio::test]
