@@ -1192,6 +1192,10 @@ class AppLocalizationsEs extends AppLocalizations {
       'No se pudo eliminar el usuario actual de forma segura, así que no se cambió nada. Inténtalo de nuevo.';
 
   @override
+  String get identitySwapStorageUnavailableMessage =>
+      'El almacenamiento del dispositivo no está disponible ahora mismo, así que se mantuvo el usuario actual y no se cambió nada. Reinicia la app e inténtalo de nuevo.';
+
+  @override
   String get failedToSaveBackupStatusMessage =>
       'No se pudo guardar el estado del respaldo. Inténtalo de nuevo.';
 

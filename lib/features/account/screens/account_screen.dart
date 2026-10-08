@@ -116,6 +116,12 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
   static bool _isWipeNotRecorded(Object e) =>
       e.toString().contains('WipeNotRecorded');
 
+  /// Whether the core refused to delete the current identity because this
+  /// session has no database (`StorageUnavailable`, review of #573): nothing
+  /// was given up, and no retry can succeed until the app restarts.
+  static bool _isStorageUnavailable(Object e) =>
+      e.toString().contains('StorageUnavailable');
+
   /// A failed read hides the banner rather than breaking the screen: the
   /// marker is diagnostic, and the retry itself does not depend on it being
   /// shown.
@@ -441,6 +447,8 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
                               ? swap.l10n.pendingWipeBlockedMessage
                               : _isWipeNotRecorded(e)
                               ? swap.l10n.wipeNotRecordedMessage
+                              : _isStorageUnavailable(e)
+                              ? swap.l10n.identitySwapStorageUnavailableMessage
                               : kDebugMode
                               ? 'Failed to generate identity: $e'
                               : swap.l10n.failedToGenerateIdentityMessage,
@@ -484,6 +492,8 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
                 ? l10n.pendingWipeBlockedMessage
                 : _isWipeNotRecorded(e)
                 ? l10n.wipeNotRecordedMessage
+                : _isStorageUnavailable(e)
+                ? l10n.identitySwapStorageUnavailableMessage
                 : kDebugMode
                 ? 'Import failed: $e'
                 : l10n.invalidMnemonicMessage,

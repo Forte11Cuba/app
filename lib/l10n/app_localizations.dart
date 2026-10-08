@@ -2170,6 +2170,12 @@ abstract class AppLocalizations {
   /// **'The current user could not be removed safely, so nothing was changed. Please try again.'**
   String get wipeNotRecordedMessage;
 
+  /// Snackbar shown when generating or importing a user is refused because this session has no database, so the current identity cannot be deleted safely until the app restarts (review of #573)
+  ///
+  /// In en, this message translates to:
+  /// **'This device\'s storage is not available right now, so the current user was kept and nothing was changed. Restart the app and try again.'**
+  String get identitySwapStorageUnavailableMessage;
+
   /// Snackbar shown when persisting the backup-complete status fails in the backup ritual
   ///
   /// In en, this message translates to:

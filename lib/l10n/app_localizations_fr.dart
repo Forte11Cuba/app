@@ -1192,6 +1192,10 @@ class AppLocalizationsFr extends AppLocalizations {
       'L\'utilisateur actuel n\'a pas pu être supprimé en toute sécurité : rien n\'a donc été modifié. Veuillez réessayer.';
 
   @override
+  String get identitySwapStorageUnavailableMessage =>
+      'Le stockage de l\'appareil n\'est pas disponible pour le moment : l\'utilisateur actuel a donc été conservé et rien n\'a été modifié. Redémarrez l\'application et réessayez.';
+
+  @override
   String get failedToSaveBackupStatusMessage =>
       'Échec de l\'enregistrement de l\'état de la sauvegarde. Veuillez réessayer.';
 

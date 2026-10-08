@@ -1500,6 +1500,10 @@
   "@wipeNotRecordedMessage": {
     "description": "Snackbar shown when generating or importing a user is refused before the current identity is deleted, because the device could not record that its data wipe is pending (issue #555)"
   },
+  "identitySwapStorageUnavailableMessage": "This device's storage is not available right now, so the current user was kept and nothing was changed. Restart the app and try again.",
+  "@identitySwapStorageUnavailableMessage": {
+    "description": "Snackbar shown when generating or importing a user is refused because this session has no database, so the current identity cannot be deleted safely until the app restarts (review of #573)"
+  },
   "failedToSaveBackupStatusMessage": "Failed to save backup status. Please try again.",
   "@failedToSaveBackupStatusMessage": {
     "description": "Snackbar shown when persisting the backup-complete status fails in the backup ritual"

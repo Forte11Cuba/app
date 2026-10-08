@@ -1196,6 +1196,10 @@ class AppLocalizationsDe extends AppLocalizations {
       'Der aktuelle Nutzer konnte nicht sicher entfernt werden, daher wurde nichts geändert. Bitte versuche es erneut.';
 
   @override
+  String get identitySwapStorageUnavailableMessage =>
+      'Der Speicher des Geräts ist gerade nicht verfügbar, daher wurde der aktuelle Nutzer beibehalten und nichts geändert. Starte die App neu und versuche es erneut.';
+
+  @override
   String get failedToSaveBackupStatusMessage =>
       'Sicherungsstatus konnte nicht gespeichert werden. Bitte versuche es erneut.';
 

@@ -1188,6 +1188,10 @@ class AppLocalizationsNl extends AppLocalizations {
       'De huidige gebruiker kon niet veilig worden verwijderd, dus er is niets gewijzigd. Probeer het opnieuw.';
 
   @override
+  String get identitySwapStorageUnavailableMessage =>
+      'De opslag van het apparaat is nu niet beschikbaar, dus de huidige gebruiker is behouden en er is niets gewijzigd. Start de app opnieuw en probeer het nog eens.';
+
+  @override
   String get failedToSaveBackupStatusMessage =>
       'De back-upstatus kon niet worden opgeslagen. Probeer het opnieuw.';
 

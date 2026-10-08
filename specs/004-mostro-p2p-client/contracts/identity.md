@@ -158,10 +158,14 @@ Before giving anything up, the deletion records the `identity_wipe_pending`
 settings key — device-scoped on purpose, since the wipe that would drop it is
 the wipe that may fail — holding the identity's public key; a successful wipe
 clears it. A marker an earlier deletion left stays as it is. When the marker
-cannot be written or read, or the session has no database, the deletion is
-refused with `WipeNotRecorded` while the identity is still loaded and whole:
-deleting without it would let the replacement install over the rows a failed
-wipe kept, with nothing left to say so. A crash between the marker and the
+cannot be written or read, the deletion is refused with `WipeNotRecorded`
+while the identity is still loaded and whole: deleting without it would let
+the replacement install over the rows a failed wipe kept, with nothing left
+to say so. A session with no database (`init_db` failed) is refused for the
+same reason, with `StorageUnavailable`: no retry can succeed before a
+restart, and the Account screen says so. This keeps a possibly compromised
+identity until the store comes back — deliberately, since rotating it would
+leave the previous user's rows on disk with no trace (review of #573). A crash between the marker and the
 wipe leaves the identity's mnemonic in secure storage, so the next launch
 reloads it and drops the marker (below).
 
@@ -194,7 +198,8 @@ half — cached providers and the notifications store — is
 on import, **before** the recovery.
 
 **Errors**: `NoIdentity`; `WipeNotRecorded` when the pending-wipe marker
-cannot be recorded (nothing deleted, the identity stays loaded).
+cannot be recorded, `StorageUnavailable` when the session has no database
+(in both, nothing deleted and the identity stays loaded).
 
 ---
 

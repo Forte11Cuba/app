@@ -636,9 +636,14 @@ async fn delete_in<S: Storage>(
 /// of that same identity the rows are its own ([`release_own_wipe_marker`]).
 ///
 /// Fails with the `WipeNotRecorded` marker, and the caller must not delete,
-/// when the marker cannot be written — or read, or there is no database to
-/// hold it: a deletion that went ahead without it would let the replacement
-/// install over the previous identity's rows, with nothing left to say so.
+/// when the marker cannot be written or read: a deletion that went ahead
+/// without it would let the replacement install over the previous
+/// identity's rows, with nothing left to say so. With no database at all it
+/// fails with `StorageUnavailable` instead, for the same reason: no retry in
+/// this session can succeed, so the screen asks for a restart rather than a
+/// retry. That keeps a possibly compromised identity until the store comes
+/// back — deliberately: rotating it would leave the previous user's rows on
+/// disk with no trace (review of #573).
 /// Written ahead, a crash between this and the wipe leaves the marker with
 /// the identity still in Flutter's secure storage, which the launch reload
 /// releases. A marker already there names an earlier deletion whose rows are
@@ -654,7 +659,7 @@ async fn record_wipe_intent<S: Storage>(db: Option<&S>, owner: &str) -> Result<(
              earlier sessions could not be wiped or marked for a retry"
                 .to_string(),
         );
-        bail!("WipeNotRecorded");
+        bail!("StorageUnavailable");
     };
     let written = match db.get_setting(IDENTITY_WIPE_PENDING).await {
         Ok(Some(_)) => return Ok(()),
