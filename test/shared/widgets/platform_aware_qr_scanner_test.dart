@@ -136,6 +136,62 @@ void main() {
       },
       variant: TargetPlatformVariant.only(TargetPlatform.android),
     );
+
+    // On desktop the value comes in with a paste shortcut, so Enter is the
+    // keyboard's Submit, as in the Cashu Receive dialog. Also on a phone
+    // whose camera was refused, where the same form stands in.
+    testWidgets(
+      'Enter submits the paste field once, trimmed',
+      (tester) async {
+        if (defaultTargetPlatform == TargetPlatform.android) {
+          _denyCameraPermission(tester);
+        }
+        final detected = <String>[];
+        await _pump(tester, onDetected: detected.add);
+        await tester.pumpAndSettle();
+
+        await tester.enterText(find.byType(TextField), '  lnbc1entered  ');
+        await tester.testTextInput.receiveAction(TextInputAction.done);
+        await tester.testTextInput.receiveAction(TextInputAction.done);
+        await tester.pump();
+
+        expect(detected, ['lnbc1entered']);
+      },
+      variant: const TargetPlatformVariant({
+        TargetPlatform.linux,
+        TargetPlatform.android,
+      }),
+    );
+
+    testWidgets(
+      'Enter on an empty paste field says so and keeps the focus',
+      (tester) async {
+        if (defaultTargetPlatform == TargetPlatform.android) {
+          _denyCameraPermission(tester);
+        }
+        final detected = <String>[];
+        await _pump(tester, onDetected: detected.add);
+        await tester.pumpAndSettle();
+
+        await tester.enterText(find.byType(TextField), '   ');
+        await tester.testTextInput.receiveAction(TextInputAction.done);
+        await tester.pump();
+
+        expect(detected, isEmpty);
+        expect(find.text('Please enter a value'), findsOneWidget);
+        expect(
+          tester
+              .widget<EditableText>(find.byType(EditableText))
+              .focusNode
+              .hasFocus,
+          isTrue,
+        );
+      },
+      variant: const TargetPlatformVariant({
+        TargetPlatform.linux,
+        TargetPlatform.android,
+      }),
+    );
   });
   // DS-A11Y-4: the longest translation, doubled, on the narrowest phone —
   // with the keyboard up as well, since typing into the paste field raises
