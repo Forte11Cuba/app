@@ -1672,6 +1672,8 @@ mod tests {
         /// Stand-ins for the rows an identity produced, by owner.
         rows: std::sync::Mutex<std::collections::BTreeSet<String>>,
         wipes: std::sync::atomic::AtomicUsize,
+        /// Run inside every wipe, to observe what the wipe holds.
+        during_wipe: std::sync::Mutex<Option<Box<dyn Fn() + Send + Sync>>>,
     }
 
     impl WipeFailingStore {
@@ -1683,6 +1685,7 @@ mod tests {
                 wipes_succeed: Default::default(),
                 rows: Default::default(),
                 wipes: Default::default(),
+                during_wipe: Default::default(),
             }
         }
         fn wipes_succeed(&self, succeed: bool) {
@@ -1737,6 +1740,9 @@ mod tests {
         }
         async fn clear_identity_data(&self) -> Result<()> {
             self.wipes.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            if let Some(probe) = self.during_wipe.lock().unwrap().as_ref() {
+                probe();
+            }
             if !self.wipes_succeed.load(std::sync::atomic::Ordering::SeqCst) {
                 anyhow::bail!("injected wipe failure");
             }
@@ -2764,5 +2770,45 @@ mod tests {
         .await
         .expect("the cleanup failure never reached the log stream");
         assert!(entry.message.contains("cleanup failed"));
+    }
+
+    /// Review of #573: a pending wipe retried by a new identity is a
+    /// full-table transaction, and the readers of the identity — every trade
+    /// screen goes through `get_identity` — must not wait on it. Transitions
+    /// are serialised by `lifecycle`, so neither the creation nor the
+    /// import's gate holds the state lock across the wipe.
+    #[tokio::test]
+    async fn readers_never_wait_on_a_retried_wipe() {
+        use crate::db::settings_keys::IDENTITY_WIPE_PENDING;
+
+        for gate in ["create_in", "retry_pending_wipe_if_vacant_in"] {
+            let (slot, store) = private_lifecycle();
+            store.wipes_succeed(true);
+            store.put_setting(IDENTITY_WIPE_PENDING, "previous-pubkey");
+            let readable = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let seen = readable.clone();
+            *store.during_wipe.lock().unwrap() = Some(Box::new(move || {
+                seen.store(
+                    slot.state.try_read().is_ok(),
+                    std::sync::atomic::Ordering::SeqCst,
+                );
+            }));
+
+            if gate == "create_in" {
+                create_in(slot, Some(store)).await.unwrap();
+            } else {
+                // Its callers hold the transition, as the imports do.
+                let _transition = slot.lifecycle.lock().await;
+                retry_pending_wipe_if_vacant_in(slot, Some(store))
+                    .await
+                    .unwrap();
+            }
+
+            assert_eq!(store.wipes(), 1, "{gate} retried the pending wipe");
+            assert!(
+                readable.load(std::sync::atomic::Ordering::SeqCst),
+                "{gate} held the state lock across the wipe, so readers waited on it"
+            );
+        }
     }
 }
