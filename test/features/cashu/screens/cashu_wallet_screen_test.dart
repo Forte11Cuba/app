@@ -798,6 +798,29 @@ void main() {
       expect(receive.onPressed, isNotNull);
     });
 
+    testWidgets('a token received with no mint set clears the no-mint notice',
+        (tester) async {
+      // Arrange — the received token's mint is now the wallet's, so asking
+      // for one would be wrong.
+      await _pump(
+        tester,
+        status: _status(connected: false, balance: 0),
+        controller: _FakeController(connectError: 'CashuNoMint'),
+      );
+      const notice =
+          'No mint set. Set one, or receive a token to use its mint.';
+      expect(find.text(notice), findsOneWidget);
+
+      // Act
+      await _openReceive(tester);
+      await tester.enterText(find.byType(TextField), 'cashuBfirst');
+      await tester.pump();
+      await _tapDialogReceive(tester);
+
+      // Assert
+      expect(find.text(notice), findsNothing);
+    });
+
     testWidgets('setting a mint connects the wallet to it', (tester) async {
       // Arrange
       final controller = _FakeController(connectError: 'CashuNoMint');
