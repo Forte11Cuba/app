@@ -207,6 +207,9 @@ class _PasteFallback extends StatelessWidget {
             hint: hint,
             errorText: errorText,
             onChanged: onChanged,
+            // Enter is Submit, under the same rule as the button; on an empty
+            // field it says so and the focus stays put.
+            onEditingComplete: onSubmit,
           ),
           const SizedBox(height: AppSpacing.md),
           InputSourceAction(
