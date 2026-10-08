@@ -1,13 +1,16 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mobile_scanner/mobile_scanner.dart';
 
 import 'package:mostro/core/app_theme.dart';
 import 'package:mostro/features/cashu/providers/cashu_wallet_provider.dart';
 import 'package:mostro/features/cashu/screens/cashu_wallet_screen.dart';
 import 'package:mostro/l10n/app_localizations.dart';
+import 'package:mostro/shared/widgets/mostro_modal.dart';
 import 'package:mostro/src/rust/api/types.dart';
 
 import '../../../support/provider_harness.dart';
@@ -26,6 +29,9 @@ class _FakeController extends CashuWalletController {
   final Object? createTokenError;
   final String token;
 
+  /// Every token handed to [receiveToken].
+  final List<String> received = [];
+
   /// Every mint a connect asked for, `null` for "the usual one".
   final List<String?> connects = [];
 
@@ -38,7 +44,10 @@ class _FakeController extends CashuWalletController {
   }
 
   @override
-  Future<BigInt> receiveToken(String encoded) async => BigInt.zero;
+  Future<BigInt> receiveToken(String encoded) async {
+    received.add(encoded);
+    return BigInt.zero;
+  }
 
   @override
   Future<String> createToken(BigInt amountSats) async {
@@ -97,7 +106,359 @@ Future<void> _pump(
   await tester.pump();
 }
 
+const _scannerMethods = MethodChannel(
+  'dev.steenbakker.mobile_scanner/scanner/method',
+);
+const _scannerEvents = MethodChannel(
+  'dev.steenbakker.mobile_scanner/scanner/event',
+);
+const _scannerOrientation = MethodChannel(
+  'dev.steenbakker.mobile_scanner/scanner/deviceOrientation',
+);
+
+/// Answers mobile_scanner's channels the way Android does when the user
+/// refuses the camera permission, so the scanner falls back to its paste form.
+void _denyCameraPermission(WidgetTester tester) {
+  final messenger = tester.binding.defaultBinaryMessenger;
+  messenger.setMockMethodCallHandler(_scannerMethods, (call) async {
+    switch (call.method) {
+      case 'state':
+        return 2; // MobileScannerAuthorizationState.denied
+      case 'request':
+        return false;
+    }
+    return null;
+  });
+  messenger.setMockMethodCallHandler(_scannerEvents, (_) async => null);
+  messenger.setMockMethodCallHandler(_scannerOrientation, (_) async => null);
+  addTearDown(() {
+    messenger.setMockMethodCallHandler(_scannerMethods, null);
+    messenger.setMockMethodCallHandler(_scannerEvents, null);
+    messenger.setMockMethodCallHandler(_scannerOrientation, null);
+  });
+}
+
+/// Makes `Clipboard.getData` return [text].
+void _mockClipboard(WidgetTester tester, String? text) {
+  final messenger = tester.binding.defaultBinaryMessenger;
+  messenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
+    if (call.method == 'Clipboard.getData') {
+      return text == null ? null : {'text': text};
+    }
+    return null;
+  });
+  addTearDown(
+    () => messenger.setMockMethodCallHandler(SystemChannels.platform, null),
+  );
+}
+
+Future<void> _openReceive(WidgetTester tester) async {
+  await tester.tap(find.text('Receive'));
+  await tester.pumpAndSettle();
+}
+
+/// The Receive button of the dialog, not the screen's own.
+Finder _dialogReceiveFinder() => find.descendant(
+  of: find.byType(MostroDialog),
+  matching: find.widgetWithText(FilledButton, 'Receive'),
+);
+
+FilledButton _dialogReceive(WidgetTester tester) =>
+    tester.widget(_dialogReceiveFinder());
+
+Future<void> _tapDialogReceive(WidgetTester tester) async {
+  await tester.tap(_dialogReceiveFinder());
+  await tester.pumpAndSettle();
+}
+
+/// One of the dialog's links (Paste, Scan QR).
+TextButton _link(WidgetTester tester, String label) => tester.widget(
+  find.descendant(
+    of: find.byType(MostroDialog),
+    matching: find.widgetWithText(TextButton, label),
+  ),
+);
+
 void main() {
+  group('CashuWalletScreen receive', () {
+    testWidgets(
+      'receive offers the token field, with Paste and Scan QR as links',
+      (tester) async {
+        await _pump(tester, status: _status(connected: true, balance: 0));
+
+        await _openReceive(tester);
+
+        expect(find.text('Receive a token'), findsOneWidget);
+        expect(find.text('CASHU TOKEN'), findsOneWidget);
+        // Empty, with a dimmed hint that goes once something is pasted.
+        expect(find.text('Paste a Cashu token'), findsOneWidget);
+        expect(_link(tester, 'Paste').onPressed, isNotNull);
+        expect(_link(tester, 'Scan QR').onPressed, isNotNull);
+        expect(find.byTooltip('Not available on this device'), findsNothing);
+        // Nothing to redeem yet.
+        expect(_dialogReceive(tester).onPressed, isNull);
+        // No camera opens on its own.
+        expect(find.byType(MobileScanner), findsNothing);
+      },
+      variant: TargetPlatformVariant.only(TargetPlatform.android),
+    );
+
+    testWidgets(
+      'a typed token is received trimmed',
+      (tester) async {
+        final controller = _FakeController();
+        await _pump(
+          tester,
+          status: _status(connected: true, balance: 0),
+          controller: controller,
+        );
+
+        await _openReceive(tester);
+        await tester.enterText(find.byType(TextField), '  cashuBtyped  ');
+        await tester.pump();
+        expect(controller.received, isEmpty);
+
+        await _tapDialogReceive(tester);
+
+        expect(controller.received, ['cashuBtyped']);
+        expect(find.text('Received 0 sats'), findsOneWidget);
+      },
+      variant: TargetPlatformVariant.only(TargetPlatform.android),
+    );
+
+    // On desktop the field has the focus and the token comes in with a paste
+    // shortcut, so Enter is the keyboard's Receive (done, not a newline).
+    testWidgets(
+      'Enter receives a typed token',
+      (tester) async {
+        final controller = _FakeController();
+        await _pump(
+          tester,
+          status: _status(connected: true, balance: 0),
+          controller: controller,
+        );
+
+        await _openReceive(tester);
+        await tester.enterText(find.byType(TextField), '  cashuBentered  ');
+        await tester.testTextInput.receiveAction(TextInputAction.done);
+        await tester.pumpAndSettle();
+
+        expect(controller.received, ['cashuBentered']);
+        expect(find.byType(MostroDialog), findsNothing);
+      },
+      variant: TargetPlatformVariant.only(TargetPlatform.linux),
+    );
+
+    testWidgets(
+      'Enter on an empty field does nothing and keeps the focus',
+      (tester) async {
+        final controller = _FakeController();
+        await _pump(
+          tester,
+          status: _status(connected: true, balance: 0),
+          controller: controller,
+        );
+
+        await _openReceive(tester);
+        await tester.enterText(find.byType(TextField), '   ');
+        await tester.testTextInput.receiveAction(TextInputAction.done);
+        await tester.pumpAndSettle();
+
+        expect(controller.received, isEmpty);
+        expect(find.byType(MostroDialog), findsOneWidget);
+        // The field keeps the focus, so a paste shortcut still lands in it
+        // without a click first.
+        expect(
+          tester
+              .widget<EditableText>(find.byType(EditableText))
+              .focusNode
+              .hasFocus,
+          isTrue,
+        );
+      },
+      variant: TargetPlatformVariant.only(TargetPlatform.linux),
+    );
+
+    testWidgets(
+      'Paste fills the field and waits for Receive',
+      (tester) async {
+        final controller = _FakeController();
+        _mockClipboard(tester, '  cashuBclipboard  ');
+        await _pump(
+          tester,
+          status: _status(connected: true, balance: 0),
+          controller: controller,
+        );
+
+        await _openReceive(tester);
+        await tester.tap(find.text('Paste'));
+        await tester.pumpAndSettle();
+
+        // The user sees what they pasted before it goes to the mint.
+        expect(find.text('cashuBclipboard'), findsOneWidget);
+        expect(controller.received, isEmpty);
+
+        await _tapDialogReceive(tester);
+
+        expect(controller.received, ['cashuBclipboard']);
+      },
+      variant: TargetPlatformVariant.only(TargetPlatform.android),
+    );
+
+    testWidgets(
+      'an empty clipboard says so under the field',
+      (tester) async {
+        final controller = _FakeController();
+        _mockClipboard(tester, '   ');
+        await _pump(
+          tester,
+          status: _status(connected: true, balance: 0),
+          controller: controller,
+        );
+
+        await _openReceive(tester);
+        await tester.tap(find.text('Paste'));
+        await tester.pumpAndSettle();
+
+        expect(find.text('Clipboard is empty'), findsOneWidget);
+        expect(_dialogReceive(tester).onPressed, isNull);
+        expect(controller.received, isEmpty);
+      },
+      variant: TargetPlatformVariant.only(TargetPlatform.android),
+    );
+
+    testWidgets(
+      'a scanned token is received without coming back to the dialog',
+      (tester) async {
+        final controller = _FakeController();
+        _denyCameraPermission(tester);
+        await _pump(
+          tester,
+          status: _status(connected: true, balance: 0),
+          controller: controller,
+        );
+
+        await _openReceive(tester);
+        await tester.tap(find.text('Scan QR'));
+        await tester.pumpAndSettle();
+
+        // The camera is refused, so the scanner offers its paste form; what
+        // it returns travels the same way a decoded QR does.
+        expect(find.text('Paste QR Code Content'), findsOneWidget);
+        await tester.enterText(find.byType(TextField).last, ' cashuBscanned ');
+        await tester.tap(find.text('Submit'));
+        await tester.pumpAndSettle();
+
+        expect(controller.received, ['cashuBscanned']);
+        expect(find.byType(MostroDialog), findsNothing);
+      },
+      variant: TargetPlatformVariant.only(TargetPlatform.android),
+    );
+
+    testWidgets(
+      'without a camera scanning is offered disabled, with the reason',
+      (tester) async {
+        final controller = _FakeController();
+        await _pump(
+          tester,
+          status: _status(connected: true, balance: 0),
+          controller: controller,
+        );
+
+        await _openReceive(tester);
+
+        // Same dialog as on a phone, so the user learns why there is no
+        // camera instead of wondering where scanning went.
+        expect(_link(tester, 'Scan QR').onPressed, isNull);
+        expect(find.byType(MobileScanner), findsNothing);
+        // The reason is a tooltip: hidden until asked for, then shown though
+        // the link itself cannot be pressed.
+        expect(find.text('Not available on this device'), findsNothing);
+        await tester.longPress(find.byTooltip('Not available on this device'));
+        await tester.pump();
+        expect(find.text('Not available on this device'), findsOneWidget);
+        await tester.pump(const Duration(seconds: 2));
+        await tester.pumpAndSettle();
+
+        await tester.enterText(find.byType(TextField), 'cashuBdesktop');
+        await tester.pump();
+        await _tapDialogReceive(tester);
+
+        expect(controller.received, ['cashuBdesktop']);
+      },
+      variant: TargetPlatformVariant.only(TargetPlatform.linux),
+    );
+
+    testWidgets(
+      'Cancel closes the dialog without reaching the wallet',
+      (tester) async {
+        final controller = _FakeController();
+        await _pump(
+          tester,
+          status: _status(connected: true, balance: 0),
+          controller: controller,
+        );
+
+        await _openReceive(tester);
+        await tester.enterText(find.byType(TextField), 'cashuBkept');
+        await tester.tap(find.text('Cancel'));
+        await tester.pumpAndSettle();
+
+        expect(find.byType(MostroDialog), findsNothing);
+        expect(controller.received, isEmpty);
+      },
+      variant: TargetPlatformVariant.only(TargetPlatform.android),
+    );
+  });
+
+  // DS-A11Y-4: the longest translation, doubled, on the narrowest phone —
+  // with Scan QR enabled (Android) and disabled with its reason (Linux), and
+  // with the keyboard up, as it is while the token is typed or pasted.
+  for (final keyboard in [0.0, 280.0]) {
+    testWidgets(
+      'German at 2x on a 320 dp screen fits the Receive dialog, '
+      'keyboard inset $keyboard',
+      (tester) async {
+        tester.view.physicalSize = const Size(320, 640);
+        tester.view.devicePixelRatio = 1.0;
+        tester.platformDispatcher.textScaleFactorTestValue = 2.0;
+        addTearDown(tester.view.reset);
+        addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+
+        await _pump(
+          tester,
+          status: _status(connected: true, balance: 0),
+          locale: const Locale('de'),
+        );
+        // At 2x the screen runs past 640 dp, and Receive with it.
+        await tester.ensureVisible(find.text('Empfangen'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Empfangen'));
+        await tester.pumpAndSettle();
+        // The keyboard rises once the dialog is open and its field in use.
+        tester.view.viewInsets = FakeViewPadding(bottom: keyboard);
+        await tester.pumpAndSettle();
+
+        expect(find.byType(MostroDialog), findsOneWidget);
+        expect(tester.takeException(), isNull);
+        // The dialog follows the keyboard: its Receive stays above it, where
+        // the user can reach it, rather than fitting only by hiding under it.
+        final receive = find.descendant(
+          of: find.byType(MostroDialog),
+          matching: find.widgetWithText(FilledButton, 'Empfangen'),
+        );
+        expect(
+          tester.getRect(receive).bottom,
+          lessThanOrEqualTo(640 - keyboard),
+        );
+      },
+      variant: const TargetPlatformVariant({
+        TargetPlatform.android,
+        TargetPlatform.linux,
+      }),
+    );
+  }
+
   group('CashuWalletScreen', () {
     testWidgets('a connected wallet shows its balance and mint', (tester) async {
       await _pump(tester, status: _status(connected: true, balance: 1234));
