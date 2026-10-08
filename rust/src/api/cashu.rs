@@ -215,7 +215,7 @@ pub(crate) async fn identity_balance_at_risk() -> Result<Option<u64>> {
     let Some(identity) = current_identity().await else {
         return Ok(None);
     };
-    let sats = crate::cashu::stored_balance(&proof_store_path(&identity)?).await?;
+    let sats = crate::cashu::stored_balance(&proof_store_path(&identity)?, None).await?;
     Ok((sats > 0).then_some(sats))
 }
 
@@ -419,15 +419,35 @@ async fn snapshot() -> CashuWalletStatus {
                 .map(str::to_string)
                 .collect(),
         },
-        None => CashuWalletStatus {
-            connected: false,
-            mint_url: None,
-            // Not connected is a known state, and a wallet with no binding
-            // genuinely holds nothing spendable here.
-            balance_sats: Some(0),
-            missing_capabilities: Vec::new(),
-        },
+        None => {
+            // Not bound, but a mint may be set that is not answering right
+            // now: it is named, with what it holds read from disk, so a user
+            // about to replace it sees what stays behind there. With no mint
+            // set, a wallet genuinely holds nothing — a known zero.
+            let mint_url = stored_wallet_mint().await.ok().flatten();
+            let balance_sats = match &mint_url {
+                Some(mint_url) => offline_balance(mint_url).await,
+                None => Some(0),
+            };
+            CashuWalletStatus {
+                connected: false,
+                mint_url,
+                balance_sats,
+                missing_capabilities: Vec::new(),
+            }
+        }
     }
+}
+
+/// What the loaded identity's proof store holds at `mint_url`, without
+/// contacting it; `None` when that cannot be read — unknown, never zero.
+async fn offline_balance(mint_url: &str) -> Option<u64> {
+    let identity = current_identity().await?;
+    let path = proof_store_path(&identity).ok()?;
+    crate::cashu::stored_balance(&path, Some(mint_url))
+        .await
+        .map_err(|e| log::warn!("[cashu] offline balance unreadable: {e}"))
+        .ok()
 }
 
 async fn notify() {
@@ -1444,9 +1464,39 @@ mod tests {
     }
 
     #[tokio::test]
+    // The globals lock must span the calls it guards.
+    #[allow(clippy::await_holding_lock)]
+    async fn a_set_mint_that_is_not_bound_is_still_named() {
+        // Arrange — a mint is set but the wallet is not bound (the mint did
+        // not answer when the wallet opened), and no identity is loaded here.
+        let _g = escrow_lock();
+        forget_wallet_mint().await;
+        let db = store().await;
+        db.set_setting(
+            crate::db::settings_keys::CASHU_WALLET_MINT_URL,
+            "https://mint.example.com",
+        )
+        .await
+        .unwrap();
+
+        // Act
+        let status = cashu_status().await.unwrap();
+
+        // Assert — the mint is named, so replacing it is never blind, and
+        // what it holds is unknown here rather than a zero.
+        assert!(!status.connected);
+        assert_eq!(status.mint_url.as_deref(), Some("https://mint.example.com"));
+        assert_eq!(status.balance_sats, None);
+        forget_wallet_mint().await;
+    }
+
+    #[tokio::test]
+    // The globals lock must span the calls it guards.
+    #[allow(clippy::await_holding_lock)]
     async fn status_is_answerable_on_any_node_and_reports_disconnected() {
         // Arrange
         let _g = escrow_lock();
+        forget_wallet_mint().await;
 
         // Act — status is deliberately ungated: the UI asks before it knows
         // anything, and "not connected" is truthful everywhere.

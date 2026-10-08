@@ -50,7 +50,7 @@ impl MintCapabilities {
 
 /// No proof store on web, so nothing is held there.
 #[cfg(target_arch = "wasm32")]
-pub async fn stored_balance(_db_path: &str) -> anyhow::Result<u64> {
+pub async fn stored_balance(_db_path: &str, _mint_url: Option<&str>) -> anyhow::Result<u64> {
     Ok(0)
 }
 

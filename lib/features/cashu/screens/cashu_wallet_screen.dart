@@ -185,10 +185,9 @@ class _CashuWalletScreenState extends ConsumerState<CashuWalletScreen> {
     final l10n = AppLocalizations.of(context);
     final balance = status?.balanceSats;
     final oldMint = status?.mintUrl;
-    if (status?.connected == true &&
-        oldMint != null &&
-        balance != null &&
-        balance > BigInt.zero) {
+    // Bound or not: a set mint that is not answering still holds its sats,
+    // and Rust reads them from disk.
+    if (oldMint != null && balance != null && balance > BigInt.zero) {
       final locale = Localizations.localeOf(context).toString();
       final goOn = await _prompt(
         () => showMostroDialog<bool>(
@@ -273,11 +272,10 @@ class _CashuWalletScreenState extends ConsumerState<CashuWalletScreen> {
           _BalanceCard(
             status: status,
             noMint: _noMint,
-            // Not while a connected wallet's balance is unknown: the warning
-            // that the balance stays at the old mint could not be shown.
+            // Not while a set mint's balance is unknown: the warning that the
+            // balance stays at the old mint could not be shown.
             onSetMint:
-                _busy ||
-                        (status?.connected == true && balance == null)
+                _busy || (status?.mintUrl != null && balance == null)
                     ? null
                     : () => _setMint(status),
           ),
@@ -500,6 +498,7 @@ class _BalanceCard extends StatelessWidget {
     final book = OrderBookPalette.of(context);
     final pal = SettingsPalette.of(context);
     final connected = status?.connected ?? false;
+    final mintUrl = status?.mintUrl;
 
     return _Card(
       child: Column(
@@ -526,7 +525,15 @@ class _BalanceCard extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 10),
-          if (!connected && noMint)
+          // The mint is named whenever one is set, bound or not: one that is
+          // not answering still holds its sats, and replacing it must never
+          // be blind.
+          if (mintUrl != null)
+            Text(
+              l10n.cashuMintLabel(mintUrl),
+              style: TextStyle(fontSize: 13, color: book.textBody),
+            ),
+          if (!connected && mintUrl == null && noMint)
             Text(
               l10n.cashuNoMintSet,
               style: TextStyle(fontSize: 13, color: book.textBody),
@@ -535,13 +542,6 @@ class _BalanceCard extends StatelessWidget {
             Text(
               l10n.cashuNotConnected,
               style: TextStyle(fontSize: 13, color: pal.danger),
-            )
-          // Rust always names the mint when connected; guarded anyway so a
-          // future status without one renders nothing rather than "Mint: ".
-          else if (status?.mintUrl case final mintUrl?)
-            Text(
-              l10n.cashuMintLabel(mintUrl),
-              style: TextStyle(fontSize: 13, color: book.textBody),
             ),
           Align(
             alignment: AlignmentDirectional.centerStart,
@@ -549,7 +549,7 @@ class _BalanceCard extends StatelessWidget {
               onPressed: onSetMint,
               style: _linkStyle(book),
               child: Text(
-                connected
+                mintUrl != null
                     ? l10n.cashuChangeMintButton
                     : l10n.cashuSetMintButton,
               ),

@@ -485,6 +485,32 @@ void main() {
       expect(find.text('Change mint?'), findsNothing);
     });
 
+    testWidgets('a set mint that is not answering is named, and replacing it '
+        'warns about its sats', (tester) async {
+      // Arrange — the mint did not answer when the wallet opened; Rust still
+      // names it and reads its 500 sats from disk.
+      await _pump(
+        tester,
+        status: CashuWalletStatus(
+          connected: false,
+          mintUrl: 'https://mint.example.com',
+          balanceSats: BigInt.from(500),
+          missingCapabilities: const [],
+        ),
+        controller: _FakeController(connectError: 'CashuMintUnreachable'),
+      );
+
+      // Assert — named, offered for change rather than for setting.
+      expect(find.text('Mint: https://mint.example.com'), findsOneWidget);
+      expect(find.text('Not connected to a mint'), findsOneWidget);
+      expect(find.text('Set mint'), findsNothing);
+
+      // Act — replacing it warns where the sats stay.
+      await tester.tap(find.text('Change mint'));
+      await tester.pumpAndSettle();
+      expect(find.text('Change mint?'), findsOneWidget);
+    });
+
     testWidgets('the mint cannot change while the balance is unknown',
         (tester) async {
       // The warning that the balance stays at the old mint needs the balance.

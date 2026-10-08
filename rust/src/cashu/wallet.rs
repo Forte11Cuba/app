@@ -421,8 +421,10 @@ impl CashuWallet {
     }
 }
 
-/// The sats held in the proof store at `db_path`, across every mint, read
-/// without contacting any: what an identity would leave behind if replaced.
+/// The sats held in the proof store at `db_path` — at `mint_url`, or across
+/// every mint when `None` — read without contacting any: what an identity
+/// would leave behind if replaced, or what stays at a mint that is not
+/// answering right now.
 ///
 /// Every proof not known spent counts — unspent, reserved for a token nobody
 /// redeemed yet, or in an operation in flight — since each is still the
@@ -430,19 +432,23 @@ impl CashuWallet {
 /// created.
 ///
 /// **Errors**: `CashuStoreUnavailable`.
-pub async fn stored_balance(db_path: &str) -> Result<u64> {
+pub async fn stored_balance(db_path: &str, mint_url: Option<&str>) -> Result<u64> {
     use cdk::cdk_database::WalletDatabase;
     use cdk::nuts::State;
 
     if !std::path::Path::new(db_path).exists() {
         return Ok(0);
     }
+    let mint_url = mint_url
+        .map(cdk::mint_url::MintUrl::from_str)
+        .transpose()
+        .map_err(|e| anyhow!("InvalidMintUrl: {e}"))?;
     let store = WalletSqliteDatabase::new(db_path)
         .await
         .map_err(|e| anyhow!("CashuStoreUnavailable: {e}"))?;
     store
         .get_balance(
-            None,
+            mint_url,
             Some(CurrencyUnit::Sat),
             Some(vec![
                 State::Unspent,
@@ -631,16 +637,32 @@ mod tests {
         // opened a wallet: reading must not leave a file behind.
         let path = temp_db_path();
 
-        assert_eq!(stored_balance(path.to_str().unwrap()).await.unwrap(), 0);
+        assert_eq!(
+            stored_balance(path.to_str().unwrap(), None).await.unwrap(),
+            0
+        );
         assert!(!path.exists());
     }
 
     #[tokio::test]
     async fn an_empty_proof_store_holds_nothing() {
         let path = temp_db_path();
-        drop(WalletSqliteDatabase::new(path.to_str().unwrap()).await.unwrap());
+        drop(
+            WalletSqliteDatabase::new(path.to_str().unwrap())
+                .await
+                .unwrap(),
+        );
 
-        assert_eq!(stored_balance(path.to_str().unwrap()).await.unwrap(), 0);
+        assert_eq!(
+            stored_balance(path.to_str().unwrap(), None).await.unwrap(),
+            0
+        );
+        assert_eq!(
+            stored_balance(path.to_str().unwrap(), Some("https://mint.example.com"))
+                .await
+                .unwrap(),
+            0
+        );
         let _ = std::fs::remove_file(&path);
     }
 
