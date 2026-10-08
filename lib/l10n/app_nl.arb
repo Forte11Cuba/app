@@ -1163,6 +1163,8 @@
   "fundsAtRiskPayoutClaim": "Borguitbetaling nog niet geïnd",
   "fundsAtRiskTradeInProgress": "Trade bezig",
   "fundsAtRiskBondInvoicePending": "Borgfactuur nog te betalen",
+  "fundsAtRiskCashuBalance": "Ecash in de Cashu-portemonnee",
+  "fundsAtRiskCashuHint": "Alleen de woorden van deze gebruiker brengen het terug",
   "fundsAtRiskKeep": "Deze gebruiker houden",
   "fundsAtRiskContinue": "Toch doorgaan",
   "restoreSheetTitle": "Je account wordt hersteld",

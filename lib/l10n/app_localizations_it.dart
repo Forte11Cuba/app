@@ -3793,6 +3793,13 @@ class AppLocalizationsIt extends AppLocalizations {
       'Fattura della cauzione ancora pagabile';
 
   @override
+  String get fundsAtRiskCashuBalance => 'Ecash nel portafoglio Cashu';
+
+  @override
+  String get fundsAtRiskCashuHint =>
+      'Solo le parole di questo utente lo recuperano';
+
+  @override
   String get fundsAtRiskKeep => 'Mantieni questo utente';
 
   @override

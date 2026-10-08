@@ -1027,6 +1027,11 @@ enum FundsAtRiskReason {
 
   /// A bond invoice that can still be paid: nothing is locked yet.
   bondInvoicePending,
+
+  /// Ecash in this identity's Cashu wallet. Its proof store opens only
+  /// under this identity, so only these words bring it back. Not tied to an
+  /// order: `order_id` is empty.
+  cashuWalletBalance,
 }
 
 class IdentityInfo {

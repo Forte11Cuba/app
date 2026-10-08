@@ -147,6 +147,30 @@ fn adopt_legacy_store(legacy: &str, own: &str) -> Result<()> {
     Ok(())
 }
 
+/// The Cashu sats the loaded identity would leave behind if it were replaced,
+/// or `None` when there are none.
+///
+/// Read from its proof store without contacting a mint — or, while it has none
+/// of its own yet, from an older install's shared store, which it would
+/// inherit. Each identity's store opens only under its own key, so these sats
+/// come back only by importing that identity's words again.
+///
+/// **Errors**: `CashuStoreUnavailable`.
+pub(crate) async fn identity_balance_at_risk() -> Result<Option<u64>> {
+    let Some(identity) = current_identity().await else {
+        return Ok(None);
+    };
+    let own = proof_store_path(&identity)?;
+    #[cfg(not(target_arch = "wasm32"))]
+    let own = if std::path::Path::new(&own).exists() {
+        own
+    } else {
+        sibling_store_path(crate::db::app_db::app_db_path(), LEGACY_STORE_NAME)?
+    };
+    let sats = crate::cashu::stored_balance(&own).await?;
+    Ok((sats > 0).then_some(sats))
+}
+
 /// The file `name` next to `app_db`, or `CashuStoreUnavailable` when the app
 /// database was never opened.
 ///

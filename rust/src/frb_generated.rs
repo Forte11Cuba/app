@@ -8453,6 +8453,7 @@ impl SseDecode for crate::api::types::FundsAtRiskReason {
             2 => crate::api::types::FundsAtRiskReason::PayoutClaimOpen,
             3 => crate::api::types::FundsAtRiskReason::TradeInProgress,
             4 => crate::api::types::FundsAtRiskReason::BondInvoicePending,
+            5 => crate::api::types::FundsAtRiskReason::CashuWalletBalance,
             _ => unreachable!("Invalid variant for FundsAtRiskReason: {}", inner),
         };
     }
@@ -11584,6 +11585,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::types::FundsAtRiskReason {
             Self::PayoutClaimOpen => 2.into_dart(),
             Self::TradeInProgress => 3.into_dart(),
             Self::BondInvoicePending => 4.into_dart(),
+            Self::CashuWalletBalance => 5.into_dart(),
             _ => unreachable!(),
         }
     }
@@ -13591,6 +13593,7 @@ impl SseEncode for crate::api::types::FundsAtRiskReason {
                 crate::api::types::FundsAtRiskReason::PayoutClaimOpen => 2,
                 crate::api::types::FundsAtRiskReason::TradeInProgress => 3,
                 crate::api::types::FundsAtRiskReason::BondInvoicePending => 4,
+                crate::api::types::FundsAtRiskReason::CashuWalletBalance => 5,
                 _ => {
                     unimplemented!("");
                 }

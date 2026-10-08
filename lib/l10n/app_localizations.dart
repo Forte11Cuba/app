@@ -6292,6 +6292,18 @@ abstract class AppLocalizations {
   /// **'Bond invoice still payable'**
   String get fundsAtRiskBondInvoicePending;
 
+  /// Funds-at-risk list entry: ecash in the current user's Cashu wallet, stranded if the user is replaced
+  ///
+  /// In en, this message translates to:
+  /// **'Ecash in the Cashu wallet'**
+  String get fundsAtRiskCashuBalance;
+
+  /// Funds-at-risk list entry, second line under the Cashu balance: only the current user's recovery words restore it
+  ///
+  /// In en, this message translates to:
+  /// **'Only this user\'s words bring it back'**
+  String get fundsAtRiskCashuHint;
+
   /// Safe, primary action of the funds-at-risk warning: abandon the generation or import
   ///
   /// In en, this message translates to:

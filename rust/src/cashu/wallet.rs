@@ -421,6 +421,40 @@ impl CashuWallet {
     }
 }
 
+/// The sats held in the proof store at `db_path`, across every mint, read
+/// without contacting any: what an identity would leave behind if replaced.
+///
+/// Every proof not known spent counts — unspent, reserved for a token nobody
+/// redeemed yet, or in an operation in flight — since each is still the
+/// owner's money. A store that does not exist holds nothing and is not
+/// created.
+///
+/// **Errors**: `CashuStoreUnavailable`.
+pub async fn stored_balance(db_path: &str) -> Result<u64> {
+    use cdk::cdk_database::WalletDatabase;
+    use cdk::nuts::State;
+
+    if !std::path::Path::new(db_path).exists() {
+        return Ok(0);
+    }
+    let store = WalletSqliteDatabase::new(db_path)
+        .await
+        .map_err(|e| anyhow!("CashuStoreUnavailable: {e}"))?;
+    store
+        .get_balance(
+            None,
+            Some(CurrencyUnit::Sat),
+            Some(vec![
+                State::Unspent,
+                State::Reserved,
+                State::Pending,
+                State::PendingSpent,
+            ]),
+        )
+        .await
+        .map_err(|e| anyhow!("CashuStoreUnavailable: {e}"))
+}
+
 /// The mint an encoded token was minted at, as the token names it.
 ///
 /// Read without contacting any mint: it is how a wallet with no mint set yet
@@ -589,6 +623,25 @@ mod tests {
         // Assert — only the scheme is stripped, never a prefix that happens to
         // look like one inside the payload.
         assert_eq!(normalize_token("cashuBcashu:inner"), "cashuBcashu:inner");
+    }
+
+    #[tokio::test]
+    async fn a_missing_proof_store_holds_nothing_and_is_not_created() {
+        // Asked of every identity before it is replaced, most of which never
+        // opened a wallet: reading must not leave a file behind.
+        let path = temp_db_path();
+
+        assert_eq!(stored_balance(path.to_str().unwrap()).await.unwrap(), 0);
+        assert!(!path.exists());
+    }
+
+    #[tokio::test]
+    async fn an_empty_proof_store_holds_nothing() {
+        let path = temp_db_path();
+        drop(WalletSqliteDatabase::new(path.to_str().unwrap()).await.unwrap());
+
+        assert_eq!(stored_balance(path.to_str().unwrap()).await.unwrap(), 0);
+        let _ = std::fs::remove_file(&path);
     }
 
     #[test]

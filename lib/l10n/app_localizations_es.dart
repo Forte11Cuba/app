@@ -3784,6 +3784,13 @@ class AppLocalizationsEs extends AppLocalizations {
   String get fundsAtRiskBondInvoicePending => 'Factura de fianza aún pagable';
 
   @override
+  String get fundsAtRiskCashuBalance => 'Ecash en la billetera Cashu';
+
+  @override
+  String get fundsAtRiskCashuHint =>
+      'Solo las palabras de este usuario lo recuperan';
+
+  @override
   String get fundsAtRiskKeep => 'Conservar este usuario';
 
   @override

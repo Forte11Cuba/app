@@ -1163,6 +1163,8 @@
   "fundsAtRiskPayoutClaim": "Pago de fianza aún sin cobrar",
   "fundsAtRiskTradeInProgress": "Operación en curso",
   "fundsAtRiskBondInvoicePending": "Factura de fianza aún pagable",
+  "fundsAtRiskCashuBalance": "Ecash en la billetera Cashu",
+  "fundsAtRiskCashuHint": "Solo las palabras de este usuario lo recuperan",
   "fundsAtRiskKeep": "Conservar este usuario",
   "fundsAtRiskContinue": "Continuar de todos modos",
   "restoreSheetTitle": "Restaurando tu cuenta",

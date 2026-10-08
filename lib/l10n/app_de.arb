@@ -1163,6 +1163,8 @@
   "fundsAtRiskPayoutClaim": "Kautionsauszahlung noch nicht abgeholt",
   "fundsAtRiskTradeInProgress": "Handel läuft",
   "fundsAtRiskBondInvoicePending": "Kautionsrechnung noch zahlbar",
+  "fundsAtRiskCashuBalance": "E-Cash in der Cashu-Wallet",
+  "fundsAtRiskCashuHint": "Nur die Wörter dieses Nutzers stellen es wieder her",
   "fundsAtRiskKeep": "Diesen Benutzer behalten",
   "fundsAtRiskContinue": "Trotzdem fortfahren",
   "restoreSheetTitle": "Dein Konto wird wiederhergestellt",

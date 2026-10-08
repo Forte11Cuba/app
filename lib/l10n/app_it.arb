@@ -1163,6 +1163,8 @@
   "fundsAtRiskPayoutClaim": "Pagamento della cauzione non ancora riscosso",
   "fundsAtRiskTradeInProgress": "Scambio in corso",
   "fundsAtRiskBondInvoicePending": "Fattura della cauzione ancora pagabile",
+  "fundsAtRiskCashuBalance": "Ecash nel portafoglio Cashu",
+  "fundsAtRiskCashuHint": "Solo le parole di questo utente lo recuperano",
   "fundsAtRiskKeep": "Mantieni questo utente",
   "fundsAtRiskContinue": "Continua comunque",
   "restoreSheetTitle": "Ripristino del tuo account",

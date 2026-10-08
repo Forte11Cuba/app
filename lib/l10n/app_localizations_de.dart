@@ -3806,6 +3806,13 @@ class AppLocalizationsDe extends AppLocalizations {
   String get fundsAtRiskBondInvoicePending => 'Kautionsrechnung noch zahlbar';
 
   @override
+  String get fundsAtRiskCashuBalance => 'E-Cash in der Cashu-Wallet';
+
+  @override
+  String get fundsAtRiskCashuHint =>
+      'Nur die Wörter dieses Nutzers stellen es wieder her';
+
+  @override
   String get fundsAtRiskKeep => 'Diesen Benutzer behalten';
 
   @override

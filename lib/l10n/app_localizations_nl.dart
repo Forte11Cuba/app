@@ -3788,6 +3788,13 @@ class AppLocalizationsNl extends AppLocalizations {
   String get fundsAtRiskBondInvoicePending => 'Borgfactuur nog te betalen';
 
   @override
+  String get fundsAtRiskCashuBalance => 'Ecash in de Cashu-portemonnee';
+
+  @override
+  String get fundsAtRiskCashuHint =>
+      'Alleen de woorden van deze gebruiker brengen het terug';
+
+  @override
   String get fundsAtRiskKeep => 'Deze gebruiker houden';
 
   @override
