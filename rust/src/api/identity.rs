@@ -1679,6 +1679,10 @@ mod tests {
         wipes: std::sync::atomic::AtomicUsize,
         /// Run inside every wipe, to observe what the wipe holds.
         during_wipe: std::sync::Mutex<Option<Box<dyn Fn() + Send + Sync>>>,
+        /// Whether clearing the trade-key mappings fails.
+        trade_keys_fail: std::sync::atomic::AtomicBool,
+        trade_key_clears: std::sync::atomic::AtomicUsize,
+        identity_row_deletes: std::sync::atomic::AtomicUsize,
     }
 
     impl WipeFailingStore {
@@ -1691,6 +1695,9 @@ mod tests {
                 rows: Default::default(),
                 wipes: Default::default(),
                 during_wipe: Default::default(),
+                trade_keys_fail: Default::default(),
+                trade_key_clears: Default::default(),
+                identity_row_deletes: Default::default(),
             }
         }
         fn wipes_succeed(&self, succeed: bool) {
@@ -1738,9 +1745,16 @@ mod tests {
 
     impl Storage for WipeFailingStore {
         async fn delete_identity(&self) -> Result<()> {
+            self.identity_row_deletes
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             Ok(())
         }
         async fn clear_trade_keys(&self) -> Result<()> {
+            self.trade_key_clears
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            if self.trade_keys_fail.load(std::sync::atomic::Ordering::SeqCst) {
+                anyhow::bail!("injected trade-key cleanup failure");
+            }
             Ok(())
         }
         async fn clear_identity_data(&self) -> Result<()> {
@@ -2817,5 +2831,40 @@ mod tests {
                 "{gate} held the state lock across the wipe, so readers waited on it"
             );
         }
+    }
+
+    /// The wipe is three steps — the identity row, its trade-key mappings
+    /// (which name its orders) and the rows it produced — and the marker
+    /// stands for all of them: one that fails keeps the marker, and the retry
+    /// runs all three. It used to cover the last one only, so a failed
+    /// trade-key cleanup was reported once and then never retried.
+    #[tokio::test]
+    async fn the_pending_wipe_covers_the_trade_keys_and_the_identity_row() {
+        use crate::db::settings_keys::IDENTITY_WIPE_PENDING;
+        use std::sync::atomic::Ordering::SeqCst;
+
+        let store = WipeFailingStore::new();
+        store.wipes_succeed(true);
+        store.trade_keys_fail.store(true, SeqCst);
+        record_wipe_intent(Some(&store), "owner-pubkey").await.unwrap();
+
+        let failures = wipe_identity_rows(&store, true).await;
+        assert!(failures.iter().any(|f| f.contains("trade key mappings kept")));
+        assert_eq!(
+            store.setting(IDENTITY_WIPE_PENDING).as_deref(),
+            Some("owner-pubkey"),
+            "a trade-key cleanup that failed keeps the wipe pending"
+        );
+
+        let err = retry_pending_wipe(&store)
+            .await
+            .expect_err("the mappings are still there");
+        assert_eq!(err.to_string(), "PendingWipeFailed");
+
+        store.trade_keys_fail.store(false, SeqCst);
+        retry_pending_wipe(&store).await.unwrap();
+        assert_eq!(store.trade_key_clears.load(SeqCst), 3, "the retry clears them");
+        assert_eq!(store.identity_row_deletes.load(SeqCst), 3);
+        assert_eq!(store.setting(IDENTITY_WIPE_PENDING), None);
     }
 }
