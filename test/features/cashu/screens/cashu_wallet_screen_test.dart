@@ -841,6 +841,60 @@ void main() {
       expect(controller.connects, [null, 'https://mint.new.com']);
     });
 
+    testWidgets(
+      'without a camera the mint dialog offers Scan QR disabled, with the '
+      'reason',
+      (tester) async {
+        await _pump(
+          tester,
+          status: _status(connected: false, balance: 0),
+          controller: _FakeController(connectError: 'CashuNoMint'),
+        );
+
+        await tester.tap(find.text('Set mint'));
+        await tester.pumpAndSettle();
+
+        // The scanner would only be a second paste field over this one.
+        expect(_link(tester, 'Scan QR').onPressed, isNull);
+        expect(_link(tester, 'Paste').onPressed, isNotNull);
+        await tester.longPress(find.byTooltip('Not available on this device'));
+        await tester.pump();
+        expect(find.text('Not available on this device'), findsOneWidget);
+        await tester.pump(const Duration(seconds: 2));
+        await tester.pumpAndSettle();
+      },
+      variant: TargetPlatformVariant.only(TargetPlatform.linux),
+    );
+
+    testWidgets(
+      'with a camera the mint dialog scans into its field',
+      (tester) async {
+        _denyCameraPermission(tester);
+        await _pump(
+          tester,
+          status: _status(connected: false, balance: 0),
+          controller: _FakeController(connectError: 'CashuNoMint'),
+        );
+
+        await tester.tap(find.text('Set mint'));
+        await tester.pumpAndSettle();
+        expect(find.byTooltip('Not available on this device'), findsNothing);
+        await tester.tap(find.text('Scan QR'));
+        await tester.pumpAndSettle();
+
+        // The camera is refused, so the scanner offers its paste form.
+        await tester.enterText(
+          find.byType(TextField).last,
+          ' https://mint.scanned.com ',
+        );
+        await tester.tap(find.text('Submit'));
+        await tester.pumpAndSettle();
+
+        expect(find.text('https://mint.scanned.com'), findsOneWidget);
+      },
+      variant: TargetPlatformVariant.only(TargetPlatform.android),
+    );
+
     testWidgets('an empty mint URL is refused in the dialog', (tester) async {
       final controller = _FakeController(connectError: 'CashuNoMint');
       await _pump(
