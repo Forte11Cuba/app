@@ -82,7 +82,12 @@ async fn open_wallet(target: &str) -> Result<BoundWallet> {
     if current_identity().await.as_deref() != Some(identity.as_str()) {
         bail!("NoIdentity");
     }
-    let db_path = proof_store_path()?;
+    let db_path = proof_store_path(&identity)?;
+    #[cfg(not(target_arch = "wasm32"))]
+    adopt_legacy_store(
+        &sibling_store_path(crate::db::app_db::app_db_path(), LEGACY_STORE_NAME)?,
+        &db_path,
+    )?;
     let wallet = CashuWallet::connect(target, seed, &db_path).await?;
     Ok(BoundWallet {
         wallet: Arc::new(wallet),
@@ -99,21 +104,56 @@ fn changes() -> &'static broadcast::Sender<CashuWalletStatus> {
     CHANGES.get_or_init(|| broadcast::channel(32).0)
 }
 
-/// Where the proof store lives: a sibling of the app database, never inside it.
+/// Where `identity`'s proof store lives: a sibling of the app database, never
+/// inside it, and one file per identity.
 ///
 /// `cdk` owns that file's schema and migrations; mixing it into the app's would
-/// put two migration systems on one file.
-fn proof_store_path() -> Result<String> {
-    sibling_store_path(crate::db::app_db::app_db_path())
+/// put two migration systems on one file. And it keys proofs by mint, not by
+/// seed: a store shared between identities would hand one user's bearer proofs
+/// to the next one at the same mint. Deleting an identity keeps its file, so
+/// importing its words again brings the balance back.
+fn proof_store_path(identity: &str) -> Result<String> {
+    sibling_store_path(
+        crate::db::app_db::app_db_path(),
+        &identity_store_name(identity),
+    )
 }
 
-/// The proof store that belongs next to `app_db`, or `CashuStoreUnavailable`
-/// when the app database was never opened.
+/// The store every identity shared before stores were per identity.
+#[cfg(not(target_arch = "wasm32"))]
+const LEGACY_STORE_NAME: &str = "cashu.sqlite";
+
+fn identity_store_name(identity: &str) -> String {
+    format!("cashu-{identity}.sqlite")
+}
+
+/// Give the shared store of an older install to the identity opening the
+/// wallet first, when it has no store of its own yet: that is the identity
+/// whose ecash it most likely holds, and leaving it behind would read as lost
+/// funds. SQLite's `-wal` and `-shm` companions move with it.
+#[cfg(not(target_arch = "wasm32"))]
+fn adopt_legacy_store(legacy: &str, own: &str) -> Result<()> {
+    if std::path::Path::new(own).exists() || !std::path::Path::new(legacy).exists() {
+        return Ok(());
+    }
+    for suffix in ["", "-wal", "-shm"] {
+        let from = format!("{legacy}{suffix}");
+        if std::path::Path::new(&from).exists() {
+            std::fs::rename(&from, format!("{own}{suffix}"))
+                .map_err(|e| anyhow::anyhow!("CashuStoreUnavailable: {e}"))?;
+        }
+    }
+    log::info!("[cashu] the shared proof store now belongs to the loaded identity");
+    Ok(())
+}
+
+/// The file `name` next to `app_db`, or `CashuStoreUnavailable` when the app
+/// database was never opened.
 ///
 /// Split from [`proof_store_path`] so it can be tested on its argument instead
 /// of on a process-wide `OnceLock` that any other test in this binary may have
 /// set — two of them in `api::escrow` and `api::reputation` call `init_db`.
-fn sibling_store_path(app_db: Option<&str>) -> Result<String> {
+fn sibling_store_path(app_db: Option<&str>, name: &str) -> Result<String> {
     let app_db = app_db.ok_or_else(|| anyhow::anyhow!("CashuStoreUnavailable"))?;
 
     // `init_db`'s argument is a filesystem path on native and an IndexedDB
@@ -125,8 +165,8 @@ fn sibling_store_path(app_db: Option<&str>) -> Result<String> {
         .filter(|p| !p.as_os_str().is_empty());
 
     Ok(match parent {
-        Some(dir) => dir.join("cashu.sqlite").to_string_lossy().into_owned(),
-        None => "cashu.sqlite".to_string(),
+        Some(dir) => dir.join(name).to_string_lossy().into_owned(),
+        None => name.to_string(),
     })
 }
 
@@ -1652,7 +1692,7 @@ mod tests {
         // path behind it is a process-wide `OnceLock`, and other tests in this
         // binary (`api::escrow`, `api::reputation`) call `init_db`, so the
         // global answer depends on which test ran first.
-        let err = sibling_store_path(None).unwrap_err();
+        let err = sibling_store_path(None, LEGACY_STORE_NAME).unwrap_err();
 
         // Assert
         assert!(
@@ -1666,13 +1706,48 @@ mod tests {
         // Arrange / Act / Assert — a native path gets a sibling file, never a
         // second schema inside the app's own database.
         assert_eq!(
-            sibling_store_path(Some("/data/app/mostro.sqlite")).unwrap(),
-            "/data/app/cashu.sqlite"
+            sibling_store_path(Some("/data/app/mostro.sqlite"), "cashu-ab.sqlite").unwrap(),
+            "/data/app/cashu-ab.sqlite"
         );
 
         // On web `init_db` is given an IndexedDB *name*, which has no parent
         // directory. Joining onto `""` would put a stray relative file next to
         // the process's cwd, so the bare name is used instead.
-        assert_eq!(sibling_store_path(Some("mostro")).unwrap(), "cashu.sqlite");
+        assert_eq!(
+            sibling_store_path(Some("mostro"), "cashu-ab.sqlite").unwrap(),
+            "cashu-ab.sqlite"
+        );
+    }
+
+    #[test]
+    fn each_identity_has_its_own_proof_store() {
+        // cdk keys proofs by mint, not by seed: a shared store would hand one
+        // user's bearer proofs to the next at the same mint.
+        assert_ne!(identity_store_name("aa"), identity_store_name("bb"));
+        assert_ne!(identity_store_name("aa"), LEGACY_STORE_NAME);
+    }
+
+    #[test]
+    fn an_older_install_s_shared_store_goes_to_the_first_identity_only() {
+        // Arrange — the shared store of an older install, with its WAL.
+        let dir = std::env::temp_dir().join(format!("mostro_cashu_adopt_{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = |name: &str| dir.join(name).to_string_lossy().into_owned();
+        std::fs::write(path(LEGACY_STORE_NAME), b"proofs").unwrap();
+        std::fs::write(format!("{}-wal", path(LEGACY_STORE_NAME)), b"wal").unwrap();
+
+        // Act — identity A opens the wallet first, then identity B.
+        adopt_legacy_store(&path(LEGACY_STORE_NAME), &path("cashu-a.sqlite")).unwrap();
+        adopt_legacy_store(&path(LEGACY_STORE_NAME), &path("cashu-b.sqlite")).unwrap();
+
+        // Assert — A got the store and its WAL; B starts empty.
+        assert_eq!(std::fs::read(path("cashu-a.sqlite")).unwrap(), b"proofs");
+        assert_eq!(
+            std::fs::read(format!("{}-wal", path("cashu-a.sqlite"))).unwrap(),
+            b"wal"
+        );
+        assert!(!std::path::Path::new(&path(LEGACY_STORE_NAME)).exists());
+        assert!(!std::path::Path::new(&path("cashu-b.sqlite")).exists());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

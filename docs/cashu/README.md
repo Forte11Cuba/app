@@ -463,7 +463,11 @@ hard prerequisite, not a nice-to-have.
     exception here is a send whose `confirm` fails, which revokes its own
     operation rather than leaving the proofs stranded;
   - proof storage via `cdk-sqlite` in the app data dir (own DB file; never mixes with
-    the app's sqlite schema).
+    the app's sqlite schema), **one file per identity** (`cashu-<pubkey>.sqlite`): cdk
+    keys proofs by mint, not by seed, so a shared store would hand one identity's
+    bearer proofs to the next at the same mint. An older install's shared
+    `cashu.sqlite` goes to the first identity that opens the wallet; deleting an
+    identity keeps its file, so importing its words again restores the balance.
 - `rust/src/api/cashu.rs` — FRB: `cashu_connect`, `cashu_status`,
   `cashu_disconnect`, `cashu_get_balance`, `cashu_receive_token`,
   `cashu_create_token`, `cashu_sweep_spent_proofs`, `on_cashu_wallet_changed`
