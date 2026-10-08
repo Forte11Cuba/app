@@ -615,8 +615,9 @@ async fn record_wipe_intent<S: Storage>(db: Option<&S>, owner: &str) -> Result<(
 /// and the contract is that a failed cleanup is reported, never turned into
 /// a failed deletion.
 ///
-/// A failed data wipe leaves the marker [`record_wipe_intent`] wrote before
-/// the deletion began; a successful one clears it. The returned strings
+/// Any failed step leaves the marker [`record_wipe_intent`] wrote before the
+/// deletion began, and the retry runs every step again; a wipe that succeeds
+/// whole clears it. The returned strings
 /// outlive `clear_logs()`, so they must name no order or counterparty.
 async fn wipe_identity_rows<S: Storage>(db: &S, wipe_data: bool) -> Vec<String> {
     use crate::db::settings_keys::IDENTITY_WIPE_PENDING;
@@ -638,13 +639,16 @@ async fn wipe_identity_rows<S: Storage>(db: &S, wipe_data: bool) -> Vec<String> 
     // find the app as a fresh install would leave it.
     if wipe_data {
         match db.clear_identity_data().await {
-            // A wipe that succeeds settles any pending retry, whichever
-            // deletion left it behind.
-            Ok(()) => {
+            // A wipe that succeeds whole settles any pending retry, whichever
+            // deletion left it behind. The marker stands for all three steps:
+            // with one of the two above failed it stays, and the retry runs
+            // them all again.
+            Ok(()) if failures.is_empty() => {
                 if let Err(e) = db.delete_setting(IDENTITY_WIPE_PENDING).await {
                     failures.push(format!("wipe-pending marker kept: {e}"));
                 }
             }
+            Ok(()) => {}
             // The marker recorded before the deletion stays for the retry.
             Err(e) => failures.push(format!("identity data rows kept: {e}")),
         }
@@ -699,7 +703,15 @@ async fn retry_pending_wipe<S: Storage>(db: &S) -> Result<()> {
             bail!("PendingWipeFailed");
         }
     }
-    match db.clear_identity_data().await {
+    // The whole wipe the deletion left pending: the identity row, the
+    // trade-key mappings and the rows — any of them may be what failed.
+    let wiped = async {
+        db.delete_identity().await?;
+        db.clear_trade_keys().await?;
+        db.clear_identity_data().await
+    }
+    .await;
+    match wiped {
         Ok(()) => {
             log::info!("[identity] pending identity wipe completed on retry");
             if let Err(e) = db.delete_setting(IDENTITY_WIPE_PENDING).await {
