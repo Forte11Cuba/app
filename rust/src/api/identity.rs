@@ -363,9 +363,11 @@ async fn load_unlocked<S: Storage>(
     }
 
     // An older install's shared Cashu proof store goes to the identity the
-    // app starts with — this load, at the first launch after the upgrade —
-    // before any screen can replace it. With the identity lock released: the
-    // claim touches only files and settings.
+    // app starts with — this load, at the first launch after the upgrade.
+    // Here, inside the transition, both the launch reload and an import claim
+    // it, and the lifecycle lock the caller holds keeps any replacement out
+    // until the claim is done. Not under the state lock: the claim touches
+    // only files and settings, so no reader of the identity waits on it.
     crate::api::cashu::claim_legacy_store(&identity_info.public_key).await;
 
     Ok(identity_info)
@@ -2643,6 +2645,16 @@ mod tests {
             2,
             "load_unlocked is reached only from load_in and import_in, which hold the lock"
         );
+
+        // The legacy Cashu store is claimed by the load itself, after the
+        // install: both the launch reload and an import reach it, under the
+        // lock, so no replacement can land before the claim (#573 x #768).
+        let load = body_of("async fn load_unlocked<");
+        let install = load.find("= Some(IdentityState {").expect("it installs");
+        let claim = load
+            .find("crate::api::cashu::claim_legacy_store(&identity_info.public_key)")
+            .expect("load_unlocked must claim the legacy Cashu store");
+        assert!(install < claim, "the claim comes after the install");
     }
 
     /// The nsec import used to install over whatever the slot held, without
