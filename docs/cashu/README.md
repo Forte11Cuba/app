@@ -466,8 +466,11 @@ hard prerequisite, not a nice-to-have.
     the app's sqlite schema), **one file per identity** (`cashu-<pubkey>.sqlite`): cdk
     keys proofs by mint, not by seed, so a shared store would hand one identity's
     bearer proofs to the next at the same mint. An older install's shared
-    `cashu.sqlite` goes to the first identity that opens the wallet; deleting an
-    identity keeps its file, so importing its words again restores the balance.
+    `cashu.sqlite` belongs to the identity the app starts with after the upgrade:
+    it is recorded as the owner (`cashu_legacy_store_owner`) at that first load,
+    before any screen can replace it, and only it adopts the file. The move is
+    restart-safe (`-wal`/`-shm` first, the main file last). Deleting an identity
+    keeps its file, so importing its words again restores the balance.
 - `rust/src/api/cashu.rs` — FRB: `cashu_connect`, `cashu_status`,
   `cashu_disconnect`, `cashu_get_balance`, `cashu_receive_token`,
   `cashu_create_token`, `cashu_sweep_spent_proofs`, `on_cashu_wallet_changed`

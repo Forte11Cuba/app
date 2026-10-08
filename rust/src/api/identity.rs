@@ -249,12 +249,20 @@ pub async fn load_identity_from_mnemonic(
         created_at,
     };
 
-    let mut guard = identity_lock().write().await;
-    *guard = Some(IdentityState {
-        mnemonic_words: words,
-        keys,
-        identity_info: identity_info.clone(),
-    });
+    {
+        let mut guard = identity_lock().write().await;
+        *guard = Some(IdentityState {
+            mnemonic_words: words,
+            keys,
+            identity_info: identity_info.clone(),
+        });
+    }
+
+    // An older install's shared Cashu proof store goes to the identity the
+    // app starts with — this load, at the first launch after the upgrade —
+    // before any screen can replace it. With the identity lock released: the
+    // claim touches only files and settings.
+    crate::api::cashu::claim_legacy_store(&identity_info.public_key).await;
 
     Ok(identity_info)
 }

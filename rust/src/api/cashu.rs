@@ -83,11 +83,9 @@ async fn open_wallet(target: &str) -> Result<BoundWallet> {
         bail!("NoIdentity");
     }
     let db_path = proof_store_path(&identity)?;
+    // Finishes a move the identity load could not, for its recorded owner only.
     #[cfg(not(target_arch = "wasm32"))]
-    adopt_legacy_store(
-        &sibling_store_path(crate::db::app_db::app_db_path(), LEGACY_STORE_NAME)?,
-        &db_path,
-    )?;
+    settle_legacy_store(&identity, false).await?;
     let wallet = CashuWallet::connect(target, seed, &db_path).await?;
     Ok(BoundWallet {
         wallet: Arc::new(wallet),
@@ -127,47 +125,97 @@ fn identity_store_name(identity: &str) -> String {
     format!("cashu-{identity}.sqlite")
 }
 
-/// Give the shared store of an older install to the identity opening the
-/// wallet first, when it has no store of its own yet: that is the identity
-/// whose ecash it most likely holds, and leaving it behind would read as lost
-/// funds. SQLite's `-wal` and `-shm` companions move with it.
+/// Settle an older install's shared proof store on the identity `identity`
+/// was loaded as, at an identity load (`may_record`) or a wallet open.
+///
+/// Called on every identity load (`api::identity`); never fails the load —
+/// a store that cannot move yet is logged and retried at the next one.
 #[cfg(not(target_arch = "wasm32"))]
-fn adopt_legacy_store(legacy: &str, own: &str) -> Result<()> {
-    if std::path::Path::new(own).exists() || !std::path::Path::new(legacy).exists() {
+pub(crate) async fn claim_legacy_store(identity: &str) {
+    if let Err(e) = settle_legacy_store(identity, true).await {
+        log::error!("[cashu] the shared proof store could not move yet: {e}");
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) async fn claim_legacy_store(_identity: &str) {}
+
+/// Whose an older install's shared store is, and whether `identity` takes it
+/// now. The first identity loaded after the upgrade — the one the app starts
+/// with, before any screen can replace it — is recorded as its owner; only
+/// that identity ever adopts it, so switching identities first cannot hand
+/// one user's bearer proofs to another. Returns `(record, adopt)`.
+#[cfg(not(target_arch = "wasm32"))]
+fn legacy_store_decision(owner: Option<&str>, identity: &str, may_record: bool) -> (bool, bool) {
+    match owner {
+        Some(owner) => (false, owner == identity),
+        None => (may_record, may_record),
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+async fn settle_legacy_store(identity: &str, may_record: bool) -> Result<()> {
+    let legacy = sibling_store_path(crate::db::app_db::app_db_path(), LEGACY_STORE_NAME)?;
+    if !["", "-wal", "-shm"]
+        .iter()
+        .any(|suffix| std::path::Path::new(&format!("{legacy}{suffix}")).exists())
+    {
         return Ok(());
     }
-    for suffix in ["", "-wal", "-shm"] {
+    let db = crate::db::app_db::db().ok_or_else(|| anyhow::anyhow!("CashuStoreUnavailable"))?;
+    let owner = db
+        .get_setting(settings_keys::CASHU_LEGACY_STORE_OWNER)
+        .await?;
+    let (record, adopt) = legacy_store_decision(owner.as_deref(), identity, may_record);
+    if record {
+        db.set_setting(settings_keys::CASHU_LEGACY_STORE_OWNER, identity)
+            .await?;
+    }
+    if adopt {
+        move_legacy_store(&legacy, &proof_store_path(identity)?)?;
+    }
+    Ok(())
+}
+
+/// Move the shared store to `own`, restart-safe. The `-wal` and `-shm`
+/// companions go first and the main file last: until the main file has moved,
+/// the next attempt still finds it under the shared name and completes the
+/// move, and once it has, every companion is already beside it — SQLite never
+/// opens the main file without the WAL holding its latest commits. A store
+/// the identity already has is never merged with the shared one.
+#[cfg(not(target_arch = "wasm32"))]
+fn move_legacy_store(legacy: &str, own: &str) -> Result<()> {
+    let exists = |path: &str| std::path::Path::new(path).exists();
+    if exists(own) && exists(legacy) {
+        log::warn!("[cashu] the identity already has a proof store; the shared one stays");
+        return Ok(());
+    }
+    for suffix in ["-wal", "-shm", ""] {
         let from = format!("{legacy}{suffix}");
-        if std::path::Path::new(&from).exists() {
-            std::fs::rename(&from, format!("{own}{suffix}"))
+        let to = format!("{own}{suffix}");
+        if exists(&from) && !exists(&to) {
+            std::fs::rename(&from, &to)
                 .map_err(|e| anyhow::anyhow!("CashuStoreUnavailable: {e}"))?;
         }
     }
-    log::info!("[cashu] the shared proof store now belongs to the loaded identity");
+    log::info!("[cashu] the shared proof store now belongs to its owner identity");
     Ok(())
 }
 
 /// The Cashu sats the loaded identity would leave behind if it were replaced,
 /// or `None` when there are none.
 ///
-/// Read from its proof store without contacting a mint — or, while it has none
-/// of its own yet, from an older install's shared store, which it would
-/// inherit. Each identity's store opens only under its own key, so these sats
-/// come back only by importing that identity's words again.
+/// Read from its proof store without contacting a mint; an older install's
+/// shared store has already moved to its owner at that identity's load. Each
+/// identity's store opens only under its own key, so these sats come back only
+/// by importing that identity's words again.
 ///
 /// **Errors**: `CashuStoreUnavailable`.
 pub(crate) async fn identity_balance_at_risk() -> Result<Option<u64>> {
     let Some(identity) = current_identity().await else {
         return Ok(None);
     };
-    let own = proof_store_path(&identity)?;
-    #[cfg(not(target_arch = "wasm32"))]
-    let own = if std::path::Path::new(&own).exists() {
-        own
-    } else {
-        sibling_store_path(crate::db::app_db::app_db_path(), LEGACY_STORE_NAME)?
-    };
-    let sats = crate::cashu::stored_balance(&own).await?;
+    let sats = crate::cashu::stored_balance(&proof_store_path(&identity)?).await?;
     Ok((sats > 0).then_some(sats))
 }
 
@@ -1752,26 +1800,77 @@ mod tests {
     }
 
     #[test]
-    fn an_older_install_s_shared_store_goes_to_the_first_identity_only() {
-        // Arrange — the shared store of an older install, with its WAL.
-        let dir = std::env::temp_dir().join(format!("mostro_cashu_adopt_{}", uuid::Uuid::new_v4()));
+    fn only_the_identity_loaded_at_the_upgrade_takes_the_shared_store() {
+        // The first load after the upgrade records its owner and takes it.
+        assert_eq!(legacy_store_decision(None, "a", true), (true, true));
+        // A wallet open never claims an unowned store.
+        assert_eq!(legacy_store_decision(None, "a", false), (false, false));
+        // The owner takes it at any later load or open; nobody else ever does,
+        // even after switching identities before the move completed.
+        assert_eq!(legacy_store_decision(Some("a"), "a", false), (false, true));
+        assert_eq!(legacy_store_decision(Some("a"), "b", true), (false, false));
+    }
+
+    /// A temporary directory holding an older install's shared store.
+    fn shared_store_dir() -> (std::path::PathBuf, impl Fn(&str) -> String) {
+        let dir = std::env::temp_dir().join(format!("mostro_cashu_move_{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
-        let path = |name: &str| dir.join(name).to_string_lossy().into_owned();
+        let root = dir.clone();
+        (dir, move |name: &str| {
+            root.join(name).to_string_lossy().into_owned()
+        })
+    }
+
+    #[test]
+    fn the_shared_store_moves_with_its_wal() {
+        // Arrange
+        let (dir, path) = shared_store_dir();
         std::fs::write(path(LEGACY_STORE_NAME), b"proofs").unwrap();
         std::fs::write(format!("{}-wal", path(LEGACY_STORE_NAME)), b"wal").unwrap();
 
-        // Act — identity A opens the wallet first, then identity B.
-        adopt_legacy_store(&path(LEGACY_STORE_NAME), &path("cashu-a.sqlite")).unwrap();
-        adopt_legacy_store(&path(LEGACY_STORE_NAME), &path("cashu-b.sqlite")).unwrap();
+        // Act
+        move_legacy_store(&path(LEGACY_STORE_NAME), &path("cashu-a.sqlite")).unwrap();
 
-        // Assert — A got the store and its WAL; B starts empty.
+        // Assert
         assert_eq!(std::fs::read(path("cashu-a.sqlite")).unwrap(), b"proofs");
         assert_eq!(
             std::fs::read(format!("{}-wal", path("cashu-a.sqlite"))).unwrap(),
             b"wal"
         );
         assert!(!std::path::Path::new(&path(LEGACY_STORE_NAME)).exists());
-        assert!(!std::path::Path::new(&path("cashu-b.sqlite")).exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_move_cut_short_is_completed_by_the_next_attempt() {
+        // Arrange — the WAL moved, then the app stopped before the main file.
+        let (dir, path) = shared_store_dir();
+        std::fs::write(path(LEGACY_STORE_NAME), b"proofs").unwrap();
+        std::fs::write(format!("{}-wal", path("cashu-a.sqlite")), b"wal").unwrap();
+
+        // Act
+        move_legacy_store(&path(LEGACY_STORE_NAME), &path("cashu-a.sqlite")).unwrap();
+
+        // Assert — the main file joins its WAL; nothing is left behind.
+        assert_eq!(std::fs::read(path("cashu-a.sqlite")).unwrap(), b"proofs");
+        assert_eq!(
+            std::fs::read(format!("{}-wal", path("cashu-a.sqlite"))).unwrap(),
+            b"wal"
+        );
+        assert!(!std::path::Path::new(&path(LEGACY_STORE_NAME)).exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_store_the_identity_already_has_is_never_merged() {
+        let (dir, path) = shared_store_dir();
+        std::fs::write(path(LEGACY_STORE_NAME), b"shared").unwrap();
+        std::fs::write(path("cashu-a.sqlite"), b"own").unwrap();
+
+        move_legacy_store(&path(LEGACY_STORE_NAME), &path("cashu-a.sqlite")).unwrap();
+
+        assert_eq!(std::fs::read(path("cashu-a.sqlite")).unwrap(), b"own");
+        assert_eq!(std::fs::read(path(LEGACY_STORE_NAME)).unwrap(), b"shared");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
