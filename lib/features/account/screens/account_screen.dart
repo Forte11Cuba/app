@@ -818,7 +818,7 @@ class _SecretWordsCard extends StatelessWidget {
 
     return _Card(
       padding: const EdgeInsets.all(14),
-      gap: 9,
+      gap: 10,
       children: [
         _CardHeader(
           icon: Icons.key_rounded,
@@ -830,14 +830,14 @@ class _SecretWordsCard extends StatelessWidget {
           Material(
             color: pal.revealFill,
             shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(13),
+              borderRadius: BorderRadius.circular(14),
               side: BorderSide(color: pal.revealBorder),
             ),
             child: InkWell(
               onTap: loading ? null : onReveal,
-              borderRadius: BorderRadius.circular(13),
+              borderRadius: BorderRadius.circular(14),
               child: Padding(
-                padding: const EdgeInsets.all(11),
+                padding: const EdgeInsets.all(12),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
@@ -853,10 +853,10 @@ class _SecretWordsCard extends StatelessWidget {
                     else
                       Icon(
                         Icons.visibility_outlined,
-                        size: 15,
+                        size: 16,
                         color: book.limeText,
                       ),
-                    const SizedBox(width: 7),
+                    const SizedBox(width: 8),
                     Text(
                       l10n.showWordsButton,
                       style: TextStyle(
@@ -900,7 +900,7 @@ class _BackedUpChip extends StatelessWidget {
     final book = OrderBookPalette.of(context);
     final pal = BackupPalette.of(context);
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
         color: pal.chipFill,
         borderRadius: BorderRadius.circular(999),
@@ -908,7 +908,7 @@ class _BackedUpChip extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.check_rounded, size: 11, color: pal.accent),
+          Icon(Icons.check_rounded, size: 12, color: pal.accent),
           const SizedBox(width: 4),
           Text(
             AppLocalizations.of(context).backedUpBadgeLabel,
@@ -983,7 +983,7 @@ class _PrivacyCard extends StatelessWidget {
     final l10n = AppLocalizations.of(context);
 
     return _Card(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 15),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
       gap: 12,
       children: [
         _CardHeader(
@@ -993,7 +993,7 @@ class _PrivacyCard extends StatelessWidget {
             onPressed: onInfo,
             icon: Icon(
               Icons.info_outline_rounded,
-              size: 15,
+              size: 16,
               color: book.textTertiary,
             ),
             tooltip: l10n.moreInformationTooltip,
@@ -1138,20 +1138,20 @@ class _AccountActions extends StatelessWidget {
           leading: Icons.person_add_alt_1_outlined,
           onPressed: onGenerate,
         ).withAutomationId(AutomationIds.keysGenerate),
-        const SizedBox(height: 9),
+        const SizedBox(height: 10),
         Row(
           children: [
             Expanded(
               child: OutlinedButton.icon(
                 onPressed: onImport,
-                icon: const Icon(Icons.download_rounded, size: 15),
+                icon: const Icon(Icons.download_rounded, size: 16),
                 label: Text(l10n.importMostroUserButton),
                 style: outline.copyWith(
-                  padding: const WidgetStatePropertyAll(EdgeInsets.all(13)),
+                  padding: const WidgetStatePropertyAll(EdgeInsets.all(12)),
                 ),
               ).withAutomationId(AutomationIds.keysImport),
             ),
-            const SizedBox(width: 9),
+            const SizedBox(width: 10),
             OutlinedButton(
               onPressed: onRefresh,
               style: outline.copyWith(
@@ -1189,7 +1189,7 @@ class _Card extends StatelessWidget {
       padding: padding,
       decoration: BoxDecoration(
         color: OrderBookPalette.of(context).surface,
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(18),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1219,7 +1219,7 @@ class _CardHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(
       children: [
-        Icon(icon, size: 17, color: BackupPalette.of(context).accent),
+        Icon(icon, size: 18, color: BackupPalette.of(context).accent),
         const SizedBox(width: 8),
         Expanded(
           child: Text(
@@ -1283,6 +1283,7 @@ class _ImportMnemonicDialogState extends State<_ImportMnemonicDialog> {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
+    final book = OrderBookPalette.of(context);
     return MostroDialog(
       title: l10n.importMnemonicDialogTitle,
       content: TextField(
@@ -1294,6 +1295,14 @@ class _ImportMnemonicDialogState extends State<_ImportMnemonicDialog> {
         decoration: InputDecoration(
           hintText: l10n.importMnemonicHintText,
           errorText: _error,
+          // Every state set here: what is left out comes from v1's theme,
+          // fill and underline included (DS-CMP-19).
+          filled: false,
+          border: _fieldBorder(book.border),
+          enabledBorder: _fieldBorder(book.border),
+          focusedBorder: _fieldBorder(book.borderHighlight),
+          errorBorder: _fieldBorder(book.sell),
+          focusedErrorBorder: _fieldBorder(book.sell),
         ),
         onChanged: (_) {
           if (_error != null) setState(() => _error = null);
@@ -1307,3 +1316,9 @@ class _ImportMnemonicDialogState extends State<_ImportMnemonicDialog> {
     );
   }
 }
+
+/// The boxed outline of the import dialog's phrase field, in [color].
+OutlineInputBorder _fieldBorder(Color color) => OutlineInputBorder(
+  borderRadius: BorderRadius.circular(14),
+  borderSide: BorderSide(color: color),
+);
