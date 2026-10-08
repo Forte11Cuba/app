@@ -68,7 +68,7 @@ class ModalLink {
 
   final String label;
 
-  /// Null disables the link.
+  /// Null disables the link, in the faint ink.
   final VoidCallback? onPressed;
   final String? automationId;
 
@@ -381,6 +381,10 @@ class ModalFooter extends StatelessWidget {
                         onPressed: link.onPressed,
                         style: TextButton.styleFrom(
                           foregroundColor: book.limeText,
+                          // Left unset, a disabled link takes Material's
+                          // default, the v1 theme's onSurface at 38%: a link
+                          // colors its label from the palette (DS-CMP-17).
+                          disabledForegroundColor: book.textFaint,
                           padding: const EdgeInsets.symmetric(horizontal: 10),
                           textStyle: const TextStyle(
                             fontFamily: AppFonts.ui,
