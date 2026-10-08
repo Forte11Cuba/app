@@ -6292,6 +6292,18 @@ abstract class AppLocalizations {
   /// **'Bond invoice still payable'**
   String get fundsAtRiskBondInvoicePending;
 
+  /// Funds-at-risk list entry: ecash in the current user's Cashu wallet, stranded if the user is replaced
+  ///
+  /// In en, this message translates to:
+  /// **'Ecash in the Cashu wallet'**
+  String get fundsAtRiskCashuBalance;
+
+  /// Funds-at-risk list entry, second line under the Cashu balance: only the current user's recovery words restore it
+  ///
+  /// In en, this message translates to:
+  /// **'Only this user\'s words bring it back'**
+  String get fundsAtRiskCashuHint;
+
   /// Safe, primary action of the funds-at-risk warning: abandon the generation or import
   ///
   /// In en, this message translates to:
@@ -6646,6 +6658,72 @@ abstract class AppLocalizations {
   /// **'Not connected to a mint'**
   String get cashuNotConnected;
 
+  /// Cashu wallet — no mint was ever set; how to get one
+  ///
+  /// In en, this message translates to:
+  /// **'No mint set. Set one, or receive a token to use its mint.'**
+  String get cashuNoMintSet;
+
+  /// Cashu wallet — button that sets the wallet's mint when none is set
+  ///
+  /// In en, this message translates to:
+  /// **'Set mint'**
+  String get cashuSetMintButton;
+
+  /// Cashu wallet — button that changes the wallet's mint
+  ///
+  /// In en, this message translates to:
+  /// **'Change mint'**
+  String get cashuChangeMintButton;
+
+  /// Cashu wallet — title of the dialog where the user enters a mint URL
+  ///
+  /// In en, this message translates to:
+  /// **'Cashu mint'**
+  String get cashuMintDialogTitle;
+
+  /// Cashu wallet — label of the mint URL field
+  ///
+  /// In en, this message translates to:
+  /// **'Mint URL'**
+  String get cashuMintFieldLabel;
+
+  /// Cashu wallet — example mint URL shown in the empty field; not translated
+  ///
+  /// In en, this message translates to:
+  /// **'https://mint.example.com'**
+  String get cashuMintFieldHint;
+
+  /// Cashu wallet — title of the warning before changing the mint with a balance
+  ///
+  /// In en, this message translates to:
+  /// **'Change mint?'**
+  String get cashuChangeMintTitle;
+
+  /// Cashu wallet — the balance stays at the old mint when the wallet changes mint
+  ///
+  /// In en, this message translates to:
+  /// **'Your {sats} sats stay at {mint}. They come back when you connect to that mint again.'**
+  String cashuChangeMintWarning(String sats, String mint);
+
+  /// Cashu — an action needs the wallet's mint and none is set
+  ///
+  /// In en, this message translates to:
+  /// **'Set a mint in the Cashu wallet first.'**
+  String get cashuErrorNoMint;
+
+  /// Cashu wallet — the mint URL is not an https URL with a host (http only for a mint on this device)
+  ///
+  /// In en, this message translates to:
+  /// **'That is not a mint URL you can use. It must start with https://.'**
+  String get cashuErrorInvalidMintUrl;
+
+  /// Lock escrow — the wallet is bound to another mint than the node's
+  ///
+  /// In en, this message translates to:
+  /// **'Your Cashu wallet uses another mint. Switch it to this node\'s mint in Settings → Cashu wallet, then try again.'**
+  String get cashuErrorWalletOnOtherMint;
+
   /// Cashu wallet — button that scans or pastes a token to redeem
   ///
   /// In en, this message translates to:
@@ -6715,7 +6793,7 @@ abstract class AppLocalizations {
   /// Cashu wallet — explanation of what the wallet is for
   ///
   /// In en, this message translates to:
-  /// **'This wallet holds ecash issued by the mint your Mostro node uses. It exists to fund and receive trades on that node — it is not a general-purpose wallet.'**
+  /// **'This wallet holds ecash from the mint you choose. It exists to fund and receive Cashu trades — it is not a general-purpose wallet.'**
   String get cashuWalletExplanation;
 
   /// Cashu error — the active node is not a Cashu node
@@ -6739,7 +6817,7 @@ abstract class AppLocalizations {
   /// Cashu error — the mint answered but lacks a required NUT or keyset
   ///
   /// In en, this message translates to:
-  /// **'This node\'s mint is missing features the escrow needs, so trading is not possible here.'**
+  /// **'This mint is missing features the wallet needs. Choose another mint.'**
   String get cashuErrorMintUnusable;
 
   /// Cashu error — the web build has no proof storage
@@ -6807,12 +6885,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'This token is too large for a QR code. Copy it instead.'**
   String get cashuTokenTooLargeForQr;
-
-  /// Cashu wallet — the node was switched while the wallet was bound to the previous node's mint
-  ///
-  /// In en, this message translates to:
-  /// **'The active node changed and this wallet is bound to another mint. Go back and open the wallet again.'**
-  String get cashuErrorMintChanged;
 
   /// Cashu wallet — permanent: an nsec-imported identity has no seed
   ///

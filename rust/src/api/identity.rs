@@ -249,12 +249,20 @@ pub async fn load_identity_from_mnemonic(
         created_at,
     };
 
-    let mut guard = identity_lock().write().await;
-    *guard = Some(IdentityState {
-        mnemonic_words: words,
-        keys,
-        identity_info: identity_info.clone(),
-    });
+    {
+        let mut guard = identity_lock().write().await;
+        *guard = Some(IdentityState {
+            mnemonic_words: words,
+            keys,
+            identity_info: identity_info.clone(),
+        });
+    }
+
+    // An older install's shared Cashu proof store goes to the identity the
+    // app starts with — this load, at the first launch after the upgrade —
+    // before any screen can replace it. With the identity lock released: the
+    // claim touches only files and settings.
+    crate::api::cashu::claim_legacy_store(&identity_info.public_key).await;
 
     Ok(identity_info)
 }
@@ -438,11 +446,20 @@ pub async fn funds_at_risk() -> Result<Vec<crate::api::types::FundsAtRisk>> {
     };
     let trades = db.list_trades().await?;
     let claims = db.list_bond_claims().await?;
-    Ok(crate::mostro::funds_at_risk::funds_at_risk(
-        &trades,
-        &claims,
-        unix_now(),
-    ))
+    let mut risks = crate::mostro::funds_at_risk::funds_at_risk(&trades, &claims, unix_now());
+    // The Cashu wallet is per identity: replacing this one strands its ecash
+    // unless these words are kept. An unreadable store is logged, not fatal —
+    // it must not hide the trade risks above.
+    match crate::api::cashu::identity_balance_at_risk().await {
+        Ok(Some(sats)) => risks.push(crate::api::types::FundsAtRisk {
+            order_id: String::new(),
+            reason: crate::api::types::FundsAtRiskReason::CashuWalletBalance,
+            amount_sats: Some(sats),
+        }),
+        Ok(None) => {}
+        Err(e) => log::warn!("[identity] Cashu balance unreadable for the funds check: {e}"),
+    }
+    Ok(risks)
 }
 
 /// Empty what the process holds in memory about the deleted identity, and

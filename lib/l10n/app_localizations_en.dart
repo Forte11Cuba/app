@@ -3758,6 +3758,12 @@ class AppLocalizationsEn extends AppLocalizations {
   String get fundsAtRiskBondInvoicePending => 'Bond invoice still payable';
 
   @override
+  String get fundsAtRiskCashuBalance => 'Ecash in the Cashu wallet';
+
+  @override
+  String get fundsAtRiskCashuHint => 'Only this user\'s words bring it back';
+
+  @override
   String get fundsAtRiskKeep => 'Keep this user';
 
   @override
@@ -3972,6 +3978,44 @@ class AppLocalizationsEn extends AppLocalizations {
   String get cashuNotConnected => 'Not connected to a mint';
 
   @override
+  String get cashuNoMintSet =>
+      'No mint set. Set one, or receive a token to use its mint.';
+
+  @override
+  String get cashuSetMintButton => 'Set mint';
+
+  @override
+  String get cashuChangeMintButton => 'Change mint';
+
+  @override
+  String get cashuMintDialogTitle => 'Cashu mint';
+
+  @override
+  String get cashuMintFieldLabel => 'Mint URL';
+
+  @override
+  String get cashuMintFieldHint => 'https://mint.example.com';
+
+  @override
+  String get cashuChangeMintTitle => 'Change mint?';
+
+  @override
+  String cashuChangeMintWarning(String sats, String mint) {
+    return 'Your $sats sats stay at $mint. They come back when you connect to that mint again.';
+  }
+
+  @override
+  String get cashuErrorNoMint => 'Set a mint in the Cashu wallet first.';
+
+  @override
+  String get cashuErrorInvalidMintUrl =>
+      'That is not a mint URL you can use. It must start with https://.';
+
+  @override
+  String get cashuErrorWalletOnOtherMint =>
+      'Your Cashu wallet uses another mint. Switch it to this node\'s mint in Settings → Cashu wallet, then try again.';
+
+  @override
   String get cashuReceiveButton => 'Receive';
 
   @override
@@ -4009,7 +4053,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get cashuWalletExplanation =>
-      'This wallet holds ecash issued by the mint your Mostro node uses. It exists to fund and receive trades on that node — it is not a general-purpose wallet.';
+      'This wallet holds ecash from the mint you choose. It exists to fund and receive Cashu trades — it is not a general-purpose wallet.';
 
   @override
   String get cashuErrorNotEnabled =>
@@ -4025,7 +4069,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get cashuErrorMintUnusable =>
-      'This node\'s mint is missing features the escrow needs, so trading is not possible here.';
+      'This mint is missing features the wallet needs. Choose another mint.';
 
   @override
   String get cashuErrorUnsupportedOnWeb =>
@@ -4068,10 +4112,6 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get cashuTokenTooLargeForQr =>
       'This token is too large for a QR code. Copy it instead.';
-
-  @override
-  String get cashuErrorMintChanged =>
-      'The active node changed and this wallet is bound to another mint. Go back and open the wallet again.';
 
   @override
   String get cashuErrorNoMnemonic =>

@@ -3793,6 +3793,13 @@ class AppLocalizationsIt extends AppLocalizations {
       'Fattura della cauzione ancora pagabile';
 
   @override
+  String get fundsAtRiskCashuBalance => 'Ecash nel portafoglio Cashu';
+
+  @override
+  String get fundsAtRiskCashuHint =>
+      'Solo le parole di questo utente lo recuperano';
+
+  @override
   String get fundsAtRiskKeep => 'Mantieni questo utente';
 
   @override
@@ -4012,6 +4019,45 @@ class AppLocalizationsIt extends AppLocalizations {
   String get cashuNotConnected => 'Non connesso a una mint';
 
   @override
+  String get cashuNoMintSet =>
+      'Nessuna mint impostata. Impostane una, oppure ricevi un token per usare la sua mint.';
+
+  @override
+  String get cashuSetMintButton => 'Imposta mint';
+
+  @override
+  String get cashuChangeMintButton => 'Cambia mint';
+
+  @override
+  String get cashuMintDialogTitle => 'Mint Cashu';
+
+  @override
+  String get cashuMintFieldLabel => 'URL della mint';
+
+  @override
+  String get cashuMintFieldHint => 'https://mint.example.com';
+
+  @override
+  String get cashuChangeMintTitle => 'Cambiare mint?';
+
+  @override
+  String cashuChangeMintWarning(String sats, String mint) {
+    return 'I tuoi $sats sats restano su $mint. Tornano quando ti ricolleghi a quella mint.';
+  }
+
+  @override
+  String get cashuErrorNoMint =>
+      'Prima imposta una mint nel Portafoglio Cashu.';
+
+  @override
+  String get cashuErrorInvalidMintUrl =>
+      'Questo non è un URL di mint utilizzabile. Deve iniziare con https://.';
+
+  @override
+  String get cashuErrorWalletOnOtherMint =>
+      'Il tuo portafoglio Cashu usa un\'altra mint. Passa alla mint di questo nodo in Impostazioni → Portafoglio Cashu, poi riprova.';
+
+  @override
   String get cashuReceiveButton => 'Ricevi';
 
   @override
@@ -4049,7 +4095,7 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get cashuWalletExplanation =>
-      'Questo portafoglio contiene ecash emesso dalla mint che usa il tuo nodo Mostro. Serve a finanziare e incassare scambi su quel nodo: non è un portafoglio generico.';
+      'Questo portafoglio contiene ecash della mint che scegli. Serve a finanziare e incassare scambi Cashu: non è un portafoglio generico.';
 
   @override
   String get cashuErrorNotEnabled =>
@@ -4065,7 +4111,7 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get cashuErrorMintUnusable =>
-      'Alla mint di questo nodo mancano funzioni necessarie al deposito, quindi qui non si può scambiare.';
+      'A questa mint mancano funzioni necessarie al portafoglio. Scegli un\'altra mint.';
 
   @override
   String get cashuErrorUnsupportedOnWeb =>
@@ -4108,10 +4154,6 @@ class AppLocalizationsIt extends AppLocalizations {
   @override
   String get cashuTokenTooLargeForQr =>
       'Questo token è troppo grande per un codice QR. Copialo invece.';
-
-  @override
-  String get cashuErrorMintChanged =>
-      'Il nodo attivo è cambiato e questo portafoglio è legato a un\'altra mint. Torna indietro e riapri il portafoglio.';
 
   @override
   String get cashuErrorNoMnemonic =>

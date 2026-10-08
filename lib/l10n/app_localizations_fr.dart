@@ -3797,6 +3797,13 @@ class AppLocalizationsFr extends AppLocalizations {
       'Facture de caution encore payable';
 
   @override
+  String get fundsAtRiskCashuBalance => 'Ecash dans le portefeuille Cashu';
+
+  @override
+  String get fundsAtRiskCashuHint =>
+      'Seuls les mots de cet utilisateur permettent de le récupérer';
+
+  @override
   String get fundsAtRiskKeep => 'Garder cet utilisateur';
 
   @override
@@ -4034,6 +4041,45 @@ class AppLocalizationsFr extends AppLocalizations {
   String get cashuNotConnected => 'Non connecté à un mint';
 
   @override
+  String get cashuNoMintSet =>
+      'Aucun mint configuré. Choisissez-en un, ou recevez un token pour utiliser son mint.';
+
+  @override
+  String get cashuSetMintButton => 'Choisir un mint';
+
+  @override
+  String get cashuChangeMintButton => 'Changer de mint';
+
+  @override
+  String get cashuMintDialogTitle => 'Mint Cashu';
+
+  @override
+  String get cashuMintFieldLabel => 'URL du mint';
+
+  @override
+  String get cashuMintFieldHint => 'https://mint.example.com';
+
+  @override
+  String get cashuChangeMintTitle => 'Changer de mint ?';
+
+  @override
+  String cashuChangeMintWarning(String sats, String mint) {
+    return 'Vos $sats sats restent sur $mint. Ils reviennent quand vous vous reconnectez à ce mint.';
+  }
+
+  @override
+  String get cashuErrorNoMint =>
+      'Choisissez d\'abord un mint dans le Portefeuille Cashu.';
+
+  @override
+  String get cashuErrorInvalidMintUrl =>
+      'Ce n\'est pas une URL de mint utilisable. Elle doit commencer par https://.';
+
+  @override
+  String get cashuErrorWalletOnOtherMint =>
+      'Votre portefeuille Cashu utilise un autre mint. Passez au mint de ce nœud dans Paramètres → Portefeuille Cashu, puis réessayez.';
+
+  @override
   String get cashuReceiveButton => 'Recevoir';
 
   @override
@@ -4071,7 +4117,7 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get cashuWalletExplanation =>
-      'Ce portefeuille contient de l\'ecash émis par le mint qu\'utilise votre nœud Mostro. Il sert à financer et à encaisser des échanges sur ce nœud : ce n\'est pas un portefeuille polyvalent.';
+      'Ce portefeuille contient de l\'ecash du mint que vous choisissez. Il sert à financer et à encaisser des échanges Cashu : ce n\'est pas un portefeuille polyvalent.';
 
   @override
   String get cashuErrorNotEnabled =>
@@ -4087,7 +4133,7 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get cashuErrorMintUnusable =>
-      'Il manque au mint de ce nœud des fonctions nécessaires au séquestre ; il n\'est donc pas possible d\'échanger ici.';
+      'Il manque à ce mint des fonctions nécessaires au portefeuille. Choisissez un autre mint.';
 
   @override
   String get cashuErrorUnsupportedOnWeb =>
@@ -4130,10 +4176,6 @@ class AppLocalizationsFr extends AppLocalizations {
   @override
   String get cashuTokenTooLargeForQr =>
       'Ce token est trop volumineux pour un code QR. Copiez-le à la place.';
-
-  @override
-  String get cashuErrorMintChanged =>
-      'Le nœud actif a changé et ce portefeuille est lié à une autre mint. Revenez en arrière et rouvrez le portefeuille.';
 
   @override
   String get cashuErrorNoMnemonic =>
