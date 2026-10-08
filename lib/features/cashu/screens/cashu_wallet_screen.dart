@@ -13,6 +13,7 @@ import 'package:mostro/features/cashu/providers/cashu_wallet_provider.dart';
 import 'package:mostro/features/settings/widgets/settings_section.dart';
 import 'package:mostro/l10n/app_localizations.dart';
 import 'package:mostro/shared/widgets/mostro_modal.dart';
+import 'package:mostro/shared/widgets/paste_field.dart';
 import 'package:mostro/shared/widgets/platform_aware_qr_scanner.dart';
 import 'package:mostro/shared/widgets/redesign_app_bar.dart';
 import 'package:mostro/src/rust/api/types.dart';
@@ -119,18 +120,9 @@ class _CashuWalletScreenState extends ConsumerState<CashuWalletScreen> {
   Future<void> _receive() async {
     final l10n = AppLocalizations.of(context);
     final token = await _prompt(
-      () => showMostroSheet<String>(
+      () => showMostroDialog<String>(
         context: context,
-        builder:
-            (sheetContext) => Padding(
-              padding: EdgeInsets.only(
-                bottom: MediaQuery.of(sheetContext).viewInsets.bottom,
-              ),
-              child: PlatformAwareQrScanner(
-                hint: l10n.cashuReceiveHint,
-                onDetected: (value) => Navigator.of(sheetContext).pop(value),
-              ),
-            ),
+        builder: (_) => const _ReceiveDialog(),
       ),
     );
 
@@ -666,6 +658,126 @@ class _MintDialogState extends State<_MintDialog> {
         onPressed: () => Navigator.of(context).pop(),
       ),
       primary: ModalAction(label: l10n.connectButtonLabel, onPressed: _submit),
+    );
+  }
+}
+
+/// Receive: the token field, Paste and Scan QR as its links — the same way
+/// in as the mint dialog — then Cancel and Receive.
+///
+/// A token is mostly shared as text, and one too large for a QR has no other
+/// way in, so pasting is never hidden behind the camera. Pops the trimmed
+/// token; Receive stays disabled while the field is empty, so nothing blank
+/// reaches the mint.
+class _ReceiveDialog extends StatefulWidget {
+  const _ReceiveDialog();
+
+  @override
+  State<_ReceiveDialog> createState() => _ReceiveDialogState();
+}
+
+class _ReceiveDialogState extends State<_ReceiveDialog> {
+  final _controller = TextEditingController();
+  String? _error;
+
+  String get _token => _controller.text.trim();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  /// Fills the field rather than redeeming at once: the user sees what they
+  /// pasted before it goes to the mint. An empty clipboard says so under the
+  /// field, where the user is looking.
+  Future<void> _paste() async {
+    final data = await Clipboard.getData(Clipboard.kTextPlain);
+    final text = (data?.text ?? '').trim();
+    if (!mounted) return;
+    setState(() {
+      if (text.isEmpty) {
+        _error = AppLocalizations.of(context).clipboardEmptyError;
+      } else {
+        _controller.text = text;
+        _error = null;
+      }
+    });
+  }
+
+  /// A scanned token is redeemed straight away: coming back to the dialog to
+  /// press Receive adds a step with one answer.
+  Future<void> _scan() async {
+    final value =
+        (await _scanQr(
+          context,
+          AppLocalizations.of(context).cashuReceiveHint,
+        ))?.trim();
+    if (!mounted || value == null || value.isEmpty) return;
+    Navigator.of(context).pop(value);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    final pal = SettingsPalette.of(context);
+    // Read once, so whether Scan QR works and the reason it gives cannot
+    // disagree.
+    final canScan = canScanQr();
+    return MostroDialog(
+      title: l10n.cashuReceiveTitle,
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            l10n.cashuTokenFieldLabel.toUpperCase(),
+            style: TextStyle(
+              fontSize: 10,
+              fontWeight: FontWeight.w600,
+              letterSpacing: 0.6,
+              color: pal.fieldLabel,
+            ),
+          ),
+          const SizedBox(height: 8),
+          PasteField(
+            controller: _controller,
+            // Focused where there is no camera, so a desktop paste shortcut
+            // lands without a click first. On a phone it would raise the
+            // keyboard over the Scan QR the user probably came for.
+            autofocus: !canScan,
+            hint: l10n.cashuPasteTokenHint,
+            errorText: _error,
+            onChanged: (_) => setState(() => _error = null),
+            // Enter is Receive, under the same rule as the button; on an
+            // empty field it does nothing and the focus stays put.
+            onEditingComplete: () {
+              if (_token.isNotEmpty) Navigator.of(context).pop(_token);
+            },
+          ),
+        ],
+      ),
+      // Ways to fill the field, not answers to the dialog: links, not
+      // buttons, as in the mint dialog.
+      links: [
+        ModalLink(label: l10n.pasteButtonLabel, onPressed: _paste),
+        ModalLink(
+          label: l10n.scanQrButtonLabel,
+          // Where there is no camera, the scanner would only be a second
+          // paste field over this one: off, and says why.
+          onPressed: canScan ? _scan : null,
+          tooltip: canScan ? null : l10n.qrScanUnavailable,
+        ),
+      ],
+      secondary: ModalAction(
+        label: l10n.cancel,
+        onPressed: () => Navigator.of(context).pop(),
+      ),
+      primary: ModalAction(
+        label: l10n.cashuReceiveButton,
+        onPressed:
+            _token.isEmpty ? null : () => Navigator.of(context).pop(_token),
+      ),
     );
   }
 }

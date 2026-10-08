@@ -4089,6 +4089,15 @@ class AppLocalizationsFr extends AppLocalizations {
   String get cashuReceiveHint => 'Collez ou scannez un token Cashu';
 
   @override
+  String get cashuReceiveTitle => 'Recevoir un token';
+
+  @override
+  String get cashuTokenFieldLabel => 'Token Cashu';
+
+  @override
+  String get cashuPasteTokenHint => 'Collez un token Cashu';
+
+  @override
   String get qrScanUnavailable => 'Non disponible sur cet appareil';
 
   @override
