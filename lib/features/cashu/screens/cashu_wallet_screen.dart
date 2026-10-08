@@ -561,6 +561,25 @@ class _BalanceCard extends StatelessWidget {
   }
 }
 
+/// Scans a QR in a sheet over the dialog that asked: the decoded value, or
+/// null when the user backs out. [hint] is the paste form's placeholder, for
+/// a camera that cannot start.
+Future<String?> _scanQr(BuildContext context, String hint) {
+  return showMostroSheet<String>(
+    context: context,
+    builder:
+        (sheetContext) => Padding(
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.of(sheetContext).viewInsets.bottom,
+          ),
+          child: PlatformAwareQrScanner(
+            hint: hint,
+            onDetected: (value) => Navigator.of(sheetContext).pop(value),
+          ),
+        ),
+  );
+}
+
 /// Which mint the wallet binds to, typed, pasted or scanned. Only emptiness is
 /// checked here: whether it is a usable mint is Rust's call (`InvalidMintUrl`,
 /// `CashuMintUnreachable`, `CashuMintUnusable`), and nothing is remembered
@@ -599,19 +618,9 @@ class _MintDialogState extends State<_MintDialog> {
   }
 
   Future<void> _scan() async {
-    final l10n = AppLocalizations.of(context);
-    final scanned = await showMostroSheet<String>(
-      context: context,
-      builder:
-          (sheetContext) => Padding(
-            padding: EdgeInsets.only(
-              bottom: MediaQuery.of(sheetContext).viewInsets.bottom,
-            ),
-            child: PlatformAwareQrScanner(
-              hint: l10n.cashuMintFieldHint,
-              onDetected: (value) => Navigator.of(sheetContext).pop(value),
-            ),
-          ),
+    final scanned = await _scanQr(
+      context,
+      AppLocalizations.of(context).cashuMintFieldHint,
     );
     if (scanned != null && mounted) _fill(scanned);
   }
