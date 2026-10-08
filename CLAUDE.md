@@ -275,6 +275,10 @@ bridged by flutter_rust_bridge.
   names the identity it reloaded, whose rows are its own (issue #555). Every slot transition
   (create, load, both imports, delete) holds `IdentitySlot::lifecycle` end to end — a deletion
   through its wipe — so none interleaves with another; a new one must too (a source scan checks).
+  A replacement refused after the deletion went through reloads the previous identity in the
+  same session (`IdentityService`), and `restore_identity_session` rebuilds what the deletion
+  gave up, as a cold start would: a new teardown step needs its rebuild there, or a note on why
+  a restart leaves it empty too (`every_identity_teardown_has_its_restore`).
 - **`OrderInfo::created_at` is when the order was created, not the event's time.** It comes from
   the NIP-69 `published_at` tag (mostro#1000), then the legacy `created_at` tag (daemon builds
   between mostro#971 and #1000), then the event's time on older nodes; a tag value is capped at

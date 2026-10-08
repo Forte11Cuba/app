@@ -426,9 +426,10 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
                   final swap = _IdentitySwap.of(context);
                   Navigator.pop(dialogContext);
                   try {
-                    // Atomically replaces the stored identity: new mnemonic is
-                    // written before old data is cleared, so there is no window
-                    // where the user is left without a valid identity.
+                    // The new mnemonic is stored only once the core holds the
+                    // new identity; a refusal after the deletion loads the
+                    // previous one again (IdentityService), so the session is
+                    // never left without one.
                     await (widget.debugRegenerate?.call() ??
                         IdentityService.regenerate());
                   } catch (e) {

@@ -94,6 +94,20 @@ Future<bool> hasPendingIdentityWipe() =>
 Future<List<FundsAtRisk>> fundsAtRisk() =>
     RustLib.instance.api.crateApiIdentityFundsAtRisk();
 
+/// Rebuild, for the identity loaded again after its replacement was refused,
+/// what its deletion gave up (review of #573): its claim nodes, the kind-14
+/// feed and the watched orders, its chats and trade sessions, the book marks
+/// of its own orders, its dispute chats and its push registrations — what a
+/// cold start builds for it. Its rows are still on disk: the refusal kept
+/// them, and the reload released their wipe-pending marker.
+///
+/// Dart calls this right after loading that identity from secure storage, so
+/// the session is never left on an identity Rust no longer serves. Held
+/// under the lifecycle lock like a transition: a deletion that started
+/// meanwhile finishes first, and then there is nothing to restore.
+Future<void> restoreIdentitySession() =>
+    RustLib.instance.api.crateApiIdentityRestoreIdentitySession();
+
 /// Derive a new trade key, auto-incrementing the index.
 /// Returns the new key's info and updates the stored `trade_key_index`.
 Future<TradeKeyInfo> deriveTradeKey() =>

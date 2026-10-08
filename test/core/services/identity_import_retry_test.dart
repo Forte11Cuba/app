@@ -27,6 +27,7 @@ class _Api implements RustLibApi {
   int deletes = 0;
   int imports = 0;
   List<String>? reloaded;
+  int restores = 0;
 
   @override
   Future<void> crateApiIdentityDeleteIdentity() async {
@@ -85,6 +86,12 @@ class _Api implements RustLibApi {
   Future<void> crateApiReputationSetPrivacyMode({
     required bool enabled,
   }) async {}
+
+  @override
+  Future<void> crateApiIdentityRestoreIdentitySession() async {
+    if (!loaded) throw AnyhowException('NoIdentity');
+    restores++;
+  }
 
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
@@ -146,6 +153,7 @@ void main() {
 
     expect(api.loaded, isTrue, reason: 'the session is never left without one');
     expect(api.reloaded, _old.split(' '));
+    expect(api.restores, 1, reason: 'Rust rebuilds what the deletion gave up');
   });
 
   test(
@@ -163,6 +171,11 @@ void main() {
 
       expect(api.loaded, isTrue);
       expect(api.reloaded, _old.split(' '));
+      expect(
+        api.restores,
+        1,
+        reason: 'Rust rebuilds what the deletion gave up',
+      );
       expect(await IdentityService.getMnemonicWords(), _old.split(' '));
     },
   );
@@ -182,6 +195,7 @@ void main() {
 
     expect(api.loaded, isTrue);
     expect(api.reloaded, _old.split(' '));
+    expect(api.restores, 1, reason: 'Rust rebuilds what the deletion gave up');
   });
 
   test('a deletion that fails is not followed by a reload', () async {
@@ -196,6 +210,7 @@ void main() {
     );
 
     expect(api.reloaded, isNull, reason: 'the identity was never given up');
+    expect(api.restores, 0);
     expect(api.imports, 0);
   });
 
@@ -248,6 +263,10 @@ class _Delegate implements RustLibApi {
   @override
   Future<void> crateApiReputationSetPrivacyMode({required bool enabled}) =>
       _api().crateApiReputationSetPrivacyMode(enabled: enabled);
+
+  @override
+  Future<void> crateApiIdentityRestoreIdentitySession() =>
+      _api().crateApiIdentityRestoreIdentitySession();
 
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);

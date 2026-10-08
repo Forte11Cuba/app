@@ -180,10 +180,14 @@ the first line of the fresh history, worded without orders or
 counterparties), and leaves the marker recorded ahead. `create_identity` and
 `import_from_mnemonic` retry the wipe off that marker while the slot is
 empty, clear it on success and refuse the new identity on failure. A refused
-replacement leaves the deleted identity's mnemonic in secure storage, so the
-next launch reloads that identity: `load_identity_from_mnemonic` then drops
-a marker naming its own public key, wiping nothing — the rows are its own.
-Otherwise the launch reload never touches the marker; `has_pending_identity_wipe` exposes it, and
+replacement leaves the deleted identity's mnemonic in secure storage, and
+the Dart side loads that identity again in the same session — any refusal
+after the deletion went through, a pending wipe or words the core rejects —
+then calls `restore_identity_session`, so the session is never left without
+an identity (review of #573). Should that reload fail, the next launch loads
+it. Either way `load_identity_from_mnemonic` drops a marker naming its own
+public key, wiping nothing — the rows are its own. Otherwise the launch
+reload never touches the marker; `has_pending_identity_wipe` exposes it, and
 the Account screen shows a warning while it holds (issue #555). The Dart
 half — cached providers and the notifications store — is
 `resetIdentityScopedState`, run by the Account screen after a generate and,
@@ -191,6 +195,18 @@ on import, **before** the recovery.
 
 **Errors**: `NoIdentity`; `WipeNotRecorded` when the pending-wipe marker
 cannot be recorded (nothing deleted, the identity stays loaded).
+
+---
+
+### restore_identity_session() → ()
+Rebuild, for the identity loaded again after its replacement was refused,
+what its deletion gave up — what a cold start builds for it: the claim nodes,
+the bulk kind-14 feed and the watched orders, its chats and trade sessions,
+the book's `is_mine` marks of its own orders (from its trade rows), its
+dispute chats and its push registrations. Per-trade receivers stay closed,
+as after a restart. Runs as a transition of the identity slot.
+
+**Errors**: `NoIdentity` when no identity is loaded.
 
 ---
 
