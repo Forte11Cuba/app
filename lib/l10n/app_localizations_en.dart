@@ -4360,6 +4360,59 @@ class AppLocalizationsEn extends AppLocalizations {
       'The payment did not go through. Nothing was paid; the sats are back in your balance.';
 
   @override
+  String get cashuReceiveTokenOption => 'Ecash token';
+
+  @override
+  String get cashuReceiveLightningOption => 'Lightning';
+
+  @override
+  String get cashuMintAmountTitle => 'Receive via Lightning';
+
+  @override
+  String get cashuMintInvoiceTitle => 'Pay this invoice';
+
+  @override
+  String get cashuMintInvoiceExpires => 'Expires';
+
+  @override
+  String get cashuMintInvoiceWaiting => 'Waiting for the payment…';
+
+  @override
+  String get cashuMintInvoiceNote =>
+      'You can close this. If the invoice is paid later, the sats arrive the next time you open the app.';
+
+  @override
+  String cashuMintReceivedTitle(String sats) {
+    return 'Received $sats sats';
+  }
+
+  @override
+  String get cashuMintExpiredTitle => 'Invoice expired';
+
+  @override
+  String get cashuMintExpiredBody =>
+      'It was not paid, so nothing was received. Create a new invoice to try again.';
+
+  @override
+  String get cashuMintFailedTitle => 'Could not receive';
+
+  @override
+  String get cashuErrorMintUnsupported =>
+      'This mint cannot receive Lightning payments.';
+
+  @override
+  String get cashuErrorMintAmountOutOfRange =>
+      'This mint does not issue invoices of that amount.';
+
+  @override
+  String get cashuErrorMintQuoteFailed =>
+      'The mint could not create an invoice. Try again later.';
+
+  @override
+  String get cashuErrorMintQuoteUnknown =>
+      'This invoice belongs to another mint. Switch back to that mint to receive it.';
+
+  @override
   String get lockEscrowTitle => 'Lock the escrow';
 
   @override

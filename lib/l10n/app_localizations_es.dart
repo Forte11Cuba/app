@@ -4388,6 +4388,59 @@ class AppLocalizationsEs extends AppLocalizations {
       'El pago no se completó. No se pagó nada; los sats volvieron a tu saldo.';
 
   @override
+  String get cashuReceiveTokenOption => 'Token de ecash';
+
+  @override
+  String get cashuReceiveLightningOption => 'Lightning';
+
+  @override
+  String get cashuMintAmountTitle => 'Recibir por Lightning';
+
+  @override
+  String get cashuMintInvoiceTitle => 'Paga esta factura';
+
+  @override
+  String get cashuMintInvoiceExpires => 'Vence';
+
+  @override
+  String get cashuMintInvoiceWaiting => 'Esperando el pago…';
+
+  @override
+  String get cashuMintInvoiceNote =>
+      'Puedes cerrar esto. Si la factura se paga más tarde, los sats llegan la próxima vez que abras la app.';
+
+  @override
+  String cashuMintReceivedTitle(String sats) {
+    return 'Recibiste $sats sats';
+  }
+
+  @override
+  String get cashuMintExpiredTitle => 'Factura vencida';
+
+  @override
+  String get cashuMintExpiredBody =>
+      'No se pagó, así que no se recibió nada. Crea una factura nueva para intentarlo otra vez.';
+
+  @override
+  String get cashuMintFailedTitle => 'No se pudo recibir';
+
+  @override
+  String get cashuErrorMintUnsupported =>
+      'Este mint no puede recibir pagos Lightning.';
+
+  @override
+  String get cashuErrorMintAmountOutOfRange =>
+      'Este mint no emite facturas de ese monto.';
+
+  @override
+  String get cashuErrorMintQuoteFailed =>
+      'El mint no pudo crear una factura. Inténtalo más tarde.';
+
+  @override
+  String get cashuErrorMintQuoteUnknown =>
+      'Esta factura es de otro mint. Vuelve a ese mint para recibirla.';
+
+  @override
   String get lockEscrowTitle => 'Bloquear la custodia';
 
   @override

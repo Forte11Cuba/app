@@ -4399,6 +4399,59 @@ class AppLocalizationsNl extends AppLocalizations {
       'De betaling is niet gelukt. Er is niets betaald; de sats staan weer in je saldo.';
 
   @override
+  String get cashuReceiveTokenOption => 'Ecash-token';
+
+  @override
+  String get cashuReceiveLightningOption => 'Lightning';
+
+  @override
+  String get cashuMintAmountTitle => 'Ontvangen via Lightning';
+
+  @override
+  String get cashuMintInvoiceTitle => 'Betaal deze factuur';
+
+  @override
+  String get cashuMintInvoiceExpires => 'Verloopt';
+
+  @override
+  String get cashuMintInvoiceWaiting => 'Wachten op de betaling…';
+
+  @override
+  String get cashuMintInvoiceNote =>
+      'Je kunt dit sluiten. Wordt de factuur later betaald, dan komen de sats binnen zodra je de app weer opent.';
+
+  @override
+  String cashuMintReceivedTitle(String sats) {
+    return '$sats sats ontvangen';
+  }
+
+  @override
+  String get cashuMintExpiredTitle => 'Factuur verlopen';
+
+  @override
+  String get cashuMintExpiredBody =>
+      'Ze is niet betaald, dus er is niets ontvangen. Maak een nieuwe factuur om het opnieuw te proberen.';
+
+  @override
+  String get cashuMintFailedTitle => 'Ontvangen mislukt';
+
+  @override
+  String get cashuErrorMintUnsupported =>
+      'Deze mint kan geen Lightning-betalingen ontvangen.';
+
+  @override
+  String get cashuErrorMintAmountOutOfRange =>
+      'Deze mint geeft geen facturen van dat bedrag uit.';
+
+  @override
+  String get cashuErrorMintQuoteFailed =>
+      'De mint kon geen factuur maken. Probeer het later opnieuw.';
+
+  @override
+  String get cashuErrorMintQuoteUnknown =>
+      'Deze factuur hoort bij een andere mint. Schakel terug naar die mint om haar te ontvangen.';
+
+  @override
   String get lockEscrowTitle => 'De escrow vergrendelen';
 
   @override

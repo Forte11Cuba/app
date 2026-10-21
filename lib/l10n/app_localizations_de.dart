@@ -4413,6 +4413,59 @@ class AppLocalizationsDe extends AppLocalizations {
       'Die Zahlung ist nicht durchgegangen. Es wurde nichts bezahlt; die Sats sind wieder in deinem Guthaben.';
 
   @override
+  String get cashuReceiveTokenOption => 'Ecash-Token';
+
+  @override
+  String get cashuReceiveLightningOption => 'Lightning';
+
+  @override
+  String get cashuMintAmountTitle => 'Über Lightning empfangen';
+
+  @override
+  String get cashuMintInvoiceTitle => 'Bezahle diese Rechnung';
+
+  @override
+  String get cashuMintInvoiceExpires => 'Läuft ab';
+
+  @override
+  String get cashuMintInvoiceWaiting => 'Warte auf die Zahlung…';
+
+  @override
+  String get cashuMintInvoiceNote =>
+      'Du kannst das schließen. Wird die Rechnung später bezahlt, kommen die Sats beim nächsten Öffnen der App an.';
+
+  @override
+  String cashuMintReceivedTitle(String sats) {
+    return '$sats Sats empfangen';
+  }
+
+  @override
+  String get cashuMintExpiredTitle => 'Rechnung abgelaufen';
+
+  @override
+  String get cashuMintExpiredBody =>
+      'Sie wurde nicht bezahlt, also wurde nichts empfangen. Erstelle eine neue Rechnung, um es erneut zu versuchen.';
+
+  @override
+  String get cashuMintFailedTitle => 'Empfang nicht möglich';
+
+  @override
+  String get cashuErrorMintUnsupported =>
+      'Diese Mint kann keine Lightning-Zahlungen empfangen.';
+
+  @override
+  String get cashuErrorMintAmountOutOfRange =>
+      'Diese Mint stellt keine Rechnungen über diesen Betrag aus.';
+
+  @override
+  String get cashuErrorMintQuoteFailed =>
+      'Die Mint konnte keine Rechnung erstellen. Versuche es später erneut.';
+
+  @override
+  String get cashuErrorMintQuoteUnknown =>
+      'Diese Rechnung gehört zu einer anderen Mint. Wechsle zurück zu dieser Mint, um sie zu empfangen.';
+
+  @override
   String get lockEscrowTitle => 'Treuhand sperren';
 
   @override
