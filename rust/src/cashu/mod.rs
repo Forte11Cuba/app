@@ -27,8 +27,9 @@ mod wallet;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use wallet::{
-    collect_pending_quotes, ensure_receivable, stored_balance, token_mint_url, CashuWallet,
-    MeltOutcomeInfo, MeltQuoteInfo, MintCapabilities, MintQuoteInfo, MintQuoteStatus,
+    collect_pending_quotes, ensure_receivable, stored_balance, stored_pending_quotes,
+    token_mint_url, CashuWallet, MeltOutcomeInfo, MeltQuoteInfo, MintCapabilities, MintQuoteInfo,
+    MintQuoteStatus, PendingQuotes,
 };
 
 // ── WASM stub ────────────────────────────────────────────────────────────────
@@ -106,6 +107,23 @@ pub enum MeltOutcomeInfo {
 #[cfg(target_arch = "wasm32")]
 pub async fn stored_balance(_db_path: &str, _mint_url: Option<&str>) -> anyhow::Result<u64> {
     Ok(0)
+}
+
+/// See the native [`wallet::PendingQuotes`].
+#[cfg(target_arch = "wasm32")]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct PendingQuotes {
+    pub paid_sats: u64,
+    pub open: u32,
+}
+
+/// No proof store on web, so no invoice pending.
+#[cfg(target_arch = "wasm32")]
+pub async fn stored_pending_quotes(
+    _db_path: &str,
+    _mint_url: Option<&str>,
+) -> anyhow::Result<PendingQuotes> {
+    Ok(PendingQuotes::default())
 }
 
 /// No proof store on web, so no quote to collect.
@@ -198,6 +216,10 @@ impl CashuWallet {
         _quote_id: &str,
         _max_total_sats: u64,
     ) -> anyhow::Result<MeltOutcomeInfo> {
+        anyhow::bail!("CashuUnsupportedOnWeb")
+    }
+
+    pub async fn pending_quotes(&self) -> anyhow::Result<PendingQuotes> {
         anyhow::bail!("CashuUnsupportedOnWeb")
     }
 

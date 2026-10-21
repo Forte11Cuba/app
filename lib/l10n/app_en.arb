@@ -4537,6 +4537,8 @@
   "@cashuErrorMintQuoteFailed": {"description": "Cashu error — the mint did not create the invoice, or it could not be read back"},
   "cashuErrorMintQuoteUnknown": "This invoice belongs to another mint. Switch back to that mint to receive it.",
   "@cashuErrorMintQuoteUnknown": {"description": "Cashu error — the invoice belongs to a mint other than the wallet's current one"},
+  "cashuReceivingSats": "Receiving {sats} sats",
+  "@cashuReceivingSats": {"description": "Cashu wallet — under the balance: invoices known paid and not minted yet, collected at the next start, resume or sync; sats is a formatted number", "placeholders": {"sats": {"type": "String"}}},
   "lockEscrowTitle": "Lock the escrow",
   "@lockEscrowTitle": {"description": "Title of the seller's Cashu escrow funding screen"},
   "lockEscrowExplanation": "Lock your ecash in a 2-of-3 escrow at this node's mint. Neither you nor the buyer can move it alone \u2014 and if the node disappears, you can reclaim it yourself once the locktime passes.",

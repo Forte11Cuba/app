@@ -4413,6 +4413,11 @@ class AppLocalizationsEn extends AppLocalizations {
       'This invoice belongs to another mint. Switch back to that mint to receive it.';
 
   @override
+  String cashuReceivingSats(String sats) {
+    return 'Receiving $sats sats';
+  }
+
+  @override
   String get lockEscrowTitle => 'Lock the escrow';
 
   @override

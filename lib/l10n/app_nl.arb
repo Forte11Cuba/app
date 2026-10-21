@@ -1200,6 +1200,7 @@
   "cashuErrorMintAmountOutOfRange": "Deze mint geeft geen facturen van dat bedrag uit.",
   "cashuErrorMintQuoteFailed": "De mint kon geen factuur maken. Probeer het later opnieuw.",
   "cashuErrorMintQuoteUnknown": "Deze factuur hoort bij een andere mint. Schakel terug naar die mint om haar te ontvangen.",
+  "cashuReceivingSats": "{sats} sats onderweg",
   "lockEscrowTitle": "De escrow vergrendelen",
   "lockEscrowExplanation": "Vergrendel je ecash in een 2-van-3-escrow bij de mint van deze node. Noch jij noch de koper kan het alleen verplaatsen. En als de node verdwijnt, kun je het zelf terugvorderen zodra de locktime verstreken is.",
   "lockEscrowAmount": "Escrow",

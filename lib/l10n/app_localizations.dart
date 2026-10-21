@@ -7302,6 +7302,12 @@ abstract class AppLocalizations {
   /// **'This invoice belongs to another mint. Switch back to that mint to receive it.'**
   String get cashuErrorMintQuoteUnknown;
 
+  /// Cashu wallet — under the balance: invoices known paid and not minted yet, collected at the next start, resume or sync; sats is a formatted number
+  ///
+  /// In en, this message translates to:
+  /// **'Receiving {sats} sats'**
+  String cashuReceivingSats(String sats);
+
   /// Title of the seller's Cashu escrow funding screen
   ///
   /// In en, this message translates to:

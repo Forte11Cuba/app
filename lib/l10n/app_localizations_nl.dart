@@ -4452,6 +4452,11 @@ class AppLocalizationsNl extends AppLocalizations {
       'Deze factuur hoort bij een andere mint. Schakel terug naar die mint om haar te ontvangen.';
 
   @override
+  String cashuReceivingSats(String sats) {
+    return '$sats sats onderweg';
+  }
+
+  @override
   String get lockEscrowTitle => 'De escrow vergrendelen';
 
   @override

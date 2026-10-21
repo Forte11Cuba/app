@@ -4466,6 +4466,11 @@ class AppLocalizationsDe extends AppLocalizations {
       'Diese Rechnung gehört zu einer anderen Mint. Wechsle zurück zu dieser Mint, um sie zu empfangen.';
 
   @override
+  String cashuReceivingSats(String sats) {
+    return '$sats Sats werden empfangen';
+  }
+
+  @override
   String get lockEscrowTitle => 'Treuhand sperren';
 
   @override

@@ -13,6 +13,7 @@ CashuWalletStatus _status({required bool connected, String? mint}) =>
       missingCapabilities: const [],
       canSendLightning: false,
       canReceiveLightning: false,
+      receivingSats: BigInt.zero,
     );
 
 void main() {

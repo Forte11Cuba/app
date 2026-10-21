@@ -568,6 +568,19 @@ impl CashuWallet {
         Ok(mint_quote_status(&checked, unix_now().as_secs()))
     }
 
+    /// This mint's [`PendingQuotes`], from the store alone.
+    ///
+    /// **Errors**: `CashuStoreUnavailable`.
+    pub async fn pending_quotes(&self) -> Result<PendingQuotes> {
+        let quotes = self
+            .inner
+            .localstore
+            .get_unissued_mint_quotes()
+            .await
+            .map_err(|e| anyhow!("CashuStoreUnavailable: {e}"))?;
+        Ok(pending_quotes_of(quotes, Some(&self.inner.mint_url)))
+    }
+
     /// Mint `amount_sats` straight from the mint, for tests only.
     ///
     /// Against a `FakeWallet` backend (which is what a local nutshell runs) the
@@ -1252,6 +1265,59 @@ pub async fn collect_pending_quotes(
         }
     }
     Ok(minted)
+}
+
+/// The invoices of a proof store not minted yet, as the store knows them —
+/// phase C3b-2. Read without contacting any mint.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct PendingQuotes {
+    /// Sats the store knows were paid and not issued yet: a mint that did not
+    /// answer, or failed to mint, when it was last asked. Collected at the
+    /// next start, resume or Sync.
+    pub paid_sats: u64,
+    /// Every invoice not minted yet and not forgotten, paid or not. One paid
+    /// while the app was closed still reads unpaid here until its mint is
+    /// asked, so this, not [`Self::paid_sats`], is what a lost store could
+    /// cost.
+    pub open: u32,
+}
+
+/// [`PendingQuotes`] over `quotes`, the store's unissued ones: in sats, at
+/// `mint` or at every mint when `None`.
+fn pending_quotes_of(quotes: Vec<cdk::wallet::MintQuote>, mint: Option<&MintUrl>) -> PendingQuotes {
+    quotes
+        .into_iter()
+        .filter(|quote| quote.unit == CurrencyUnit::Sat)
+        .filter(|quote| mint.is_none_or(|mint| &quote.mint_url == mint))
+        .fold(PendingQuotes::default(), |pending, quote| PendingQuotes {
+            paid_sats: pending
+                .paid_sats
+                .saturating_add(u64::from(quote.amount_mintable())),
+            open: pending.open.saturating_add(1),
+        })
+}
+
+/// The [`PendingQuotes`] of the proof store at `db_path` — at `mint_url`, or
+/// across every mint when `None` — without contacting any. A store that does
+/// not exist holds none and is not created.
+///
+/// **Errors**: `CashuStoreUnavailable`, `InvalidMintUrl`.
+pub async fn stored_pending_quotes(db_path: &str, mint_url: Option<&str>) -> Result<PendingQuotes> {
+    if !std::path::Path::new(db_path).exists() {
+        return Ok(PendingQuotes::default());
+    }
+    let mint_url = mint_url
+        .map(MintUrl::from_str)
+        .transpose()
+        .map_err(|e| anyhow!("InvalidMintUrl: {e}"))?;
+    let store = WalletSqliteDatabase::new(db_path)
+        .await
+        .map_err(|e| anyhow!("CashuStoreUnavailable: {e}"))?;
+    let quotes = store
+        .get_unissued_mint_quotes()
+        .await
+        .map_err(|e| anyhow!("CashuStoreUnavailable: {e}"))?;
+    Ok(pending_quotes_of(quotes, mint_url.as_ref()))
 }
 
 /// How long after its expiry a quote still unpaid at the mint is forgotten.
@@ -3046,5 +3112,78 @@ mod tests {
         // Assert
         assert!(mint.connections() > 0);
         assert!(quote_kept(&db).await);
+    }
+
+    #[test]
+    fn pending_quotes_count_every_open_invoice_and_the_paid_sats() {
+        use cdk::nuts::MintQuoteState;
+
+        let ours = MintUrl::from_str("https://mint.example.com").unwrap();
+        let theirs = MintUrl::from_str("https://other.example.com").unwrap();
+        let unpaid = mint_quote_for("unpaid", &ours, 1);
+        let paid = cdk::wallet::MintQuote {
+            state: MintQuoteState::Paid,
+            ..mint_quote_for("paid", &ours, 1)
+        };
+        let elsewhere = cdk::wallet::MintQuote {
+            state: MintQuoteState::Paid,
+            ..mint_quote_for("elsewhere", &theirs, 1)
+        };
+        let usd = cdk::wallet::MintQuote {
+            unit: CurrencyUnit::Usd,
+            state: MintQuoteState::Paid,
+            ..mint_quote_for("usd", &ours, 1)
+        };
+        let all = vec![unpaid, paid, elsewhere, usd];
+
+        // At this mint: both sat invoices are open, one of them paid.
+        assert_eq!(
+            pending_quotes_of(all.clone(), Some(&ours)),
+            PendingQuotes {
+                paid_sats: SEEDED_SATS,
+                open: 2
+            }
+        );
+        // Across every mint: the one at the other mint too. Never the usd.
+        assert_eq!(
+            pending_quotes_of(all, None),
+            PendingQuotes {
+                paid_sats: 2 * SEEDED_SATS,
+                open: 3
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn pending_quotes_are_read_from_the_store_alone() {
+        // Arrange — a paid quote the mint has not issued yet, and no mint up.
+        let mint = StubMint::start(None).await;
+        let db = temp_db_path();
+        let wallet = seeded_wallet_at(&mint.url, &db).await;
+        let paid = cdk::wallet::MintQuote {
+            state: cdk::nuts::MintQuoteState::Paid,
+            ..mint_quote_for("paid", &wallet.inner.mint_url, 1)
+        };
+        wallet.inner.localstore.add_mint_quote(paid).await.unwrap();
+        let expected = PendingQuotes {
+            paid_sats: SEEDED_SATS,
+            open: 1,
+        };
+
+        // Act / Assert — bound or not, the same answer, and no mint asked.
+        assert_eq!(wallet.pending_quotes().await.unwrap(), expected);
+        let stored = stored_pending_quotes(db.to_str().unwrap(), Some(&mint.url))
+            .await
+            .unwrap();
+        assert_eq!(stored, expected);
+        assert_eq!(mint.connections(), 0, "a mint was contacted");
+        let missing = temp_db_path();
+        assert_eq!(
+            stored_pending_quotes(missing.to_str().unwrap(), None)
+                .await
+                .unwrap(),
+            PendingQuotes::default()
+        );
+        assert!(!missing.exists(), "the store was created");
     }
 }

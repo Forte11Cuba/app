@@ -9011,8 +9011,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   CashuWalletStatus dco_decode_cashu_wallet_status(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 6)
-      throw Exception('unexpected arr length: expect 6 but see ${arr.length}');
+    if (arr.length != 7)
+      throw Exception('unexpected arr length: expect 7 but see ${arr.length}');
     return CashuWalletStatus(
       connected: dco_decode_bool(arr[0]),
       mintUrl: dco_decode_opt_String(arr[1]),
@@ -9020,6 +9020,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       missingCapabilities: dco_decode_list_String(arr[3]),
       canSendLightning: dco_decode_bool(arr[4]),
       canReceiveLightning: dco_decode_bool(arr[5]),
+      receivingSats: dco_decode_u_64(arr[6]),
     );
   }
 
@@ -11821,6 +11822,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_missingCapabilities = sse_decode_list_String(deserializer);
     var var_canSendLightning = sse_decode_bool(deserializer);
     var var_canReceiveLightning = sse_decode_bool(deserializer);
+    var var_receivingSats = sse_decode_u_64(deserializer);
     return CashuWalletStatus(
       connected: var_connected,
       mintUrl: var_mintUrl,
@@ -11828,6 +11830,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       missingCapabilities: var_missingCapabilities,
       canSendLightning: var_canSendLightning,
       canReceiveLightning: var_canReceiveLightning,
+      receivingSats: var_receivingSats,
     );
   }
 
@@ -15211,6 +15214,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_list_String(self.missingCapabilities, serializer);
     sse_encode_bool(self.canSendLightning, serializer);
     sse_encode_bool(self.canReceiveLightning, serializer);
+    sse_encode_u_64(self.receivingSats, serializer);
   }
 
   @protected

@@ -152,6 +152,7 @@ CashuWalletStatus _status({
   required int? balance,
   bool canSendLightning = false,
   bool canReceiveLightning = false,
+  int receiving = 0,
 }) {
   return CashuWalletStatus(
     connected: connected,
@@ -160,6 +161,7 @@ CashuWalletStatus _status({
     missingCapabilities: const [],
     canSendLightning: canSendLightning,
     canReceiveLightning: canReceiveLightning,
+    receivingSats: BigInt.from(receiving),
   );
 }
 
@@ -588,6 +590,7 @@ void main() {
         missingCapabilities: const [],
         canSendLightning: false,
         canReceiveLightning: false,
+        receivingSats: BigInt.zero,
       );
 
       // Act
@@ -1066,6 +1069,7 @@ void main() {
           missingCapabilities: const [],
           canSendLightning: false,
           canReceiveLightning: false,
+          receivingSats: BigInt.zero,
         ),
         controller: _FakeController(connectError: 'CashuMintUnreachable'),
       );
@@ -1843,6 +1847,25 @@ void main() {
         find.text('This mint does not issue invoices of that amount.'),
         findsOneWidget,
       );
+    });
+
+    testWidgets('sats paid and not minted yet show as receiving', (
+      tester,
+    ) async {
+      await _pump(
+        tester,
+        status: _status(connected: true, balance: 500, receiving: 1500),
+      );
+
+      // Under the balance, never added to it.
+      expect(find.text('500 Satoshis'), findsOneWidget);
+      expect(find.text('Receiving 1,500 sats'), findsOneWidget);
+    });
+
+    testWidgets('nothing receiving shows no row', (tester) async {
+      await _pump(tester, status: _status(connected: true, balance: 500));
+
+      expect(find.textContaining('Receiving'), findsNothing);
     });
 
     // DS-A11Y-4: the longest translation, doubled, on the narrowest phone.

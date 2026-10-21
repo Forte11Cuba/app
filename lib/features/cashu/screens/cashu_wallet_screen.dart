@@ -696,6 +696,25 @@ class _BalanceCard extends StatelessWidget {
               color: book.textPrimary,
             ),
           ),
+          // Invoices known paid and not minted yet: the mint was down or
+          // failed when asked. Money on its way, never part of the balance
+          // until it is minted (C3b-2).
+          if ((status?.receivingSats ?? BigInt.zero) > BigInt.zero) ...[
+            const SizedBox(height: 4),
+            Text(
+              l10n.cashuReceivingSats(
+                _fmtSats(
+                  status!.receivingSats,
+                  Localizations.localeOf(context).toString(),
+                ),
+              ),
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w500,
+                color: book.textBody,
+              ),
+            ),
+          ],
           const SizedBox(height: 10),
           // The mint is named whenever one is set, bound or not: one that is
           // not answering still holds its sats, and replacing it must never

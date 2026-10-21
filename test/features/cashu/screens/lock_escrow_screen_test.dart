@@ -87,6 +87,7 @@ class _FakeWallet extends CashuWalletController {
     missingCapabilities: const [],
     canSendLightning: false,
     canReceiveLightning: false,
+    receivingSats: BigInt.zero,
   );
 }
 
@@ -217,6 +218,7 @@ void main() {
           missingCapabilities: const [],
           canSendLightning: false,
           canReceiveLightning: false,
+          receivingSats: BigInt.zero,
         ),
       );
       await tester.pump();

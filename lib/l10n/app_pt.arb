@@ -1200,6 +1200,7 @@
   "cashuErrorMintAmountOutOfRange": "Este mint não emite faturas desse valor.",
   "cashuErrorMintQuoteFailed": "O mint não conseguiu criar uma fatura. Tente mais tarde.",
   "cashuErrorMintQuoteUnknown": "Esta fatura pertence a outro mint. Volte para esse mint para recebê-la.",
+  "cashuReceivingSats": "Recebendo {sats} sats",
   "lockEscrowTitle": "Bloquear a custódia",
   "lockEscrowExplanation": "Bloqueie seu ecash em uma custódia 2 de 3 no mint deste nó. Nem você nem o comprador podem movê-lo sozinhos — e, se o nó desaparecer, você mesmo pode recuperá-lo quando o prazo de bloqueio passar.",
   "lockEscrowAmount": "Custódia",

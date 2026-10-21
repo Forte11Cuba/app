@@ -4465,6 +4465,11 @@ class AppLocalizationsPt extends AppLocalizations {
       'Esta fatura pertence a outro mint. Volte para esse mint para recebê-la.';
 
   @override
+  String cashuReceivingSats(String sats) {
+    return 'Recebendo $sats sats';
+  }
+
+  @override
   String get lockEscrowTitle => 'Bloquear a custódia';
 
   @override

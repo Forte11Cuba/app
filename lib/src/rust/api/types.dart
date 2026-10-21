@@ -794,6 +794,12 @@ class CashuWalletStatus {
   /// hides "via Lightning" instead of refusing the mint.
   final bool canReceiveLightning;
 
+  /// Sats of invoices the wallet knows were paid at this mint and not yet
+  /// minted — phase C3b-2: the mint did not answer, or failed to mint, when
+  /// last asked. Collected at the next start, resume or Sync. Read from the
+  /// store alone; 0 when it cannot be read.
+  final BigInt receivingSats;
+
   const CashuWalletStatus({
     required this.connected,
     this.mintUrl,
@@ -801,6 +807,7 @@ class CashuWalletStatus {
     required this.missingCapabilities,
     required this.canSendLightning,
     required this.canReceiveLightning,
+    required this.receivingSats,
   });
 
   @override
@@ -810,7 +817,8 @@ class CashuWalletStatus {
       balanceSats.hashCode ^
       missingCapabilities.hashCode ^
       canSendLightning.hashCode ^
-      canReceiveLightning.hashCode;
+      canReceiveLightning.hashCode ^
+      receivingSats.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -822,7 +830,8 @@ class CashuWalletStatus {
           balanceSats == other.balanceSats &&
           missingCapabilities == other.missingCapabilities &&
           canSendLightning == other.canSendLightning &&
-          canReceiveLightning == other.canReceiveLightning;
+          canReceiveLightning == other.canReceiveLightning &&
+          receivingSats == other.receivingSats;
 }
 
 class ChatMessage {

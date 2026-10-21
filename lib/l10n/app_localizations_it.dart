@@ -4454,6 +4454,11 @@ class AppLocalizationsIt extends AppLocalizations {
       'Questa fattura appartiene a un\'altra mint. Torna a quella mint per riceverla.';
 
   @override
+  String cashuReceivingSats(String sats) {
+    return 'In arrivo $sats sats';
+  }
+
+  @override
   String get lockEscrowTitle => 'Blocca la custodia';
 
   @override

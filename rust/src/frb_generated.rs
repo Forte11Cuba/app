@@ -9444,6 +9444,7 @@ impl SseDecode for crate::api::types::CashuWalletStatus {
         let mut var_missingCapabilities = <Vec<String>>::sse_decode(deserializer);
         let mut var_canSendLightning = <bool>::sse_decode(deserializer);
         let mut var_canReceiveLightning = <bool>::sse_decode(deserializer);
+        let mut var_receivingSats = <u64>::sse_decode(deserializer);
         return crate::api::types::CashuWalletStatus {
             connected: var_connected,
             mint_url: var_mintUrl,
@@ -9451,6 +9452,7 @@ impl SseDecode for crate::api::types::CashuWalletStatus {
             missing_capabilities: var_missingCapabilities,
             can_send_lightning: var_canSendLightning,
             can_receive_lightning: var_canReceiveLightning,
+            receiving_sats: var_receivingSats,
         };
     }
 }
@@ -13002,6 +13004,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::types::CashuWalletStatus {
             self.missing_capabilities.into_into_dart().into_dart(),
             self.can_send_lightning.into_into_dart().into_dart(),
             self.can_receive_lightning.into_into_dart().into_dart(),
+            self.receiving_sats.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -15421,6 +15424,7 @@ impl SseEncode for crate::api::types::CashuWalletStatus {
         <Vec<String>>::sse_encode(self.missing_capabilities, serializer);
         <bool>::sse_encode(self.can_send_lightning, serializer);
         <bool>::sse_encode(self.can_receive_lightning, serializer);
+        <u64>::sse_encode(self.receiving_sats, serializer);
     }
 }
 

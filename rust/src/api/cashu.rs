@@ -422,6 +422,13 @@ async fn snapshot() -> CashuWalletStatus {
                 .collect(),
             can_send_lightning: wallet.capabilities().nut05_bolt11,
             can_receive_lightning: wallet.capabilities().nut04_bolt11,
+            receiving_sats: match wallet.pending_quotes().await {
+                Ok(pending) => pending.paid_sats,
+                Err(e) => {
+                    log::warn!("[cashu] pending invoices unreadable: {e}");
+                    0
+                }
+            },
         },
         None => {
             // Not bound, but a mint may be set that is not answering right
@@ -429,9 +436,12 @@ async fn snapshot() -> CashuWalletStatus {
             // about to replace it sees what stays behind there. With no mint
             // set, a wallet genuinely holds nothing — a known zero.
             let mint_url = stored_wallet_mint().await.ok().flatten();
-            let balance_sats = match &mint_url {
-                Some(mint_url) => offline_balance(mint_url).await,
-                None => Some(0),
+            let (balance_sats, receiving_sats) = match &mint_url {
+                Some(mint_url) => (
+                    offline_balance(mint_url).await,
+                    offline_receiving(mint_url).await,
+                ),
+                None => (Some(0), 0),
             };
             CashuWalletStatus {
                 connected: false,
@@ -440,6 +450,7 @@ async fn snapshot() -> CashuWalletStatus {
                 missing_capabilities: Vec::new(),
                 can_send_lightning: false,
                 can_receive_lightning: false,
+                receiving_sats,
             }
         }
     }
@@ -454,6 +465,25 @@ async fn offline_balance(mint_url: &str) -> Option<u64> {
         .await
         .map_err(|e| log::warn!("[cashu] offline balance unreadable: {e}"))
         .ok()
+}
+
+/// What the loaded identity's store knows was paid at `mint_url` and not
+/// minted yet, without contacting it; 0 when that cannot be read. A mint
+/// that is down at start is exactly when this shows.
+async fn offline_receiving(mint_url: &str) -> u64 {
+    let Some(identity) = current_identity().await else {
+        return 0;
+    };
+    let Ok(path) = proof_store_path(&identity) else {
+        return 0;
+    };
+    crate::cashu::stored_pending_quotes(&path, Some(mint_url))
+        .await
+        .map(|pending| pending.paid_sats)
+        .unwrap_or_else(|e| {
+            log::warn!("[cashu] offline pending invoices unreadable: {e}");
+            0
+        })
 }
 
 async fn notify() {
@@ -731,8 +761,8 @@ pub async fn cashu_claim_mint_quote(quote_id: String) -> Result<CashuMintQuoteSt
 }
 
 /// Collect the loaded identity's invoices that were paid and not yet minted,
-/// at every mint it holds quotes for — phase C3b-2. The balance is broadcast
-/// when anything came in.
+/// at every mint it holds quotes for — phase C3b-2. The wallet's status is
+/// broadcast once it ran.
 ///
 /// For the invoice paid while the app was closed or in the background: Dart
 /// calls it, unawaited, at start and on resume; Sync runs it too. Quiet by
@@ -773,10 +803,10 @@ async fn collect_pending_quotes() -> Result<()> {
         return Ok(());
     }
     let active = live_wallet().await;
-    let minted = crate::cashu::collect_pending_quotes(&db_path, &seed, active.as_deref()).await?;
-    if minted > 0 {
-        notify().await;
-    }
+    crate::cashu::collect_pending_quotes(&db_path, &seed, active.as_deref()).await?;
+    // Whatever came of it: sats minted move the balance, and a quote found
+    // paid but not minted moves "receiving".
+    notify().await;
     Ok(())
 }
 

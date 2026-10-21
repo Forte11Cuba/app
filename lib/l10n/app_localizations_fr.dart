@@ -4475,6 +4475,11 @@ class AppLocalizationsFr extends AppLocalizations {
       'Cette facture appartient à un autre mint. Revenez à ce mint pour la recevoir.';
 
   @override
+  String cashuReceivingSats(String sats) {
+    return '$sats sats en cours de réception';
+  }
+
+  @override
   String get lockEscrowTitle => 'Bloquer le séquestre';
 
   @override

@@ -1200,6 +1200,7 @@
   "cashuErrorMintAmountOutOfRange": "Ce mint n'émet pas de factures de ce montant.",
   "cashuErrorMintQuoteFailed": "Le mint n'a pas pu créer de facture. Réessayez plus tard.",
   "cashuErrorMintQuoteUnknown": "Cette facture appartient à un autre mint. Revenez à ce mint pour la recevoir.",
+  "cashuReceivingSats": "{sats} sats en cours de réception",
   "lockEscrowTitle": "Bloquer le séquestre",
   "lockEscrowExplanation": "Bloquez votre ecash dans un séquestre 2-sur-3 au mint de ce nœud. Ni vous ni l'acheteur ne pouvez le déplacer seul — et si le nœud disparaît, vous pourrez le récupérer vous-même une fois le délai de blocage écoulé.",
   "lockEscrowAmount": "S\u00e9questre",

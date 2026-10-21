@@ -1355,6 +1355,11 @@ pub struct CashuWalletStatus {
     /// False when not connected. Optional, like `can_send_lightning`: the UI
     /// hides "via Lightning" instead of refusing the mint.
     pub can_receive_lightning: bool,
+    /// Sats of invoices the wallet knows were paid at this mint and not yet
+    /// minted — phase C3b-2: the mint did not answer, or failed to mint, when
+    /// last asked. Collected at the next start, resume or Sync. Read from the
+    /// store alone; 0 when it cannot be read.
+    pub receiving_sats: u64,
 }
 
 /// What paying a Lightning invoice from the Cashu wallet costs — phase C3b-1.

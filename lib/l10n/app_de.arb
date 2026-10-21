@@ -1200,6 +1200,7 @@
   "cashuErrorMintAmountOutOfRange": "Diese Mint stellt keine Rechnungen über diesen Betrag aus.",
   "cashuErrorMintQuoteFailed": "Die Mint konnte keine Rechnung erstellen. Versuche es später erneut.",
   "cashuErrorMintQuoteUnknown": "Diese Rechnung gehört zu einer anderen Mint. Wechsle zurück zu dieser Mint, um sie zu empfangen.",
+  "cashuReceivingSats": "{sats} Sats werden empfangen",
   "lockEscrowTitle": "Treuhand sperren",
   "lockEscrowExplanation": "Sperre dein E-Cash in einer 2-von-3-Treuhand bei der Mint dieses Nodes. Weder du noch der K\u00e4ufer k\u00f6nnt es allein bewegen \u2014 und verschwindet der Node, holst du es nach Ablauf der Sperrfrist selbst zur\u00fcck.",
   "lockEscrowAmount": "Treuhand",
