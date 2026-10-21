@@ -1350,6 +1350,11 @@ pub struct CashuWalletStatus {
     /// can pay one — phase C3b-1. False when not connected. Optional: a mint
     /// without it is still usable, and the UI hides "to Lightning" instead.
     pub can_send_lightning: bool,
+    /// Whether the mint issues ecash against a `bolt11` invoice (NUT-04), so
+    /// the wallet can be funded from any Lightning wallet — phase C3b-2.
+    /// False when not connected. Optional, like `can_send_lightning`: the UI
+    /// hides "via Lightning" instead of refusing the mint.
+    pub can_receive_lightning: bool,
 }
 
 /// What paying a Lightning invoice from the Cashu wallet costs — phase C3b-1.

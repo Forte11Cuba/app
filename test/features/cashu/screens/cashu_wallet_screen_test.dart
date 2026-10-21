@@ -114,6 +114,7 @@ CashuWalletStatus _status({
   required bool connected,
   required int? balance,
   bool canSendLightning = false,
+  bool canReceiveLightning = false,
 }) {
   return CashuWalletStatus(
     connected: connected,
@@ -121,6 +122,7 @@ CashuWalletStatus _status({
     balanceSats: balance == null ? null : BigInt.from(balance),
     missingCapabilities: const [],
     canSendLightning: canSendLightning,
+    canReceiveLightning: canReceiveLightning,
   );
 }
 
@@ -548,6 +550,7 @@ void main() {
         balanceSats: BigInt.parse('9007199254740993'),
         missingCapabilities: const [],
         canSendLightning: false,
+        canReceiveLightning: false,
       );
 
       // Act
@@ -1025,6 +1028,7 @@ void main() {
           balanceSats: BigInt.from(500),
           missingCapabilities: const [],
           canSendLightning: false,
+          canReceiveLightning: false,
         ),
         controller: _FakeController(connectError: 'CashuMintUnreachable'),
       );

@@ -8876,14 +8876,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   CashuWalletStatus dco_decode_cashu_wallet_status(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 5)
-      throw Exception('unexpected arr length: expect 5 but see ${arr.length}');
+    if (arr.length != 6)
+      throw Exception('unexpected arr length: expect 6 but see ${arr.length}');
     return CashuWalletStatus(
       connected: dco_decode_bool(arr[0]),
       mintUrl: dco_decode_opt_String(arr[1]),
       balanceSats: dco_decode_opt_box_autoadd_u_64(arr[2]),
       missingCapabilities: dco_decode_list_String(arr[3]),
       canSendLightning: dco_decode_bool(arr[4]),
+      canReceiveLightning: dco_decode_bool(arr[5]),
     );
   }
 
@@ -11649,12 +11650,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_balanceSats = sse_decode_opt_box_autoadd_u_64(deserializer);
     var var_missingCapabilities = sse_decode_list_String(deserializer);
     var var_canSendLightning = sse_decode_bool(deserializer);
+    var var_canReceiveLightning = sse_decode_bool(deserializer);
     return CashuWalletStatus(
       connected: var_connected,
       mintUrl: var_mintUrl,
       balanceSats: var_balanceSats,
       missingCapabilities: var_missingCapabilities,
       canSendLightning: var_canSendLightning,
+      canReceiveLightning: var_canReceiveLightning,
     );
   }
 
@@ -15008,6 +15011,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_opt_box_autoadd_u_64(self.balanceSats, serializer);
     sse_encode_list_String(self.missingCapabilities, serializer);
     sse_encode_bool(self.canSendLightning, serializer);
+    sse_encode_bool(self.canReceiveLightning, serializer);
   }
 
   @protected

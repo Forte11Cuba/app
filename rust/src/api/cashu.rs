@@ -419,6 +419,7 @@ async fn snapshot() -> CashuWalletStatus {
                 .map(str::to_string)
                 .collect(),
             can_send_lightning: wallet.capabilities().nut05_bolt11,
+            can_receive_lightning: wallet.capabilities().nut04_bolt11,
         },
         None => {
             // Not bound, but a mint may be set that is not answering right
@@ -436,6 +437,7 @@ async fn snapshot() -> CashuWalletStatus {
                 balance_sats,
                 missing_capabilities: Vec::new(),
                 can_send_lightning: false,
+                can_receive_lightning: false,
             }
         }
     }

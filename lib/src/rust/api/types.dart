@@ -735,12 +735,19 @@ class CashuWalletStatus {
   /// without it is still usable, and the UI hides "to Lightning" instead.
   final bool canSendLightning;
 
+  /// Whether the mint issues ecash against a `bolt11` invoice (NUT-04), so
+  /// the wallet can be funded from any Lightning wallet — phase C3b-2.
+  /// False when not connected. Optional, like `can_send_lightning`: the UI
+  /// hides "via Lightning" instead of refusing the mint.
+  final bool canReceiveLightning;
+
   const CashuWalletStatus({
     required this.connected,
     this.mintUrl,
     this.balanceSats,
     required this.missingCapabilities,
     required this.canSendLightning,
+    required this.canReceiveLightning,
   });
 
   @override
@@ -749,7 +756,8 @@ class CashuWalletStatus {
       mintUrl.hashCode ^
       balanceSats.hashCode ^
       missingCapabilities.hashCode ^
-      canSendLightning.hashCode;
+      canSendLightning.hashCode ^
+      canReceiveLightning.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -760,7 +768,8 @@ class CashuWalletStatus {
           mintUrl == other.mintUrl &&
           balanceSats == other.balanceSats &&
           missingCapabilities == other.missingCapabilities &&
-          canSendLightning == other.canSendLightning;
+          canSendLightning == other.canSendLightning &&
+          canReceiveLightning == other.canReceiveLightning;
 }
 
 class ChatMessage {

@@ -45,6 +45,9 @@ pub struct MintCapabilities {
     pub nut05_bolt11: bool,
     pub melt_min_sats: Option<u64>,
     pub melt_max_sats: Option<u64>,
+    pub nut04_bolt11: bool,
+    pub mint_min_sats: Option<u64>,
+    pub mint_max_sats: Option<u64>,
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -130,6 +133,9 @@ impl CashuWallet {
             nut05_bolt11: false,
             melt_min_sats: None,
             melt_max_sats: None,
+            nut04_bolt11: false,
+            mint_min_sats: None,
+            mint_max_sats: None,
         };
         NONE
     }
