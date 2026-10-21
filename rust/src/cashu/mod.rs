@@ -27,8 +27,8 @@ mod wallet;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use wallet::{
-    ensure_receivable, stored_balance, token_mint_url, CashuWallet, MeltOutcomeInfo, MeltQuoteInfo,
-    MintCapabilities, MintQuoteInfo, MintQuoteStatus,
+    collect_pending_quotes, ensure_receivable, stored_balance, token_mint_url, CashuWallet,
+    MeltOutcomeInfo, MeltQuoteInfo, MintCapabilities, MintQuoteInfo, MintQuoteStatus,
 };
 
 // ── WASM stub ────────────────────────────────────────────────────────────────
@@ -105,6 +105,16 @@ pub enum MeltOutcomeInfo {
 /// No proof store on web, so nothing is held there.
 #[cfg(target_arch = "wasm32")]
 pub async fn stored_balance(_db_path: &str, _mint_url: Option<&str>) -> anyhow::Result<u64> {
+    Ok(0)
+}
+
+/// No proof store on web, so no quote to collect.
+#[cfg(target_arch = "wasm32")]
+pub async fn collect_pending_quotes(
+    _db_path: &str,
+    _seed: &zeroize::Zeroizing<[u8; 64]>,
+    _active: Option<&CashuWallet>,
+) -> anyhow::Result<u64> {
     Ok(0)
 }
 

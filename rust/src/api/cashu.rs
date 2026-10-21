@@ -597,8 +597,9 @@ pub async fn cashu_create_token(amount_sats: u64) -> Result<String> {
 }
 
 /// Reconcile the proof store with the mint: proofs the mint reports spent are
-/// forgotten, melts still in flight are settled as the mint reports them, and
-/// the new balance is broadcast.
+/// forgotten, melts still in flight are settled as the mint reports them,
+/// invoices paid and not yet minted are collected at every mint
+/// ([`cashu_collect_pending_quotes`]), and the new balance is broadcast.
 ///
 /// The melts are settled here because a bound wallet is reused, not
 /// reconnected: without this, a melt that answered `Pending` would keep its
@@ -610,9 +611,9 @@ pub async fn cashu_create_token(amount_sats: u64) -> Result<String> {
 /// its saga is on record as in flight, and settling it now would roll back a
 /// payment the mint may still make (#864). The next sync settles them.
 ///
-/// Both steps run whatever the other did, and the balance is broadcast after
-/// them even when one fails: either may have moved proofs. The first error is
-/// returned.
+/// Every step runs whatever the others did, and the balance is broadcast
+/// after them even when one fails: any may have moved proofs. The first error
+/// of the sweep or the melts is returned; the collection only logs.
 ///
 /// **Returns nothing on purpose.** It reclaims neither an unredeemed token of
 /// ours nor the proofs of a half-finished send — cdk's state check cannot see
@@ -625,6 +626,11 @@ pub async fn cashu_sweep_spent_proofs() -> Result<()> {
     let wallet = active_wallet().await?;
     let swept = wallet.sweep_spent_proofs().await;
     let settled = wallet.finalize_pending_melts().await;
+    // Paid invoices too, at every mint: Sync is where a user who paid one
+    // with the wallet open, but the dialog closed, looks for it.
+    if let Err(e) = collect_pending_quotes().await {
+        log::warn!("[cashu] collecting paid invoices failed: {e}");
+    }
     notify().await;
     swept.and(settled)
 }
@@ -722,6 +728,56 @@ pub async fn cashu_claim_mint_quote(quote_id: String) -> Result<CashuMintQuoteSt
         }
         crate::cashu::MintQuoteStatus::Expired => CashuMintQuoteState::Expired,
     })
+}
+
+/// Collect the loaded identity's invoices that were paid and not yet minted,
+/// at every mint it holds quotes for — phase C3b-2. The balance is broadcast
+/// when anything came in.
+///
+/// For the invoice paid while the app was closed or in the background: Dart
+/// calls it, unawaited, at start and on resume; Sync runs it too. Quiet by
+/// design: with nothing pending it contacts no mint and builds no wallet,
+/// and it never fails — a mint that does not answer is tried at the next
+/// run. A no-op on web and for an identity without secret words, which has
+/// no wallet.
+///
+/// It writes only to the identity's own proof store, which outlives the
+/// identity's deletion on purpose (importing its words brings the balance
+/// back), so a run that ends after a deletion or an import fills that
+/// identity's file, never the next one's. Not stopped by the teardown
+/// either: an abort between the mint's answer and storing its proofs is the
+/// interrupted issue this phase guards against.
+pub async fn cashu_collect_pending_quotes() -> Result<()> {
+    if let Err(e) = collect_pending_quotes().await {
+        log::warn!("[cashu] collecting paid invoices failed: {e}");
+    }
+    Ok(())
+}
+
+async fn collect_pending_quotes() -> Result<()> {
+    let Some(identity) = current_identity().await else {
+        return Ok(());
+    };
+    let db_path = proof_store_path(&identity)?;
+    if !std::path::Path::new(&db_path).exists() {
+        return Ok(());
+    }
+    let seed = match crate::api::identity::current_bip39_seed().await {
+        Ok(seed) => seed,
+        // An identity imported from a private key has no wallet to fill.
+        Err(_) => return Ok(()),
+    };
+    // The seed must be this identity's, as in `open_wallet`: one swapped in
+    // between would mint with the wrong key into this store.
+    if current_identity().await.as_deref() != Some(identity.as_str()) {
+        return Ok(());
+    }
+    let active = live_wallet().await;
+    let minted = crate::cashu::collect_pending_quotes(&db_path, &seed, active.as_deref()).await?;
+    if minted > 0 {
+        notify().await;
+    }
+    Ok(())
 }
 
 /// Drop the in-memory wallet. Proofs stay on disk and the wallet's mint stays

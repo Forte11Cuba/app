@@ -752,11 +752,17 @@ mints is inconsistent), no general wallet features.
   never installed) for any other, which never runs `recover_incomplete_sagas`.
   cdk does not filter by expiry, so an invoice paid before it expired is collected
   whenever the app next runs, and a failing quote or mint does not stop the rest
-  (`refresh_and_mint_quote`). Dart calls it, unawaited, after the identity loads,
-  on resume (`ResumeResync`) and from "Sync with mint".
-- **It writes for one identity.** `release_identity_subscriptions` stops and awaits
-  it before anything is cleared, like `forget_late_take_retries`
-  (`mostro/delete_effects.rs`), and `restore_identity_session` gets its rebuild.
+  (`refresh_and_mint_quote`). Dart calls it, unawaited, at start and on resume
+  (an `AppLifecycleService` of its own); `cashu_sweep_spent_proofs` ("Sync with
+  mint") runs it too, in Rust.
+- **It writes only to one identity's own proof store**, and is not part of the
+  identity teardown. The run snapshots the identity, its seed and its store path
+  together (the check of `open_wallet`), and that file outlives the identity's
+  deletion on purpose — importing its words brings the balance back. So a run
+  that ends after a deletion or an import fills the old identity's file, never
+  the next one's, and nothing in memory carries over. Aborting it instead could
+  cut a mint between the mint's answer and storing its proofs: the interrupted
+  issue this phase guards against.
 - **The store says "unissued", not "paid".** `get_unissued_mint_quotes` returns every
   bolt11 quote with nothing issued, paid or not, and a quote paid while the app was
   closed is still `Unpaid` locally until a mint is asked. cdk never forgets one.
@@ -792,9 +798,10 @@ mints is inconsistent), no general wallet features.
 - **Tests:** unit — the capability gate, the limits, no mint contacted with an empty
   store, quotes grouped by mint, the forget rule (expired > 24 h and `UNPAID` only),
   the at-risk count; the issue mark (a second check while one holds it skips, and
-  connect skips recovery); the collector stopped at identity deletion. Widget — the
-  receive choice, the invoice dialog's states, the "receiving" row. By hand against
-  `cdk-mintd` on regtest: paid with the app open; **paid with the app closed, then
+  connect skips recovery); the collector asking every mint with quotes and none
+  without, skipping a held mint, and recovering nothing at a mint left behind.
+  Widget — the receive choice, the invoice dialog's states, the "receiving" row.
+  By hand against `cdk-mintd` on regtest: paid with the app open; **paid with the app closed, then
   reopened**; paid in the background; a quote at mint A collected after switching
   to B; a mint down at reopen ("receiving", then collected); an unpaid quote
   forgotten; a mint request held by a slow proxy while the dialog polls and while

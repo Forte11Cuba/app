@@ -1165,6 +1165,83 @@ fn bolt11_sat_mint(nut04: &cdk::nuts::nut04::Settings) -> Option<MintMethodSetti
     nut04.get_settings(&CurrencyUnit::Sat, &PaymentMethod::BOLT11)
 }
 
+/// Collect every invoice of the proof store at `db_path` that was paid and
+/// not yet minted, at every mint it holds quotes for — phase C3b-2. Returns
+/// the sats minted.
+///
+/// The invoice is usually paid from another app, with this one closed or in
+/// the background, so this runs at start, on resume and on Sync. With no
+/// unissued quote in the store it returns without contacting any mint, and a
+/// store that does not exist is not created.
+///
+/// cdk's `mint_unissued_quotes` keeps only its wallet's own mint, so a quote
+/// at a mint the user has since left would wait until they return to it.
+/// Each mint with quotes gets its own pass: on `active` for the mint it is
+/// bound to, otherwise on a throwaway `cdk::Wallet` over the same seed and
+/// store, never installed and never asked to `recover_incomplete_sagas` — a
+/// recovery here could roll back an operation still running on the bound
+/// wallet. Each pass holds that mint's issue mark ([`in_flight`]), and a
+/// mint already held is skipped: whoever holds it is checking those quotes.
+///
+/// cdk does not filter by expiry, so a quote paid before it expired is
+/// collected whenever this next runs. A mint that does not answer, or a
+/// quote that fails, is logged and left for the next run: nothing here is
+/// an error but a store that cannot be read.
+///
+/// **Errors** (stable markers): `CashuStoreUnavailable`.
+pub async fn collect_pending_quotes(
+    db_path: &str,
+    seed: &zeroize::Zeroizing<[u8; 64]>,
+    active: Option<&CashuWallet>,
+) -> Result<u64> {
+    if !std::path::Path::new(db_path).exists() {
+        return Ok(0);
+    }
+    let store = Arc::new(
+        WalletSqliteDatabase::new(db_path)
+            .await
+            .map_err(|e| anyhow!("CashuStoreUnavailable: {e}"))?,
+    );
+    let mints: std::collections::BTreeSet<MintUrl> = store
+        .get_unissued_mint_quotes()
+        .await
+        .map_err(|e| anyhow!("CashuStoreUnavailable: {e}"))?
+        .into_iter()
+        .filter(|quote| quote.unit == CurrencyUnit::Sat)
+        .map(|quote| quote.mint_url)
+        .collect();
+
+    let mut minted = 0u64;
+    for mint in mints {
+        let Some(_issuing) = in_flight::try_begin_issue(&mint) else {
+            log::info!("[cashu] quotes at {mint} are being checked already: skipped");
+            continue;
+        };
+        let collected = match active.filter(|wallet| wallet.inner.mint_url == mint) {
+            Some(wallet) => wallet.inner.mint_unissued_quotes().await,
+            None => match Wallet::new(
+                &mint.to_string(),
+                CurrencyUnit::Sat,
+                store.clone(),
+                **seed,
+                None,
+            ) {
+                Ok(wallet) => wallet.mint_unissued_quotes().await,
+                Err(e) => Err(e),
+            },
+        };
+        match collected {
+            Ok(amount) if amount > Amount::ZERO => {
+                log::info!("[cashu] collected {amount} sat of paid invoices at {mint}");
+                minted = minted.saturating_add(u64::from(amount));
+            }
+            Ok(_) => {}
+            Err(e) => log::warn!("[cashu] collecting paid invoices at {mint} failed: {e}"),
+        }
+    }
+    Ok(minted)
+}
+
 /// The sats held in the proof store at `db_path` — at `mint_url`, or across
 /// every mint when `None` — read without contacting any: what an identity
 /// would leave behind if replaced, or what stays at a mint that is not
@@ -2129,12 +2206,17 @@ mod tests {
     /// A wallet at `mint_url` with one [`SEEDED_SATS`] proof under a keyset
     /// seeded in its store, and no fees anywhere.
     async fn seeded_wallet(mint_url: &str) -> CashuWallet {
+        seeded_wallet_at(mint_url, &temp_db_path()).await
+    }
+
+    /// [`seeded_wallet`], with its store at `db_path`.
+    async fn seeded_wallet_at(mint_url: &str, db_path: &std::path::Path) -> CashuWallet {
         use cdk::nuts::{Id, KeySet, Keys, SecretKey, State};
         use cdk::secret::Secret;
         use cdk::wallet::types::ProofInfo;
         use std::collections::BTreeMap;
 
-        let store = WalletSqliteDatabase::new(temp_db_path().to_str().unwrap())
+        let store = WalletSqliteDatabase::new(db_path.to_str().unwrap())
             .await
             .unwrap();
         let mint = MintUrl::from_str(mint_url).unwrap();
@@ -2679,5 +2761,124 @@ mod tests {
         let recorded = wallet.inner.localstore.get_saga(&saga).await.unwrap();
         assert!(recorded.is_some(), "recovery ran while the mint was held");
         assert_eq!(mint.connections(), 0, "the mint was asked about it");
+    }
+
+    #[tokio::test]
+    async fn collecting_from_no_store_creates_none_and_asks_no_mint() {
+        let missing = temp_db_path();
+
+        let minted = collect_pending_quotes(missing.to_str().unwrap(), &unique_seed(), None)
+            .await
+            .unwrap();
+
+        assert_eq!(minted, 0);
+        assert!(!missing.exists(), "the store was created");
+    }
+
+    #[tokio::test]
+    async fn collecting_with_no_quote_asks_no_mint() {
+        // Arrange — a wallet with ecash, and no invoice ever asked for.
+        let mint = StubMint::start(None).await;
+        let db = temp_db_path();
+        let wallet = seeded_wallet_at(&mint.url, &db).await;
+
+        // Act
+        let minted = collect_pending_quotes(db.to_str().unwrap(), &unique_seed(), Some(&wallet))
+            .await
+            .unwrap();
+
+        // Assert — the wallet stays lazy.
+        assert_eq!(minted, 0);
+        assert_eq!(mint.connections(), 0, "a mint was contacted");
+    }
+
+    #[tokio::test]
+    async fn collecting_asks_every_mint_with_quotes_not_only_the_bound_one() {
+        // Arrange — quotes at the bound mint and at one the user left, both
+        // still unpaid there.
+        let expiry = unix_now().as_secs() + 3_600;
+        let bound = StubMint::start(Some(unpaid_mint_quote_answer("here", expiry))).await;
+        let left = StubMint::start(Some(unpaid_mint_quote_answer("there", expiry))).await;
+        let db = temp_db_path();
+        let wallet = seeded_wallet_at(&bound.url, &db).await;
+        let store = &wallet.inner.localstore;
+        store
+            .add_mint_quote(mint_quote_for("here", &wallet.inner.mint_url, expiry))
+            .await
+            .unwrap();
+        let elsewhere = MintUrl::from_str(&left.url).unwrap();
+        store
+            .add_mint_quote(mint_quote_for("there", &elsewhere, expiry))
+            .await
+            .unwrap();
+
+        // Act
+        let minted = collect_pending_quotes(db.to_str().unwrap(), &unique_seed(), Some(&wallet))
+            .await
+            .unwrap();
+
+        // Assert — both asked; nothing paid, nothing minted.
+        assert_eq!(minted, 0);
+        assert!(bound.connections() > 0, "the bound mint was not asked");
+        assert!(left.connections() > 0, "the mint the user left was not asked");
+    }
+
+    #[tokio::test]
+    async fn collecting_skips_a_mint_whose_quotes_are_being_checked() {
+        // Arrange — two mints with quotes; an invoice screen holds the first.
+        let expiry = unix_now().as_secs() + 3_600;
+        let held = StubMint::start(Some(unpaid_mint_quote_answer("held", expiry))).await;
+        let free = StubMint::start(Some(unpaid_mint_quote_answer("free", expiry))).await;
+        let db = temp_db_path();
+        let wallet = seeded_wallet_at(&held.url, &db).await;
+        let store = &wallet.inner.localstore;
+        store
+            .add_mint_quote(mint_quote_for("held", &wallet.inner.mint_url, expiry))
+            .await
+            .unwrap();
+        let other = MintUrl::from_str(&free.url).unwrap();
+        store
+            .add_mint_quote(mint_quote_for("free", &other, expiry))
+            .await
+            .unwrap();
+        let _issuing = in_flight::try_begin_issue(&wallet.inner.mint_url).unwrap();
+
+        // Act
+        collect_pending_quotes(db.to_str().unwrap(), &unique_seed(), Some(&wallet))
+            .await
+            .unwrap();
+
+        // Assert — the held mint is left to its holder; the other is asked.
+        assert_eq!(held.connections(), 0, "the held mint was asked");
+        assert!(free.connections() > 0, "the free mint was not asked");
+    }
+
+    #[tokio::test]
+    async fn collecting_at_a_mint_left_behind_recovers_nothing_there() {
+        // Arrange — the mint the user left still has a melt on record, which
+        // a recovery would roll back on this "unpaid" answer, and a quote.
+        let expiry = unix_now().as_secs() + 3_600;
+        let left = StubMint::start(Some(unpaid_answer("melting"))).await;
+        let db = temp_db_path();
+        let earlier = seeded_wallet_at(&left.url, &db).await;
+        let saga = record_melt_in_flight(&earlier, "melting").await;
+        earlier
+            .inner
+            .localstore
+            .add_mint_quote(mint_quote_for("quote", &earlier.inner.mint_url, expiry))
+            .await
+            .unwrap();
+
+        // Act — no wallet bound to it: the collector builds its own.
+        collect_pending_quotes(db.to_str().unwrap(), &unique_seed(), None)
+            .await
+            .unwrap();
+
+        // Assert — the mint was asked about the quote, and the melt is
+        // untouched: the throwaway wallet ran no recovery.
+        assert!(left.connections() > 0, "the mint was not asked");
+        let recorded = earlier.inner.localstore.get_saga(&saga).await.unwrap();
+        assert!(recorded.is_some(), "the melt was rolled back");
+        assert_eq!(unspent_sats(&earlier).await, 0);
     }
 }
