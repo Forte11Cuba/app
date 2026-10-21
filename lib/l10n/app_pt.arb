@@ -1047,6 +1047,7 @@
   "fundsAtRiskTradeInProgress": "Operação em andamento",
   "fundsAtRiskBondInvoicePending": "Fatura do depósito ainda em aberto",
   "fundsAtRiskCashuBalance": "Ecash na carteira Cashu",
+  "fundsAtRiskCashuInvoices": "Faturas Cashu que podem já ter sido pagas",
   "fundsAtRiskCashuHint": "Só as palavras secretas deste usuário o recuperam",
   "fundsAtRiskKeep": "Manter este usuário",
   "fundsAtRiskContinue": "Continuar mesmo assim",

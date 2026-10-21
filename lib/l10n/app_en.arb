@@ -4231,6 +4231,8 @@
   "@fundsAtRiskBondInvoicePending": {"description": "Funds-at-risk list entry: a bond invoice that has not been paid and has not expired"},
   "fundsAtRiskCashuBalance": "Ecash in the Cashu wallet",
   "@fundsAtRiskCashuBalance": {"description": "Funds-at-risk list entry: ecash in the current user's Cashu wallet, stranded if the user is replaced"},
+  "fundsAtRiskCashuInvoices": "Cashu invoices that may have been paid",
+  "@fundsAtRiskCashuInvoices": {"description": "Funds-at-risk list entry: invoices to fund the current user's Cashu wallet not minted yet; any may have been paid while the app was closed, and only this user's words collect them"},
   "fundsAtRiskCashuHint": "Only this user's words bring it back",
   "@fundsAtRiskCashuHint": {"description": "Funds-at-risk list entry, second line under the Cashu balance: only the current user's recovery words restore it"},
   "fundsAtRiskKeep": "Keep this user",

@@ -1228,6 +1228,13 @@ pub enum FundsAtRiskReason {
     /// under this identity, so only these words bring it back. Not tied to an
     /// order: `order_id` is empty.
     CashuWalletBalance,
+    /// Cashu invoices of this identity not minted yet (phase C3b-2): one
+    /// paid while the app was closed still reads unpaid until its mint is
+    /// asked, so each may be money on its way. They live only in this
+    /// identity's proof store, collected when these words are loaded again.
+    /// `amount_sats` is what is known paid, `None` when none is yet.
+    /// `order_id` is empty.
+    CashuPendingInvoices,
 }
 
 /// One thing the current identity still has in flight, as listed by

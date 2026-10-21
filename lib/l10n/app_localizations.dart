@@ -6384,6 +6384,12 @@ abstract class AppLocalizations {
   /// **'Ecash in the Cashu wallet'**
   String get fundsAtRiskCashuBalance;
 
+  /// Funds-at-risk list entry: invoices to fund the current user's Cashu wallet not minted yet; any may have been paid while the app was closed, and only this user's words collect them
+  ///
+  /// In en, this message translates to:
+  /// **'Cashu invoices that may have been paid'**
+  String get fundsAtRiskCashuInvoices;
+
   /// Funds-at-risk list entry, second line under the Cashu balance: only the current user's recovery words restore it
   ///
   /// In en, this message translates to:

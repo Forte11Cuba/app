@@ -1047,6 +1047,7 @@
   "fundsAtRiskTradeInProgress": "Trade bezig",
   "fundsAtRiskBondInvoicePending": "Borg-invoice nog te betalen",
   "fundsAtRiskCashuBalance": "Ecash in de Cashu-wallet",
+  "fundsAtRiskCashuInvoices": "Cashu-facturen die misschien al betaald zijn",
   "fundsAtRiskCashuHint": "Alleen de woorden van deze gebruiker brengen het terug",
   "fundsAtRiskKeep": "Deze gebruiker houden",
   "fundsAtRiskContinue": "Toch doorgaan",

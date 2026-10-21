@@ -221,6 +221,35 @@ pub(crate) async fn identity_balance_at_risk() -> Result<Option<u64>> {
     Ok((sats > 0).then_some(sats))
 }
 
+/// The loaded identity's Cashu invoices not minted yet, as a funds-at-risk
+/// entry, or `None` when it has none — phase C3b-2.
+///
+/// Read from its proof store without contacting a mint, so an invoice paid
+/// while the app was closed still reads unpaid: every open one counts, not
+/// only those known paid. They are collected when this identity's words are
+/// loaded again.
+///
+/// **Errors**: `CashuStoreUnavailable`.
+pub(crate) async fn identity_invoices_at_risk() -> Result<Option<crate::api::types::FundsAtRisk>> {
+    let Some(identity) = current_identity().await else {
+        return Ok(None);
+    };
+    let pending = crate::cashu::stored_pending_quotes(&proof_store_path(&identity)?, None).await?;
+    Ok(invoices_at_risk(pending))
+}
+
+/// [`identity_invoices_at_risk`]'s entry for `pending`: one line for all the
+/// open invoices, with the sats known paid when there are any.
+fn invoices_at_risk(
+    pending: crate::cashu::PendingQuotes,
+) -> Option<crate::api::types::FundsAtRisk> {
+    (pending.open > 0).then(|| crate::api::types::FundsAtRisk {
+        order_id: String::new(),
+        reason: crate::api::types::FundsAtRiskReason::CashuPendingInvoices,
+        amount_sats: (pending.paid_sats > 0).then_some(pending.paid_sats),
+    })
+}
+
 /// The file `name` next to `app_db`, or `CashuStoreUnavailable` when the app
 /// database was never opened.
 ///
@@ -1442,6 +1471,34 @@ pub fn on_cashu_wallet_changed() -> CashuWalletStream {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn open_invoices_are_at_risk_paid_or_not() {
+        use crate::api::types::FundsAtRiskReason;
+        use crate::cashu::PendingQuotes;
+
+        // None open: nothing to warn about.
+        assert!(invoices_at_risk(PendingQuotes::default()).is_none());
+
+        // Open and none known paid: still a risk, one paid while the app was
+        // closed reads unpaid here. No amount to name.
+        let maybe = invoices_at_risk(PendingQuotes {
+            paid_sats: 0,
+            open: 2,
+        })
+        .expect("open invoices are at risk");
+        assert_eq!(maybe.reason, FundsAtRiskReason::CashuPendingInvoices);
+        assert_eq!(maybe.amount_sats, None);
+        assert!(maybe.order_id.is_empty(), "not tied to an order");
+
+        // Some known paid: those sats are named.
+        let paid = invoices_at_risk(PendingQuotes {
+            paid_sats: 210,
+            open: 3,
+        })
+        .unwrap();
+        assert_eq!(paid.amount_sats, Some(210));
+    }
 
     /// The escrow globals are process-wide, and so is the lock that guards
     /// them: a private mutex here would serialize this module against itself

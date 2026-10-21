@@ -3881,6 +3881,10 @@ class AppLocalizationsEs extends AppLocalizations {
   String get fundsAtRiskCashuBalance => 'Ecash en la billetera Cashu';
 
   @override
+  String get fundsAtRiskCashuInvoices =>
+      'Facturas Cashu que pueden estar pagadas';
+
+  @override
   String get fundsAtRiskCashuHint =>
       'Solo las palabras de este usuario lo recuperan';
 

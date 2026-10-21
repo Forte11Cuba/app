@@ -1047,6 +1047,7 @@
   "fundsAtRiskTradeInProgress": "Trade läuft",
   "fundsAtRiskBondInvoicePending": "Einlage-Rechnung noch zahlbar",
   "fundsAtRiskCashuBalance": "E-Cash in der Cashu-Wallet",
+  "fundsAtRiskCashuInvoices": "Cashu-Rechnungen, die schon bezahlt sein können",
   "fundsAtRiskCashuHint": "Nur die Wörter dieses Benutzers stellen es wieder her",
   "fundsAtRiskKeep": "Diesen Benutzer behalten",
   "fundsAtRiskContinue": "Trotzdem fortfahren",
