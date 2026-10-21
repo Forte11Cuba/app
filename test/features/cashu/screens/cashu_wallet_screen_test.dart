@@ -30,6 +30,7 @@ class _FakeController extends CashuWalletController {
     List<CashuMeltQuote>? quotes,
     List<Object>? meltOutcomes,
     this.mintQuoteError,
+    this.invoiceLifetime,
     List<Object>? claimOutcomes,
   }) : quotes = quotes ?? [],
        meltOutcomes = meltOutcomes ?? [],
@@ -52,6 +53,9 @@ class _FakeController extends CashuWalletController {
 
   /// What [mintQuote] throws, when set.
   final Object? mintQuoteError;
+
+  /// How long the invoice [mintQuote] gives can be paid; none when null.
+  final Duration? invoiceLifetime;
 
   /// What each [claimMintQuote] does, in order: a [CashuMintQuoteState] is
   /// returned, anything else is thrown. Once used up, it keeps waiting.
@@ -109,7 +113,12 @@ class _FakeController extends CashuWalletController {
       quoteId: 'mq1',
       invoice: _invoice,
       amountSats: amountSats,
-      expiresAt: BigInt.zero,
+      expiresAt: switch (invoiceLifetime) {
+        final lifetime? => BigInt.from(
+          DateTime.now().add(lifetime).millisecondsSinceEpoch ~/ 1000,
+        ),
+        null => BigInt.zero,
+      },
     );
   }
 
@@ -1847,6 +1856,41 @@ void main() {
         find.text('This mint does not issue invoices of that amount.'),
         findsOneWidget,
       );
+    });
+
+    // DS-CMP-21: the time left, labelled, ticking down — never the clock
+    // time it ends at, which reads as minutes and seconds that never move.
+    testWidgets('the invoice counts down the time left to pay it', (
+      tester,
+    ) async {
+      final controller = _FakeController(
+        invoiceLifetime: const Duration(minutes: 10),
+      );
+      await openInvoice(tester, controller);
+
+      expect(find.text('Expires in'), findsOneWidget);
+      final shown = RegExp(r'^\d\d:\d\d$');
+      String figure() =>
+          tester
+              .widgetList<Text>(find.byType(Text))
+              .map((text) => text.data ?? '')
+              .firstWhere(shown.hasMatch);
+      final first = figure();
+      expect(first, anyOf('10:00', '09:59'));
+
+      await tester.pump(const Duration(seconds: 2));
+      expect(figure(), isNot(first), reason: 'the countdown did not move');
+
+      await tester.tap(find.text('Close'));
+      await tester.pump(const Duration(milliseconds: 500));
+    });
+
+    testWidgets('an invoice with no expiry shows no countdown', (tester) async {
+      await openInvoice(tester, _FakeController());
+
+      expect(find.text('Expires in'), findsNothing);
+      await tester.tap(find.text('Close'));
+      await tester.pump(const Duration(milliseconds: 500));
     });
 
     testWidgets('sats paid and not minted yet show as receiving', (

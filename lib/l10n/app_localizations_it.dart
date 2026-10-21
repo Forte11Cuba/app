@@ -4413,9 +4413,6 @@ class AppLocalizationsIt extends AppLocalizations {
   String get cashuMintInvoiceTitle => 'Paga questa fattura';
 
   @override
-  String get cashuMintInvoiceExpires => 'Scade';
-
-  @override
   String get cashuMintInvoiceWaiting => 'In attesa del pagamento…';
 
   @override

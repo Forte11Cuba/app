@@ -1189,7 +1189,6 @@
   "cashuReceiveLightningOption": "Lightning",
   "cashuMintAmountTitle": "Ontvangen via Lightning",
   "cashuMintInvoiceTitle": "Betaal deze factuur",
-  "cashuMintInvoiceExpires": "Verloopt",
   "cashuMintInvoiceWaiting": "Wachten op de betaling…",
   "cashuMintInvoiceNote": "Je kunt dit sluiten. Wordt de factuur later betaald, dan komen de sats binnen zodra je de app weer opent.",
   "cashuMintReceivedTitle": "{sats} sats ontvangen",

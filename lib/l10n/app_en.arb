@@ -4515,8 +4515,6 @@
   "@cashuMintAmountTitle": {"description": "Cashu wallet — title of the dialog asking how much to receive over Lightning"},
   "cashuMintInvoiceTitle": "Pay this invoice",
   "@cashuMintInvoiceTitle": {"description": "Cashu wallet — title of the dialog showing the Lightning invoice that funds the wallet"},
-  "cashuMintInvoiceExpires": "Expires",
-  "@cashuMintInvoiceExpires": {"description": "Cashu wallet — label of the row with the time the invoice expires"},
   "cashuMintInvoiceWaiting": "Waiting for the payment…",
   "@cashuMintInvoiceWaiting": {"description": "Cashu wallet — status while the invoice has not been paid yet"},
   "cashuMintInvoiceNote": "You can close this. If the invoice is paid later, the sats arrive the next time you open the app.",

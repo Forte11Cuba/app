@@ -11,8 +11,11 @@ import 'package:mostro/core/app_theme.dart';
 import 'package:mostro/core/settings_palette.dart';
 import 'package:mostro/features/cashu/cashu_error_messages.dart';
 import 'package:mostro/features/cashu/providers/cashu_wallet_provider.dart';
+import 'package:mostro/features/order/widgets/invoice_clock.dart';
 import 'package:mostro/features/settings/widgets/settings_section.dart';
 import 'package:mostro/l10n/app_localizations.dart';
+import 'package:mostro/shared/utils/countdown.dart';
+import 'package:mostro/shared/widgets/countdown_urgency_announcer.dart';
 import 'package:mostro/shared/widgets/mostro_modal.dart';
 import 'package:mostro/shared/widgets/mostro_qr.dart';
 import 'package:mostro/shared/widgets/paste_field.dart';
@@ -1347,7 +1350,8 @@ const _mintPollEvery = Duration(seconds: 3);
 
 /// The invoice that funds the wallet, from creation to outcome, in one dialog.
 ///
-/// First the QR, the amount, the mint and when it expires, while [claim] is
+/// First the QR, the amount, the mint and the time left to pay it
+/// (DS-CMP-21), while [claim] is
 /// polled every [_mintPollEvery]. The same dialog then shows how it ended —
 /// received, expired unpaid, or failed with the reason — with Close as its
 /// only button. Closing early loses nothing: the quote is stored, and a later
@@ -1370,8 +1374,13 @@ class _MintInvoiceDialog extends StatefulWidget {
   State<_MintInvoiceDialog> createState() => _MintInvoiceDialogState();
 }
 
-class _MintInvoiceDialogState extends State<_MintInvoiceDialog> {
+class _MintInvoiceDialogState extends State<_MintInvoiceDialog>
+    with InvoiceClock {
   Timer? _poll;
+
+  /// The invoice's whole lifetime, as seen when it was shown: it sets when the
+  /// countdown turns urgent.
+  Duration? _window;
 
   /// A check is running: the next tick waits for it rather than stack one.
   bool _checking = false;
@@ -1382,6 +1391,12 @@ class _MintInvoiceDialogState extends State<_MintInvoiceDialog> {
   @override
   void initState() {
     super.initState();
+    final expiresAt = widget.quote.expiresAt.toInt();
+    if (expiresAt > 0) {
+      final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+      _window = Duration(seconds: expiresAt > now ? expiresAt - now : 0);
+      trackInvoiceDeadline(expiresAt);
+    }
     _poll = Timer.periodic(_mintPollEvery, (_) => _check());
   }
 
@@ -1475,11 +1490,16 @@ class _MintInvoiceDialogState extends State<_MintInvoiceDialog> {
           ),
           if (mintUrl != null)
             _MeltRow(label: l10n.cashuMintDialogTitle, value: mintUrl),
-          if (quote.expiresAt > BigInt.zero)
-            _MeltRow(
-              label: l10n.cashuMintInvoiceExpires,
-              value: _fmtExpiry(quote.expiresAt, locale),
-            ),
+          // Stays at 00:00 once it runs out: whether it expired unpaid is
+          // the mint's to say, after a grace (C3b-2).
+          ValueListenableBuilder<Duration?>(
+            valueListenable: invoiceRemaining,
+            builder:
+                (context, remaining, _) =>
+                    remaining == null
+                        ? const SizedBox.shrink()
+                        : _CountdownRow(remaining: remaining, window: _window),
+          ),
           const SizedBox(height: 12),
           Row(
             children: [
@@ -1523,18 +1543,62 @@ class _MintInvoiceDialogState extends State<_MintInvoiceDialog> {
   }
 }
 
-/// When an invoice expires, in the reader's locale: the time alone today,
-/// with the date otherwise.
-String _fmtExpiry(BigInt unixSeconds, String locale) {
-  final at = DateTime.fromMillisecondsSinceEpoch(
-    unixSeconds.toInt() * 1000,
-  );
-  final now = DateTime.now();
-  final today =
-      at.year == now.year && at.month == now.month && at.day == now.day;
-  return today
-      ? DateFormat.Hm(locale).format(at)
-      : DateFormat.MMMd(locale).add_Hm().format(at);
+/// The time left to pay an invoice, labelled and toned like every countdown
+/// of the app (DS-CMP-21): lime while there is time, since paying it is the
+/// user's turn; amber under an hour; coral in the last minute of a window
+/// this short. Turning urgent is announced once; the figure never is.
+class _CountdownRow extends StatelessWidget {
+  const _CountdownRow({required this.remaining, required this.window});
+
+  final Duration remaining;
+  final Duration? window;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    final book = OrderBookPalette.of(context);
+    final pal = SettingsPalette.of(context);
+    final tone = countdownTone(remaining, window: window);
+    final figure = formatCountdown(
+      remaining,
+      hours: l10n.invoiceCountdownHours,
+    );
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Wrap(
+        alignment: WrapAlignment.spaceBetween,
+        spacing: 12,
+        children: [
+          Text(
+            l10n.countdownExpiresInLabel,
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w500,
+              color: book.textBody,
+            ),
+          ),
+          CountdownUrgencyAnnouncer(
+            urgent: tone == CountdownTone.urgent,
+            message: '${l10n.countdownExpiresInLabel} $figure',
+            child: Text(
+              figure,
+              style: TextStyle(
+                fontFamily: AppFonts.figures,
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                fontFeatures: const [FontFeature.tabularFigures()],
+                color: switch (tone) {
+                  CountdownTone.calm => book.limeIcon,
+                  CountdownTone.warning => book.yellowInk,
+                  CountdownTone.urgent => pal.danger,
+                },
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 /// One line of the payment confirmation: label, then the figure — on the

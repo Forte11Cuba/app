@@ -4424,9 +4424,6 @@ class AppLocalizationsPt extends AppLocalizations {
   String get cashuMintInvoiceTitle => 'Pague esta fatura';
 
   @override
-  String get cashuMintInvoiceExpires => 'Expira';
-
-  @override
   String get cashuMintInvoiceWaiting => 'Aguardando o pagamento…';
 
   @override

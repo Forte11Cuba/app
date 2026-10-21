@@ -7236,12 +7236,6 @@ abstract class AppLocalizations {
   /// **'Pay this invoice'**
   String get cashuMintInvoiceTitle;
 
-  /// Cashu wallet — label of the row with the time the invoice expires
-  ///
-  /// In en, this message translates to:
-  /// **'Expires'**
-  String get cashuMintInvoiceExpires;
-
   /// Cashu wallet — status while the invoice has not been paid yet
   ///
   /// In en, this message translates to:

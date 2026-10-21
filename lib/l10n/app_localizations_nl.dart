@@ -4411,9 +4411,6 @@ class AppLocalizationsNl extends AppLocalizations {
   String get cashuMintInvoiceTitle => 'Betaal deze factuur';
 
   @override
-  String get cashuMintInvoiceExpires => 'Verloopt';
-
-  @override
   String get cashuMintInvoiceWaiting => 'Wachten op de betaling…';
 
   @override

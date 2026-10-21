@@ -1189,7 +1189,6 @@
   "cashuReceiveLightningOption": "Lightning",
   "cashuMintAmountTitle": "Über Lightning empfangen",
   "cashuMintInvoiceTitle": "Bezahle diese Rechnung",
-  "cashuMintInvoiceExpires": "Läuft ab",
   "cashuMintInvoiceWaiting": "Warte auf die Zahlung…",
   "cashuMintInvoiceNote": "Du kannst das schließen. Wird die Rechnung später bezahlt, kommen die Sats beim nächsten Öffnen der App an.",
   "cashuMintReceivedTitle": "{sats} Sats empfangen",

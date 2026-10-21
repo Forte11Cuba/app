@@ -1189,7 +1189,6 @@
   "cashuReceiveLightningOption": "Lightning",
   "cashuMintAmountTitle": "Ricevi via Lightning",
   "cashuMintInvoiceTitle": "Paga questa fattura",
-  "cashuMintInvoiceExpires": "Scade",
   "cashuMintInvoiceWaiting": "In attesa del pagamento…",
   "cashuMintInvoiceNote": "Puoi chiudere. Se la fattura viene pagata più tardi, i sats arrivano la prossima volta che apri l'app.",
   "cashuMintReceivedTitle": "Ricevuti {sats} sats",
