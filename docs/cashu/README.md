@@ -696,29 +696,113 @@ mints is inconsistent), no general wallet features.
 
 ##### C3b-2 — receive via Lightning (mint, NUT-04)
 
-- `cashu_mint_quote(amount)` → bolt11 invoice + QR; the quote is persisted by cdk
-  (`add_mint_quote`) **before** the invoice exists, so it survives a kill.
+- **Capability, optional.** `MintCapabilities` gains `nut04_bolt11`, with its min/max
+  limits, computed like `nut05_bolt11`. It is **not** part of `is_usable()`: the UI
+  hides "via Lightning" (`CashuWalletStatus::can_receive_lightning`), it does not
+  refuse the mint.
+- **Rust** (`cashu/wallet.rs`, `api/cashu.rs`):
+  - `cashu_mint_quote(amount_sats) -> CashuMintQuote` — quote id, bolt11 invoice,
+    amount, expiry. Checks the limits before contacting the mint, then
+    `mint_quote(Bolt11, ..)`, which persists the quote (`add_mint_quote`) **before**
+    it returns, so it survives a kill. The quote is NUT-20-locked with a key derived
+    from the seed: its id alone mints nothing.
+  - `cashu_claim_mint_quote(quote_id) -> CashuMintQuoteState` (`Unpaid` /
+    `Issued { amount_sats }` / `Expired`) — what the invoice dialog polls: checks the
+    quote and, once paid, mints it. A poll, not `subscribe_mint_quote_state`: no
+    stream crosses the bridge, no dependency on NUT-17, and it runs only while the
+    dialog is open.
+  - `cashu_collect_pending_quotes()` — see below.
+  - Markers: `CashuMintUnsupported`, `CashuMintAmountOutOfRange`,
+    `CashuMintQuoteFailed`, plus `CashuNotConnected`. The wasm stub fails with
+    `CashuUnsupportedOnWeb`; the collector is a no-op there.
+  - `on_cashu_wallet_changed` fires after every mint, so the balance rises.
+- **A status check resumes the quote's saga without asking whether it is still
+  running.** `inner_check_mint_quote_status` (`wallet/issue/mod.rs:344-403`, cdk
+  0.18.1) resumes any issue saga it finds on the quote: in `SecretsPrepared` it
+  compensates, in `MintRequested` it replays or restores the outputs. Against a mint
+  that has not signed yet the restore comes back empty and the saga is **deleted**
+  (`issue/saga/resume.rs`, `EmptyResponse`); the check then writes the quote, which
+  bumps its version. The live mint then gets its signatures, fails its own
+  versioned `add_mint_quote` with `ConcurrentUpdate` and returns **before**
+  `update_proofs` (`issue/saga/mod.rs:1034-1054`): the mint has issued, the proofs
+  are not stored, and no saga is left to recover them — only a NUT-09 restore
+  (#854) would. The dialog's poll, `mint_unissued_quotes` and connect's
+  `recover_incomplete_sagas` all run that check. So:
+  - **an issue mark per mint**, in the process-wide registry of C3b-1's melt mark
+    (`cashu/in_flight.rs`), kept apart from it (a melt and an issue touch different
+    sagas). It is held across **every** status check of a quote, not only across
+    `mint()`;
+  - **it skips, never refuses**: a poll that finds it held skips that tick, the
+    collector moves on to the next mint, and neither shows an error;
+  - connect skips `recover_incomplete_sagas` while it is held, as for a melt; the
+    next connect runs it.
 - **Paid while the app was closed or in the background** — the normal case on a
-  phone, where the user pays from another wallet app: on resume, and at start when the
-  identity's store holds unissued quotes (a local read; no mint is contacted
-  otherwise, so the wallet stays lazy), the wallet runs `mint_unissued_quotes()`. It
-  does this **for every mint with pending quotes**, not only the current one — cdk
-  filters by the wallet's mint, so a quote at a mint the user has since left would
-  otherwise wait until they return to it. cdk does not filter by expiry, so an
-  invoice paid before it expired is collected whenever the app next runs; the quote
-  is NUT-20-locked with a key derived from the seed, so its id alone mints nothing.
-- While the invoice screen is open, `subscribe_mint_quote_state` (or a poll of
-  `check_mint_quote_status`) credits the balance as soon as it is paid.
+  phone, where the user pays from another wallet app.
+  `cashu_collect_pending_quotes()` reads the identity's store
+  (`get_unissued_mint_quotes`, every mint) and, with nothing there, returns without
+  contacting any mint, so the wallet stays lazy. Otherwise, **for every mint with
+  pending quotes** — cdk's `mint_unissued_quotes()` keeps only the wallet's own
+  mint, so a quote at a mint the user has since left would wait for them to return
+  — it takes that mint's issue mark and runs `mint_unissued_quotes()`: on the bound
+  wallet for the active mint, on a throwaway `cdk::Wallet` (same seed, same store,
+  never installed) for any other, which never runs `recover_incomplete_sagas`.
+  cdk does not filter by expiry, so an invoice paid before it expired is collected
+  whenever the app next runs, and a failing quote or mint does not stop the rest
+  (`refresh_and_mint_quote`). Dart calls it, unawaited, after the identity loads,
+  on resume (`ResumeResync`) and from "Sync with mint".
+- **It writes for one identity.** `release_identity_subscriptions` stops and awaits
+  it before anything is cleared, like `forget_late_take_retries`
+  (`mostro/delete_effects.rs`), and `restore_identity_session` gets its rebuild.
+- **The store says "unissued", not "paid".** `get_unissued_mint_quotes` returns every
+  bolt11 quote with nothing issued, paid or not, and a quote paid while the app was
+  closed is still `Unpaid` locally until a mint is asked. cdk never forgets one.
+  So a quote is forgotten (`remove_mint_quote`) once the mint answers `UNPAID` and
+  it **expired more than 24 h ago** — the margin covers a payment in flight when it
+  expired. Never when the mint does not answer, never a paid or issued one. Without
+  this every unpaid invoice would contact its mint at every start, and link the
+  quotes to each other.
+- **Expiry.** NUT-04 bolt11 has no expired state: the dialog shows *expired* only
+  when `expiry` has passed **and** the last check said `UNPAID`, and keeps polling
+  for a while after it, so an invoice paid just before its expiry is still credited.
 - **The quote lives only in the local store.** Lost before minting (reinstall, lost
-  file), the sats stay at the mint with no way back — NUT-13 restore (#854) has nothing
-  signed to find. So: the wallet shows "receiving X sats" while quotes are pending,
-  `identity_balance_at_risk` counts paid-but-unminted quotes, and the backup of C10
-  covers them.
-- Quotes that expired unpaid, as the mint confirms, are forgotten, so they are not
-  re-checked (and linked to each other) at every start.
-- To check before this PR: how long the mints we target keep a paid, unminted quote.
+  file), the sats stay at the mint with no way back — NUT-13 restore (#854) has
+  nothing signed to find. So:
+  - `CashuWalletStatus::receiving_sats`: the quotes the store knows paid and not
+    yet issued (a mint that was down), shown as "receiving X sats";
+  - `identity_balance_at_risk` counts those sats, and the identity-replacement
+    warning gains `FundsAtRiskReason::CashuPendingInvoices` for the invoices not
+    yet forgotten, which may have been paid without the app knowing (api type
+    change: FRB regen, the warning's text in every locale);
+  - the backup of C10 covers them.
+- **Dart** (`lib/features/cashu/`): Receive → *Ecash token* / *Lightning* (rows of
+  equal weight, the second hidden without `can_receive_lightning`); the amount
+  (`_AmountDialog`, with the mint's limits); a dialog with the invoice (`MostroQr`,
+  Copy, amount / mint / expiry) that polls and turns, in place, into *received X
+  sats* or *expired*. It can be closed at any time and says so: paid later, the
+  sats arrive the next time the app opens. A "receiving X sats" row on the balance
+  card. Markers in `cashu_error_messages.dart`, every locale; the layout follows
+  `DESIGN_SYSTEM.md` (DS-CMP-2, DS-A11Y-2 through `MostroDialog`'s `liveRegion`).
+- **Out of scope:** naming the order's mint in the escrow lock screen's
+  insufficient-funds message (the lock already refuses a wallet on another mint,
+  `CashuWalletOnOtherMint`); amountless (any-amount) invoices; bolt12.
+- **Tests:** unit — the capability gate, the limits, no mint contacted with an empty
+  store, quotes grouped by mint, the forget rule (expired > 24 h and `UNPAID` only),
+  the at-risk count; the issue mark (a second check while one holds it skips, and
+  connect skips recovery); the collector stopped at identity deletion. Widget — the
+  receive choice, the invoice dialog's states, the "receiving" row. By hand against
+  `cdk-mintd` on regtest: paid with the app open; **paid with the app closed, then
+  reopened**; paid in the background; a quote at mint A collected after switching
+  to B; a mint down at reopen ("receiving", then collected); an unpaid quote
+  forgotten; a mint request held by a slow proxy while the dialog polls and while
+  switching mints and back, the issue left intact.
+- **Mint retention, checked on cdk-mintd 0.18.1:** issuing does not check the
+  quote's expiry and nothing deletes quotes (`mint/issue/mod.rs`), so a quote paid
+  before expiry can be minted later. To confirm by hand: pay before expiry, keep the
+  app closed past `mint_ttl`, reopen. Nutshell unverified — never promise
+  "recoverable forever".
 - **Done when:** Receive → "via Lightning" → pay the QR from any LN wallet with the app
   closed → reopen → the balance has risen.
+- Est. size: M–L (~1000–1500 lines).
 
 #### C4 — escrow primitives (Rust, no UI)
 
