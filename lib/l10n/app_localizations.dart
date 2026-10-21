@@ -7272,6 +7272,12 @@ abstract class AppLocalizations {
   /// **'Could not receive'**
   String get cashuMintFailedTitle;
 
+  /// Cashu wallet — shown instead of the QR when the invoice to pay does not fit one; the invoice follows as copyable text
+  ///
+  /// In en, this message translates to:
+  /// **'This invoice is too large for a QR code. Copy it instead.'**
+  String get cashuInvoiceTooLargeForQr;
+
   /// Cashu error — the mint does not issue ecash against Lightning invoices
   ///
   /// In en, this message translates to:

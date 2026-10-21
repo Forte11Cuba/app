@@ -1195,6 +1195,7 @@
   "cashuMintExpiredTitle": "Factuur verlopen",
   "cashuMintExpiredBody": "Ze is niet betaald, dus er is niets ontvangen. Maak een nieuwe factuur om het opnieuw te proberen.",
   "cashuMintFailedTitle": "Ontvangen mislukt",
+  "cashuInvoiceTooLargeForQr": "Deze factuur is te groot voor een QR-code. Kopieer haar in plaats daarvan.",
   "cashuErrorMintUnsupported": "Deze mint kan geen Lightning-betalingen ontvangen.",
   "cashuErrorMintAmountOutOfRange": "Deze mint geeft geen facturen van dat bedrag uit.",
   "cashuErrorMintQuoteFailed": "De mint kon geen factuur maken. Probeer het later opnieuw.",

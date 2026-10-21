@@ -31,6 +31,7 @@ class _FakeController extends CashuWalletController {
     List<Object>? meltOutcomes,
     this.mintQuoteError,
     this.invoiceLifetime,
+    this.mintInvoice = _invoice,
     List<Object>? claimOutcomes,
   }) : quotes = quotes ?? [],
        meltOutcomes = meltOutcomes ?? [],
@@ -56,6 +57,9 @@ class _FakeController extends CashuWalletController {
 
   /// How long the invoice [mintQuote] gives can be paid; none when null.
   final Duration? invoiceLifetime;
+
+  /// The invoice [mintQuote] gives.
+  final String mintInvoice;
 
   /// What each [claimMintQuote] does, in order: a [CashuMintQuoteState] is
   /// returned, anything else is thrown. Once used up, it keeps waiting.
@@ -111,7 +115,7 @@ class _FakeController extends CashuWalletController {
     if (mintQuoteError != null) throw mintQuoteError!;
     return CashuMintQuote(
       quoteId: 'mq1',
-      invoice: _invoice,
+      invoice: mintInvoice,
       amountSats: amountSats,
       expiresAt: switch (invoiceLifetime) {
         final lifetime? => BigInt.from(
@@ -1881,6 +1885,75 @@ void main() {
       await tester.pump(const Duration(seconds: 2));
       expect(figure(), isNot(first), reason: 'the countdown did not move');
 
+      await tester.tap(find.text('Close'));
+      await tester.pump(const Duration(milliseconds: 500));
+    });
+
+    // DS-CMP-2: copying is what the user does while it waits; closing is
+    // the way out, and loses nothing.
+    testWidgets('Copy is the answer while the invoice waits, Close the way out', (
+      tester,
+    ) async {
+      await openInvoice(tester, _FakeController());
+
+      final dialog = find.byType(MostroDialog);
+      expect(
+        find.descendant(
+          of: dialog,
+          matching: find.widgetWithText(FilledButton, 'Copy'),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: dialog,
+          matching: find.widgetWithText(FilledButton, 'Close'),
+        ),
+        findsNothing,
+      );
+      await tester.tap(find.text('Close'));
+      await tester.pumpAndSettle();
+      expect(find.byType(MostroDialog), findsNothing);
+    });
+
+    testWidgets('an invoice too large for a QR is shown as text to copy', (
+      tester,
+    ) async {
+      final huge = 'lnbcrt${'q' * 6000}';
+      await openInvoice(tester, _FakeController(mintInvoice: huge));
+
+      expect(tester.takeException(), isNull);
+      expect(find.byType(MostroQr), findsNothing);
+      expect(
+        find.text('This invoice is too large for a QR code. Copy it instead.'),
+        findsOneWidget,
+      );
+      expect(find.text(huge), findsOneWidget);
+      await tester.tap(find.text('Close'));
+      await tester.pump(const Duration(milliseconds: 500));
+    });
+
+    // DS-MOT-3: no looping spinner when the system asks for reduced motion.
+    testWidgets('the waiting spinner stands still with animations off', (
+      tester,
+    ) async {
+      tester.platformDispatcher.accessibilityFeaturesTestValue =
+          const FakeAccessibilityFeatures(disableAnimations: true);
+      addTearDown(tester.platformDispatcher.clearAccessibilityFeaturesTestValue);
+      await openInvoice(tester, _FakeController());
+
+      final dialog = find.byType(MostroDialog);
+      expect(
+        find.descendant(
+          of: dialog,
+          matching: find.byType(CircularProgressIndicator),
+        ),
+        findsNothing,
+      );
+      expect(
+        find.descendant(of: dialog, matching: find.byIcon(Icons.schedule_rounded)),
+        findsOneWidget,
+      );
       await tester.tap(find.text('Close'));
       await tester.pump(const Duration(milliseconds: 500));
     });

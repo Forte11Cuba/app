@@ -1195,6 +1195,7 @@
   "cashuMintExpiredTitle": "Factura vencida",
   "cashuMintExpiredBody": "No se pagó, así que no se recibió nada. Crea una factura nueva para intentarlo otra vez.",
   "cashuMintFailedTitle": "No se pudo recibir",
+  "cashuInvoiceTooLargeForQr": "Esta factura es demasiado grande para un código QR. Cópiala.",
   "cashuErrorMintUnsupported": "Este mint no puede recibir pagos Lightning.",
   "cashuErrorMintAmountOutOfRange": "Este mint no emite facturas de ese monto.",
   "cashuErrorMintQuoteFailed": "El mint no pudo crear una factura. Inténtalo más tarde.",

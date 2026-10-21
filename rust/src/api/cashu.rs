@@ -771,6 +771,11 @@ pub async fn cashu_claim_mint_quote(quote_id: String) -> Result<CashuMintQuoteSt
 /// run. A no-op on web and for an identity without secret words, which has
 /// no wallet.
 ///
+/// Runs may overlap — start, resume and Sync each start one, unawaited —
+/// and that is allowed: each mint's issue mark lets one run work a mint
+/// while the others skip it, and a skipped mint is collected by a later
+/// run. The status may then be broadcast once per run.
+///
 /// It writes only to the identity's own proof store, which outlives the
 /// identity's deletion on purpose (importing its words brings the balance
 /// back), so a run that ends after a deletion or an import fills that

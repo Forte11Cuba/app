@@ -4527,6 +4527,8 @@
   "@cashuMintExpiredBody": {"description": "Cashu wallet — body under an expired invoice"},
   "cashuMintFailedTitle": "Could not receive",
   "@cashuMintFailedTitle": {"description": "Cashu wallet — the invoice could not be checked or collected; the reason follows"},
+  "cashuInvoiceTooLargeForQr": "This invoice is too large for a QR code. Copy it instead.",
+  "@cashuInvoiceTooLargeForQr": {"description": "Cashu wallet — shown instead of the QR when the invoice to pay does not fit one; the invoice follows as copyable text"},
   "cashuErrorMintUnsupported": "This mint cannot receive Lightning payments.",
   "@cashuErrorMintUnsupported": {"description": "Cashu error — the mint does not issue ecash against Lightning invoices"},
   "cashuErrorMintAmountOutOfRange": "This mint does not issue invoices of that amount.",

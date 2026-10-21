@@ -4446,6 +4446,10 @@ class AppLocalizationsPt extends AppLocalizations {
   String get cashuMintFailedTitle => 'Não foi possível receber';
 
   @override
+  String get cashuInvoiceTooLargeForQr =>
+      'Esta fatura é grande demais para um código QR. Copie-a.';
+
+  @override
   String get cashuErrorMintUnsupported =>
       'Este mint não pode receber pagamentos Lightning.';
 

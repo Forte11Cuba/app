@@ -1480,7 +1480,22 @@ class _MintInvoiceDialogState extends State<_MintInvoiceDialog>
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           // No logo: the invoice belongs to the mint, not to a node (#851).
-          Center(child: MostroQr(data: quote.invoice)),
+          // Checked before drawing, as for a token: the mint writes the
+          // invoice, and one past a QR's capacity must still be payable.
+          if (MostroQr.fits(quote.invoice))
+            Center(child: MostroQr(data: quote.invoice))
+          else ...[
+            Text(
+              l10n.cashuInvoiceTooLargeForQr,
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 13, color: book.textBody),
+            ),
+            const SizedBox(height: 8),
+            SelectableText(
+              quote.invoice,
+              style: TextStyle(fontSize: 11, color: book.textMuted),
+            ),
+          ],
           const SizedBox(height: 12),
           _MeltRow(
             label: l10n.cashuMeltAmount,
@@ -1503,13 +1518,18 @@ class _MintInvoiceDialogState extends State<_MintInvoiceDialog>
           const SizedBox(height: 12),
           Row(
             children: [
-              SizedBox.square(
-                dimension: 14,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  color: book.limeIcon,
+              // A looping spinner stops with the system's reduced motion
+              // (DS-MOT-3): a still clock says the same.
+              if (MediaQuery.disableAnimationsOf(context))
+                Icon(Icons.schedule_rounded, size: 14, color: book.limeIcon)
+              else
+                SizedBox.square(
+                  dimension: 14,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: book.limeIcon,
+                  ),
                 ),
-              ),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
@@ -1534,11 +1554,14 @@ class _MintInvoiceDialogState extends State<_MintInvoiceDialog>
           ),
         ],
       ),
-      secondary: ModalAction(
+      // Copy is the answer while it waits: whoever pays from another app on
+      // this phone needs the invoice. Closing is the way out, and costs
+      // nothing (DS-CMP-2). Each outcome has Close alone.
+      secondary: _close(l10n),
+      primary: ModalAction(
         label: l10n.cashuCopyToken,
         onPressed: () => _copy(l10n),
       ),
-      primary: _close(l10n),
     );
   }
 }
