@@ -128,6 +128,29 @@ Future<CashuMeltResult> cashuMelt({
   maxTotalSats: maxTotalSats,
 );
 
+/// An invoice for `amount_sats` that funds the wallet once paid, from any
+/// Lightning wallet — phase C3b-2.
+///
+/// The quote is stored before this returns, so an invoice paid after the app
+/// was closed is still collected.
+///
+/// **Errors**: `CashuNotConnected`, `CashuMintUnsupported`,
+/// `CashuMintAmountOutOfRange`, `CashuMintQuoteFailed`.
+Future<CashuMintQuote> cashuMintQuote({required BigInt amountSats}) =>
+    RustLib.instance.api.crateApiCashuCashuMintQuote(amountSats: amountSats);
+
+/// Whether the invoice of [`cashu_mint_quote`] `quote_id` was paid, minting
+/// its ecash into the wallet when it was. Meant to be polled while the
+/// invoice is on screen; the balance is broadcast once it is issued.
+///
+/// `Waiting` also covers a mint that did not answer and a round skipped
+/// because the quote was being checked elsewhere: neither is an error.
+///
+/// **Errors**: `CashuNotConnected`, `CashuMintQuoteUnknown` (not a quote of
+/// this wallet's mint, e.g. after a change of mint), `CashuMintQuoteFailed`.
+Future<CashuMintQuoteState> cashuClaimMintQuote({required String quoteId}) =>
+    RustLib.instance.api.crateApiCashuCashuClaimMintQuote(quoteId: quoteId);
+
 /// Drop the in-memory wallet. Proofs stay on disk and the wallet's mint stays
 /// set — this is a disconnect, not a wipe. A node switch does **not** call it:
 /// the wallet's mint is the user's, not the node's.

@@ -706,14 +706,18 @@ mints is inconsistent), no general wallet features.
     `mint_quote(Bolt11, ..)`, which persists the quote (`add_mint_quote`) **before**
     it returns, so it survives a kill. The quote is NUT-20-locked with a key derived
     from the seed: its id alone mints nothing.
-  - `cashu_claim_mint_quote(quote_id) -> CashuMintQuoteState` (`Unpaid` /
+  - `cashu_claim_mint_quote(quote_id) -> CashuMintQuoteState` (`Waiting` /
     `Issued { amount_sats }` / `Expired`) — what the invoice dialog polls: checks the
-    quote and, once paid, mints it. A poll, not `subscribe_mint_quote_state`: no
+    quote and, once paid, mints it. `Waiting` also covers a mint that did not
+    answer, a mint call that failed (retried next round) and a round skipped under
+    the issue mark; none of them is an error. A quote already issued locally is
+    answered without asking the mint. A poll, not `subscribe_mint_quote_state`: no
     stream crosses the bridge, no dependency on NUT-17, and it runs only while the
     dialog is open.
   - `cashu_collect_pending_quotes()` — see below.
-  - Markers: `CashuMintUnsupported`, `CashuMintAmountOutOfRange`,
-    `CashuMintQuoteFailed`, plus `CashuNotConnected`. The wasm stub fails with
+  - Markers: `CashuMintUnsupported`, `CashuMintAmountOutOfRange` (zero included),
+    `CashuMintQuoteFailed`, `CashuMintQuoteUnknown` (a quote this wallet does not
+    hold at its mint, e.g. after a change of mint), plus `CashuNotConnected`. The wasm stub fails with
     `CashuUnsupportedOnWeb`; the collector is a no-op there.
   - `on_cashu_wallet_changed` fires after every mint, so the balance rises.
 - **A status check resumes the quote's saga without asking whether it is still

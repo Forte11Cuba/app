@@ -21,7 +21,9 @@ use std::sync::{Arc, OnceLock};
 use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::{broadcast, RwLock};
 
-use crate::api::types::{CashuMeltQuote, CashuMeltResult, CashuWalletStatus};
+use crate::api::types::{
+    CashuMeltQuote, CashuMeltResult, CashuMintQuote, CashuMintQuoteState, CashuWalletStatus,
+};
 use crate::cashu::CashuWallet;
 use crate::db::{settings_keys, Storage};
 use crate::mostro::escrow_mode;
@@ -677,6 +679,48 @@ pub async fn cashu_melt(quote_id: String, max_total_sats: u64) -> Result<CashuMe
             fee_paid_sats,
         },
         crate::cashu::MeltOutcomeInfo::Pending => CashuMeltResult::Pending,
+    })
+}
+
+/// An invoice for `amount_sats` that funds the wallet once paid, from any
+/// Lightning wallet — phase C3b-2.
+///
+/// The quote is stored before this returns, so an invoice paid after the app
+/// was closed is still collected.
+///
+/// **Errors**: `CashuNotConnected`, `CashuMintUnsupported`,
+/// `CashuMintAmountOutOfRange`, `CashuMintQuoteFailed`.
+pub async fn cashu_mint_quote(amount_sats: u64) -> Result<CashuMintQuote> {
+    let quote = active_wallet().await?.mint_quote(amount_sats).await?;
+    Ok(CashuMintQuote {
+        quote_id: quote.quote_id,
+        invoice: quote.invoice,
+        amount_sats: quote.amount_sats,
+        expires_at: quote.expires_at,
+    })
+}
+
+/// Whether the invoice of [`cashu_mint_quote`] `quote_id` was paid, minting
+/// its ecash into the wallet when it was. Meant to be polled while the
+/// invoice is on screen; the balance is broadcast once it is issued.
+///
+/// `Waiting` also covers a mint that did not answer and a round skipped
+/// because the quote was being checked elsewhere: neither is an error.
+///
+/// **Errors**: `CashuNotConnected`, `CashuMintQuoteUnknown` (not a quote of
+/// this wallet's mint, e.g. after a change of mint), `CashuMintQuoteFailed`.
+pub async fn cashu_claim_mint_quote(quote_id: String) -> Result<CashuMintQuoteState> {
+    let status = active_wallet()
+        .await?
+        .claim_mint_quote(&quote_id)
+        .await?;
+    Ok(match status {
+        crate::cashu::MintQuoteStatus::Waiting => CashuMintQuoteState::Waiting,
+        crate::cashu::MintQuoteStatus::Issued { amount_sats } => {
+            notify().await;
+            CashuMintQuoteState::Issued { amount_sats }
+        }
+        crate::cashu::MintQuoteStatus::Expired => CashuMintQuoteState::Expired,
     })
 }
 

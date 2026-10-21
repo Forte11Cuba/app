@@ -28,7 +28,7 @@ mod wallet;
 #[cfg(not(target_arch = "wasm32"))]
 pub use wallet::{
     ensure_receivable, stored_balance, token_mint_url, CashuWallet, MeltOutcomeInfo, MeltQuoteInfo,
-    MintCapabilities,
+    MintCapabilities, MintQuoteInfo, MintQuoteStatus,
 };
 
 // ── WASM stub ────────────────────────────────────────────────────────────────
@@ -70,6 +70,25 @@ pub struct MeltQuoteInfo {
     pub fee_reserve_sats: u64,
     pub input_fee_sats: u64,
     pub max_total_sats: u64,
+}
+
+/// See the native [`wallet::MintQuoteInfo`].
+#[cfg(target_arch = "wasm32")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MintQuoteInfo {
+    pub quote_id: String,
+    pub invoice: String,
+    pub amount_sats: u64,
+    pub expires_at: u64,
+}
+
+/// See the native [`wallet::MintQuoteStatus`].
+#[cfg(target_arch = "wasm32")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MintQuoteStatus {
+    Waiting,
+    Issued { amount_sats: u64 },
+    Expired,
 }
 
 /// See the native [`wallet::MeltOutcomeInfo`].
@@ -169,6 +188,14 @@ impl CashuWallet {
         _quote_id: &str,
         _max_total_sats: u64,
     ) -> anyhow::Result<MeltOutcomeInfo> {
+        anyhow::bail!("CashuUnsupportedOnWeb")
+    }
+
+    pub async fn mint_quote(&self, _amount_sats: u64) -> anyhow::Result<MintQuoteInfo> {
+        anyhow::bail!("CashuUnsupportedOnWeb")
+    }
+
+    pub async fn claim_mint_quote(&self, _quote_id: &str) -> anyhow::Result<MintQuoteStatus> {
         anyhow::bail!("CashuUnsupportedOnWeb")
     }
 
