@@ -1202,23 +1202,28 @@ pub async fn collect_pending_quotes(
             .await
             .map_err(|e| anyhow!("CashuStoreUnavailable: {e}"))?,
     );
-    let mints: std::collections::BTreeSet<MintUrl> = store
+    let mut by_mint: std::collections::BTreeMap<MintUrl, Vec<cdk::wallet::MintQuote>> =
+        Default::default();
+    for quote in store
         .get_unissued_mint_quotes()
         .await
         .map_err(|e| anyhow!("CashuStoreUnavailable: {e}"))?
         .into_iter()
         .filter(|quote| quote.unit == CurrencyUnit::Sat)
-        .map(|quote| quote.mint_url)
-        .collect();
+    {
+        by_mint.entry(quote.mint_url.clone()).or_default().push(quote);
+    }
 
+    let now = unix_now().as_secs();
     let mut minted = 0u64;
-    for mint in mints {
+    for (mint, quotes) in by_mint {
         let Some(_issuing) = in_flight::try_begin_issue(&mint) else {
             log::info!("[cashu] quotes at {mint} are being checked already: skipped");
             continue;
         };
-        let collected = match active.filter(|wallet| wallet.inner.mint_url == mint) {
-            Some(wallet) => wallet.inner.mint_unissued_quotes().await,
+        let throwaway;
+        let wallet = match active.filter(|wallet| wallet.inner.mint_url == mint) {
+            Some(bound) => &bound.inner,
             None => match Wallet::new(
                 &mint.to_string(),
                 CurrencyUnit::Sat,
@@ -1226,11 +1231,18 @@ pub async fn collect_pending_quotes(
                 **seed,
                 None,
             ) {
-                Ok(wallet) => wallet.mint_unissued_quotes().await,
-                Err(e) => Err(e),
+                Ok(wallet) => {
+                    throwaway = wallet;
+                    &throwaway
+                }
+                Err(e) => {
+                    log::warn!("[cashu] no wallet to collect paid invoices at {mint}: {e}");
+                    continue;
+                }
             },
         };
-        match collected {
+        forget_expired_unpaid(wallet, &quotes, now).await;
+        match wallet.mint_unissued_quotes().await {
             Ok(amount) if amount > Amount::ZERO => {
                 log::info!("[cashu] collected {amount} sat of paid invoices at {mint}");
                 minted = minted.saturating_add(u64::from(amount));
@@ -1240,6 +1252,45 @@ pub async fn collect_pending_quotes(
         }
     }
     Ok(minted)
+}
+
+/// How long after its expiry a quote still unpaid at the mint is forgotten.
+/// Not at once: a payment that left just before the expiry can take a while
+/// to show as paid.
+const MINT_QUOTE_FORGET_AFTER_SECS: u64 = 24 * 60 * 60;
+
+/// Whether `quote` is one to forget, as far as the store knows: nothing paid,
+/// nothing issued, no operation on it, and expired over
+/// [`MINT_QUOTE_FORGET_AFTER_SECS`] ago. An expiry of 0 means none.
+fn forgettable(quote: &cdk::wallet::MintQuote, now: u64) -> bool {
+    quote.state == cdk::nuts::MintQuoteState::Unpaid
+        && quote.amount_paid == Amount::ZERO
+        && quote.amount_issued == Amount::ZERO
+        && quote.used_by_operation.is_none()
+        && quote.expiry != 0
+        && now >= quote.expiry.saturating_add(MINT_QUOTE_FORGET_AFTER_SECS)
+}
+
+/// Forget the `quotes` of `wallet`'s mint that expired unpaid long ago, so
+/// they are not checked at every start — each check links the quotes to one
+/// another at the mint. The caller holds that mint's issue mark.
+///
+/// Only once the mint has said so: a quote the store calls unpaid may have
+/// been paid while the app was closed, and the store's word is not enough. A
+/// mint that does not answer keeps the quote for the next run.
+async fn forget_expired_unpaid(wallet: &Wallet, quotes: &[cdk::wallet::MintQuote], now: u64) {
+    for quote in quotes.iter().filter(|quote| forgettable(quote, now)) {
+        match wallet.check_mint_quote_status(&quote.id).await {
+            Ok(checked) if forgettable(&checked, now) => {
+                match wallet.localstore.remove_mint_quote(&quote.id).await {
+                    Ok(()) => log::info!("[cashu] forgot a mint quote that expired unpaid"),
+                    Err(e) => log::warn!("[cashu] forgetting an expired mint quote failed: {e}"),
+                }
+            }
+            Ok(_) => {}
+            Err(e) => log::info!("[cashu] expired mint quote kept, not checked: {e}"),
+        }
+    }
 }
 
 /// The sats held in the proof store at `db_path` — at `mint_url`, or across
@@ -2880,5 +2931,120 @@ mod tests {
         let recorded = earlier.inner.localstore.get_saga(&saga).await.unwrap();
         assert!(recorded.is_some(), "the melt was rolled back");
         assert_eq!(unspent_sats(&earlier).await, 0);
+    }
+
+    #[test]
+    fn a_quote_is_forgettable_only_long_after_it_expired_unpaid() {
+        use cdk::nuts::MintQuoteState;
+
+        let mint = MintUrl::from_str("https://mint.example.com").unwrap();
+        let expiry = 1_000_000;
+        let quote = mint_quote_for("q", &mint, expiry);
+        let forget_at = expiry + MINT_QUOTE_FORGET_AFTER_SECS;
+
+        assert!(!forgettable(&quote, forget_at - 1), "not yet");
+        assert!(forgettable(&quote, forget_at));
+
+        // Anything the mint said was paid or issued, an operation on it, or
+        // no expiry at all: kept, whatever the clock says.
+        let kept = [
+            cdk::wallet::MintQuote {
+                state: MintQuoteState::Paid,
+                ..quote.clone()
+            },
+            cdk::wallet::MintQuote {
+                amount_paid: Amount::from(SEEDED_SATS),
+                ..quote.clone()
+            },
+            cdk::wallet::MintQuote {
+                amount_issued: Amount::from(SEEDED_SATS),
+                ..quote.clone()
+            },
+            cdk::wallet::MintQuote {
+                used_by_operation: Some(Uuid::new_v4().to_string()),
+                ..quote.clone()
+            },
+            mint_quote_for("q", &mint, 0),
+        ];
+        for quote in kept {
+            assert!(!forgettable(&quote, u64::MAX), "{quote:?}");
+        }
+    }
+
+    /// A store at `db` holding one quote at `mint_url`, expired `ago` seconds
+    /// ago.
+    async fn store_with_expired_quote(mint_url: &str, db: &std::path::Path, ago: u64) {
+        let wallet = seeded_wallet_at(mint_url, db).await;
+        let expiry = unix_now().as_secs() - ago;
+        wallet
+            .inner
+            .localstore
+            .add_mint_quote(mint_quote_for("old", &wallet.inner.mint_url, expiry))
+            .await
+            .unwrap();
+    }
+
+    async fn quote_kept(db: &std::path::Path) -> bool {
+        let store = WalletSqliteDatabase::new(db.to_str().unwrap()).await.unwrap();
+        store.get_mint_quote("old").await.unwrap().is_some()
+    }
+
+    #[tokio::test]
+    async fn collecting_forgets_a_quote_the_mint_says_expired_unpaid_long_ago() {
+        // Arrange — expired two days ago, and the mint still calls it unpaid.
+        let db = temp_db_path();
+        let ago = 2 * MINT_QUOTE_FORGET_AFTER_SECS;
+        let expiry = unix_now().as_secs() - ago;
+        let mint = StubMint::start(Some(unpaid_mint_quote_answer("old", expiry))).await;
+        store_with_expired_quote(&mint.url, &db, ago).await;
+
+        // Act
+        collect_pending_quotes(db.to_str().unwrap(), &unique_seed(), None)
+            .await
+            .unwrap();
+
+        // Assert — gone, so the next start asks nothing.
+        assert!(!quote_kept(&db).await);
+        let asked = mint.connections();
+        collect_pending_quotes(db.to_str().unwrap(), &unique_seed(), None)
+            .await
+            .unwrap();
+        assert_eq!(mint.connections(), asked, "the mint was asked again");
+    }
+
+    #[tokio::test]
+    async fn collecting_keeps_a_quote_expired_within_the_margin() {
+        // Arrange — expired an hour ago, unpaid at the mint: a payment may
+        // still be on its way.
+        let db = temp_db_path();
+        let expiry = unix_now().as_secs() - 3_600;
+        let mint = StubMint::start(Some(unpaid_mint_quote_answer("old", expiry))).await;
+        store_with_expired_quote(&mint.url, &db, 3_600).await;
+
+        // Act
+        collect_pending_quotes(db.to_str().unwrap(), &unique_seed(), None)
+            .await
+            .unwrap();
+
+        // Assert
+        assert!(quote_kept(&db).await);
+    }
+
+    #[tokio::test]
+    async fn collecting_keeps_an_expired_quote_the_mint_did_not_answer_for() {
+        // Arrange — long expired, but the mint hangs up: it may have been
+        // paid, and only the mint can say it was not.
+        let db = temp_db_path();
+        let mint = StubMint::start(None).await;
+        store_with_expired_quote(&mint.url, &db, 2 * MINT_QUOTE_FORGET_AFTER_SECS).await;
+
+        // Act
+        collect_pending_quotes(db.to_str().unwrap(), &unique_seed(), None)
+            .await
+            .unwrap();
+
+        // Assert
+        assert!(mint.connections() > 0);
+        assert!(quote_kept(&db).await);
     }
 }
