@@ -686,8 +686,9 @@ pub async fn cashu_sweep_spent_proofs() -> Result<()> {
     let swept = wallet.sweep_spent_proofs().await;
     let settled = wallet.finalize_pending_melts().await;
     // Paid invoices too, at every mint: Sync is where a user who paid one
-    // with the wallet open, but the dialog closed, looks for it.
-    if let Err(e) = collect_pending_quotes().await {
+    // with the wallet open, but the dialog closed, looks for it. Asked for by
+    // the user, so long-silent mints are tried again as well.
+    if let Err(e) = collect_pending_quotes(crate::cashu::Collect::Everything).await {
         log::warn!("[cashu] collecting paid invoices failed: {e}");
     }
     notify().await;
@@ -798,7 +799,8 @@ pub async fn cashu_claim_mint_quote(quote_id: String) -> Result<CashuMintQuoteSt
 /// design: with nothing pending it contacts no mint and builds no wallet,
 /// and it never fails — a mint that does not answer is tried at the next
 /// run. A no-op on web and for an identity without secret words, which has
-/// no wallet.
+/// no wallet. A mint whose quotes all expired a month ago or more, without
+/// it ever answering for them, is left to Sync ([`crate::cashu::Collect`]).
 ///
 /// Runs may overlap — start, resume and Sync each start one, unawaited —
 /// and that is allowed: each mint's issue mark lets one run work a mint
@@ -812,13 +814,13 @@ pub async fn cashu_claim_mint_quote(quote_id: String) -> Result<CashuMintQuoteSt
 /// either: an abort between the mint's answer and storing its proofs is the
 /// interrupted issue this phase guards against.
 pub async fn cashu_collect_pending_quotes() -> Result<()> {
-    if let Err(e) = collect_pending_quotes().await {
+    if let Err(e) = collect_pending_quotes(crate::cashu::Collect::Live).await {
         log::warn!("[cashu] collecting paid invoices failed: {e}");
     }
     Ok(())
 }
 
-async fn collect_pending_quotes() -> Result<()> {
+async fn collect_pending_quotes(which: crate::cashu::Collect) -> Result<()> {
     let Some(identity) = current_identity().await else {
         return Ok(());
     };
@@ -829,7 +831,13 @@ async fn collect_pending_quotes() -> Result<()> {
     let seed = match crate::api::identity::current_bip39_seed().await {
         Ok(seed) => seed,
         // An identity imported from a private key has no wallet to fill.
-        Err(_) => return Ok(()),
+        Err(e) if e.to_string() == "CashuNoMnemonic" => return Ok(()),
+        // Anything else — the identity swapped out mid-run, a seed that does
+        // not derive — skips a collection the next run makes up: say so.
+        Err(e) => {
+            log::warn!("[cashu] paid invoices not collected, no seed: {e}");
+            return Ok(());
+        }
     };
     // The seed must be this identity's, as in `open_wallet`: one swapped in
     // between would mint with the wrong key into this store.
@@ -837,7 +845,7 @@ async fn collect_pending_quotes() -> Result<()> {
         return Ok(());
     }
     let active = live_wallet().await;
-    crate::cashu::collect_pending_quotes(&db_path, &seed, active.as_deref()).await?;
+    crate::cashu::collect_pending_quotes(&db_path, &seed, active.as_deref(), which).await?;
     // Whatever came of it: sats minted move the balance, and a quote found
     // paid but not minted moves "receiving".
     notify().await;

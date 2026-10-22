@@ -161,7 +161,8 @@ Future<CashuMintQuoteState> cashuClaimMintQuote({required String quoteId}) =>
 /// design: with nothing pending it contacts no mint and builds no wallet,
 /// and it never fails — a mint that does not answer is tried at the next
 /// run. A no-op on web and for an identity without secret words, which has
-/// no wallet.
+/// no wallet. A mint whose quotes all expired a month ago or more, without
+/// it ever answering for them, is left to Sync ([`crate::cashu::Collect`]).
 ///
 /// Runs may overlap — start, resume and Sync each start one, unawaited —
 /// and that is allowed: each mint's issue mark lets one run work a mint

@@ -771,9 +771,31 @@ mints is inconsistent), no general wallet features.
   expired. Never when the mint does not answer, never a paid or issued one. Without
   this every unpaid invoice would contact its mint at every start, and link the
   quotes to each other.
+- **By the mint's clock, never the device's alone.** `expiry` is the mint's time.
+  A phone set a day ahead would forget a fresh invoice the mint truthfully calls
+  `UNPAID`, and a payment made afterwards would find no quote to mint with — sats
+  at the mint the wallet cannot claim. So both verdicts that hang on the expiry,
+  forgetting a quote and calling it *expired*, are confirmed against the mint's
+  time (`cashu/mint_clock.rs`): the `Date` header of a `GET /v1/info` (RFC 9110
+  §6.6.1, sent by every HTTP server), its offset to the device kept 5 min per mint.
+  NUT-06's `time` cannot serve: cdk-mintd leaves it out, and cdk refuses a mint
+  whose `time` is over 30 s from the device's (`fetch_mint_info`, cdk 0.18.1). The
+  device's clock only says whether a verdict may be due; with no readable date
+  nothing is forgotten and nothing is called expired.
+- **A mint that never answers.** cdk reads a mint's "unknown quote" as a generic
+  error (code 50000), so a mint that purged the quote, or is gone for good, cannot
+  be told from one failing, and its quotes are never confirmed unpaid. Such a quote
+  is **dormant** once it expired more than **30 days** ago, unpaid as far as the
+  store knows: start and resume skip a mint whose quotes are all dormant, and the
+  at-risk count leaves them out. They are **kept**, with their NUT-20 keys, and Sync
+  — which the user asks for — still asks their mint (`cashu::Collect`). Deleting
+  them instead would be final if the mint came back.
 - **Expiry.** NUT-04 bolt11 has no expired state: the dialog shows *expired* only
-  when `expiry` has passed **and** the last check said `UNPAID`, and keeps polling
-  for a while after it, so an invoice paid just before its expiry is still credited.
+  when `expiry` has passed **by the mint's clock** **and** the last check said
+  `UNPAID`, and keeps polling for a while after it, so an invoice paid just before
+  its expiry is still credited. Its countdown is hidden once the device's clock
+  runs out, rather than left at 00:00: until the mint says so the invoice is only
+  waiting.
 - **The quote lives only in the local store.** Lost before minting (reinstall, lost
   file), the sats stay at the mint with no way back — NUT-13 restore (#854) has
   nothing signed to find. So:
@@ -781,8 +803,8 @@ mints is inconsistent), no general wallet features.
     yet issued (a mint that was down), shown as "receiving X sats";
   - the identity-replacement warning (`funds_at_risk`) gains
     `FundsAtRiskReason::CashuPendingInvoices`, after `CashuWalletBalance`: one
-    entry for every invoice not minted or forgotten yet, at any mint, since one
-    paid while the app was closed reads unpaid until its mint is asked.
+    entry for every invoice not minted, forgotten or dormant yet, at any mint,
+    since one paid while the app was closed reads unpaid until its mint is asked.
     `amount_sats` names the sats known paid, `None` when none is; `order_id` is
     empty. They come back with the identity's words, like its ecash;
   - the backup of C10 covers them.
@@ -799,7 +821,9 @@ mints is inconsistent), no general wallet features.
   `CashuWalletOnOtherMint`); amountless (any-amount) invoices; bolt12.
 - **Tests:** unit — the capability gate, the limits, no mint contacted with an empty
   store, quotes grouped by mint, the forget rule (expired > 24 h and `UNPAID` only),
-  the at-risk count; the issue mark (a second check while one holds it skips, and
+  both expiry verdicts held back by a device clock ahead of the mint's and by a mint
+  that dates nothing, the `Date` parser, dormancy (a long-silent mint left to Sync,
+  its quote kept), the at-risk count; the issue mark (a second check while one holds it skips, and
   connect skips recovery); the collector asking every mint with quotes and none
   without, skipping a held mint, and recovering nothing at a mint left behind.
   Widget — the receive choice, the invoice dialog's states, the "receiving" row.

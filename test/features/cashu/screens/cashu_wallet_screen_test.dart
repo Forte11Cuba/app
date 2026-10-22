@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:clock/clock.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
@@ -119,7 +120,7 @@ class _FakeController extends CashuWalletController {
       amountSats: amountSats,
       expiresAt: switch (invoiceLifetime) {
         final lifetime? => BigInt.from(
-          DateTime.now().add(lifetime).millisecondsSinceEpoch ~/ 1000,
+          clock.now().add(lifetime).millisecondsSinceEpoch ~/ 1000,
         ),
         null => BigInt.zero,
       },
@@ -1954,6 +1955,29 @@ void main() {
         find.descendant(of: dialog, matching: find.byIcon(Icons.schedule_rounded)),
         findsOneWidget,
       );
+      await tester.tap(find.text('Close'));
+      await tester.pump(const Duration(milliseconds: 500));
+    });
+
+    // A clock ahead of the mint's runs out before the invoice does: 00:00
+    // would read as dead an invoice that can still be paid. Only the mint
+    // calls it expired; until then it waits, and keeps asking.
+    testWidgets('a run-out countdown leaves the invoice waiting, not dead', (
+      tester,
+    ) async {
+      final controller = _FakeController(
+        invoiceLifetime: const Duration(seconds: 2),
+      );
+      await openInvoice(tester, controller);
+      expect(find.text('Expires in'), findsOneWidget);
+
+      await poll(tester);
+      await poll(tester);
+
+      expect(find.text('Expires in'), findsNothing);
+      expect(find.text('00:00'), findsNothing);
+      expect(find.text('Waiting for the payment…'), findsOneWidget);
+      expect(controller.claims, hasLength(2), reason: 'it still asks');
       await tester.tap(find.text('Close'));
       await tester.pump(const Duration(milliseconds: 500));
     });

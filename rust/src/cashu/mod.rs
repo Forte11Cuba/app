@@ -8,8 +8,8 @@
 //! Scope, deliberately small: connect to one mint, hold `sat` proofs, receive a
 //! token, export a token, re-check proof state, and settle at connect what an
 //! interrupted session left half done. Melting to Lightning is phase C3b-1 and
-//! NUT-11 locking lives in [`escrow`]; minting from Lightning (C3b-2) and
-//! multi-mint support are not here.
+//! NUT-11 locking lives in [`escrow`]; minting from Lightning is phase C3b-2.
+//! Multi-mint support is not here.
 //!
 //! **Native only.** Proof storage is `cdk-sqlite`, which is `rusqlite` and does
 //! not build for `wasm32`. The web target gets the typed stub at the bottom of
@@ -23,13 +23,15 @@ pub mod escrow;
 #[cfg(not(target_arch = "wasm32"))]
 mod in_flight;
 #[cfg(not(target_arch = "wasm32"))]
+mod mint_clock;
+#[cfg(not(target_arch = "wasm32"))]
 mod wallet;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use wallet::{
     collect_pending_quotes, ensure_receivable, stored_balance, stored_pending_quotes,
-    token_mint_url, CashuWallet, MeltOutcomeInfo, MeltQuoteInfo, MintCapabilities, MintQuoteInfo,
-    MintQuoteStatus, PendingQuotes,
+    token_mint_url, CashuWallet, Collect, MeltOutcomeInfo, MeltQuoteInfo, MintCapabilities,
+    MintQuoteInfo, MintQuoteStatus, PendingQuotes,
 };
 
 // ── WASM stub ────────────────────────────────────────────────────────────────
@@ -126,12 +128,21 @@ pub async fn stored_pending_quotes(
     Ok(PendingQuotes::default())
 }
 
+/// See the native [`wallet::Collect`].
+#[cfg(target_arch = "wasm32")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Collect {
+    Live,
+    Everything,
+}
+
 /// No proof store on web, so no quote to collect.
 #[cfg(target_arch = "wasm32")]
 pub async fn collect_pending_quotes(
     _db_path: &str,
     _seed: &zeroize::Zeroizing<[u8; 64]>,
     _active: Option<&CashuWallet>,
+    _which: Collect,
 ) -> anyhow::Result<u64> {
     Ok(0)
 }

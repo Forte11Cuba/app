@@ -409,13 +409,13 @@ Future<void> _startup(
     return container;
   });
 
-  // Copies of attachments handed to another app ("open with…", share):
-  // whatever an earlier run left behind goes now, and a resume clears those
-  // past their lifetime — a younger one may still be read (#589).
   // An invoice that funds the Cashu wallet is usually paid from another app,
   // with this one in the background: collect it on the way back (C3b-2).
   AppLifecycleService(onResume: _collectCashuInvoices).attach();
 
+  // Copies of attachments handed to another app ("open with…", share):
+  // whatever an earlier run left behind goes now, and a resume clears those
+  // past their lifetime — a younger one may still be read (#589).
   final attachmentLauncher = container.read(attachmentLauncherProvider);
   unawaited(attachmentLauncher.sweep());
   AppLifecycleService(

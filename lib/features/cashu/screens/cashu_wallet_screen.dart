@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:clock/clock.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -1393,7 +1394,8 @@ class _MintInvoiceDialogState extends State<_MintInvoiceDialog>
     super.initState();
     final expiresAt = widget.quote.expiresAt.toInt();
     if (expiresAt > 0) {
-      final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+      // The clock [InvoiceClock] counts with, or the two disagree.
+      final now = clock.now().millisecondsSinceEpoch ~/ 1000;
       _window = Duration(seconds: expiresAt > now ? expiresAt - now : 0);
       trackInvoiceDeadline(expiresAt);
     }
@@ -1505,13 +1507,15 @@ class _MintInvoiceDialogState extends State<_MintInvoiceDialog>
           ),
           if (mintUrl != null)
             _MeltRow(label: l10n.cashuMintDialogTitle, value: mintUrl),
-          // Stays at 00:00 once it runs out: whether it expired unpaid is
-          // the mint's to say, after a grace (C3b-2).
+          // Gone once it runs out, not left at 00:00: whether it expired
+          // unpaid is the mint's to say, after a grace (C3b-2), and a device
+          // clock ahead of the mint's runs out early. Until the mint says so
+          // the invoice is only waiting, which the row below says.
           ValueListenableBuilder<Duration?>(
             valueListenable: invoiceRemaining,
             builder:
                 (context, remaining, _) =>
-                    remaining == null
+                    remaining == null || remaining == Duration.zero
                         ? const SizedBox.shrink()
                         : _CountdownRow(remaining: remaining, window: _window),
           ),

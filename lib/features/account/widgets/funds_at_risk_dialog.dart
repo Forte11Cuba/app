@@ -125,8 +125,8 @@ class _RiskRow extends StatelessWidget {
                     // what gets them back.
                     switch (risk.reason) {
                       FundsAtRiskReason.cashuWalletBalance ||
-                      FundsAtRiskReason.cashuPendingInvoices =>
-                        l10n.fundsAtRiskCashuHint,
+                      FundsAtRiskReason
+                          .cashuPendingInvoices => l10n.fundsAtRiskCashuHint,
                       _ => l10n.orderLabel(shortOrderId(risk.orderId)),
                     },
                     style: TextStyle(fontSize: 11, color: book.textSecondary),
